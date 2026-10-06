@@ -15,6 +15,10 @@ def validate_catalog(catalog,version,channel,head):
   if a['version']!=version or a['commit']!=head or a.get('dirty_build',True) or a.get('test_origin') or a.get('channel')!=channel:raise ValueError('mixed/unpublishable build identity')
   expected=f'https://github.com/{REPO}/releases/download/v{version}/Spacewars-{version}-'+('Windows-x64.exe' if a['platform']=='windows-x64' else 'macOS-Universal.dmg')
   if a['url']!=expected:raise ValueError('wrong immutable installer URL')
+def find_draft(releases,tag):
+ matches=[r for r in releases if r['tag_name']==tag and r['draft']]
+ if len(matches)!=1:raise ValueError('exact owned draft missing or ambiguous')
+ return matches[0]
 def source_names():
  # Public Unity source only; no historical private game/planning/history.
  names=run(['git','ls-files'],cwd=ROOT).splitlines()
@@ -93,7 +97,7 @@ Private build source: {head}; public snapshot: {public_commit}. No production/VP
  args=['gh','release','create',tag,'--repo',REPO,'--target',public_commit,'--draft','--title',f'Spacewars {a.version} ({a.channel})','--notes-file',notes]
  if a.channel=='test':args+=['--prerelease','--latest=false']
  run(args);run(['gh','release','upload',tag,*files,'--repo',REPO])
- release=json.loads(run(['gh','api',f'repos/{REPO}/releases/tags/{tag}']))
+ release=find_draft(json.loads(run(['gh','api',f'repos/{REPO}/releases?per_page=100'])),tag)
  if not release['draft'] or release['prerelease']!=(a.channel=='test') or {x['name'] for x in release['assets']}!=set(expected):raise ValueError('draft completeness/channel rejected')
  with tempfile.TemporaryDirectory(prefix='spacewars-draft-readback-') as temp:
   for item in release['assets']:

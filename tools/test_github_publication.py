@@ -10,3 +10,9 @@ class GithubPublicationTests(unittest.TestCase):
    x=self.catalog();x['artifacts'][0][key]=value;bad.append(x)
   for x in bad:
    with self.assertRaises(ValueError):publisher.validate_catalog(x,'0.6.5','test','abc')
+
+class DraftLookupTests(unittest.TestCase):
+ def test_draft_is_found_by_list_not_published_tag_endpoint(self):
+  r={'tag_name':'v0.6.5','draft':True,'id':404988196};self.assertEqual(publisher.find_draft([r],'v0.6.5')['id'],404988196)
+  with self.assertRaises(ValueError):publisher.find_draft([dict(r,draft=False)],'v0.6.5')
+  with self.assertRaises(ValueError):publisher.find_draft([r,r],'v0.6.5')

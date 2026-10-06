@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "build_source_commit": "e6b5789bc347a019bfee5407512eaea03df5da23",
+  "build_source_commit": "d770dd9b9a20f3a9a99a9f549cb6304038789ac0",
   "export_policy": "current Unity/tooling/landing only; no private Git history",
   "files": {
     ".github/workflows/installer-windows.yml": "ab47c8ad5a2917cc635aa49ca4977560b099275efb3e1fe53cf46a277291a7b3",
@@ -21,7 +21,7 @@
     "tools/native-release/icons/Spacewars.ico": "55ccbb5604628a2a413d72679f208a836bba906cd0e83d3478fbcdc4b34566ef",
     "tools/native-release/installer.nsi": "a8082223185d2e16175d299a4024593fe4501c8e6456d200379d491c20666c3b",
     "tools/native-release/package.py": "2c95e87556aba30acc681f35debd8554954c6c0bc796b544e2106fedd0ea5646",
-    "tools/native-release/publish.py": "8d68c989804c574f511496e79cc1e3d438fbd386cd3c3d7eee5d6da4b001769d",
+    "tools/native-release/publish.py": "7e6c712faedb0c34d592700fcadfbdb34137e1ee1896740e1bcebd4cbcdfcc8b",
     "tools/native-release/publish_legacy.py": "f9978314397d198108e6c5e0c1cef6044b9434a55413d6b0f35f44028a411a11",
     "tools/native-release/remote_makensis.py": "2e7105ee504c4650504075758503b74212fa5cf5416d4ceb41e22fee3e642d0a",
     "tools/native-release/test_windows_installer.ps1": "6b7bbc7eb20ec35b7f89a2b6f692adb54fd3f1cca48cc8fb3312b0f8ef0c390b",
@@ -44,7 +44,7 @@
     "tools/native_qa.py": "7d706bb0d5aab7819d643987778ff84f3073aa9495bfb443cc3eb9aaa08150c9",
     "tools/test_check_qa.py": "4735445903d9a29dda103257ed5073a07da4466da73b92f59f701bd00012e1e5",
     "tools/test_flow.py": "e5469ca35754cb55133022d68fcb4857acbe9d992a7b5ca53f4733a735b5cd7d",
-    "tools/test_github_publication.py": "738314e8a4791fd95799b4794806bace665744f39ca21561011f77453d95af10",
+    "tools/test_github_publication.py": "d50b48a676d6a3bfc11df6bbbb943c148fe9674a702f0ea874d6308cbbf70f3c",
     "tools/test_native_distribution.py": "347f80e1b04aa15c388d872781733e4a7d60c18438789486be8908a81786ddf3",
     "tools/unity.sh": "fc31cd3bbf956c7ccd5f1999e15fb25bd7a77ad8f999008a6bee88d22399ac42",
     "unity/Assets/DefaultVolumeProfile.asset": "3c59850f926d56241ef66290346c442733208c7dd27dc87e43d7d4a291ff72b2",
