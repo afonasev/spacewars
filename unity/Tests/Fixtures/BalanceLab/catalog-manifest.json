@@ -1,0 +1,2835 @@
+{
+  "schemaVersion": 1,
+  "releaseRef": {
+    "id": "local:main:1788708872201:1",
+    "revision": 5
+  },
+  "revisions": [
+    {
+      "ref": {
+        "id": "local:main:1788708872201:1",
+        "name": "main",
+        "revision": 2,
+        "source": "local",
+        "createdOn": "20260906"
+      },
+      "profile": {
+        "name": "main",
+        "revision": 2,
+        "units": {
+          "tank": {
+            "collisionRadius": 0.72,
+            "modelRadius": 0.65,
+            "modelScale": 1,
+            "speed": 4,
+            "turnSpeed": 4.5,
+            "turretTurnSpeed": 6,
+            "aimToleranceRad": 0.034906585,
+            "range": 10,
+            "vision": 13,
+            "health": 100,
+            "firesWhileMoving": true,
+            "stopForMs": 0,
+            "populationCost": 3,
+            "creditCost": 150,
+            "productionMenuOrder": 20,
+            "productionDurationSec": 15,
+            "weapon": {
+              "kind": "single",
+              "damage": 8,
+              "fireIntervalMs": 900,
+              "projectileType": "kinetic-shell",
+              "projectileSpeed": 15
+            }
+          },
+          "explorer": {
+            "collisionRadius": 0.58,
+            "modelRadius": 0.5,
+            "modelScale": 0.9,
+            "speed": 7,
+            "turnSpeed": 7.5,
+            "turretTurnSpeed": 10,
+            "aimToleranceRad": 0.034906585,
+            "range": 10,
+            "vision": 15,
+            "health": 70,
+            "firesWhileMoving": true,
+            "stopForMs": 0,
+            "populationCost": 2,
+            "creditCost": 100,
+            "productionMenuOrder": 10,
+            "productionDurationSec": 15,
+            "weapon": {
+              "kind": "burst",
+              "damage": 2,
+              "burstSize": 5,
+              "burstShotIntervalMs": 90,
+              "burstPauseMs": 1100,
+              "projectileSpeed": 32,
+              "spreadDeg": 5,
+              "tracerLength": 0.45,
+              "tracerThickness": 0.025
+            }
+          },
+          "shkval": {
+            "collisionRadius": 0.72,
+            "modelRadius": 0.6,
+            "modelScale": 1.3,
+            "speed": 4,
+            "turnSpeed": 4.5,
+            "turretTurnSpeed": 6,
+            "aimToleranceRad": 0.035,
+            "range": 16,
+            "vision": 12,
+            "health": 70,
+            "firesWhileMoving": false,
+            "stopForMs": 1800,
+            "populationCost": 4,
+            "creditCost": 200,
+            "productionMenuOrder": 30,
+            "productionDurationSec": 20,
+            "weapon": {
+              "kind": "ballistic",
+              "damage": 10,
+              "fireIntervalMs": 1800,
+              "projectileSpeed": 12,
+              "arcHeight": 4,
+              "blastRadius": 1.4,
+              "markerStartRadius": 1.9,
+              "markerOpacity": 0.22,
+              "leadSpeedThreshold": 7,
+              "leadFalloff": 1,
+              "launchHeight": 1.15,
+              "projectileRadius": 0.09,
+              "projectileLength": 0.65,
+              "buildingCollisionHeight": 2.5,
+              "maxLeadTimeSec": 30,
+              "friendlyFirePenalty": 2
+            }
+          }
+        },
+        "entityText": {
+          "tank": {
+            "name": "Танк",
+            "description": "Тяжёлая боевая машина для открытого боя и прорыва обороны."
+          },
+          "explorer": {
+            "name": "Исследователь",
+            "description": "Быстрый лёгкий разведчик и рейдер, особенно опасный вблизи и против плотной группы."
+          },
+          "headquarters": {
+            "name": "Штаб",
+            "description": "Главный центр базы: приносит доход, открывает слоты и производит Исследователей."
+          },
+          "outpost": {
+            "name": "Форпост",
+            "description": "Центр расширения: приносит доход, открывает слоты и производит Исследователей."
+          },
+          "factory": {
+            "name": "Фабрика",
+            "description": "Производит тяжёлые танки."
+          },
+          "refinery": {
+            "name": "Завод переработки",
+            "description": "Усиливает регулярный доход базы."
+          },
+          "scientificCenter": {
+            "name": "Научный центр",
+            "description": "Пассивный научный комплекс для будущих технологий."
+          },
+          "mine": {
+            "name": "Шахта",
+            "description": "Добывает кредиты на отдельной ресурсной точке."
+          },
+          "shkval": {
+            "name": "Шквал",
+            "description": "Хрупкая дальнобойная артиллерия. Стреляет с места по разведке команды; взрыв опасен и для своих."
+          }
+        },
+        "buildings": {
+          "headquarters": {
+            "health": 400,
+            "buildTimeSec": 25,
+            "vision": 22,
+            "footprintRadius": 2.05,
+            "creditCost": 600,
+            "creditIncome": 20,
+            "buildMenuOrder": 10,
+            "modelHeightMeters": 4.6,
+            "modelScale": 0.7,
+            "antennaTurnSpeedDegSec": 22
+          },
+          "outpost": {
+            "health": 300,
+            "buildTimeSec": 20,
+            "vision": 18,
+            "footprintRadius": 1.7,
+            "creditCost": 400,
+            "creditIncome": 5,
+            "buildMenuOrder": 20,
+            "modelHeightMeters": 4.6,
+            "modelScale": 0.8,
+            "antennaTurnSpeedDegSec": 34
+          },
+          "factory": {
+            "health": 250,
+            "buildTimeSec": 15,
+            "vision": 14,
+            "footprintRadius": 1.45,
+            "creditCost": 300,
+            "creditIncome": 0,
+            "buildMenuOrder": 10,
+            "modelHeightMeters": 2.5,
+            "modelScale": 0.7,
+            "antennaTurnSpeedDegSec": 0
+          },
+          "refinery": {
+            "health": 200,
+            "buildTimeSec": 10,
+            "vision": 14,
+            "footprintRadius": 1.35,
+            "creditCost": 200,
+            "creditIncome": 10,
+            "buildMenuOrder": 20,
+            "modelHeightMeters": 2.6,
+            "modelScale": 0.8,
+            "antennaTurnSpeedDegSec": 0
+          },
+          "scientificCenter": {
+            "health": 250,
+            "buildTimeSec": 20,
+            "vision": 14,
+            "footprintRadius": 1.45,
+            "creditCost": 500,
+            "creditIncome": 0,
+            "buildMenuOrder": 30,
+            "modelHeightMeters": 1.6407,
+            "modelScale": 0.8,
+            "antennaTurnSpeedDegSec": 0
+          },
+          "mine": {
+            "health": 250,
+            "buildTimeSec": 15,
+            "vision": 16,
+            "footprintRadius": 1.4,
+            "creditCost": 200,
+            "creditIncome": 15,
+            "buildMenuOrder": 30,
+            "modelHeightMeters": 2.4,
+            "modelScale": 0.7,
+            "antennaTurnSpeedDegSec": 0
+          }
+        },
+        "buildingUpgrades": {
+          "refinery": {
+            "creditCost": 200,
+            "durationSec": 20,
+            "creditIncome": 15,
+            "turbineTurnSpeedDegSec": 90
+          }
+        },
+        "economy": {
+          "startingCredits": 500,
+          "incomePeriodSec": 5,
+          "buildingCancellationRefundRatio": 0.75,
+          "unitCancellationRefundRatio": 1
+        },
+        "capture": {
+          "headquarters": {
+            "timeSec": 5,
+            "radius": 4.5
+          },
+          "outpost": {
+            "timeSec": 5,
+            "radius": 3.5
+          },
+          "mine": {
+            "timeSec": 5,
+            "radius": 3
+          }
+        },
+        "construction": {
+          "damageMultiplier": 1.5,
+          "visionMultiplier": 0.5
+        },
+        "army": {
+          "capacity": 100
+        },
+        "baseGeneration": {
+          "headquartersSlots": 5,
+          "outpostSlots": 3,
+          "localOutpostsMin": 1,
+          "localOutpostsMax": 1,
+          "localMines": 2,
+          "neutralOutpostsMin": 1,
+          "neutralOutpostsMax": 2,
+          "neutralMinesMin": 1,
+          "neutralMinesMax": 2,
+          "clusterSpacing": 3.2
+        },
+        "system": {
+          "matchScoreEarnedCreditsDivisor": 2,
+          "hudScale": {
+            "minimap": 1,
+            "resources": 1,
+            "entityDetail": 1,
+            "selection": 1,
+            "commands": 1,
+            "signals": 1,
+            "spectator": 1,
+            "chat": 1
+          },
+          "cameraDefaultZoom": 18,
+          "cameraPanSpeed": 8,
+          "cameraEdgePanSpeed": 8,
+          "cameraEdgePanZonePx": 28,
+          "healthBarHeightPx": 12,
+          "orderMarkerRadius": 0.42,
+          "rallyFlagHeight": 1.8,
+          "unitSelectionRingWidth": 0.05,
+          "selectionDragThreshold": 0.9,
+          "controlGroupDoubleTapMs": 300,
+          "unitOrderQueueLimit": 64,
+          "signalFrontMergeRadius": 18,
+          "signalFrontIdleSec": 8,
+          "signalFrontRepeatCooldownSec": 12,
+          "signalEventRetentionSec": 8,
+          "chatVisibleMessageLimit": 6,
+          "chatReadableMs": 8000,
+          "chatFadeMs": 2800,
+          "chatEvictionFadeMs": 350,
+          "idleAutoDefenseMultiplier": 1.1,
+          "projectileExtraRangePercent": 20,
+          "fogRevealMs": 180,
+          "fogConcealMs": 450,
+          "fogEdgeFeather": 1.5,
+          "fogExploredOpacity": 0.46,
+          "fogUnseenOpacity": 0.94,
+          "minimapTerrainSaturation": 0.7,
+          "minimapTerrainBrightness": 1.15,
+          "minimapTierContrast": 0.12,
+          "minimapMarkerSize": 1.1,
+          "minimapMarkerStroke": 0.35,
+          "minimapTerrainStroke": 0.32,
+          "foundationRiseSec": 2,
+          "renderPixelRatioCap": 1.5,
+          "hudPublicationHz": 30
+        },
+        "map": {
+          "extent": 112,
+          "smallExtentMin": 112,
+          "smallExtentMax": 128,
+          "smallExtentStep": 8,
+          "bridgeWideWidth": 9,
+          "bridgeFlankWidth": 5,
+          "bridgeStandardWidth": 7,
+          "bridgeExtraWideWidth": 12,
+          "visionCellSize": 4,
+          "routeFairnessTolerance": 0.15,
+          "startAngularSeparationMinDeg": 165,
+          "startAngularSeparationMaxDeg": 178,
+          "startAnchorRadialJitter": 0.01,
+          "startBranchBend": 0.015,
+          "startLocalRouteFairnessTolerance": 0.2,
+          "startContestedRouteFairnessTolerance": 0.22,
+          "startHeightTransitionTolerance": 1,
+          "rampReadabilityBandSpacing": 0.8,
+          "rampReadabilityBandWidth": 0.18,
+          "rampReadabilityBandOpacity": 0.58,
+          "bridgeCrownHeight": 0.18,
+          "bridgeRailHeight": 0.28,
+          "bridgeRailThickness": 0.08,
+          "bridgeEndPostHeight": 0.42,
+          "bridgeEndPostSize": 0.14,
+          "bridgeSeamOverlap": 0.07,
+          "terrainHeight": 1,
+          "escarpmentWidth": 1.1,
+          "plateauEdgeMarkerWidth": 0.08,
+          "ordinaryPadSizeRatio": 1.55,
+          "ordinaryPadBorderRatio": 0.0375,
+          "lavaBankWidth": 2.4,
+          "rampLength": 3.2,
+          "groundMaxFootprintRadius": 0.72,
+          "groundVerticalClearance": 0.9,
+          "groundMaxSlopeDeg": 22,
+          "groundApproachClearance": 0.2,
+          "groundTurningRadius": 1.4,
+          "generationMaxAttempts": 8,
+          "riftMinCount": 0,
+          "riftMaxCount": 3,
+          "riftBendMaxOffset": 5,
+          "exteriorLavaInset": 3.2,
+          "zoneMinSpan": 10,
+          "siteSeparation": 8,
+          "routeJunctionClearance": 5,
+          "routeDistanceMin": 10,
+          "routeDistanceMax": 34,
+          "routeElevationChangeBudget": 3,
+          "routeBridgeBudget": 3,
+          "viewConnectorBudget": 6,
+          "zoneExitMinCount": 2,
+          "zoneExitMaxCount": 4,
+          "rampBoundaryNormalToleranceDeg": 20,
+          "poiCameraRadius": 13,
+          "poiCameraMaxSites": 2,
+          "cellContourPoints": 12,
+          "cellContourJitter": 0.18,
+          "naturalContourMinRadialVariation": 0.08,
+          "naturalContourMinAngularVariation": 0.06,
+          "nonStartElevationMinCount": 2,
+          "corridorBoundaryCoverage": 0.8,
+          "compoundMinLength": 4,
+          "compoundMaxLength": 10,
+          "compoundMinHeight": 1.4,
+          "compoundMaxHeight": 4.2,
+          "compoundMinMasses": 3,
+          "compoundMaxMasses": 5,
+          "materialRegionCount": 3,
+          "materialRegionMinSpan": 9,
+          "materialTransitionWidth": 3.4,
+          "authoredTextureFeatherDefaultWidth": 0.45,
+          "authoredTextureFeatherMaxWidth": 2.25,
+          "authoredTextureFeatherIrregularity": 0.16,
+          "presentationMaskTexelsPerMeter": 4,
+          "presentationRoleTintStrength": 0.38,
+          "materialCoverageMin": 0.62,
+          "materialContrastMin": 0.16,
+          "sunElevationMinDeg": 35,
+          "sunElevationMaxDeg": 58,
+          "sunIntensityMin": 2.2,
+          "sunIntensityMax": 2.8,
+          "connectorApproachSeparation": 4,
+          "openSpaceDistrictMargin": 2,
+          "openSpaceRouteHalfWidth": 2,
+          "openSpaceSampleStep": 1,
+          "openSpaceMaxEmptyRadius": 4,
+          "openSpaceMassHeight": 3,
+          "objectiveTargetRadiusFraction": 0.28,
+          "objectivePeripheralRadiusFraction": 0.24,
+          "objectivePeripheralMinShare": 0.5,
+          "realizationContourStrength": 0.24,
+          "macroSurfaceMergeChance": 0.58,
+          "styleMinorityMinShare": 0.25,
+          "styleTransitionWidth": 12,
+          "styleMonotonicTolerance": 0.08,
+          "routeSegmentMinLength": 4,
+          "routeSegmentMaxCount": 4,
+          "tunnelMaxLength": 10,
+          "tunnelRoofFadeDistance": 9,
+          "tunnelMaxOccludedShare": 0.55,
+          "noveltyThreshold": 0.28,
+          "noveltySimilarityTolerance": 0.12,
+          "noveltySilhouetteWeight": 1,
+          "noveltyAdjacencyWeight": 0.9,
+          "noveltyRouteWeight": 0.85,
+          "noveltyArchetypeWeight": 0.8,
+          "noveltyTransitionWeight": 0.75,
+          "noveltyCompositionWeight": 0.9,
+          "noveltyLandmarkWeight": 0.55,
+          "terrainMaterialLuminanceMin": 0.18,
+          "terrainMaterialLuminanceMax": 0.74,
+          "terrainMaterialLightDarkDeltaMin": 0.24,
+          "terrainMaterialSeamDeltaMax": 0.12,
+          "terrainMaterialPeriodicityMax": 0.72,
+          "terrainTextureSampleBudget": 5,
+          "terrainMicroFadeNear": 18,
+          "terrainMicroFadeFar": 42,
+          "authoredTransitionRoadWidth": 0.8,
+          "authoredTransitionNaturalWidth": 4,
+          "authoredTransitionHardWidth": 0,
+          "authoredTransitionDepositWidth": 1.6
+        },
+        "unitUpgrades": {
+          "tankChassis": {
+            "creditCost": 300,
+            "durationSec": 30,
+            "speed": 6,
+            "glowIntensity": 1.2
+          }
+        }
+      },
+      "aiProfile": {
+        "schemaVersion": 2,
+        "id": "adaptive-strategic-ai-v1",
+        "revision": 2,
+        "difficulties": {
+          "recruit": {
+            "decisionIntervalTicks": 90,
+            "observationDelayTicks": 90,
+            "estimateNoise": 0.28,
+            "scoutIntensity": 0.55,
+            "strategySwitchDelayTicks": 180,
+            "maxConcurrentMissions": 1,
+            "microQuality": 0.35
+          },
+          "fighter": {
+            "decisionIntervalTicks": 45,
+            "observationDelayTicks": 30,
+            "estimateNoise": 0.12,
+            "scoutIntensity": 0.8,
+            "strategySwitchDelayTicks": 90,
+            "maxConcurrentMissions": 2,
+            "microQuality": 0.65
+          },
+          "veteran": {
+            "decisionIntervalTicks": 15,
+            "observationDelayTicks": 0,
+            "estimateNoise": 0.03,
+            "scoutIntensity": 1,
+            "strategySwitchDelayTicks": 30,
+            "maxConcurrentMissions": 4,
+            "microQuality": 0.9
+          }
+        },
+        "personality": {
+          "aggression": {
+            "min": 0.15,
+            "max": 0.95
+          },
+          "greed": {
+            "min": 0.15,
+            "max": 0.95
+          },
+          "caution": {
+            "min": 0.15,
+            "max": 0.95
+          },
+          "scouting": {
+            "min": 0.35,
+            "max": 1
+          },
+          "flanking": {
+            "min": 0.1,
+            "max": 0.9
+          },
+          "remoteExpansion": {
+            "min": 0.05,
+            "max": 0.65
+          },
+          "commitment": {
+            "min": 0.2,
+            "max": 0.9
+          },
+          "allIn": {
+            "min": 0.05,
+            "max": 0.65
+          }
+        },
+        "openings": {
+          "weights": {
+            "safe": 0.49,
+            "greedy-safe": 0.22,
+            "greedy-mine": 0.12,
+            "blind-rush": 0.16,
+            "explorer-all-in": 0.06,
+            "double-mine-explorer-rush": 0.12
+          },
+          "greedyMineTimeoutSec": 15,
+          "safeThreatRadius": 20,
+          "blindRushAttackProducedUnits": 1,
+          "blindRushReinforcementLimit": 3,
+          "blindRushCommitmentSec": 45,
+          "deadlinesSec": {
+            "safe": 105,
+            "greedy-safe": 135,
+            "greedy-mine": 90,
+            "blind-rush": 90,
+            "explorer-all-in": 75,
+            "double-mine-explorer-rush": 150
+          },
+          "explorerAllInFirstWave": 4,
+          "explorerAllInReinforcementLimit": 7,
+          "explorerAllInCommitmentSec": 55,
+          "doubleMineFirstWave": 5,
+          "doubleMineReinforcementLimit": 8,
+          "doubleMineCommitmentSec": 70
+        },
+        "midgame": {
+          "weights": {
+            "map-control": 0.42,
+            "mass-assault": 0.36,
+            "raids": 0.22
+          },
+          "openingReadiness": {
+            "safe": {
+              "map-control": 0.8,
+              "mass-assault": 0.55,
+              "raids": 0.7
+            },
+            "greedy-safe": {
+              "map-control": 1,
+              "mass-assault": 0.65,
+              "raids": 0.75
+            },
+            "greedy-mine": {
+              "map-control": 1.05,
+              "mass-assault": 0.6,
+              "raids": 0.8
+            },
+            "blind-rush": {
+              "map-control": 0.35,
+              "mass-assault": 1.1,
+              "raids": 0.7
+            },
+            "explorer-all-in": {
+              "map-control": 0.25,
+              "mass-assault": 1.15,
+              "raids": 1.05
+            },
+            "double-mine-explorer-rush": {
+              "map-control": 0.95,
+              "mass-assault": 0.85,
+              "raids": 1.1
+            }
+          },
+          "transitionCosts": {
+            "map-control": 0.08,
+            "mass-assault": 0.12,
+            "raids": 0.1
+          },
+          "massAssaultMinUnits": 5,
+          "raidGroupMin": 2,
+          "raidGroupMax": 3,
+          "defensiveReserveUnits": 1,
+          "mapControlIncomeBuildings": 3,
+          "raidIncomeBuildings": 2,
+          "vulnerableDefenseRatio": 0.75,
+          "emergencyThreatRatio": 0.75,
+          "mapControlExplorerMin": 1,
+          "raidExplorerShare": 0.75,
+          "massAssaultExplorerShare": 0.3
+        },
+        "economy": {
+          "factoryUtilizationThreshold": 0.6,
+          "utilizationWindowSec": 30,
+          "factoryForecastSec": 45,
+          "parallelTankCycles": 2,
+          "maximumFactories": 3,
+          "techMinimumRefineries": 2,
+          "techMaximumDanger": 0.5,
+          "techAdvantageRatio": 1.5,
+          "techOutpostEnemyDistance": 30,
+          "maxConcurrentUpgrades": 1
+        },
+        "liveness": {
+          "maximumUncommittedBank": 600,
+          "resourceStallSec": 60,
+          "productionStallSec": 45,
+          "armyStallSec": 50,
+          "missionStallSec": 60,
+          "scoutOverdueSec": 45,
+          "offensiveOverdueSec": 40
+        },
+        "scouting": {
+          "rescoutSec": 35,
+          "informationWeight": 1,
+          "riskWeight": 0.8,
+          "retreatThreatRatio": 1,
+          "cornerCheckWeight": 0.3,
+          "remoteExpansionThreshold": 0.35
+        },
+        "utility": {
+          "switchMargin": 0.18,
+          "commitmentSec": 12,
+          "threatWeight": 1,
+          "economyWeight": 0.7,
+          "forceWeight": 0.8,
+          "vulnerabilityWeight": 0.9,
+          "mapOpportunityWeight": 0.65
+        },
+        "tactics": {
+          "focusFireRatio": 0.7,
+          "retreatHealthRatio": 0.28,
+          "regroupRadius": 8,
+          "kiteDistance": 2,
+          "competitiveEnabled": 0,
+          "maximumInitiatedFronts": 3,
+          "coordinationRecruit": 0,
+          "coordinationFighter": 0.6,
+          "coordinationVeteran": 0.9,
+          "contactWindowSec": 3,
+          "maximumAssemblySec": 30,
+          "reinforcementIntervalSec": 4,
+          "minimumGroupForce": 1,
+          "objectiveRadius": 3,
+          "progressDistance": 0.5,
+          "emergencyRadius": 30
+        },
+        "evaluation": {
+          "seedCount": 2,
+          "maximumStallSec": 180,
+          "maximumScoutLossRatio": 0.7,
+          "decisionBudgetMs": 4,
+          "matchTimeLimitSec": 180,
+          "replaySampleCount": 8,
+          "coverageProbeSec": 1,
+          "soakSeedCount": 1,
+          "competitive": {
+            "durationSec": 300,
+            "seedCount": 1,
+            "minimumCompletionRate": 0.25,
+            "maximumWinRateRegression": 0.1,
+            "minimumDoubleMineCompletionRate": 0.5,
+            "minimumCoordinatedContactRate": 0.25,
+            "minimumCategoryGames": 2
+          }
+        },
+        "artillery": {
+          "enabled": 1,
+          "targetShare": 0.2,
+          "shareDeviation": 0.03,
+          "capacityThreshold": 40,
+          "smallArmyProbability": 0.2,
+          "largeArmyProbability": 0.9,
+          "massBattleBonus": 0.08,
+          "raidProbabilityFactor": 0.25,
+          "massBattleUnits": 6,
+          "clusterRadius": 8,
+          "strategyCommitmentSec": 30,
+          "coverDistance": 5,
+          "coverRadius": 12,
+          "retreatDistance": 8,
+          "positionTolerance": 1.5,
+          "holdSec": 5,
+          "coverCandidates": 3,
+          "lateralDistance": 3,
+          "earlyProbability": 0.4,
+          "earlyFirstOrdinal": 5,
+          "earlyOrdinalChoices": 2
+        }
+      },
+      "aiProfileRef": {
+        "id": "adaptive-strategic-ai-v1",
+        "revision": 2,
+        "source": "candidate"
+      },
+      "schemaVersion": 2
+    },
+    {
+      "ref": {
+        "id": "local:main:1788708872201:1",
+        "name": "main",
+        "revision": 3,
+        "source": "local",
+        "createdOn": "20260906"
+      },
+      "profile": {
+        "name": "main",
+        "revision": 3,
+        "units": {
+          "tank": {
+            "collisionRadius": 0.72,
+            "modelRadius": 0.65,
+            "modelScale": 1,
+            "speed": 4,
+            "turnSpeed": 4.5,
+            "turretTurnSpeed": 6,
+            "aimToleranceRad": 0.034906585,
+            "range": 10,
+            "vision": 13,
+            "health": 100,
+            "firesWhileMoving": true,
+            "stopForMs": 0,
+            "populationCost": 3,
+            "creditCost": 150,
+            "productionMenuOrder": 20,
+            "productionDurationSec": 15,
+            "weapon": {
+              "kind": "single",
+              "damage": 8,
+              "fireIntervalMs": 900,
+              "projectileType": "kinetic-shell",
+              "projectileSpeed": 15
+            }
+          },
+          "explorer": {
+            "collisionRadius": 0.58,
+            "modelRadius": 0.5,
+            "modelScale": 1,
+            "speed": 7,
+            "turnSpeed": 7.5,
+            "turretTurnSpeed": 10,
+            "aimToleranceRad": 0.034906585,
+            "range": 10,
+            "vision": 15,
+            "health": 70,
+            "firesWhileMoving": true,
+            "stopForMs": 0,
+            "populationCost": 2,
+            "creditCost": 100,
+            "productionMenuOrder": 10,
+            "productionDurationSec": 15,
+            "weapon": {
+              "kind": "burst",
+              "damage": 2,
+              "burstSize": 5,
+              "burstShotIntervalMs": 90,
+              "burstPauseMs": 1100,
+              "projectileSpeed": 32,
+              "spreadDeg": 5,
+              "tracerLength": 0.45,
+              "tracerThickness": 0.025
+            }
+          },
+          "shkval": {
+            "collisionRadius": 0.72,
+            "modelRadius": 0.6,
+            "modelScale": 1.4,
+            "speed": 4,
+            "turnSpeed": 4.5,
+            "turretTurnSpeed": 6,
+            "aimToleranceRad": 0.035,
+            "range": 16,
+            "vision": 12,
+            "health": 70,
+            "firesWhileMoving": false,
+            "stopForMs": 1800,
+            "populationCost": 4,
+            "creditCost": 200,
+            "productionMenuOrder": 30,
+            "productionDurationSec": 20,
+            "weapon": {
+              "kind": "ballistic",
+              "damage": 10,
+              "fireIntervalMs": 1800,
+              "projectileSpeed": 12,
+              "arcHeight": 4,
+              "blastRadius": 1.4,
+              "markerStartRadius": 1.9,
+              "markerOpacity": 0.22,
+              "leadSpeedThreshold": 7,
+              "leadFalloff": 1,
+              "launchHeight": 1.15,
+              "projectileRadius": 0.09,
+              "projectileLength": 0.65,
+              "buildingCollisionHeight": 2.5,
+              "maxLeadTimeSec": 30,
+              "friendlyFirePenalty": 2
+            }
+          }
+        },
+        "entityText": {
+          "tank": {
+            "name": "Танк",
+            "description": "Тяжёлая боевая машина для открытого боя и прорыва обороны."
+          },
+          "explorer": {
+            "name": "Исследователь",
+            "description": "Быстрый лёгкий разведчик и рейдер, особенно опасный вблизи и против плотной группы."
+          },
+          "headquarters": {
+            "name": "Штаб",
+            "description": "Главный центр базы: приносит доход, открывает слоты и производит Исследователей."
+          },
+          "outpost": {
+            "name": "Форпост",
+            "description": "Центр расширения: приносит доход, открывает слоты и производит Исследователей."
+          },
+          "factory": {
+            "name": "Фабрика",
+            "description": "Производит тяжёлые танки."
+          },
+          "refinery": {
+            "name": "Завод переработки",
+            "description": "Усиливает регулярный доход базы."
+          },
+          "scientificCenter": {
+            "name": "Научный центр",
+            "description": "Пассивный научный комплекс для будущих технологий."
+          },
+          "mine": {
+            "name": "Шахта",
+            "description": "Добывает кредиты на отдельной ресурсной точке."
+          },
+          "shkval": {
+            "name": "Шквал",
+            "description": "Хрупкая дальнобойная артиллерия. Стреляет с места по разведке команды; взрыв опасен и для своих."
+          }
+        },
+        "buildings": {
+          "headquarters": {
+            "health": 400,
+            "buildTimeSec": 25,
+            "vision": 22,
+            "footprintRadius": 2.05,
+            "creditCost": 600,
+            "creditIncome": 20,
+            "buildMenuOrder": 10,
+            "modelHeightMeters": 4.6,
+            "modelScale": 0.7,
+            "antennaTurnSpeedDegSec": 22
+          },
+          "outpost": {
+            "health": 300,
+            "buildTimeSec": 20,
+            "vision": 18,
+            "footprintRadius": 1.7,
+            "creditCost": 400,
+            "creditIncome": 5,
+            "buildMenuOrder": 20,
+            "modelHeightMeters": 4.6,
+            "modelScale": 0.8,
+            "antennaTurnSpeedDegSec": 34
+          },
+          "factory": {
+            "health": 250,
+            "buildTimeSec": 15,
+            "vision": 14,
+            "footprintRadius": 1.45,
+            "creditCost": 300,
+            "creditIncome": 0,
+            "buildMenuOrder": 10,
+            "modelHeightMeters": 2.5,
+            "modelScale": 0.7,
+            "antennaTurnSpeedDegSec": 0
+          },
+          "refinery": {
+            "health": 200,
+            "buildTimeSec": 10,
+            "vision": 14,
+            "footprintRadius": 1.35,
+            "creditCost": 200,
+            "creditIncome": 10,
+            "buildMenuOrder": 20,
+            "modelHeightMeters": 2.6,
+            "modelScale": 0.8,
+            "antennaTurnSpeedDegSec": 0
+          },
+          "scientificCenter": {
+            "health": 250,
+            "buildTimeSec": 20,
+            "vision": 14,
+            "footprintRadius": 1.45,
+            "creditCost": 300,
+            "creditIncome": 0,
+            "buildMenuOrder": 30,
+            "modelHeightMeters": 1.6407,
+            "modelScale": 0.8,
+            "antennaTurnSpeedDegSec": 0
+          },
+          "mine": {
+            "health": 250,
+            "buildTimeSec": 15,
+            "vision": 16,
+            "footprintRadius": 1.4,
+            "creditCost": 200,
+            "creditIncome": 15,
+            "buildMenuOrder": 30,
+            "modelHeightMeters": 2.4,
+            "modelScale": 0.7,
+            "antennaTurnSpeedDegSec": 0
+          }
+        },
+        "buildingUpgrades": {
+          "refinery": {
+            "creditCost": 200,
+            "durationSec": 20,
+            "creditIncome": 15,
+            "turbineTurnSpeedDegSec": 90
+          }
+        },
+        "economy": {
+          "startingCredits": 500,
+          "incomePeriodSec": 5,
+          "buildingCancellationRefundRatio": 0.75,
+          "unitCancellationRefundRatio": 1
+        },
+        "capture": {
+          "headquarters": {
+            "timeSec": 5,
+            "radius": 4.5
+          },
+          "outpost": {
+            "timeSec": 5,
+            "radius": 3.5
+          },
+          "mine": {
+            "timeSec": 5,
+            "radius": 3
+          }
+        },
+        "construction": {
+          "damageMultiplier": 1.5,
+          "visionMultiplier": 0.5
+        },
+        "army": {
+          "capacity": 100
+        },
+        "baseGeneration": {
+          "headquartersSlots": 5,
+          "outpostSlots": 3,
+          "localOutpostsMin": 1,
+          "localOutpostsMax": 1,
+          "localMines": 2,
+          "neutralOutpostsMin": 1,
+          "neutralOutpostsMax": 2,
+          "neutralMinesMin": 1,
+          "neutralMinesMax": 2,
+          "clusterSpacing": 3.2
+        },
+        "system": {
+          "matchScoreEarnedCreditsDivisor": 2,
+          "hudScale": {
+            "minimap": 1,
+            "resources": 1,
+            "entityDetail": 1,
+            "selection": 1,
+            "commands": 1,
+            "signals": 1,
+            "spectator": 1,
+            "chat": 1
+          },
+          "cameraDefaultZoom": 18,
+          "cameraPanSpeed": 8,
+          "cameraEdgePanSpeed": 8,
+          "cameraEdgePanZonePx": 28,
+          "healthBarHeightPx": 12,
+          "orderMarkerRadius": 0.42,
+          "rallyFlagHeight": 1.8,
+          "unitSelectionRingWidth": 0.05,
+          "selectionDragThreshold": 0.9,
+          "controlGroupDoubleTapMs": 300,
+          "unitOrderQueueLimit": 64,
+          "signalFrontMergeRadius": 18,
+          "signalFrontIdleSec": 8,
+          "signalFrontRepeatCooldownSec": 12,
+          "signalEventRetentionSec": 8,
+          "chatVisibleMessageLimit": 6,
+          "chatReadableMs": 8000,
+          "chatFadeMs": 2800,
+          "chatEvictionFadeMs": 350,
+          "idleAutoDefenseMultiplier": 1.1,
+          "projectileExtraRangePercent": 20,
+          "fogRevealMs": 180,
+          "fogConcealMs": 450,
+          "fogEdgeFeather": 1.5,
+          "fogExploredOpacity": 0.46,
+          "fogUnseenOpacity": 0.94,
+          "minimapTerrainSaturation": 0.7,
+          "minimapTerrainBrightness": 1.15,
+          "minimapTierContrast": 0.12,
+          "minimapMarkerSize": 1.1,
+          "minimapMarkerStroke": 0.35,
+          "minimapTerrainStroke": 0.32,
+          "foundationRiseSec": 2,
+          "renderPixelRatioCap": 1.5,
+          "hudPublicationHz": 30
+        },
+        "map": {
+          "extent": 112,
+          "smallExtentMin": 112,
+          "smallExtentMax": 128,
+          "smallExtentStep": 8,
+          "bridgeWideWidth": 9,
+          "bridgeFlankWidth": 5,
+          "bridgeStandardWidth": 7,
+          "bridgeExtraWideWidth": 12,
+          "visionCellSize": 4,
+          "routeFairnessTolerance": 0.15,
+          "startAngularSeparationMinDeg": 165,
+          "startAngularSeparationMaxDeg": 178,
+          "startAnchorRadialJitter": 0.01,
+          "startBranchBend": 0.015,
+          "startLocalRouteFairnessTolerance": 0.2,
+          "startContestedRouteFairnessTolerance": 0.22,
+          "startHeightTransitionTolerance": 1,
+          "rampReadabilityBandSpacing": 0.8,
+          "rampReadabilityBandWidth": 0.18,
+          "rampReadabilityBandOpacity": 0.58,
+          "bridgeCrownHeight": 0.18,
+          "bridgeRailHeight": 0.28,
+          "bridgeRailThickness": 0.08,
+          "bridgeEndPostHeight": 0.42,
+          "bridgeEndPostSize": 0.14,
+          "bridgeSeamOverlap": 0.07,
+          "terrainHeight": 1,
+          "escarpmentWidth": 1.1,
+          "plateauEdgeMarkerWidth": 0.08,
+          "ordinaryPadSizeRatio": 1.55,
+          "ordinaryPadBorderRatio": 0.0375,
+          "lavaBankWidth": 2.4,
+          "rampLength": 3.2,
+          "groundMaxFootprintRadius": 0.72,
+          "groundVerticalClearance": 0.9,
+          "groundMaxSlopeDeg": 22,
+          "groundApproachClearance": 0.2,
+          "groundTurningRadius": 1.4,
+          "generationMaxAttempts": 8,
+          "riftMinCount": 0,
+          "riftMaxCount": 3,
+          "riftBendMaxOffset": 5,
+          "exteriorLavaInset": 3.2,
+          "zoneMinSpan": 10,
+          "siteSeparation": 8,
+          "routeJunctionClearance": 5,
+          "routeDistanceMin": 10,
+          "routeDistanceMax": 34,
+          "routeElevationChangeBudget": 3,
+          "routeBridgeBudget": 3,
+          "viewConnectorBudget": 6,
+          "zoneExitMinCount": 2,
+          "zoneExitMaxCount": 4,
+          "rampBoundaryNormalToleranceDeg": 20,
+          "poiCameraRadius": 13,
+          "poiCameraMaxSites": 2,
+          "cellContourPoints": 12,
+          "cellContourJitter": 0.18,
+          "naturalContourMinRadialVariation": 0.08,
+          "naturalContourMinAngularVariation": 0.06,
+          "nonStartElevationMinCount": 2,
+          "corridorBoundaryCoverage": 0.8,
+          "compoundMinLength": 4,
+          "compoundMaxLength": 10,
+          "compoundMinHeight": 1.4,
+          "compoundMaxHeight": 4.2,
+          "compoundMinMasses": 3,
+          "compoundMaxMasses": 5,
+          "materialRegionCount": 3,
+          "materialRegionMinSpan": 9,
+          "materialTransitionWidth": 3.4,
+          "authoredTextureFeatherDefaultWidth": 0.45,
+          "authoredTextureFeatherMaxWidth": 2.25,
+          "authoredTextureFeatherIrregularity": 0.16,
+          "presentationMaskTexelsPerMeter": 4,
+          "presentationRoleTintStrength": 0.38,
+          "materialCoverageMin": 0.62,
+          "materialContrastMin": 0.16,
+          "sunElevationMinDeg": 35,
+          "sunElevationMaxDeg": 58,
+          "sunIntensityMin": 2.2,
+          "sunIntensityMax": 2.8,
+          "connectorApproachSeparation": 4,
+          "openSpaceDistrictMargin": 2,
+          "openSpaceRouteHalfWidth": 2,
+          "openSpaceSampleStep": 1,
+          "openSpaceMaxEmptyRadius": 4,
+          "openSpaceMassHeight": 3,
+          "objectiveTargetRadiusFraction": 0.28,
+          "objectivePeripheralRadiusFraction": 0.24,
+          "objectivePeripheralMinShare": 0.5,
+          "realizationContourStrength": 0.24,
+          "macroSurfaceMergeChance": 0.58,
+          "styleMinorityMinShare": 0.25,
+          "styleTransitionWidth": 12,
+          "styleMonotonicTolerance": 0.08,
+          "routeSegmentMinLength": 4,
+          "routeSegmentMaxCount": 4,
+          "tunnelMaxLength": 10,
+          "tunnelRoofFadeDistance": 9,
+          "tunnelMaxOccludedShare": 0.55,
+          "noveltyThreshold": 0.28,
+          "noveltySimilarityTolerance": 0.12,
+          "noveltySilhouetteWeight": 1,
+          "noveltyAdjacencyWeight": 0.9,
+          "noveltyRouteWeight": 0.85,
+          "noveltyArchetypeWeight": 0.8,
+          "noveltyTransitionWeight": 0.75,
+          "noveltyCompositionWeight": 0.9,
+          "noveltyLandmarkWeight": 0.55,
+          "terrainMaterialLuminanceMin": 0.18,
+          "terrainMaterialLuminanceMax": 0.74,
+          "terrainMaterialLightDarkDeltaMin": 0.24,
+          "terrainMaterialSeamDeltaMax": 0.12,
+          "terrainMaterialPeriodicityMax": 0.72,
+          "terrainTextureSampleBudget": 5,
+          "terrainMicroFadeNear": 18,
+          "terrainMicroFadeFar": 42,
+          "authoredTransitionRoadWidth": 0.8,
+          "authoredTransitionNaturalWidth": 4,
+          "authoredTransitionHardWidth": 0,
+          "authoredTransitionDepositWidth": 1.6
+        },
+        "unitUpgrades": {
+          "tankChassis": {
+            "creditCost": 300,
+            "durationSec": 30,
+            "speed": 6,
+            "glowIntensity": 1.2
+          }
+        }
+      },
+      "aiProfile": {
+        "schemaVersion": 2,
+        "id": "adaptive-strategic-ai-v1",
+        "revision": 3,
+        "difficulties": {
+          "recruit": {
+            "decisionIntervalTicks": 90,
+            "observationDelayTicks": 90,
+            "estimateNoise": 0.28,
+            "scoutIntensity": 0.55,
+            "strategySwitchDelayTicks": 180,
+            "maxConcurrentMissions": 1,
+            "microQuality": 0.35
+          },
+          "fighter": {
+            "decisionIntervalTicks": 45,
+            "observationDelayTicks": 30,
+            "estimateNoise": 0.12,
+            "scoutIntensity": 0.8,
+            "strategySwitchDelayTicks": 90,
+            "maxConcurrentMissions": 2,
+            "microQuality": 0.65
+          },
+          "veteran": {
+            "decisionIntervalTicks": 15,
+            "observationDelayTicks": 0,
+            "estimateNoise": 0.03,
+            "scoutIntensity": 1,
+            "strategySwitchDelayTicks": 30,
+            "maxConcurrentMissions": 4,
+            "microQuality": 0.9
+          }
+        },
+        "personality": {
+          "aggression": {
+            "min": 0.15,
+            "max": 0.95
+          },
+          "greed": {
+            "min": 0.15,
+            "max": 0.95
+          },
+          "caution": {
+            "min": 0.15,
+            "max": 0.95
+          },
+          "scouting": {
+            "min": 0.35,
+            "max": 1
+          },
+          "flanking": {
+            "min": 0.1,
+            "max": 0.9
+          },
+          "remoteExpansion": {
+            "min": 0.05,
+            "max": 0.65
+          },
+          "commitment": {
+            "min": 0.2,
+            "max": 0.9
+          },
+          "allIn": {
+            "min": 0.05,
+            "max": 0.65
+          }
+        },
+        "openings": {
+          "weights": {
+            "safe": 0.49,
+            "greedy-safe": 0.22,
+            "greedy-mine": 0.12,
+            "blind-rush": 0.16,
+            "explorer-all-in": 0.06,
+            "double-mine-explorer-rush": 0.12
+          },
+          "greedyMineTimeoutSec": 15,
+          "safeThreatRadius": 20,
+          "blindRushAttackProducedUnits": 1,
+          "blindRushReinforcementLimit": 3,
+          "blindRushCommitmentSec": 45,
+          "deadlinesSec": {
+            "safe": 105,
+            "greedy-safe": 135,
+            "greedy-mine": 90,
+            "blind-rush": 90,
+            "explorer-all-in": 75,
+            "double-mine-explorer-rush": 150
+          },
+          "explorerAllInFirstWave": 4,
+          "explorerAllInReinforcementLimit": 7,
+          "explorerAllInCommitmentSec": 55,
+          "doubleMineFirstWave": 5,
+          "doubleMineReinforcementLimit": 8,
+          "doubleMineCommitmentSec": 70
+        },
+        "midgame": {
+          "weights": {
+            "map-control": 0.42,
+            "mass-assault": 0.36,
+            "raids": 0.22
+          },
+          "openingReadiness": {
+            "safe": {
+              "map-control": 0.8,
+              "mass-assault": 0.55,
+              "raids": 0.7
+            },
+            "greedy-safe": {
+              "map-control": 1,
+              "mass-assault": 0.65,
+              "raids": 0.75
+            },
+            "greedy-mine": {
+              "map-control": 1.05,
+              "mass-assault": 0.6,
+              "raids": 0.8
+            },
+            "blind-rush": {
+              "map-control": 0.35,
+              "mass-assault": 1.1,
+              "raids": 0.7
+            },
+            "explorer-all-in": {
+              "map-control": 0.25,
+              "mass-assault": 1.15,
+              "raids": 1.05
+            },
+            "double-mine-explorer-rush": {
+              "map-control": 0.95,
+              "mass-assault": 0.85,
+              "raids": 1.1
+            }
+          },
+          "transitionCosts": {
+            "map-control": 0.08,
+            "mass-assault": 0.12,
+            "raids": 0.1
+          },
+          "massAssaultMinUnits": 5,
+          "raidGroupMin": 2,
+          "raidGroupMax": 3,
+          "defensiveReserveUnits": 1,
+          "mapControlIncomeBuildings": 3,
+          "raidIncomeBuildings": 2,
+          "vulnerableDefenseRatio": 0.75,
+          "emergencyThreatRatio": 0.75,
+          "mapControlExplorerMin": 1,
+          "raidExplorerShare": 0.75,
+          "massAssaultExplorerShare": 0.3
+        },
+        "economy": {
+          "factoryUtilizationThreshold": 0.6,
+          "utilizationWindowSec": 30,
+          "factoryForecastSec": 45,
+          "parallelTankCycles": 2,
+          "maximumFactories": 3,
+          "techMinimumRefineries": 2,
+          "techMaximumDanger": 0.5,
+          "techAdvantageRatio": 1.5,
+          "techOutpostEnemyDistance": 30,
+          "maxConcurrentUpgrades": 1
+        },
+        "liveness": {
+          "maximumUncommittedBank": 600,
+          "resourceStallSec": 60,
+          "productionStallSec": 45,
+          "armyStallSec": 50,
+          "missionStallSec": 60,
+          "scoutOverdueSec": 45,
+          "offensiveOverdueSec": 40
+        },
+        "scouting": {
+          "rescoutSec": 35,
+          "informationWeight": 1,
+          "riskWeight": 0.8,
+          "retreatThreatRatio": 1,
+          "cornerCheckWeight": 0.3,
+          "remoteExpansionThreshold": 0.35
+        },
+        "utility": {
+          "switchMargin": 0.18,
+          "commitmentSec": 12,
+          "threatWeight": 1,
+          "economyWeight": 0.7,
+          "forceWeight": 0.8,
+          "vulnerabilityWeight": 0.9,
+          "mapOpportunityWeight": 0.65
+        },
+        "tactics": {
+          "focusFireRatio": 0.7,
+          "retreatHealthRatio": 0.28,
+          "regroupRadius": 8,
+          "kiteDistance": 2,
+          "competitiveEnabled": 0,
+          "maximumInitiatedFronts": 3,
+          "coordinationRecruit": 0,
+          "coordinationFighter": 0.6,
+          "coordinationVeteran": 0.9,
+          "contactWindowSec": 3,
+          "maximumAssemblySec": 30,
+          "reinforcementIntervalSec": 4,
+          "minimumGroupForce": 1,
+          "objectiveRadius": 3,
+          "progressDistance": 0.5,
+          "emergencyRadius": 30
+        },
+        "evaluation": {
+          "seedCount": 2,
+          "maximumStallSec": 180,
+          "maximumScoutLossRatio": 0.7,
+          "decisionBudgetMs": 4,
+          "matchTimeLimitSec": 180,
+          "replaySampleCount": 8,
+          "coverageProbeSec": 1,
+          "soakSeedCount": 1,
+          "competitive": {
+            "durationSec": 300,
+            "seedCount": 1,
+            "minimumCompletionRate": 0.25,
+            "maximumWinRateRegression": 0.1,
+            "minimumDoubleMineCompletionRate": 0.5,
+            "minimumCoordinatedContactRate": 0.25,
+            "minimumCategoryGames": 2
+          }
+        },
+        "artillery": {
+          "enabled": 1,
+          "targetShare": 0.2,
+          "shareDeviation": 0.03,
+          "capacityThreshold": 40,
+          "smallArmyProbability": 0.2,
+          "largeArmyProbability": 0.9,
+          "massBattleBonus": 0.08,
+          "raidProbabilityFactor": 0.25,
+          "massBattleUnits": 6,
+          "clusterRadius": 8,
+          "strategyCommitmentSec": 30,
+          "coverDistance": 5,
+          "coverRadius": 12,
+          "retreatDistance": 8,
+          "positionTolerance": 1.5,
+          "holdSec": 5,
+          "coverCandidates": 3,
+          "lateralDistance": 3,
+          "earlyProbability": 0.4,
+          "earlyFirstOrdinal": 5,
+          "earlyOrdinalChoices": 2
+        }
+      },
+      "aiProfileRef": {
+        "id": "adaptive-strategic-ai-v1",
+        "revision": 3,
+        "source": "candidate"
+      },
+      "schemaVersion": 2
+    },
+    {
+      "ref": {
+        "id": "local:main:1788708872201:1",
+        "name": "main",
+        "revision": 4,
+        "source": "local",
+        "createdOn": "20260906"
+      },
+      "profile": {
+        "name": "main",
+        "revision": 4,
+        "units": {
+          "tank": {
+            "collisionRadius": 0.72,
+            "modelRadius": 0.65,
+            "modelScale": 1,
+            "speed": 4,
+            "turnSpeed": 4.5,
+            "turretTurnSpeed": 6,
+            "aimToleranceRad": 0.034906585,
+            "range": 10,
+            "vision": 13,
+            "health": 100,
+            "firesWhileMoving": true,
+            "stopForMs": 0,
+            "populationCost": 3,
+            "creditCost": 150,
+            "productionMenuOrder": 20,
+            "productionDurationSec": 15,
+            "weapon": {
+              "kind": "single",
+              "damage": 8,
+              "fireIntervalMs": 900,
+              "projectileType": "kinetic-shell",
+              "projectileSpeed": 15
+            }
+          },
+          "explorer": {
+            "collisionRadius": 0.58,
+            "modelRadius": 0.5,
+            "modelScale": 1,
+            "speed": 7,
+            "turnSpeed": 7.5,
+            "turretTurnSpeed": 10,
+            "aimToleranceRad": 0.034906585,
+            "range": 10,
+            "vision": 15,
+            "health": 70,
+            "firesWhileMoving": true,
+            "stopForMs": 0,
+            "populationCost": 2,
+            "creditCost": 100,
+            "productionMenuOrder": 10,
+            "productionDurationSec": 15,
+            "weapon": {
+              "kind": "burst",
+              "damage": 2,
+              "burstSize": 5,
+              "burstShotIntervalMs": 90,
+              "burstPauseMs": 1100,
+              "projectileSpeed": 32,
+              "spreadDeg": 5,
+              "tracerLength": 0.45,
+              "tracerThickness": 0.025
+            }
+          },
+          "shkval": {
+            "collisionRadius": 0.72,
+            "modelRadius": 0.6,
+            "modelScale": 1.4,
+            "speed": 4,
+            "turnSpeed": 4.5,
+            "turretTurnSpeed": 6,
+            "aimToleranceRad": 0.035,
+            "range": 16,
+            "vision": 12,
+            "health": 70,
+            "firesWhileMoving": false,
+            "stopForMs": 1800,
+            "populationCost": 4,
+            "creditCost": 200,
+            "productionMenuOrder": 30,
+            "productionDurationSec": 20,
+            "weapon": {
+              "kind": "ballistic",
+              "damage": 10,
+              "fireIntervalMs": 1800,
+              "projectileSpeed": 12,
+              "arcHeight": 4,
+              "blastRadius": 1.4,
+              "markerStartRadius": 1.9,
+              "markerOpacity": 0.22,
+              "leadSpeedThreshold": 7,
+              "leadFalloff": 1,
+              "launchHeight": 1.15,
+              "projectileRadius": 0.09,
+              "projectileLength": 0.65,
+              "buildingCollisionHeight": 2.5,
+              "maxLeadTimeSec": 30,
+              "friendlyFirePenalty": 2
+            }
+          }
+        },
+        "entityText": {
+          "tank": {
+            "name": "Танк",
+            "description": "Тяжёлая боевая машина для открытого боя и прорыва обороны."
+          },
+          "explorer": {
+            "name": "Исследователь",
+            "description": "Быстрый лёгкий разведчик и рейдер, особенно опасный вблизи и против плотной группы."
+          },
+          "headquarters": {
+            "name": "Штаб",
+            "description": "Главный центр базы: приносит доход, открывает слоты и производит Исследователей."
+          },
+          "outpost": {
+            "name": "Форпост",
+            "description": "Центр расширения: приносит доход, открывает слоты и производит Исследователей."
+          },
+          "factory": {
+            "name": "Фабрика",
+            "description": "Производит тяжёлые танки."
+          },
+          "refinery": {
+            "name": "Завод переработки",
+            "description": "Усиливает регулярный доход базы."
+          },
+          "scientificCenter": {
+            "name": "Научный центр",
+            "description": "Пассивный научный комплекс для будущих технологий."
+          },
+          "mine": {
+            "name": "Шахта",
+            "description": "Добывает кредиты на отдельной ресурсной точке."
+          },
+          "shkval": {
+            "name": "Шквал",
+            "description": "Хрупкая дальнобойная артиллерия. Стреляет с места по разведке команды; взрыв опасен и для своих."
+          }
+        },
+        "buildings": {
+          "headquarters": {
+            "health": 400,
+            "buildTimeSec": 25,
+            "vision": 22,
+            "footprintRadius": 2.05,
+            "creditCost": 600,
+            "creditIncome": 20,
+            "buildMenuOrder": 10,
+            "modelHeightMeters": 4.6,
+            "modelScale": 0.7,
+            "antennaTurnSpeedDegSec": 22
+          },
+          "outpost": {
+            "health": 300,
+            "buildTimeSec": 20,
+            "vision": 18,
+            "footprintRadius": 1.7,
+            "creditCost": 400,
+            "creditIncome": 5,
+            "buildMenuOrder": 20,
+            "modelHeightMeters": 4.6,
+            "modelScale": 0.8,
+            "antennaTurnSpeedDegSec": 34
+          },
+          "factory": {
+            "health": 250,
+            "buildTimeSec": 15,
+            "vision": 14,
+            "footprintRadius": 1.45,
+            "creditCost": 300,
+            "creditIncome": 0,
+            "buildMenuOrder": 10,
+            "modelHeightMeters": 2.5,
+            "modelScale": 0.7,
+            "antennaTurnSpeedDegSec": 0
+          },
+          "refinery": {
+            "health": 200,
+            "buildTimeSec": 10,
+            "vision": 14,
+            "footprintRadius": 1.35,
+            "creditCost": 200,
+            "creditIncome": 10,
+            "buildMenuOrder": 20,
+            "modelHeightMeters": 2.6,
+            "modelScale": 0.8,
+            "antennaTurnSpeedDegSec": 0
+          },
+          "scientificCenter": {
+            "health": 250,
+            "buildTimeSec": 20,
+            "vision": 14,
+            "footprintRadius": 1.45,
+            "creditCost": 300,
+            "creditIncome": 0,
+            "buildMenuOrder": 30,
+            "modelHeightMeters": 1.6407,
+            "modelScale": 0.8,
+            "antennaTurnSpeedDegSec": 0
+          },
+          "mine": {
+            "health": 250,
+            "buildTimeSec": 15,
+            "vision": 16,
+            "footprintRadius": 1.4,
+            "creditCost": 200,
+            "creditIncome": 15,
+            "buildMenuOrder": 30,
+            "modelHeightMeters": 2.4,
+            "modelScale": 0.7,
+            "antennaTurnSpeedDegSec": 0
+          }
+        },
+        "buildingUpgrades": {
+          "refinery": {
+            "creditCost": 200,
+            "durationSec": 20,
+            "creditIncome": 15,
+            "turbineTurnSpeedDegSec": 90
+          }
+        },
+        "economy": {
+          "startingCredits": 500,
+          "incomePeriodSec": 5,
+          "buildingCancellationRefundRatio": 0.75,
+          "unitCancellationRefundRatio": 1
+        },
+        "capture": {
+          "headquarters": {
+            "timeSec": 5,
+            "radius": 4.5
+          },
+          "outpost": {
+            "timeSec": 5,
+            "radius": 3.5
+          },
+          "mine": {
+            "timeSec": 5,
+            "radius": 3
+          }
+        },
+        "construction": {
+          "damageMultiplier": 1.5,
+          "visionMultiplier": 0.5
+        },
+        "army": {
+          "capacity": 100
+        },
+        "baseGeneration": {
+          "headquartersSlots": 5,
+          "outpostSlots": 3,
+          "localOutpostsMin": 1,
+          "localOutpostsMax": 1,
+          "localMines": 2,
+          "neutralOutpostsMin": 1,
+          "neutralOutpostsMax": 2,
+          "neutralMinesMin": 1,
+          "neutralMinesMax": 2,
+          "clusterSpacing": 3.2
+        },
+        "system": {
+          "matchScoreEarnedCreditsDivisor": 2,
+          "hudScale": {
+            "minimap": 1,
+            "resources": 1,
+            "entityDetail": 1,
+            "selection": 1,
+            "commands": 1,
+            "signals": 1,
+            "spectator": 1,
+            "chat": 1
+          },
+          "cameraDefaultZoom": 18,
+          "cameraPanSpeed": 8,
+          "cameraEdgePanSpeed": 8,
+          "cameraEdgePanZonePx": 28,
+          "healthBarHeightPx": 12,
+          "orderMarkerRadius": 0.42,
+          "rallyFlagHeight": 1.8,
+          "unitSelectionRingWidth": 0.05,
+          "selectionDragThreshold": 0.9,
+          "controlGroupDoubleTapMs": 300,
+          "unitOrderQueueLimit": 64,
+          "signalFrontMergeRadius": 18,
+          "signalFrontIdleSec": 8,
+          "signalFrontRepeatCooldownSec": 12,
+          "signalEventRetentionSec": 8,
+          "chatVisibleMessageLimit": 6,
+          "chatReadableMs": 8000,
+          "chatFadeMs": 2800,
+          "chatEvictionFadeMs": 350,
+          "idleAutoDefenseMultiplier": 1.1,
+          "projectileExtraRangePercent": 20,
+          "fogRevealMs": 180,
+          "fogConcealMs": 450,
+          "fogEdgeFeather": 1.5,
+          "fogExploredOpacity": 0.46,
+          "fogUnseenOpacity": 0.94,
+          "minimapTerrainSaturation": 0.7,
+          "minimapTerrainBrightness": 1.15,
+          "minimapTierContrast": 0.12,
+          "minimapMarkerSize": 1.1,
+          "minimapMarkerStroke": 0.35,
+          "minimapTerrainStroke": 0.32,
+          "foundationRiseSec": 2,
+          "renderPixelRatioCap": 1.5,
+          "hudPublicationHz": 30
+        },
+        "map": {
+          "extent": 112,
+          "smallExtentMin": 112,
+          "smallExtentMax": 128,
+          "smallExtentStep": 8,
+          "bridgeWideWidth": 9,
+          "bridgeFlankWidth": 5,
+          "bridgeStandardWidth": 7,
+          "bridgeExtraWideWidth": 12,
+          "visionCellSize": 4,
+          "routeFairnessTolerance": 0.15,
+          "startAngularSeparationMinDeg": 165,
+          "startAngularSeparationMaxDeg": 178,
+          "startAnchorRadialJitter": 0.01,
+          "startBranchBend": 0.015,
+          "startLocalRouteFairnessTolerance": 0.2,
+          "startContestedRouteFairnessTolerance": 0.22,
+          "startHeightTransitionTolerance": 1,
+          "rampReadabilityBandSpacing": 0.8,
+          "rampReadabilityBandWidth": 0.18,
+          "rampReadabilityBandOpacity": 0.58,
+          "bridgeCrownHeight": 0.18,
+          "bridgeRailHeight": 0.28,
+          "bridgeRailThickness": 0.08,
+          "bridgeEndPostHeight": 0.42,
+          "bridgeEndPostSize": 0.14,
+          "bridgeSeamOverlap": 0.07,
+          "terrainHeight": 1,
+          "escarpmentWidth": 1.1,
+          "plateauEdgeMarkerWidth": 0.08,
+          "ordinaryPadSizeRatio": 1.55,
+          "ordinaryPadBorderRatio": 0.0375,
+          "lavaBankWidth": 2.4,
+          "rampLength": 3.2,
+          "groundMaxFootprintRadius": 0.72,
+          "groundVerticalClearance": 0.9,
+          "groundMaxSlopeDeg": 22,
+          "groundApproachClearance": 0.2,
+          "groundTurningRadius": 1.4,
+          "generationMaxAttempts": 8,
+          "riftMinCount": 0,
+          "riftMaxCount": 3,
+          "riftBendMaxOffset": 5,
+          "exteriorLavaInset": 3.2,
+          "zoneMinSpan": 10,
+          "siteSeparation": 8,
+          "routeJunctionClearance": 5,
+          "routeDistanceMin": 10,
+          "routeDistanceMax": 34,
+          "routeElevationChangeBudget": 3,
+          "routeBridgeBudget": 3,
+          "viewConnectorBudget": 6,
+          "zoneExitMinCount": 2,
+          "zoneExitMaxCount": 4,
+          "rampBoundaryNormalToleranceDeg": 20,
+          "poiCameraRadius": 13,
+          "poiCameraMaxSites": 2,
+          "cellContourPoints": 12,
+          "cellContourJitter": 0.18,
+          "naturalContourMinRadialVariation": 0.08,
+          "naturalContourMinAngularVariation": 0.06,
+          "nonStartElevationMinCount": 2,
+          "corridorBoundaryCoverage": 0.8,
+          "compoundMinLength": 4,
+          "compoundMaxLength": 10,
+          "compoundMinHeight": 1.4,
+          "compoundMaxHeight": 4.2,
+          "compoundMinMasses": 3,
+          "compoundMaxMasses": 5,
+          "materialRegionCount": 3,
+          "materialRegionMinSpan": 9,
+          "materialTransitionWidth": 3.4,
+          "authoredTextureFeatherDefaultWidth": 0.45,
+          "authoredTextureFeatherMaxWidth": 2.25,
+          "authoredTextureFeatherIrregularity": 0.16,
+          "presentationMaskTexelsPerMeter": 4,
+          "presentationRoleTintStrength": 0.38,
+          "materialCoverageMin": 0.62,
+          "materialContrastMin": 0.16,
+          "sunElevationMinDeg": 35,
+          "sunElevationMaxDeg": 58,
+          "sunIntensityMin": 2.2,
+          "sunIntensityMax": 2.8,
+          "connectorApproachSeparation": 4,
+          "openSpaceDistrictMargin": 2,
+          "openSpaceRouteHalfWidth": 2,
+          "openSpaceSampleStep": 1,
+          "openSpaceMaxEmptyRadius": 4,
+          "openSpaceMassHeight": 3,
+          "objectiveTargetRadiusFraction": 0.28,
+          "objectivePeripheralRadiusFraction": 0.24,
+          "objectivePeripheralMinShare": 0.5,
+          "realizationContourStrength": 0.24,
+          "macroSurfaceMergeChance": 0.58,
+          "styleMinorityMinShare": 0.25,
+          "styleTransitionWidth": 12,
+          "styleMonotonicTolerance": 0.08,
+          "routeSegmentMinLength": 4,
+          "routeSegmentMaxCount": 4,
+          "tunnelMaxLength": 10,
+          "tunnelRoofFadeDistance": 9,
+          "tunnelMaxOccludedShare": 0.55,
+          "noveltyThreshold": 0.28,
+          "noveltySimilarityTolerance": 0.12,
+          "noveltySilhouetteWeight": 1,
+          "noveltyAdjacencyWeight": 0.9,
+          "noveltyRouteWeight": 0.85,
+          "noveltyArchetypeWeight": 0.8,
+          "noveltyTransitionWeight": 0.75,
+          "noveltyCompositionWeight": 0.9,
+          "noveltyLandmarkWeight": 0.55,
+          "terrainMaterialLuminanceMin": 0.18,
+          "terrainMaterialLuminanceMax": 0.74,
+          "terrainMaterialLightDarkDeltaMin": 0.24,
+          "terrainMaterialSeamDeltaMax": 0.12,
+          "terrainMaterialPeriodicityMax": 0.72,
+          "terrainTextureSampleBudget": 5,
+          "terrainMicroFadeNear": 18,
+          "terrainMicroFadeFar": 42,
+          "authoredTransitionRoadWidth": 0.8,
+          "authoredTransitionNaturalWidth": 4,
+          "authoredTransitionHardWidth": 0,
+          "authoredTransitionDepositWidth": 1.6
+        },
+        "unitUpgrades": {
+          "tankChassis": {
+            "creditCost": 300,
+            "durationSec": 30,
+            "speed": 6,
+            "glowIntensity": 1.2
+          }
+        }
+      },
+      "aiProfile": {
+        "artillery": {
+          "capacityThreshold": 40,
+          "clusterRadius": 8,
+          "coverCandidates": 3,
+          "coverDistance": 5,
+          "coverRadius": 12,
+          "earlyFirstOrdinal": 5,
+          "earlyOrdinalChoices": 2,
+          "earlyProbability": 0.4,
+          "enabled": 1,
+          "holdSec": 5,
+          "largeArmyProbability": 0.9,
+          "lateralDistance": 3,
+          "massBattleBonus": 0.08,
+          "massBattleUnits": 6,
+          "positionTolerance": 1.5,
+          "raidProbabilityFactor": 0.25,
+          "retreatDistance": 8,
+          "shareDeviation": 0.03,
+          "smallArmyProbability": 0.2,
+          "strategyCommitmentSec": 30,
+          "targetShare": 0.2
+        },
+        "difficulties": {
+          "fighter": {
+            "decisionIntervalTicks": 45,
+            "estimateNoise": 0.12,
+            "maxConcurrentMissions": 2,
+            "microQuality": 0.65,
+            "observationDelayTicks": 30,
+            "scoutIntensity": 0.8,
+            "strategySwitchDelayTicks": 90
+          },
+          "recruit": {
+            "decisionIntervalTicks": 90,
+            "estimateNoise": 0.28,
+            "maxConcurrentMissions": 1,
+            "microQuality": 0.35,
+            "observationDelayTicks": 90,
+            "scoutIntensity": 0.55,
+            "strategySwitchDelayTicks": 180
+          },
+          "veteran": {
+            "decisionIntervalTicks": 15,
+            "estimateNoise": 0.03,
+            "maxConcurrentMissions": 4,
+            "microQuality": 0.9,
+            "observationDelayTicks": 0,
+            "scoutIntensity": 1,
+            "strategySwitchDelayTicks": 30
+          }
+        },
+        "economy": {
+          "factoryForecastSec": 45,
+          "factoryUtilizationThreshold": 0.6,
+          "maxConcurrentUpgrades": 1,
+          "maximumFactories": 3,
+          "parallelTankCycles": 2,
+          "techAdvantageRatio": 1.5,
+          "techMaximumDanger": 0.5,
+          "techMinimumRefineries": 2,
+          "techOutpostEnemyDistance": 30,
+          "utilizationWindowSec": 30
+        },
+        "evaluation": {
+          "competitive": {
+            "durationSec": 300,
+            "maximumWinRateRegression": 0.1,
+            "minimumCategoryGames": 2,
+            "minimumCompletionRate": 0.25,
+            "minimumCoordinatedContactRate": 0.25,
+            "minimumDoubleMineCompletionRate": 0.5,
+            "seedCount": 1
+          },
+          "coverageProbeSec": 1,
+          "decisionBudgetMs": 4,
+          "matchTimeLimitSec": 180,
+          "maximumScoutLossRatio": 0.7,
+          "maximumStallSec": 180,
+          "replaySampleCount": 8,
+          "seedCount": 2,
+          "soakSeedCount": 1
+        },
+        "id": "adaptive-strategic-ai-v1",
+        "liveness": {
+          "armyStallSec": 50,
+          "maximumUncommittedBank": 600,
+          "missionStallSec": 60,
+          "offensiveOverdueSec": 40,
+          "productionStallSec": 45,
+          "resourceStallSec": 60,
+          "scoutOverdueSec": 45
+        },
+        "midgame": {
+          "defensiveReserveUnits": 1,
+          "emergencyThreatRatio": 0.75,
+          "mapControlExplorerMin": 1,
+          "mapControlIncomeBuildings": 3,
+          "massAssaultExplorerShare": 0.3,
+          "massAssaultMinUnits": 5,
+          "openingReadiness": {
+            "blind-rush": {
+              "map-control": 0.35,
+              "mass-assault": 1.1,
+              "raids": 0.7
+            },
+            "double-mine-explorer-rush": {
+              "map-control": 0.95,
+              "mass-assault": 0.85,
+              "raids": 1.1
+            },
+            "explorer-all-in": {
+              "map-control": 0.25,
+              "mass-assault": 1.15,
+              "raids": 1.05
+            },
+            "greedy-mine": {
+              "map-control": 1.05,
+              "mass-assault": 0.6,
+              "raids": 0.8
+            },
+            "greedy-safe": {
+              "map-control": 1,
+              "mass-assault": 0.65,
+              "raids": 0.75
+            },
+            "safe": {
+              "map-control": 0.8,
+              "mass-assault": 0.55,
+              "raids": 0.7
+            }
+          },
+          "raidExplorerShare": 0.75,
+          "raidGroupMax": 3,
+          "raidGroupMin": 2,
+          "raidIncomeBuildings": 2,
+          "transitionCosts": {
+            "map-control": 0.08,
+            "mass-assault": 0.12,
+            "raids": 0.1
+          },
+          "vulnerableDefenseRatio": 0.75,
+          "weights": {
+            "map-control": 0.42,
+            "mass-assault": 0.36,
+            "raids": 0.22
+          },
+          "observedCompositionWeight": 1
+        },
+        "openings": {
+          "blindRushAttackProducedUnits": 1,
+          "blindRushCommitmentSec": 45,
+          "blindRushReinforcementLimit": 3,
+          "deadlinesSec": {
+            "blind-rush": 90,
+            "double-mine-explorer-rush": 150,
+            "explorer-all-in": 75,
+            "greedy-mine": 90,
+            "greedy-safe": 135,
+            "safe": 105
+          },
+          "doubleMineCommitmentSec": 70,
+          "doubleMineFirstWave": 5,
+          "doubleMineReinforcementLimit": 8,
+          "explorerAllInCommitmentSec": 55,
+          "explorerAllInFirstWave": 4,
+          "explorerAllInReinforcementLimit": 7,
+          "greedyMineTimeoutSec": 15,
+          "safeThreatRadius": 20,
+          "weights": {
+            "blind-rush": 0.16,
+            "double-mine-explorer-rush": 0.12,
+            "explorer-all-in": 0.06,
+            "greedy-mine": 0.12,
+            "greedy-safe": 0.22,
+            "safe": 0.49
+          }
+        },
+        "personality": {
+          "aggression": {
+            "max": 0.95,
+            "min": 0.15
+          },
+          "allIn": {
+            "max": 0.65,
+            "min": 0.05
+          },
+          "caution": {
+            "max": 0.95,
+            "min": 0.15
+          },
+          "commitment": {
+            "max": 0.9,
+            "min": 0.2
+          },
+          "flanking": {
+            "max": 0.9,
+            "min": 0.1
+          },
+          "greed": {
+            "max": 0.95,
+            "min": 0.15
+          },
+          "remoteExpansion": {
+            "max": 0.65,
+            "min": 0.05
+          },
+          "scouting": {
+            "max": 1,
+            "min": 0.35
+          }
+        },
+        "revision": 9,
+        "schemaVersion": 2,
+        "scouting": {
+          "cornerCheckWeight": 0.3,
+          "informationWeight": 1,
+          "remoteExpansionThreshold": 0.35,
+          "rescoutSec": 35,
+          "retreatThreatRatio": 1,
+          "riskWeight": 0.8
+        },
+        "tactics": {
+          "competitiveEnabled": 1,
+          "contactWindowSec": 3,
+          "coordinationFighter": 0.6,
+          "coordinationRecruit": 0,
+          "coordinationVeteran": 0.9,
+          "emergencyRadius": 30,
+          "focusFireRatio": 0.7,
+          "kiteDistance": 2,
+          "maximumAssemblySec": 30,
+          "maximumInitiatedFronts": 3,
+          "minimumGroupForce": 1,
+          "objectiveRadius": 3,
+          "progressDistance": 0.5,
+          "regroupRadius": 8,
+          "reinforcementIntervalSec": 4,
+          "retreatHealthRatio": 0.28,
+          "armyStagingEnabled": 1,
+          "minimumAttackUnits": 2,
+          "minimumReinforcementUnits": 2,
+          "authoredApproachCandidates": 8,
+          "lastCenterDefenseHealthRatio": 0.9,
+          "authoredScoutCandidates": 8
+        },
+        "utility": {
+          "commitmentSec": 12,
+          "economyWeight": 0.7,
+          "forceWeight": 0.8,
+          "mapOpportunityWeight": 0.65,
+          "switchMargin": 0.18,
+          "threatWeight": 1,
+          "vulnerabilityWeight": 0.9
+        }
+      },
+      "aiProfileRef": {
+        "id": "adaptive-strategic-ai-v1",
+        "revision": 9,
+        "source": "candidate"
+      },
+      "schemaVersion": 2
+    },
+    {
+      "ref": {
+        "id": "local:main:1788708872201:1",
+        "name": "main",
+        "revision": 5,
+        "source": "local",
+        "createdOn": "20260909"
+      },
+      "profile": {
+        "name": "main",
+        "revision": 5,
+        "units": {
+          "tank": {
+            "collisionRadius": 0.72,
+            "modelRadius": 0.65,
+            "modelScale": 1,
+            "speed": 4,
+            "turnSpeed": 4.5,
+            "turretTurnSpeed": 6,
+            "aimToleranceRad": 0.034906585,
+            "range": 10,
+            "vision": 13,
+            "health": 100,
+            "firesWhileMoving": true,
+            "stopForMs": 0,
+            "populationCost": 3,
+            "creditCost": 150,
+            "productionMenuOrder": 20,
+            "productionDurationSec": 15,
+            "weapon": {
+              "kind": "single",
+              "damage": 8,
+              "fireIntervalMs": 900,
+              "projectileType": "kinetic-shell",
+              "projectileSpeed": 15
+            }
+          },
+          "explorer": {
+            "collisionRadius": 0.58,
+            "modelRadius": 0.5,
+            "modelScale": 1,
+            "speed": 7,
+            "turnSpeed": 7.5,
+            "turretTurnSpeed": 10,
+            "aimToleranceRad": 0.034906585,
+            "range": 10,
+            "vision": 15,
+            "health": 70,
+            "firesWhileMoving": true,
+            "stopForMs": 0,
+            "populationCost": 2,
+            "creditCost": 100,
+            "productionMenuOrder": 10,
+            "productionDurationSec": 15,
+            "weapon": {
+              "kind": "burst",
+              "damage": 2,
+              "burstSize": 4,
+              "burstShotIntervalMs": 90,
+              "burstPauseMs": 1100,
+              "projectileSpeed": 32,
+              "spreadDeg": 7,
+              "tracerLength": 0.45,
+              "tracerThickness": 0.025
+            }
+          },
+          "shkval": {
+            "collisionRadius": 0.72,
+            "modelRadius": 0.6,
+            "modelScale": 1.4,
+            "speed": 4,
+            "turnSpeed": 4.5,
+            "turretTurnSpeed": 6,
+            "aimToleranceRad": 0.035,
+            "range": 16,
+            "vision": 12,
+            "health": 70,
+            "firesWhileMoving": false,
+            "stopForMs": 1800,
+            "populationCost": 4,
+            "creditCost": 200,
+            "productionMenuOrder": 30,
+            "productionDurationSec": 20,
+            "weapon": {
+              "kind": "ballistic",
+              "damage": 10,
+              "fireIntervalMs": 1800,
+              "projectileSpeed": 12,
+              "arcHeight": 4,
+              "blastRadius": 1.4,
+              "markerStartRadius": 1.9,
+              "markerOpacity": 0.22,
+              "leadSpeedThreshold": 7,
+              "leadFalloff": 1,
+              "launchHeight": 1.15,
+              "projectileRadius": 0.09,
+              "projectileLength": 0.65,
+              "buildingCollisionHeight": 2.5,
+              "maxLeadTimeSec": 30,
+              "friendlyFirePenalty": 2
+            }
+          }
+        },
+        "entityText": {
+          "tank": {
+            "name": "Танк",
+            "description": "Тяжёлая боевая машина для открытого боя и прорыва обороны."
+          },
+          "explorer": {
+            "name": "Исследователь",
+            "description": "Быстрый лёгкий разведчик и рейдер, особенно опасный вблизи и против плотной группы."
+          },
+          "headquarters": {
+            "name": "Штаб",
+            "description": "Главный центр базы: приносит доход, открывает слоты и производит Исследователей."
+          },
+          "outpost": {
+            "name": "Форпост",
+            "description": "Центр расширения: приносит доход, открывает слоты и производит Исследователей."
+          },
+          "factory": {
+            "name": "Фабрика",
+            "description": "Производит тяжёлые танки."
+          },
+          "refinery": {
+            "name": "Завод переработки",
+            "description": "Усиливает регулярный доход базы."
+          },
+          "scientificCenter": {
+            "name": "Научный центр",
+            "description": "Пассивный научный комплекс для будущих технологий."
+          },
+          "mine": {
+            "name": "Шахта",
+            "description": "Добывает кредиты на отдельной ресурсной точке."
+          },
+          "shkval": {
+            "name": "Шквал",
+            "description": "Хрупкая дальнобойная артиллерия. Стреляет с места по разведке команды; взрыв опасен и для своих."
+          }
+        },
+        "buildings": {
+          "headquarters": {
+            "health": 400,
+            "buildTimeSec": 25,
+            "vision": 22,
+            "footprintRadius": 2.05,
+            "creditCost": 600,
+            "creditIncome": 20,
+            "buildMenuOrder": 10,
+            "modelHeightMeters": 4.6,
+            "modelScale": 0.7,
+            "antennaTurnSpeedDegSec": 22
+          },
+          "outpost": {
+            "health": 300,
+            "buildTimeSec": 20,
+            "vision": 18,
+            "footprintRadius": 1.7,
+            "creditCost": 400,
+            "creditIncome": 5,
+            "buildMenuOrder": 20,
+            "modelHeightMeters": 4.6,
+            "modelScale": 0.8,
+            "antennaTurnSpeedDegSec": 34
+          },
+          "factory": {
+            "health": 250,
+            "buildTimeSec": 15,
+            "vision": 14,
+            "footprintRadius": 1.45,
+            "creditCost": 300,
+            "creditIncome": 0,
+            "buildMenuOrder": 10,
+            "modelHeightMeters": 2.5,
+            "modelScale": 0.7,
+            "antennaTurnSpeedDegSec": 0
+          },
+          "refinery": {
+            "health": 200,
+            "buildTimeSec": 10,
+            "vision": 14,
+            "footprintRadius": 1.35,
+            "creditCost": 200,
+            "creditIncome": 10,
+            "buildMenuOrder": 20,
+            "modelHeightMeters": 2.6,
+            "modelScale": 0.8,
+            "antennaTurnSpeedDegSec": 0
+          },
+          "scientificCenter": {
+            "health": 250,
+            "buildTimeSec": 20,
+            "vision": 14,
+            "footprintRadius": 1.45,
+            "creditCost": 300,
+            "creditIncome": 0,
+            "buildMenuOrder": 30,
+            "modelHeightMeters": 1.6407,
+            "modelScale": 0.8,
+            "antennaTurnSpeedDegSec": 0
+          },
+          "mine": {
+            "health": 250,
+            "buildTimeSec": 15,
+            "vision": 16,
+            "footprintRadius": 1.4,
+            "creditCost": 200,
+            "creditIncome": 15,
+            "buildMenuOrder": 30,
+            "modelHeightMeters": 2.4,
+            "modelScale": 0.7,
+            "antennaTurnSpeedDegSec": 0
+          }
+        },
+        "buildingUpgrades": {
+          "refinery": {
+            "creditCost": 200,
+            "durationSec": 20,
+            "creditIncome": 15,
+            "turbineTurnSpeedDegSec": 90
+          }
+        },
+        "economy": {
+          "startingCredits": 500,
+          "incomePeriodSec": 5,
+          "buildingCancellationRefundRatio": 0.75,
+          "unitCancellationRefundRatio": 1
+        },
+        "capture": {
+          "headquarters": {
+            "timeSec": 5,
+            "radius": 4.5
+          },
+          "outpost": {
+            "timeSec": 5,
+            "radius": 3.5
+          },
+          "mine": {
+            "timeSec": 5,
+            "radius": 3
+          }
+        },
+        "construction": {
+          "damageMultiplier": 1.5,
+          "visionMultiplier": 0.5
+        },
+        "army": {
+          "capacity": 100
+        },
+        "baseGeneration": {
+          "headquartersSlots": 5,
+          "outpostSlots": 3,
+          "localOutpostsMin": 1,
+          "localOutpostsMax": 1,
+          "localMines": 2,
+          "neutralOutpostsMin": 1,
+          "neutralOutpostsMax": 2,
+          "neutralMinesMin": 1,
+          "neutralMinesMax": 2,
+          "clusterSpacing": 3.2
+        },
+        "system": {
+          "matchScoreEarnedCreditsDivisor": 2,
+          "hudScale": {
+            "minimap": 1,
+            "resources": 1,
+            "entityDetail": 1,
+            "selection": 1,
+            "commands": 1,
+            "signals": 1,
+            "spectator": 1,
+            "chat": 1
+          },
+          "cameraDefaultZoom": 12,
+          "cameraMinZoom": 6,
+          "cameraMaxZoom": 30,
+          "cameraPanSpeed": 8,
+          "cameraEdgePanSpeed": 8,
+          "cameraEdgePanZonePx": 28,
+          "healthBarHeightPx": 12,
+          "orderMarkerRadius": 0.42,
+          "rallyFlagHeight": 1.8,
+          "unitSelectionRingWidth": 0.05,
+          "selectionDragThreshold": 0.9,
+          "controlGroupDoubleTapMs": 450,
+          "unitOrderQueueLimit": 64,
+          "signalFrontMergeRadius": 18,
+          "signalFrontIdleSec": 8,
+          "signalFrontRepeatCooldownSec": 12,
+          "signalEventRetentionSec": 8,
+          "chatVisibleMessageLimit": 6,
+          "chatReadableMs": 8000,
+          "chatFadeMs": 2800,
+          "chatEvictionFadeMs": 350,
+          "idleAutoDefenseMultiplier": 1.1,
+          "projectileExtraRangePercent": 20,
+          "fogRevealMs": 180,
+          "fogConcealMs": 450,
+          "fogEdgeFeather": 1.5,
+          "fogExploredOpacity": 0.46,
+          "fogUnseenOpacity": 0.94,
+          "minimapTerrainSaturation": 0.7,
+          "minimapTerrainBrightness": 1.15,
+          "minimapTierContrast": 0.12,
+          "minimapMarkerSize": 1.1,
+          "minimapMarkerStroke": 0.35,
+          "minimapTerrainStroke": 0.32,
+          "foundationRiseSec": 2,
+          "renderPixelRatioCap": 1.5,
+          "hudPublicationHz": 30
+        },
+        "map": {
+          "extent": 112,
+          "smallExtentMin": 112,
+          "smallExtentMax": 128,
+          "smallExtentStep": 8,
+          "bridgeWideWidth": 9,
+          "bridgeFlankWidth": 5,
+          "bridgeStandardWidth": 7,
+          "bridgeExtraWideWidth": 12,
+          "visionCellSize": 4,
+          "routeFairnessTolerance": 0.15,
+          "startAngularSeparationMinDeg": 165,
+          "startAngularSeparationMaxDeg": 178,
+          "startAnchorRadialJitter": 0.01,
+          "startBranchBend": 0.015,
+          "startLocalRouteFairnessTolerance": 0.2,
+          "startContestedRouteFairnessTolerance": 0.22,
+          "startHeightTransitionTolerance": 1,
+          "rampReadabilityBandSpacing": 0.8,
+          "rampReadabilityBandWidth": 0.18,
+          "rampReadabilityBandOpacity": 0.58,
+          "bridgeCrownHeight": 0.18,
+          "bridgeRailHeight": 0.28,
+          "bridgeRailThickness": 0.08,
+          "bridgeEndPostHeight": 0.42,
+          "bridgeEndPostSize": 0.14,
+          "bridgeSeamOverlap": 0.07,
+          "terrainHeight": 1,
+          "escarpmentWidth": 1.1,
+          "plateauEdgeMarkerWidth": 0.08,
+          "ordinaryPadSizeRatio": 1.55,
+          "ordinaryPadBorderRatio": 0.0375,
+          "lavaBankWidth": 2.4,
+          "rampLength": 3.2,
+          "groundMaxFootprintRadius": 0.72,
+          "groundVerticalClearance": 0.9,
+          "groundMaxSlopeDeg": 22,
+          "groundApproachClearance": 0.2,
+          "groundTurningRadius": 1.4,
+          "generationMaxAttempts": 8,
+          "riftMinCount": 0,
+          "riftMaxCount": 3,
+          "riftBendMaxOffset": 5,
+          "exteriorLavaInset": 3.2,
+          "zoneMinSpan": 10,
+          "siteSeparation": 8,
+          "routeJunctionClearance": 5,
+          "routeDistanceMin": 10,
+          "routeDistanceMax": 34,
+          "routeElevationChangeBudget": 3,
+          "routeBridgeBudget": 3,
+          "viewConnectorBudget": 6,
+          "zoneExitMinCount": 2,
+          "zoneExitMaxCount": 4,
+          "rampBoundaryNormalToleranceDeg": 20,
+          "poiCameraRadius": 13,
+          "poiCameraMaxSites": 2,
+          "cellContourPoints": 12,
+          "cellContourJitter": 0.18,
+          "naturalContourMinRadialVariation": 0.08,
+          "naturalContourMinAngularVariation": 0.06,
+          "nonStartElevationMinCount": 2,
+          "corridorBoundaryCoverage": 0.8,
+          "compoundMinLength": 4,
+          "compoundMaxLength": 10,
+          "compoundMinHeight": 1.4,
+          "compoundMaxHeight": 4.2,
+          "compoundMinMasses": 3,
+          "compoundMaxMasses": 5,
+          "materialRegionCount": 3,
+          "materialRegionMinSpan": 9,
+          "materialTransitionWidth": 3.4,
+          "authoredTextureFeatherDefaultWidth": 0.45,
+          "authoredTextureFeatherMaxWidth": 2.25,
+          "authoredTextureFeatherIrregularity": 0.16,
+          "presentationMaskTexelsPerMeter": 4,
+          "presentationRoleTintStrength": 0.38,
+          "materialCoverageMin": 0.62,
+          "materialContrastMin": 0.16,
+          "sunElevationMinDeg": 35,
+          "sunElevationMaxDeg": 58,
+          "sunIntensityMin": 2.2,
+          "sunIntensityMax": 2.8,
+          "connectorApproachSeparation": 4,
+          "openSpaceDistrictMargin": 2,
+          "openSpaceRouteHalfWidth": 2,
+          "openSpaceSampleStep": 1,
+          "openSpaceMaxEmptyRadius": 4,
+          "openSpaceMassHeight": 3,
+          "objectiveTargetRadiusFraction": 0.28,
+          "objectivePeripheralRadiusFraction": 0.24,
+          "objectivePeripheralMinShare": 0.5,
+          "realizationContourStrength": 0.24,
+          "macroSurfaceMergeChance": 0.58,
+          "styleMinorityMinShare": 0.25,
+          "styleTransitionWidth": 12,
+          "styleMonotonicTolerance": 0.08,
+          "routeSegmentMinLength": 4,
+          "routeSegmentMaxCount": 4,
+          "tunnelMaxLength": 10,
+          "tunnelRoofFadeDistance": 9,
+          "tunnelMaxOccludedShare": 0.55,
+          "noveltyThreshold": 0.28,
+          "noveltySimilarityTolerance": 0.12,
+          "noveltySilhouetteWeight": 1,
+          "noveltyAdjacencyWeight": 0.9,
+          "noveltyRouteWeight": 0.85,
+          "noveltyArchetypeWeight": 0.8,
+          "noveltyTransitionWeight": 0.75,
+          "noveltyCompositionWeight": 0.9,
+          "noveltyLandmarkWeight": 0.55,
+          "terrainMaterialLuminanceMin": 0.18,
+          "terrainMaterialLuminanceMax": 0.74,
+          "terrainMaterialLightDarkDeltaMin": 0.24,
+          "terrainMaterialSeamDeltaMax": 0.12,
+          "terrainMaterialPeriodicityMax": 0.72,
+          "terrainTextureSampleBudget": 5,
+          "terrainMicroFadeNear": 18,
+          "terrainMicroFadeFar": 42,
+          "authoredTransitionRoadWidth": 0.8,
+          "authoredTransitionNaturalWidth": 4,
+          "authoredTransitionHardWidth": 0,
+          "authoredTransitionDepositWidth": 1.6
+        },
+        "unitUpgrades": {
+          "tankChassis": {
+            "creditCost": 300,
+            "durationSec": 30,
+            "speed": 6,
+            "glowIntensity": 1.2
+          },
+          "explorerAssaultGuns": {
+            "creditCost": 300,
+            "durationSec": 30,
+            "baseBurstSize": 4,
+            "upgradedBurstSize": 6,
+            "baseSpreadDeg": 7,
+            "upgradedSpreadDeg": 5
+          }
+        }
+      },
+      "aiProfile": {
+        "artillery": {
+          "capacityThreshold": 40,
+          "clusterRadius": 8,
+          "coverCandidates": 3,
+          "coverDistance": 5,
+          "coverRadius": 12,
+          "earlyFirstOrdinal": 5,
+          "earlyOrdinalChoices": 2,
+          "earlyProbability": 0.4,
+          "enabled": 1,
+          "holdSec": 5,
+          "largeArmyProbability": 0.9,
+          "lateralDistance": 3,
+          "massBattleBonus": 0.08,
+          "massBattleUnits": 6,
+          "positionTolerance": 1.5,
+          "raidProbabilityFactor": 0.25,
+          "retreatDistance": 8,
+          "shareDeviation": 0.03,
+          "smallArmyProbability": 0.2,
+          "strategyCommitmentSec": 30,
+          "targetShare": 0.2
+        },
+        "difficulties": {
+          "fighter": {
+            "decisionIntervalTicks": 45,
+            "estimateNoise": 0.12,
+            "maxConcurrentMissions": 2,
+            "microQuality": 0.65,
+            "observationDelayTicks": 30,
+            "scoutIntensity": 0.8,
+            "strategySwitchDelayTicks": 90
+          },
+          "recruit": {
+            "decisionIntervalTicks": 90,
+            "estimateNoise": 0.28,
+            "maxConcurrentMissions": 1,
+            "microQuality": 0.35,
+            "observationDelayTicks": 90,
+            "scoutIntensity": 0.55,
+            "strategySwitchDelayTicks": 180
+          },
+          "veteran": {
+            "decisionIntervalTicks": 15,
+            "estimateNoise": 0.03,
+            "maxConcurrentMissions": 4,
+            "microQuality": 0.9,
+            "observationDelayTicks": 0,
+            "scoutIntensity": 1,
+            "strategySwitchDelayTicks": 30
+          }
+        },
+        "economy": {
+          "factoryForecastSec": 45,
+          "factoryUtilizationThreshold": 0.6,
+          "maxConcurrentUpgrades": 1,
+          "maximumFactories": 3,
+          "parallelTankCycles": 2,
+          "techAdvantageRatio": 1.5,
+          "techMaximumDanger": 0.5,
+          "techMinimumRefineries": 2,
+          "techOutpostEnemyDistance": 30,
+          "utilizationWindowSec": 30,
+          "explorerAssaultCountThreshold": 6,
+          "explorerAssaultBankThreshold": 2000
+        },
+        "evaluation": {
+          "competitive": {
+            "durationSec": 300,
+            "maximumWinRateRegression": 0.1,
+            "minimumCategoryGames": 2,
+            "minimumCompletionRate": 0.25,
+            "minimumCoordinatedContactRate": 0.25,
+            "minimumDoubleMineCompletionRate": 0.5,
+            "seedCount": 1
+          },
+          "coverageProbeSec": 1,
+          "decisionBudgetMs": 4,
+          "matchTimeLimitSec": 180,
+          "maximumScoutLossRatio": 0.7,
+          "maximumStallSec": 180,
+          "replaySampleCount": 8,
+          "seedCount": 2,
+          "soakSeedCount": 1
+        },
+        "id": "adaptive-strategic-ai-v1",
+        "liveness": {
+          "armyStallSec": 50,
+          "maximumUncommittedBank": 600,
+          "missionStallSec": 60,
+          "offensiveOverdueSec": 40,
+          "productionStallSec": 45,
+          "resourceStallSec": 60,
+          "scoutOverdueSec": 45
+        },
+        "midgame": {
+          "defensiveReserveUnits": 1,
+          "emergencyThreatRatio": 0.75,
+          "mapControlExplorerMin": 1,
+          "mapControlIncomeBuildings": 3,
+          "massAssaultExplorerShare": 0.3,
+          "massAssaultMinUnits": 5,
+          "openingReadiness": {
+            "blind-rush": {
+              "map-control": 0.35,
+              "mass-assault": 1.1,
+              "raids": 0.7
+            },
+            "double-mine-explorer-rush": {
+              "map-control": 0.95,
+              "mass-assault": 0.85,
+              "raids": 1.1
+            },
+            "explorer-all-in": {
+              "map-control": 0.25,
+              "mass-assault": 1.15,
+              "raids": 1.05
+            },
+            "greedy-mine": {
+              "map-control": 1.05,
+              "mass-assault": 0.6,
+              "raids": 0.8
+            },
+            "greedy-safe": {
+              "map-control": 1,
+              "mass-assault": 0.65,
+              "raids": 0.75
+            },
+            "safe": {
+              "map-control": 0.8,
+              "mass-assault": 0.55,
+              "raids": 0.7
+            }
+          },
+          "raidExplorerShare": 0.75,
+          "raidGroupMax": 3,
+          "raidGroupMin": 2,
+          "raidIncomeBuildings": 2,
+          "transitionCosts": {
+            "map-control": 0.08,
+            "mass-assault": 0.12,
+            "raids": 0.1
+          },
+          "vulnerableDefenseRatio": 0.75,
+          "weights": {
+            "map-control": 0.42,
+            "mass-assault": 0.36,
+            "raids": 0.22
+          },
+          "observedCompositionWeight": 1
+        },
+        "openings": {
+          "blindRushAttackProducedUnits": 1,
+          "blindRushCommitmentSec": 45,
+          "blindRushReinforcementLimit": 3,
+          "deadlinesSec": {
+            "blind-rush": 90,
+            "double-mine-explorer-rush": 150,
+            "explorer-all-in": 75,
+            "greedy-mine": 90,
+            "greedy-safe": 135,
+            "safe": 105
+          },
+          "doubleMineCommitmentSec": 70,
+          "doubleMineFirstWave": 5,
+          "doubleMineReinforcementLimit": 8,
+          "explorerAllInCommitmentSec": 55,
+          "explorerAllInFirstWave": 4,
+          "explorerAllInReinforcementLimit": 7,
+          "greedyMineTimeoutSec": 15,
+          "safeThreatRadius": 20,
+          "weights": {
+            "blind-rush": 0.16,
+            "double-mine-explorer-rush": 0.12,
+            "explorer-all-in": 0.06,
+            "greedy-mine": 0.12,
+            "greedy-safe": 0.22,
+            "safe": 0.49
+          }
+        },
+        "personality": {
+          "aggression": {
+            "max": 0.95,
+            "min": 0.15
+          },
+          "allIn": {
+            "max": 0.65,
+            "min": 0.05
+          },
+          "caution": {
+            "max": 0.95,
+            "min": 0.15
+          },
+          "commitment": {
+            "max": 0.9,
+            "min": 0.2
+          },
+          "flanking": {
+            "max": 0.9,
+            "min": 0.1
+          },
+          "greed": {
+            "max": 0.95,
+            "min": 0.15
+          },
+          "remoteExpansion": {
+            "max": 0.65,
+            "min": 0.05
+          },
+          "scouting": {
+            "max": 1,
+            "min": 0.35
+          }
+        },
+        "revision": 9,
+        "schemaVersion": 2,
+        "scouting": {
+          "cornerCheckWeight": 0.3,
+          "informationWeight": 1,
+          "remoteExpansionThreshold": 0.35,
+          "rescoutSec": 35,
+          "retreatThreatRatio": 1,
+          "riskWeight": 0.8
+        },
+        "tactics": {
+          "competitiveEnabled": 1,
+          "contactWindowSec": 3,
+          "coordinationFighter": 0.6,
+          "coordinationRecruit": 0,
+          "coordinationVeteran": 0.9,
+          "emergencyRadius": 30,
+          "focusFireRatio": 0.7,
+          "kiteDistance": 2,
+          "maximumAssemblySec": 30,
+          "maximumInitiatedFronts": 3,
+          "minimumGroupForce": 1,
+          "objectiveRadius": 3,
+          "progressDistance": 0.5,
+          "regroupRadius": 8,
+          "reinforcementIntervalSec": 4,
+          "retreatHealthRatio": 0.28,
+          "armyStagingEnabled": 1,
+          "minimumAttackUnits": 2,
+          "minimumReinforcementUnits": 2,
+          "authoredApproachCandidates": 8,
+          "lastCenterDefenseHealthRatio": 0.9,
+          "authoredScoutCandidates": 8
+        },
+        "utility": {
+          "commitmentSec": 12,
+          "economyWeight": 0.7,
+          "forceWeight": 0.8,
+          "mapOpportunityWeight": 0.65,
+          "switchMargin": 0.18,
+          "threatWeight": 1,
+          "vulnerabilityWeight": 0.9
+        }
+      },
+      "aiProfileRef": {
+        "id": "adaptive-strategic-ai-v1",
+        "revision": 9,
+        "source": "candidate"
+      },
+      "schemaVersion": 2
+    }
+  ]
+}

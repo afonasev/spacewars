@@ -1,6 +1,7 @@
 param([Parameter(Mandatory=$true)][string]$Installer,[Parameter(Mandatory=$true)][string]$Catalog)
 $ErrorActionPreference='Stop'
 $record=(Get-Content $Catalog -Raw | ConvertFrom-Json).artifacts | Where-Object platform -eq 'windows-x64'
+$appName=if ($record.channel -eq 'test') {'Spacewars Test'} else {'Spacewars'}
 if ((Get-FileHash $Installer -Algorithm SHA256).Hash.ToLower() -ne $record.sha256 -or (Get-Item $Installer).Length -ne $record.size) { throw 'Installer identity mismatch' }
 Add-Type @'
 using System;using System.Text;using System.Runtime.InteropServices;
@@ -61,10 +62,10 @@ if ($finish -eq [IntPtr]::Zero) {$finish=[InstallerUI]::Child($window,'Заве�
 if ($finish -eq [IntPtr]::Zero) {throw 'Finish button missing'}
 [InstallerUI]::Click($finish)
 if (-not $proc.WaitForExit(30000) -or $proc.ExitCode -ne 0) {throw 'Installer did not complete'}
-$install=(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Spacewars').DisplayIcon | Split-Path
-$expected=Join-Path $env:ProgramFiles 'Spacewars'
+$install=(Get-ItemProperty ("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\"+$appName)).DisplayIcon | Split-Path
+$expected=Join-Path $env:ProgramFiles $appName
 if ($install -ne $expected) {throw "Unexpected default directory: $install"}
-$link=Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Spacewars.lnk'
+$link=Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) ($appName+'.lnk')
 if (-not (Test-Path $link)) {throw 'Public Desktop shortcut absent'}
 $shortcut=(New-Object -ComObject WScript.Shell).CreateShortcut($link)
 if ($shortcut.TargetPath -ne (Join-Path $install 'Spacewars.exe') -or $shortcut.IconLocation -notlike '*Spacewars.ico*') {throw 'Shortcut target/icon invalid'}

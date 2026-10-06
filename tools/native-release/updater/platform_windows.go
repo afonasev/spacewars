@@ -55,3 +55,22 @@ func acquireApplyLock(root string) (func(), error) {
 	}
 	return func() { f.Close() }, nil
 }
+
+func acquireHostLock(root, cache string) (func(), error) {
+	name, e := syscall.UTF16PtrFromString("Global\\Spacewars-" + digest([]byte(strings.ToLower(root))))
+	if e != nil {
+		return nil, e
+	}
+	h, _, err := syscall.NewLazyDLL("kernel32.dll").NewProc("CreateMutexW").Call(0, 1, uintptr(unsafe.Pointer(name)))
+	if h == 0 {
+		return nil, err
+	}
+	if err == syscall.Errno(183) {
+		syscall.CloseHandle(syscall.Handle(h))
+		return nil, fmt.Errorf("Spacewars is already running")
+	}
+	return func() {
+		syscall.NewLazyDLL("kernel32.dll").NewProc("ReleaseMutex").Call(h)
+		syscall.CloseHandle(syscall.Handle(h))
+	}, nil
+}

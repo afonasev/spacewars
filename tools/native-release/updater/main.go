@@ -52,6 +52,12 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) == 5 && os.Args[1] == "--sign-document" {
+		return signDocument(os.Args[2], os.Args[3], os.Args[4])
+	}
+	if len(os.Args) == 5 && os.Args[1] == "--verify-package" {
+		return verifyPackageFile(os.Args[2], os.Args[3], os.Args[4])
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--pack" {
 		return pack(os.Args[2:])
 	}
@@ -111,7 +117,7 @@ func run() error {
 		if e != nil {
 			return e
 		}
-		root = filepath.Join(base, "Spacewars", "native-v1")
+		root = filepath.Join(base, "Spacewars", storeNamespace())
 		if e = seedMacStore(seed, root); e != nil {
 			return e
 		}
@@ -162,7 +168,7 @@ func recoverPrevious(root string, a Active) error {
 		return e
 	}
 	if base, e := os.UserCacheDir(); e == nil {
-		dir := filepath.Join(base, "Spacewars", "native-v1")
+		dir := filepath.Join(base, "Spacewars", storeNamespace())
 		_ = os.MkdirAll(dir, 0700)
 		_ = os.WriteFile(filepath.Join(dir, "last-error.txt"), []byte("candidate bootstrap failed"), 0600)
 	}
@@ -179,6 +185,10 @@ type Status struct {
 	Total     int64  `json:"total"`
 }
 
+var discoverForHost = candidate
+var stageForHost = stageUpdate
+var applyForHost = applyWithPermission
+
 func host(root, exe string) error {
 	platform := platformID()
 	a, e := readActive(root)
@@ -193,7 +203,30 @@ func host(root, exe string) error {
 	if e != nil {
 		return e
 	}
-	cache := filepath.Join(cacheBase, "Spacewars", "native-v1")
+	cache := filepath.Join(cacheBase, "Spacewars", storeNamespace(), digest([]byte(root)))
+	if e = os.MkdirAll(cache, 0700); e != nil {
+		return e
+	}
+	releaseHost, e := acquireHostLock(root, cache)
+	if e != nil {
+		fmt.Fprintln(os.Stderr, "Spacewars host is busy:", e)
+		return crashAfterReady
+	}
+	defer releaseHost()
+	pendingStage := ""
+	if pending, e := readPending(root, cache); e == nil {
+		if _, skip := os.Stat(filepath.Join(cache, "skip-pending-once")); skip == nil {
+			_ = os.Remove(filepath.Join(cache, "skip-pending-once"))
+			pendingStage = pending
+		} else {
+			if e = applyForHost(exe, pending); e == nil {
+				_ = os.Remove(filepath.Join(cache, "pending.json"))
+				return restartBootstrap(root)
+			}
+			_ = os.WriteFile(filepath.Join(cache, "last-error.txt"), []byte(e.Error()), 0600)
+			pendingStage = pending
+		}
+	}
 	tokenBytes := make([]byte, 32)
 	if _, e = rand.Read(tokenBytes); e != nil {
 		return e
@@ -211,10 +244,44 @@ func host(root, exe string) error {
 	}
 	var next Manifest
 	var raw []byte
-	var stage string
+	stage := pendingStage
+	if stage != "" {
+		status.State = "prepared"
+		if b, e := os.ReadFile(filepath.Join(stage, "manifest.json")); e == nil {
+			if m, e := verifyEnvelope(b, platform); e == nil {
+				status.Available = m.Version
+			}
+		}
+	}
 	commit := false
 	ready := false
 	menu := false
+	check := func() {
+		b, m, err := discoverForHost(platform)
+		mu.Lock()
+		defer mu.Unlock()
+		if status.State != "checking" {
+			return
+		}
+		if err != nil {
+			status.State = "offline"
+			status.Error = err.Error()
+			return
+		}
+		if m.Sequence > current.Sequence && newerVersion(m.Version, current.Version) {
+			if err = rememberHighest(cache, m); err != nil {
+				status.State = "error"
+				status.Error = err.Error()
+				return
+			}
+			next = m
+			raw = b
+			status.Available = m.Version
+			status.State = "available"
+		} else {
+			status.State = "current"
+		}
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+token {
@@ -231,6 +298,14 @@ func host(root, exe string) error {
 				http.Error(w, "method", 405)
 				return
 			}
+		case "/check":
+			if r.Method != "POST" || status.State == "downloading" || status.State == "prepared" || status.State == "applying" || status.State == "checking" {
+				http.Error(w, "busy", 409)
+				return
+			}
+			status.State = "checking"
+			status.Error = ""
+			go check()
 		case "/ready":
 			if r.Method != "POST" {
 				http.Error(w, "method", 405)
@@ -239,7 +314,7 @@ func host(root, exe string) error {
 			ready = true
 			menu = true
 		case "/play":
-			if r.Method != "POST" || status.State == "downloading" || status.State == "prepared" {
+			if r.Method != "POST" || status.State == "applying" {
 				http.Error(w, "busy", 409)
 				return
 			}
@@ -259,13 +334,18 @@ func host(root, exe string) error {
 			status.Error = ""
 			m, b := next, append([]byte(nil), raw...)
 			go func() {
-				s, e := stageUpdate(root, cache, m, b, func(d, t int64) { mu.Lock(); status.Done = d; status.Total = t; mu.Unlock() })
+				s, e := stageForHost(root, cache, m, b, func(d, t int64) { mu.Lock(); status.Done = d; status.Total = t; mu.Unlock() })
 				mu.Lock()
 				defer mu.Unlock()
 				if e != nil {
 					status.State = "error"
 					status.Error = e.Error()
 				} else {
+					if e = writePending(root, cache, s, m, b); e != nil {
+						status.State = "error"
+						status.Error = e.Error()
+						return
+					}
 					stage = s
 					status.State = "prepared"
 				}
@@ -286,24 +366,9 @@ func host(root, exe string) error {
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go server.Serve(listener)
 	defer server.Close()
-	go func() {
-		b, m, e := candidate(platform)
-		mu.Lock()
-		defer mu.Unlock()
-		if e != nil {
-			status.State = "offline"
-			status.Error = e.Error()
-			return
-		}
-		if m.Sequence > current.Sequence {
-			next = m
-			raw = b
-			status.Available = m.Version
-			status.State = "available"
-		} else {
-			status.State = "current"
-		}
-	}()
+	if status.State == "checking" {
+		go check()
+	}
 	game := exec.Command(filepath.Join(root, "releases", a.ID, filepath.FromSlash(current.Entry)))
 	game.Env = append(os.Environ(), "SPACEWARS_UPDATE_ENDPOINT=http://"+listener.Addr().String(), "SPACEWARS_UPDATE_TOKEN="+token)
 	game.Stdout = os.Stdout
@@ -329,12 +394,21 @@ func host(root, exe string) error {
 	}
 	mu.Lock()
 	doCommit, healthy := commit, ready
+	preparedStage := stage
 	mu.Unlock()
-	if doCommit {
-		if e = applyWithPermission(exe, stage); e != nil {
+	if preparedStage != "" && healthy && gameErr == nil {
+		if e = applyForHost(exe, preparedStage); e != nil {
 			_ = os.WriteFile(filepath.Join(cache, "last-error.txt"), []byte(e.Error()), 0600)
+		} else {
+			_ = os.Remove(filepath.Join(cache, "pending.json"))
 		}
-		return restartBootstrap(root)
+		if doCommit {
+			if e != nil {
+				_ = os.WriteFile(filepath.Join(cache, "skip-pending-once"), []byte("1"), 0600)
+			}
+			return restartBootstrap(root)
+		}
+		return nil
 	}
 	if gameErr != nil && !healthy && hashOK(a.Previous) {
 		if e = rollbackWithPermission(exe); e != nil {

@@ -36,7 +36,7 @@ func keygen(name string) error {
 	return nil
 }
 func pack(args []string) error {
-	if len(args) != 8 {
+	if len(args) != 8 && len(args) != 9 {
 		return errors.New("pack INPUT OUTPUT PRIVATE_KEY PLATFORM ENTRY VERSION SEQUENCE COMMIT")
 	}
 	input, out, keyFile, platform, entry, version, seq, commit := args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]
@@ -119,6 +119,48 @@ func pack(args []string) error {
 		return e
 	}
 	sort.Slice(m.Files, func(i, j int) bool { return m.Files[i].Path < m.Files[j].Path })
+	if len(args) == 9 {
+		ch := args[8]
+		if ch != "test" && ch != "production" {
+			return errors.New("invalid channel")
+		}
+		t := &Transport{Channel: ch, Tag: "v" + version, Asset: "Spacewars-" + version + "-" + platform + ".pack"}
+		dir := filepath.Join(out, "github")
+		if e = os.MkdirAll(dir, 0755); e != nil {
+			return e
+		}
+		stream, e := os.Create(filepath.Join(dir, t.Asset))
+		if e != nil {
+			return e
+		}
+		h := newHasher()
+		seen := map[string]bool{}
+		for _, f := range m.Files {
+			for _, c := range f.Chunks {
+				if seen[c.Hash] {
+					continue
+				}
+				seen[c.Hash] = true
+				b, e := os.ReadFile(filepath.Join(objects, c.Hash))
+				if e != nil {
+					stream.Close()
+					return e
+				}
+				if _, e = stream.Write(b); e != nil {
+					stream.Close()
+					return e
+				}
+				h.Write(b)
+				t.Chunks = append(t.Chunks, PackageChunk{Hash: c.Hash, Size: c.Size, Offset: t.Size})
+				t.Size += c.Size
+			}
+		}
+		if e = stream.Close(); e != nil {
+			return e
+		}
+		t.Hash = fmt.Sprintf("%x", h.Sum(nil))
+		m.Transport = t
+	}
 	identity, _ := json.Marshal(m)
 	m.ID = digest(identity)
 	payload, e := json.Marshal(m)
@@ -143,6 +185,19 @@ func pack(args []string) error {
 	}
 	if e = os.WriteFile(filepath.Join(dir, "latest.json"), raw, 0644); e != nil {
 		return e
+	}
+	if m.Transport != nil {
+		name := "Spacewars-" + version + "-" + platform + ".json"
+		if e = os.WriteFile(filepath.Join(out, "github", name), raw, 0644); e != nil {
+			return e
+		}
+		bridge := m
+		bridge.Transport = nil
+		bp, _ := json.Marshal(bridge)
+		br, _ := json.Marshal(Envelope{Payload: base64.StdEncoding.EncodeToString(bp), Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(key, bp))})
+		if e = os.WriteFile(filepath.Join(dir, "bridge.json"), br, 0644); e != nil {
+			return e
+		}
 	}
 	fmt.Println(m.ID)
 	return nil

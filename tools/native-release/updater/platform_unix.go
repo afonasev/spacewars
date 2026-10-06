@@ -24,3 +24,5 @@ func acquireApplyLock(root string) (func(), error) {
 	}
 	return func() { f.Close() }, nil
 }
+
+func acquireHostLock(root, cache string) (func(), error) { return acquireApplyLock(cache) }

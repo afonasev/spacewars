@@ -1,12 +1,15 @@
 Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
-Name "Spacewars ${VERSION}"
+!ifndef APPNAME
+!define APPNAME "Spacewars"
+!endif
+Name "${APPNAME} ${VERSION}"
 !define MUI_ICON "${PAYLOAD}/Spacewars.ico"
 !define MUI_UNICON "${PAYLOAD}/Spacewars.ico"
 OutFile "${OUTFILE}"
-InstallDir "$PROGRAMFILES64\Spacewars"
-InstallDirRegKey HKLM "Software\Spacewars" "InstallDir"
+InstallDir "$PROGRAMFILES64\${APPNAME}"
+InstallDirRegKey HKLM "Software\${APPNAME}" "InstallDir"
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 ; Exact AppleDouble names emitted by older macOS packaging, not user data.
@@ -44,24 +47,24 @@ Section "Spacewars (обязательно)" SEC_GAME
   MessageBox MB_ICONSTOP "Не удалось активировать установленную версию. Закройте игру и повторите установку. Рабочая версия сохранена."
   Abort
  ${EndIf}
- WriteRegStr HKLM "Software\Spacewars" "InstallDir" "$INSTDIR"
+ WriteRegStr HKLM "Software\${APPNAME}" "InstallDir" "$INSTDIR"
  WriteUninstaller "$INSTDIR\Uninstall.exe"
- WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Spacewars" "DisplayName" "Spacewars"
- WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Spacewars" "DisplayVersion" "${VERSION}"
- WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Spacewars" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
- WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Spacewars" "DisplayIcon" "$INSTDIR\Spacewars.ico"
+ WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayName" "${APPNAME}"
+ WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayVersion" "${VERSION}"
+ WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
+ WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayIcon" "$INSTDIR\Spacewars.ico"
  SetShellVarContext all
- CreateDirectory "$SMPROGRAMS\Spacewars"
- CreateShortcut "$SMPROGRAMS\Spacewars\Spacewars.lnk" "$INSTDIR\Spacewars.exe" "" "$INSTDIR\Spacewars.ico"
+ CreateDirectory "$SMPROGRAMS\${APPNAME}"
+ CreateShortcut "$SMPROGRAMS\${APPNAME}\Spacewars.lnk" "$INSTDIR\Spacewars.exe" "" "$INSTDIR\Spacewars.ico"
 SectionEnd
 Function CreateDesktopShortcut
  SetShellVarContext all
  ClearErrors
- CreateShortcut "$DESKTOP\Spacewars.lnk" "$INSTDIR\Spacewars.exe" "" "$INSTDIR\Spacewars.ico"
+ CreateShortcut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\Spacewars.exe" "" "$INSTDIR\Spacewars.ico"
  ${If} ${Errors}
   MessageBox MB_ICONEXCLAMATION "Не удалось создать ярлык на общем рабочем столе Windows. Spacewars доступен в меню «Пуск»."
  ${Else}
-  IfFileExists "$DESKTOP\Spacewars.lnk" +2 0
+  IfFileExists "$DESKTOP\${APPNAME}.lnk" +2 0
   MessageBox MB_ICONEXCLAMATION "Ярлык не найден на рабочем столе Windows. Spacewars доступен в меню «Пуск»."
  ${EndIf}
 FunctionEnd
@@ -76,9 +79,9 @@ FunctionEnd
 Section "Uninstall"
  SetRegView 64
  SetShellVarContext all
- Delete "$DESKTOP\Spacewars.lnk"
- Delete "$SMPROGRAMS\Spacewars\Spacewars.lnk"
- RMDir "$SMPROGRAMS\Spacewars"
+ Delete "$DESKTOP\${APPNAME}.lnk"
+ Delete "$SMPROGRAMS\${APPNAME}\Spacewars.lnk"
+ RMDir "$SMPROGRAMS\${APPNAME}"
  RMDir /r "$INSTDIR\releases"
  Delete "$INSTDIR\active.json"
  Delete "$INSTDIR\apply.lock"
@@ -87,6 +90,6 @@ Section "Uninstall"
  Delete "$INSTDIR\Uninstall.exe"
  !insertmacro RemoveLegacyPackagingMetadata
  RMDir "$INSTDIR"
- DeleteRegKey HKLM "Software\Spacewars"
- DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Spacewars"
+ DeleteRegKey HKLM "Software\${APPNAME}"
+ DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
 SectionEnd

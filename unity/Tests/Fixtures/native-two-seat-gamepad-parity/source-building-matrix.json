@@ -1,0 +1,2597 @@
+{
+  "fixture": "source test helper ready paid factory, projected per-kind/lifecycle variants; admission stays authoritative",
+  "proofs": [
+    {
+      "kind": "headquarters",
+      "mode": "ready-rich",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "headquarters",
+      "mode": "ready-poor",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "headquarters",
+      "mode": "damaged-unlocked",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": true,
+          "command": {
+            "type": "startBuildingRepair",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "🔧 Готово к ремонту"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "headquarters",
+      "mode": "damaged-locked",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Ремонт доступен через 5 с после урона · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": false,
+          "hold": "sell",
+          "detail": "Продажа запрещена: здание находится в бою · Сейчас недоступно для разовой покупки · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "headquarters",
+      "mode": "repair-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Отменить ремонт",
+          "enabled": true,
+          "command": {
+            "type": "cancelBuildingRepair",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "🔧 Ремонт выполняется"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "headquarters",
+      "mode": "requested",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": []
+    },
+    {
+      "kind": "headquarters",
+      "mode": "selling",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": []
+    },
+    {
+      "kind": "headquarters",
+      "mode": "repeat-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "headquarters",
+      "mode": "refinery-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "headquarters",
+      "mode": "refinery-complete",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "headquarters",
+      "mode": "research-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "headquarters",
+      "mode": "research-complete",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "outpost",
+      "mode": "ready-rich",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "outpost",
+      "mode": "ready-poor",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "outpost",
+      "mode": "damaged-unlocked",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": true,
+          "command": {
+            "type": "startBuildingRepair",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "🔧 Готово к ремонту"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "outpost",
+      "mode": "damaged-locked",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Ремонт доступен через 5 с после урона · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": false,
+          "hold": "sell",
+          "detail": "Продажа запрещена: здание находится в бою · Сейчас недоступно для разовой покупки · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "outpost",
+      "mode": "repair-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Отменить ремонт",
+          "enabled": true,
+          "command": {
+            "type": "cancelBuildingRepair",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "🔧 Ремонт выполняется"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "outpost",
+      "mode": "requested",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": []
+    },
+    {
+      "kind": "outpost",
+      "mode": "selling",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": []
+    },
+    {
+      "kind": "outpost",
+      "mode": "repeat-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "outpost",
+      "mode": "refinery-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "outpost",
+      "mode": "refinery-complete",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "outpost",
+      "mode": "research-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "outpost",
+      "mode": "research-complete",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание · Продажа удалит все зависимые здания. Последний центр: поражение игрока"
+        }
+      ]
+    },
+    {
+      "kind": "factory",
+      "mode": "ready-rich",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer",
+          "label": "Произвести: Исследователь",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "repeatActive": false,
+          "detail": "Исследователь · 100 кредитов · 2 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank",
+          "label": "Произвести: Танк",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "repeatActive": false,
+          "detail": "Танк · 150 кредитов · 3 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval",
+          "label": "Произвести: Шквал",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "repeatActive": false,
+          "detail": "Шквал · 200 кредитов · 4 лимита · 20 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        },
+        {
+          "id": "rally",
+          "label": "Точка сбора",
+          "enabled": true,
+          "detail": "A — перейти к размещению; затем A — поставить, B — отменить"
+        }
+      ]
+    },
+    {
+      "kind": "factory",
+      "mode": "ready-poor",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer",
+          "label": "Произвести: Исследователь",
+          "enabled": true,
+          "hold": "repeat",
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "repeatActive": false,
+          "detail": "Исследователь · 100 кредитов · 2 лимита · 15 с · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank",
+          "label": "Произвести: Танк",
+          "enabled": true,
+          "hold": "repeat",
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "repeatActive": false,
+          "detail": "Танк · 150 кредитов · 3 лимита · 15 с · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval",
+          "label": "Произвести: Шквал",
+          "enabled": true,
+          "hold": "repeat",
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "repeatActive": false,
+          "detail": "Шквал · 200 кредитов · 4 лимита · 20 с · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        },
+        {
+          "id": "rally",
+          "label": "Точка сбора",
+          "enabled": true,
+          "detail": "A — перейти к размещению; затем A — поставить, B — отменить"
+        }
+      ]
+    },
+    {
+      "kind": "factory",
+      "mode": "damaged-unlocked",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer",
+          "label": "Произвести: Исследователь",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "repeatActive": false,
+          "detail": "Исследователь · 100 кредитов · 2 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank",
+          "label": "Произвести: Танк",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "repeatActive": false,
+          "detail": "Танк · 150 кредитов · 3 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval",
+          "label": "Произвести: Шквал",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "repeatActive": false,
+          "detail": "Шквал · 200 кредитов · 4 лимита · 20 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": true,
+          "command": {
+            "type": "startBuildingRepair",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "🔧 Готово к ремонту"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        },
+        {
+          "id": "rally",
+          "label": "Точка сбора",
+          "enabled": true,
+          "detail": "A — перейти к размещению; затем A — поставить, B — отменить"
+        }
+      ]
+    },
+    {
+      "kind": "factory",
+      "mode": "damaged-locked",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer",
+          "label": "Произвести: Исследователь",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "repeatActive": false,
+          "detail": "Исследователь · 100 кредитов · 2 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank",
+          "label": "Произвести: Танк",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "repeatActive": false,
+          "detail": "Танк · 150 кредитов · 3 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval",
+          "label": "Произвести: Шквал",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "repeatActive": false,
+          "detail": "Шквал · 200 кредитов · 4 лимита · 20 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Ремонт доступен через 5 с после урона · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": false,
+          "hold": "sell",
+          "detail": "Продажа запрещена: здание находится в бою · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "rally",
+          "label": "Точка сбора",
+          "enabled": true,
+          "detail": "A — перейти к размещению; затем A — поставить, B — отменить"
+        }
+      ]
+    },
+    {
+      "kind": "factory",
+      "mode": "repair-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer",
+          "label": "Произвести: Исследователь",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "repeatActive": false,
+          "detail": "Исследователь · 100 кредитов · 2 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank",
+          "label": "Произвести: Танк",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "repeatActive": false,
+          "detail": "Танк · 150 кредитов · 3 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval",
+          "label": "Произвести: Шквал",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "repeatActive": false,
+          "detail": "Шквал · 200 кредитов · 4 лимита · 20 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Отменить ремонт",
+          "enabled": true,
+          "command": {
+            "type": "cancelBuildingRepair",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "🔧 Ремонт выполняется"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        },
+        {
+          "id": "rally",
+          "label": "Точка сбора",
+          "enabled": true,
+          "detail": "A — перейти к размещению; затем A — поставить, B — отменить"
+        }
+      ]
+    },
+    {
+      "kind": "factory",
+      "mode": "requested",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": []
+    },
+    {
+      "kind": "factory",
+      "mode": "selling",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "rally",
+          "label": "Точка сбора",
+          "enabled": true,
+          "detail": "A — перейти к размещению; затем A — поставить, B — отменить"
+        }
+      ]
+    },
+    {
+      "kind": "factory",
+      "mode": "repeat-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer",
+          "label": "Произвести: Исследователь",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "repeatActive": false,
+          "detail": "Исследователь · 100 кредитов · 2 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank",
+          "label": "Произвести: Танк ∞",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "repeatActive": true,
+          "detail": "Танк · 150 кредитов · 3 лимита · 15 с · ∞: ожидание ресурсов или лимита"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval",
+          "label": "Произвести: Шквал",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "repeatActive": false,
+          "detail": "Шквал · 200 кредитов · 4 лимита · 20 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        },
+        {
+          "id": "rally",
+          "label": "Точка сбора",
+          "enabled": true,
+          "detail": "A — перейти к размещению; затем A — поставить, B — отменить"
+        }
+      ]
+    },
+    {
+      "kind": "factory",
+      "mode": "refinery-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer",
+          "label": "Произвести: Исследователь",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "repeatActive": false,
+          "detail": "Исследователь · 100 кредитов · 2 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank",
+          "label": "Произвести: Танк",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "repeatActive": false,
+          "detail": "Танк · 150 кредитов · 3 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval",
+          "label": "Произвести: Шквал",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "repeatActive": false,
+          "detail": "Шквал · 200 кредитов · 4 лимита · 20 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        },
+        {
+          "id": "rally",
+          "label": "Точка сбора",
+          "enabled": true,
+          "detail": "A — перейти к размещению; затем A — поставить, B — отменить"
+        }
+      ]
+    },
+    {
+      "kind": "factory",
+      "mode": "refinery-complete",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer",
+          "label": "Произвести: Исследователь",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "repeatActive": false,
+          "detail": "Исследователь · 100 кредитов · 2 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank",
+          "label": "Произвести: Танк",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "repeatActive": false,
+          "detail": "Танк · 150 кредитов · 3 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval",
+          "label": "Произвести: Шквал",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "repeatActive": false,
+          "detail": "Шквал · 200 кредитов · 4 лимита · 20 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        },
+        {
+          "id": "rally",
+          "label": "Точка сбора",
+          "enabled": true,
+          "detail": "A — перейти к размещению; затем A — поставить, B — отменить"
+        }
+      ]
+    },
+    {
+      "kind": "factory",
+      "mode": "research-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer",
+          "label": "Произвести: Исследователь",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "repeatActive": false,
+          "detail": "Исследователь · 100 кредитов · 2 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank",
+          "label": "Произвести: Танк",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "repeatActive": false,
+          "detail": "Танк · 150 кредитов · 3 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval",
+          "label": "Произвести: Шквал",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "repeatActive": false,
+          "detail": "Шквал · 200 кредитов · 4 лимита · 20 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        },
+        {
+          "id": "rally",
+          "label": "Точка сбора",
+          "enabled": true,
+          "detail": "A — перейти к размещению; затем A — поставить, B — отменить"
+        }
+      ]
+    },
+    {
+      "kind": "factory",
+      "mode": "research-complete",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer",
+          "label": "Произвести: Исследователь",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "explorer"
+          },
+          "repeatActive": false,
+          "detail": "Исследователь · 100 кредитов · 2 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank",
+          "label": "Произвести: Танк",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "tank"
+          },
+          "repeatActive": false,
+          "detail": "Танк · 150 кредитов · 3 лимита · 15 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval",
+          "label": "Произвести: Шквал",
+          "enabled": true,
+          "hold": "repeat",
+          "command": {
+            "type": "enqueueProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "holdCommand": {
+            "type": "toggleRepeatProduction",
+            "ownerId": "p1",
+            "factoryId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+            "unitKind": "shkval"
+          },
+          "repeatActive": false,
+          "detail": "Шквал · 200 кредитов · 4 лимита · 20 с"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        },
+        {
+          "id": "rally",
+          "label": "Точка сбора",
+          "enabled": true,
+          "detail": "A — перейти к размещению; затем A — поставить, B — отменить"
+        }
+      ]
+    },
+    {
+      "kind": "refinery",
+      "mode": "ready-rich",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:upgrade",
+          "label": "Улучшить завод",
+          "enabled": false,
+          "detail": "Улучшить завод · повышает доход до 15 кредитов за период · 200 кредитов · 20 с · Требуется готовый научный центр · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "refinery",
+      "mode": "ready-poor",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:upgrade",
+          "label": "Улучшить завод",
+          "enabled": false,
+          "detail": "Улучшить завод · повышает доход до 15 кредитов за период · 200 кредитов · 20 с · Требуется готовый научный центр · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "refinery",
+      "mode": "damaged-unlocked",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:upgrade",
+          "label": "Улучшить завод",
+          "enabled": false,
+          "detail": "Улучшить завод · повышает доход до 15 кредитов за период · 200 кредитов · 20 с · Требуется готовый научный центр · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": true,
+          "command": {
+            "type": "startBuildingRepair",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "🔧 Готово к ремонту"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "refinery",
+      "mode": "damaged-locked",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:upgrade",
+          "label": "Улучшить завод",
+          "enabled": false,
+          "detail": "Улучшить завод · повышает доход до 15 кредитов за период · 200 кредитов · 20 с · Требуется готовый научный центр · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Ремонт доступен через 5 с после урона · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": false,
+          "hold": "sell",
+          "detail": "Продажа запрещена: здание находится в бою · Сейчас недоступно для разовой покупки"
+        }
+      ]
+    },
+    {
+      "kind": "refinery",
+      "mode": "repair-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:upgrade",
+          "label": "Улучшить завод",
+          "enabled": false,
+          "detail": "Улучшить завод · повышает доход до 15 кредитов за период · 200 кредитов · 20 с · Требуется готовый научный центр · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Отменить ремонт",
+          "enabled": true,
+          "command": {
+            "type": "cancelBuildingRepair",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "🔧 Ремонт выполняется"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "refinery",
+      "mode": "requested",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": []
+    },
+    {
+      "kind": "refinery",
+      "mode": "selling",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": []
+    },
+    {
+      "kind": "refinery",
+      "mode": "repeat-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:upgrade",
+          "label": "Улучшить завод",
+          "enabled": false,
+          "detail": "Улучшить завод · повышает доход до 15 кредитов за период · 200 кредитов · 20 с · Требуется готовый научный центр · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "refinery",
+      "mode": "refinery-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "refinery",
+      "mode": "refinery-complete",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "refinery",
+      "mode": "research-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:upgrade",
+          "label": "Улучшить завод",
+          "enabled": false,
+          "detail": "Улучшить завод · повышает доход до 15 кредитов за период · 200 кредитов · 20 с · Требуется готовый научный центр · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "refinery",
+      "mode": "research-complete",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:upgrade",
+          "label": "Улучшить завод",
+          "enabled": false,
+          "detail": "Улучшить завод · повышает доход до 15 кредитов за период · 200 кредитов · 20 с · Требуется готовый научный центр · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "scientificCenter",
+      "mode": "ready-rich",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank-chassis",
+          "label": "Улучшить танковое шасси",
+          "enabled": true,
+          "command": {
+            "type": "startTankChassisUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Улучшить танковое шасси · скорость всех танков до 6 м/с · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer-assault-guns",
+          "label": "Улучшить штурмовые орудия",
+          "enabled": true,
+          "command": {
+            "type": "startExplorerAssaultGunsUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Штурмовые орудия · 6 трассеров · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval-guidance",
+          "label": "Исследовать системы наведения",
+          "enabled": true,
+          "command": {
+            "type": "startShkvalGuidanceResearch",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Системы наведения · дальность 16 м · 600 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "scientificCenter",
+      "mode": "ready-poor",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank-chassis",
+          "label": "Улучшить танковое шасси",
+          "enabled": false,
+          "detail": "Улучшить танковое шасси · скорость всех танков до 6 м/с · 300 кредитов · 30 с · Недостаточно кредитов · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer-assault-guns",
+          "label": "Улучшить штурмовые орудия",
+          "enabled": false,
+          "detail": "Штурмовые орудия · 6 трассеров · 300 кредитов · 30 с · Недостаточно кредитов · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval-guidance",
+          "label": "Исследовать системы наведения",
+          "enabled": false,
+          "detail": "Системы наведения · дальность 16 м · 600 кредитов · 30 с · Недостаточно кредитов · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "scientificCenter",
+      "mode": "damaged-unlocked",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank-chassis",
+          "label": "Улучшить танковое шасси",
+          "enabled": true,
+          "command": {
+            "type": "startTankChassisUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Улучшить танковое шасси · скорость всех танков до 6 м/с · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer-assault-guns",
+          "label": "Улучшить штурмовые орудия",
+          "enabled": true,
+          "command": {
+            "type": "startExplorerAssaultGunsUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Штурмовые орудия · 6 трассеров · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval-guidance",
+          "label": "Исследовать системы наведения",
+          "enabled": true,
+          "command": {
+            "type": "startShkvalGuidanceResearch",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Системы наведения · дальность 16 м · 600 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": true,
+          "command": {
+            "type": "startBuildingRepair",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "🔧 Готово к ремонту"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "scientificCenter",
+      "mode": "damaged-locked",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank-chassis",
+          "label": "Улучшить танковое шасси",
+          "enabled": true,
+          "command": {
+            "type": "startTankChassisUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Улучшить танковое шасси · скорость всех танков до 6 м/с · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer-assault-guns",
+          "label": "Улучшить штурмовые орудия",
+          "enabled": true,
+          "command": {
+            "type": "startExplorerAssaultGunsUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Штурмовые орудия · 6 трассеров · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval-guidance",
+          "label": "Исследовать системы наведения",
+          "enabled": true,
+          "command": {
+            "type": "startShkvalGuidanceResearch",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Системы наведения · дальность 16 м · 600 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Ремонт доступен через 5 с после урона · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": false,
+          "hold": "sell",
+          "detail": "Продажа запрещена: здание находится в бою · Сейчас недоступно для разовой покупки"
+        }
+      ]
+    },
+    {
+      "kind": "scientificCenter",
+      "mode": "repair-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank-chassis",
+          "label": "Улучшить танковое шасси",
+          "enabled": true,
+          "command": {
+            "type": "startTankChassisUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Улучшить танковое шасси · скорость всех танков до 6 м/с · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer-assault-guns",
+          "label": "Улучшить штурмовые орудия",
+          "enabled": true,
+          "command": {
+            "type": "startExplorerAssaultGunsUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Штурмовые орудия · 6 трассеров · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval-guidance",
+          "label": "Исследовать системы наведения",
+          "enabled": true,
+          "command": {
+            "type": "startShkvalGuidanceResearch",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Системы наведения · дальность 16 м · 600 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Отменить ремонт",
+          "enabled": true,
+          "command": {
+            "type": "cancelBuildingRepair",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "🔧 Ремонт выполняется"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "scientificCenter",
+      "mode": "requested",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": []
+    },
+    {
+      "kind": "scientificCenter",
+      "mode": "selling",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": []
+    },
+    {
+      "kind": "scientificCenter",
+      "mode": "repeat-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank-chassis",
+          "label": "Улучшить танковое шасси",
+          "enabled": true,
+          "command": {
+            "type": "startTankChassisUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Улучшить танковое шасси · скорость всех танков до 6 м/с · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer-assault-guns",
+          "label": "Улучшить штурмовые орудия",
+          "enabled": true,
+          "command": {
+            "type": "startExplorerAssaultGunsUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Штурмовые орудия · 6 трассеров · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval-guidance",
+          "label": "Исследовать системы наведения",
+          "enabled": true,
+          "command": {
+            "type": "startShkvalGuidanceResearch",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Системы наведения · дальность 16 м · 600 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "scientificCenter",
+      "mode": "refinery-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank-chassis",
+          "label": "Улучшить танковое шасси",
+          "enabled": true,
+          "command": {
+            "type": "startTankChassisUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Улучшить танковое шасси · скорость всех танков до 6 м/с · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer-assault-guns",
+          "label": "Улучшить штурмовые орудия",
+          "enabled": true,
+          "command": {
+            "type": "startExplorerAssaultGunsUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Штурмовые орудия · 6 трассеров · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval-guidance",
+          "label": "Исследовать системы наведения",
+          "enabled": true,
+          "command": {
+            "type": "startShkvalGuidanceResearch",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Системы наведения · дальность 16 м · 600 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "scientificCenter",
+      "mode": "refinery-complete",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:tank-chassis",
+          "label": "Улучшить танковое шасси",
+          "enabled": true,
+          "command": {
+            "type": "startTankChassisUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Улучшить танковое шасси · скорость всех танков до 6 м/с · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer-assault-guns",
+          "label": "Улучшить штурмовые орудия",
+          "enabled": true,
+          "command": {
+            "type": "startExplorerAssaultGunsUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Штурмовые орудия · 6 трассеров · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval-guidance",
+          "label": "Исследовать системы наведения",
+          "enabled": true,
+          "command": {
+            "type": "startShkvalGuidanceResearch",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Системы наведения · дальность 16 м · 600 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "scientificCenter",
+      "mode": "research-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer-assault-guns",
+          "label": "Улучшить штурмовые орудия",
+          "enabled": true,
+          "command": {
+            "type": "startExplorerAssaultGunsUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Штурмовые орудия · 6 трассеров · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval-guidance",
+          "label": "Исследовать системы наведения",
+          "enabled": true,
+          "command": {
+            "type": "startShkvalGuidanceResearch",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Системы наведения · дальность 16 м · 600 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "scientificCenter",
+      "mode": "research-complete",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:explorer-assault-guns",
+          "label": "Улучшить штурмовые орудия",
+          "enabled": true,
+          "command": {
+            "type": "startExplorerAssaultGunsUpgrade",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Штурмовые орудия · 6 трассеров · 300 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:shkval-guidance",
+          "label": "Исследовать системы наведения",
+          "enabled": true,
+          "command": {
+            "type": "startShkvalGuidanceResearch",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Системы наведения · дальность 16 м · 600 кредитов · 30 с · Готово к запуску"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "mine",
+      "mode": "ready-rich",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "mine",
+      "mode": "ready-poor",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "mine",
+      "mode": "damaged-unlocked",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": true,
+          "command": {
+            "type": "startBuildingRepair",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "🔧 Готово к ремонту"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "mine",
+      "mode": "damaged-locked",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Ремонт доступен через 5 с после урона · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": false,
+          "hold": "sell",
+          "detail": "Продажа запрещена: здание находится в бою · Сейчас недоступно для разовой покупки"
+        }
+      ]
+    },
+    {
+      "kind": "mine",
+      "mode": "repair-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Отменить ремонт",
+          "enabled": true,
+          "command": {
+            "type": "cancelBuildingRepair",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "🔧 Ремонт выполняется"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "mine",
+      "mode": "requested",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": []
+    },
+    {
+      "kind": "mine",
+      "mode": "selling",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": []
+    },
+    {
+      "kind": "mine",
+      "mode": "repeat-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "mine",
+      "mode": "refinery-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "mine",
+      "mode": "refinery-complete",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "mine",
+      "mode": "research-active",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    },
+    {
+      "kind": "mine",
+      "mode": "research-complete",
+      "sourceId": "building:factory:site:hq:1:site:hq:1:slot:1:p1",
+      "actions": [
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:repair",
+          "label": "Ремонт",
+          "enabled": false,
+          "detail": "🔧 Здание полностью исправно · Сейчас недоступно для разовой покупки"
+        },
+        {
+          "id": "building:factory:site:hq:1:site:hq:1:slot:1:p1:sale",
+          "label": "Продать здание",
+          "enabled": true,
+          "hold": "sell",
+          "holdCommand": {
+            "type": "sellBuilding",
+            "ownerId": "p1",
+            "buildingId": "building:factory:site:hq:1:site:hq:1:slot:1:p1"
+          },
+          "detail": "Продать здание"
+        }
+      ]
+    }
+  ]
+}

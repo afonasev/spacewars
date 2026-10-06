@@ -30,14 +30,15 @@ type File struct {
 	Chunks []Chunk `json:"chunks"`
 }
 type Manifest struct {
-	Schema   int    `json:"schema"`
-	Sequence int64  `json:"sequence"`
-	Version  string `json:"version"`
-	Commit   string `json:"commit"`
-	ID       string `json:"id"`
-	Platform string `json:"platform"`
-	Entry    string `json:"entry"`
-	Files    []File `json:"files"`
+	Schema    int        `json:"schema"`
+	Sequence  int64      `json:"sequence"`
+	Version   string     `json:"version"`
+	Commit    string     `json:"commit"`
+	ID        string     `json:"id"`
+	Platform  string     `json:"platform"`
+	Entry     string     `json:"entry"`
+	Files     []File     `json:"files"`
+	Transport *Transport `json:"transport,omitempty"`
 }
 type Envelope struct {
 	Payload   string `json:"payload"`
@@ -122,6 +123,12 @@ func verifyEnvelope(raw []byte, platform string) (Manifest, error) {
 				return m, errors.New("file/directory collision")
 			}
 		}
+	}
+	if _, e := versionParts(m.Version); e != nil {
+		return m, e
+	}
+	if e := validateTransport(m); e != nil {
+		return m, e
 	}
 	return m, nil
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -83,6 +84,9 @@ func fetch(url string, limit int64) ([]byte, error) {
 	return b, e
 }
 func candidate(platform string) ([]byte, Manifest, error) {
+	if !strings.HasPrefix(origin, "http://127.0.0.1:") {
+		return githubCandidate(platform)
+	}
 	b, e := fetch(origin+"/"+platform+"/latest.json", 16*1024*1024)
 	if e != nil {
 		return nil, Manifest{}, e
@@ -182,7 +186,18 @@ func stageUpdate(root, cache string, m Manifest, raw []byte, progress func(int64
 			op := filepath.Join(objects, c.Hash)
 			b, e := os.ReadFile(op)
 			if e != nil || int64(len(b)) != c.Size || digest(b) != c.Hash {
-				b, e = fetch(origin+"/objects/"+c.Hash, c.Size)
+				if m.Transport != nil {
+					var pc PackageChunk
+					for _, x := range m.Transport.Chunks {
+						if x.Hash == c.Hash {
+							pc = x
+							break
+						}
+					}
+					b, e = fetchRange(packageURL(m.Transport), pc, m.Transport.Size)
+				} else {
+					b, e = fetch(origin+"/objects/"+c.Hash, c.Size)
+				}
 				if e != nil || int64(len(b)) != c.Size || digest(b) != c.Hash {
 					out.Close()
 					return "", errors.New("downloaded chunk rejected")
@@ -209,6 +224,19 @@ func stageUpdate(root, cache string, m Manifest, raw []byte, progress func(int64
 		out.Close()
 		_ = os.Chmod(p, os.FileMode(f.Mode))
 	}
+	if m.Transport != nil {
+		h := newHasher()
+		for _, c := range m.Transport.Chunks {
+			b, e := os.ReadFile(filepath.Join(objects, c.Hash))
+			if e != nil || int64(len(b)) != c.Size || digest(b) != c.Hash {
+				return "", errors.New("package reconstruction rejected")
+			}
+			h.Write(b)
+		}
+		if fmt.Sprintf("%x", h.Sum(nil)) != m.Transport.Hash {
+			return "", errors.New("whole package hash rejected")
+		}
+	}
 	if e = os.WriteFile(filepath.Join(stage, "manifest.json"), raw, 0600); e != nil {
 		return "", e
 	}
@@ -224,6 +252,9 @@ func applyStage(root, stage, platform string) error {
 	if e != nil {
 		return e
 	}
+	if e = verifyStagedPackage(stage, m); e != nil {
+		return e
+	}
 	unlock, e := acquireApplyLock(root)
 	if e != nil {
 		return e
@@ -237,7 +268,10 @@ func applyStage(root, stage, platform string) error {
 	if e != nil {
 		return e
 	}
-	if m.Sequence <= old.Sequence {
+	if m.Transport != nil && m.Transport.Channel != channel {
+		return errors.New("apply channel rejected")
+	}
+	if m.Sequence <= old.Sequence || !newerVersion(m.Version, old.Version) {
 		return errors.New("release rollback rejected")
 	}
 	releases := filepath.Join(root, "releases")
@@ -396,4 +430,46 @@ func activateInstalled(root, id, platform string) error {
 		return errors.New("installer downgrade rejected")
 	}
 	return atomicJSON(filepath.Join(root, "active.json"), Active{ID: id, Previous: a.ID})
+}
+
+// Reconstruct the signed package digest from staged files too: elevated apply
+// never trusts a caller's earlier download validation.
+func verifyStagedPackage(stage string, m Manifest) error {
+	if m.Transport == nil {
+		return nil
+	}
+	type location struct {
+		Path   string
+		Offset int64
+	}
+	locations := map[string]location{}
+	for _, f := range m.Files {
+		var offset int64
+		for _, c := range f.Chunks {
+			locations[c.Hash] = location{f.Path, offset}
+			offset += c.Size
+		}
+	}
+	whole := newHasher()
+	for _, c := range m.Transport.Chunks {
+		loc := locations[c.Hash]
+		p := filepath.Join(stage, filepath.FromSlash(loc.Path))
+		if e := regular(p); e != nil {
+			return e
+		}
+		in, e := os.Open(p)
+		if e != nil {
+			return e
+		}
+		h := newHasher()
+		n, e := io.Copy(io.MultiWriter(h, whole), io.NewSectionReader(in, loc.Offset, c.Size))
+		in.Close()
+		if e != nil || n != c.Size || fmt.Sprintf("%x", h.Sum(nil)) != c.Hash {
+			return errors.New("staged package chunk rejected")
+		}
+	}
+	if fmt.Sprintf("%x", whole.Sum(nil)) != m.Transport.Hash {
+		return errors.New("staged package SHA256 rejected")
+	}
+	return nil
 }
