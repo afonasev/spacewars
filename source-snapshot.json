@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "build_source_commit": "d770dd9b9a20f3a9a99a9f549cb6304038789ac0",
+  "build_source_commit": "5e825deadc31095000a130a39865c8dbeec3710c",
   "export_policy": "current Unity/tooling/landing only; no private Git history",
   "files": {
     ".github/workflows/installer-windows.yml": "ab47c8ad5a2917cc635aa49ca4977560b099275efb3e1fe53cf46a277291a7b3",
@@ -32,6 +32,7 @@
     "tools/native-release/updater/go.sum": "3e83ce3f03ded7bdc8c5ba212e4de6eb8a55ce6f977f98c484575de70805b6e6",
     "tools/native-release/updater/hash.go": "79fd5a8e6d999daf481b1d2f56dab3603ac38935b318b21af7b00e0c38276df2",
     "tools/native-release/updater/host_test.go": "14efda32ec4e2c3512f198a3c33ef4ee2084ff673bbed06741fc498f7bd8b0b8",
+    "tools/native-release/updater/live_github_test.go": "e6f1b535a77ac7ab683f722fb3dd7844e7427f430db68f0bd6a3f05a070a61c7",
     "tools/native-release/updater/main.go": "87aeff36aa9ce2734403876c30c2f96c104361cf1a8380f3cfbea2198afc0226",
     "tools/native-release/updater/manifest.go": "02a5259382477f31a6115c87f2f42f1925021fa8cac4a9e34ef0db2db7ba32f8",
     "tools/native-release/updater/manifest_test.go": "c8d1369ef4259c819da2d90e4baabd68189167a8deb704d12465ab762f37e894",
@@ -935,6 +936,7 @@
     "tools/native-release/updater/go.sum": "0o644",
     "tools/native-release/updater/hash.go": "0o644",
     "tools/native-release/updater/host_test.go": "0o644",
+    "tools/native-release/updater/live_github_test.go": "0o644",
     "tools/native-release/updater/main.go": "0o644",
     "tools/native-release/updater/manifest.go": "0o644",
     "tools/native-release/updater/manifest_test.go": "0o644",
