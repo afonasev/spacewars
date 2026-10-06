@@ -29,6 +29,7 @@ while ((Get-Date) -lt $deadline) {
   if ($run -ne [IntPtr]::Zero -and $desktop -ne [IntPtr]::Zero) {break}
   if (-not $clicked) {
    $next=[InstallerUI]::Child($window,'Далее')
+   if ($next -eq [IntPtr]::Zero) {$next=[InstallerUI]::Child($window,'Установить')}
    if ($next -ne [IntPtr]::Zero) {[InstallerUI]::Click($next);$clicked=$true}
   }
  }
@@ -67,3 +68,4 @@ if ($reinstall.ExitCode -ne 0 -or (Get-Content (Join-Path $install 'active.json'
 $uninstall=Start-Process (Join-Path $install 'Uninstall.exe') -ArgumentList '/S' -Wait -PassThru
 Start-Sleep -Seconds 3
 if (Test-Path $link) {throw 'Uninstall left desktop shortcut'}
+if (Test-Path $install) {throw 'Uninstall left application directory'}
