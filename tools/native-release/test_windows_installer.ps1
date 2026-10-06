@@ -10,10 +10,15 @@ public static class InstallerUI {
  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h,Callback cb,IntPtr l);
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,StringBuilder s,int n);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h,StringBuilder s,int n);
+ public static bool Button(IntPtr h){var s=new StringBuilder(128);GetClassName(h,s,s.Capacity);return s.ToString()=="Button";}
+ public struct Rect {public int left,top,right,bottom;}
+ [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out Rect r);
+ public static int[] Bounds(IntPtr h){Rect r;GetWindowRect(h,out r);return new[]{r.left,r.top,r.right-r.left,r.bottom-r.top};}
  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
  public static string Text(IntPtr h){var s=new StringBuilder(2048);GetWindowText(h,s,s.Capacity);return s.ToString();}
  public static IntPtr Window(int pid){IntPtr found=IntPtr.Zero;EnumWindows((h,l)=>{uint p;GetWindowThreadProcessId(h,out p);if(p==pid&&Text(h).Contains("Spacewars"))found=h;return true;},IntPtr.Zero);return found;}
- public static IntPtr Child(IntPtr parent,string text){IntPtr found=IntPtr.Zero;EnumChildWindows(parent,(h,l)=>{if(Text(h).Contains(text))found=h;return true;},IntPtr.Zero);return found;}
+ public static IntPtr Child(IntPtr parent,string text){IntPtr found=IntPtr.Zero;EnumChildWindows(parent,(h,l)=>{if(Button(h)&&Text(h).Contains(text))found=h;return true;},IntPtr.Zero);return found;}
  public static string Children(IntPtr parent){var s=new StringBuilder();EnumChildWindows(parent,(h,l)=>{s.AppendLine(Text(h));return true;},IntPtr.Zero);return s.ToString();}
  public static void Click(IntPtr h){SendMessage(h,0xF5,IntPtr.Zero,IntPtr.Zero);}
  public static bool Checked(IntPtr h){return SendMessage(h,0xF0,IntPtr.Zero,IntPtr.Zero).ToInt32()==1;}
@@ -41,10 +46,12 @@ if (-not [InstallerUI]::Text($window).Contains($record.version)) {throw 'Wizard 
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
 try {
- $bounds=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds
- $bitmap=New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height
+ $bounds=[InstallerUI]::Bounds($window)
+ $bitmap=New-Object System.Drawing.Bitmap $bounds[2],$bounds[3]
  $graphics=[System.Drawing.Graphics]::FromImage($bitmap)
- $graphics.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size)
+ $point=New-Object System.Drawing.Point $bounds[0],$bounds[1]
+ $size=New-Object System.Drawing.Size $bounds[2],$bounds[3]
+ $graphics.CopyFromScreen($point,[System.Drawing.Point]::Empty,$size)
  $bitmap.Save((Join-Path $PWD 'artifacts/final-screen.png'));$graphics.Dispose();$bitmap.Dispose()
 } catch { Write-Warning "Screen capture unavailable: $_" }
 # The launch default is verified; avoid opening a Unity game on a CI service desktop.
