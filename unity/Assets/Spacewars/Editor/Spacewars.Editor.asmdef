@@ -1,0 +1,14 @@
+{
+  "name": "Spacewars.Editor",
+  "references": [
+    "Spacewars.Presentation",
+    "Spacewars.StyleA.Preview",
+    "Unity.RenderPipelines.Universal.Runtime",
+    "Unity.RenderPipelines.Core.Runtime",
+    "Spacewars.Runtime",
+    "Spacewars.Simulation"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ]
+}

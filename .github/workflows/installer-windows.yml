@@ -1,0 +1,30 @@
+name: Windows installer acceptance
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Release tag to test
+        required: true
+        default: v0.6.3
+permissions:
+  contents: read
+jobs:
+  installer:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download exact installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download '${{ inputs.release }}' --repo afonasev/spacewars --pattern '*Windows-x64.exe' --pattern 'downloads.json' --dir artifacts
+      - name: Exercise final screen and shortcut
+        shell: pwsh
+        run: tools/native-release/test_windows_installer.ps1 -Installer (Get-ChildItem artifacts/*Windows-x64.exe).FullName -Catalog artifacts/downloads.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-installer-evidence
+          path: artifacts/
+          retention-days: 14

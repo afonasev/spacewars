@@ -1,0 +1,11 @@
+{
+  "name": "Spacewars.Presentation",
+  "references": [
+    "Spacewars.Simulation",
+    "Spacewars.Runtime",
+    "Spacewars.Input",
+    "Unity.InputSystem",
+    "Unity.RenderPipelines.Universal.Runtime",
+    "Unity.RenderPipelines.Core.Runtime"
+  ]
+}

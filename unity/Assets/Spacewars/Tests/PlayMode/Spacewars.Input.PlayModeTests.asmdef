@@ -1,0 +1,27 @@
+{
+  "name": "Spacewars.Input.PlayModeTests",
+  "rootNamespace": "Spacewars.Input.Tests",
+  "references": [
+    "Spacewars.Input",
+    "Unity.InputSystem",
+    "Unity.InputSystem.TestFramework",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner",
+    "Spacewars.Presentation",
+    "Spacewars.Runtime",
+    "Spacewars.Simulation"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

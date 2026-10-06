@@ -1,0 +1,22 @@
+/* GenericDropdownMenu uses the panel root, outside the UIDocument subtree. */
+.unity-base-dropdown__container-outer,
+.unity-base-dropdown__container-inner {
+    background-color: #0d1112;
+    color: #e5eef1;
+    border-color: #53636a;
+    border-width: 1px;
+}
+.unity-base-dropdown__item {
+    background-color: #0d1112;
+    color: #e5eef1;
+    min-height: 32px;
+}
+.unity-base-dropdown__label { color: #e5eef1; }
+.unity-base-dropdown__item:hover,
+.unity-base-dropdown__item:focus {
+    background-color: #15343b;
+    color: #70d9e8;
+}
+.unity-base-dropdown__item:hover .unity-base-dropdown__label,
+.unity-base-dropdown__item:focus .unity-base-dropdown__label { color: #70d9e8; }
+.unity-base-dropdown__checkmark { -unity-background-image-tint-color: #70d9e8; }

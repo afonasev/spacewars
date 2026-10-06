@@ -1,0 +1,10 @@
+{
+  "name": "Spacewars.BalanceLab",
+  "rootNamespace": "Spacewars.BalanceLab",
+  "references": [],
+  "noEngineReferences": true,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "Newtonsoft.Json.dll"
+  ]
+}

@@ -1,0 +1,11 @@
+/Library/
+/Temp/
+/Obj/
+/Logs/
+/Builds/
+/UserSettings/
+/TestResults/
+/MemoryCaptures/
+*.csproj
+*.sln
+.DS_Store

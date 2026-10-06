@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "profileId": "unity-foundation-diagnostic-v1",
+  "revision": 1,
+  "sourceCommit": "ab1d42d5b1e8af104509efb6d204a4c310be00f1",
+  "sourceProfileId": "local:main:1788708872201:1",
+  "sourceProfileRevision": 5,
+  "sourceManifestSha256": "af6c3085e1a487c827ea104b86242c3931b46ac1f6756fa74d6c1cddbdaf09fb",
+  "cameraPanSpeed": 8.0,
+  "cameraPitchDegrees": 55.0,
+  "cameraHeight": 28.0,
+  "cameraOffsetZ": -20.0,
+  "cameraZoom": 12.0,
+  "cameraMinZoom": 6.0,
+  "cameraMaxZoom": 30.0,
+  "cameraZoomSpeed": 0.01,
+  "moveSpeed": 4.0,
+  "groundHalfExtent": 20.0
+}

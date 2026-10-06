@@ -1,0 +1,6 @@
+{
+  "name": "Spacewars.BalanceLab.BuildProbe",
+  "references": ["Spacewars.BalanceLab"],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": true
+}

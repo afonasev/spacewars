@@ -1,0 +1,11 @@
+{
+  "name": "Spacewars.BalanceLab.EditModeTests",
+  "rootNamespace": "Spacewars.Tests.EditMode.BalanceLab",
+  "references": ["Spacewars.BalanceLab", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],
+  "includePlatforms": ["Editor"],
+  "overrideReferences": true,
+  "precompiledReferences": ["nunit.framework.dll", "Newtonsoft.Json.dll"],
+  "autoReferenced": false,
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+  "noEngineReferences": true
+}

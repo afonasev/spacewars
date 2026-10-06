@@ -1,0 +1,666 @@
+using System;
+using System.IO;
+using System.Text;
+using System.Linq;
+using Spacewars.Simulation;
+namespace Spacewars.Runtime
+{
+    // Version 1 primitive wire: little-endian numbers, length-prefixed arrays/UTF8,
+    // explicit optional records. No runtime reflection, object formatter or JsonUtility.
+    internal static class WorldWire
+    {
+        // Technical corruption/allocation limits, not gameplay/profile tuning.
+        internal const int MaxBytes=32*1024*1024, MaxItems=262144;
+
+        internal static bool Boolean(BinaryReader r){byte b=r.ReadByte();
+            if(b>1)throw new ArgumentException("Invalid bool tag.");
+            return b==1;
+            }
+        internal static double Number(BinaryReader r){double d=r.ReadDouble();
+            if(double.IsNaN(d)||double.IsInfinity(d))throw new ArgumentException("Non-finite wire number.");
+            return d;
+            }
+        internal static void Number(BinaryWriter w,double d){if(double.IsNaN(d)||double.IsInfinity(d))throw new ArgumentException("Non-finite authority number.");
+            w.Write(d);
+            }
+        internal static T EnumValue<T>(BinaryReader r) where T:struct {int n=r.ReadInt32();
+            if(!Enum.IsDefined(typeof(T),n))throw new ArgumentException("Unknown wire enum.");
+            return (T)Enum.ToObject(typeof(T),n);
+            }
+        internal static string String(BinaryReader r){int n=r.ReadInt32();
+            if(n==-1)return null;
+            if(n<0||n>MaxBytes||n>r.BaseStream.Length-r.BaseStream.Position)throw new ArgumentException("Invalid string length.");
+            return new UTF8Encoding(false,true).GetString(r.ReadBytes(n));
+            }
+        internal static void String(BinaryWriter w,string s){if(s==null){w.Write(-1);
+            return;
+            }var bytes=Encoding.UTF8.GetBytes(s);
+            if(bytes.Length>MaxBytes)throw new ArgumentException("String too large.");
+            w.Write(bytes.Length);
+            w.Write(bytes);
+            }
+        internal static T[] Array<T>(BinaryReader r,Func<T> read){int n=r.ReadInt32();
+            if(n<0||n>MaxItems||n>r.BaseStream.Length-r.BaseStream.Position)throw new ArgumentException("Invalid array length.");
+            var result=new T[n];
+            for(int i=0;
+            i<n;
+            i++)result[i]=read();
+            return result;
+            }
+        internal static void Array<T>(BinaryWriter w,T[] values,Action<T> write){if(values==null||values.Length>MaxItems)throw new ArgumentException("Invalid array.");
+            w.Write(values.Length);
+            foreach(var v in values)write(v);
+            }
+        internal static byte[] Pack(Action<BinaryWriter> write){using(var m=new MemoryStream()){using(var w=new BinaryWriter(m,Encoding.UTF8,true))write(w);
+            if(m.Length>MaxBytes)throw new ArgumentException("World exceeds byte limit.");
+            return m.ToArray();
+            }}
+        internal static T Unpack<T>(byte[] bytes,Func<BinaryReader,T> read){if(bytes==null||bytes.Length>MaxBytes)throw new ArgumentException("Invalid world bytes.");
+            try{using(var m=new MemoryStream((byte[])bytes.Clone()))using(var r=new BinaryReader(m,Encoding.UTF8)){T result=read(r);
+            if(m.Position!=m.Length)throw new ArgumentException("Trailing world data.");
+            return result;
+            }}catch(EndOfStreamException e){throw new ArgumentException("Truncated world bytes.",e);
+            }}
+        internal static void Write(BinaryWriter w,NavPoint p){Number(w,p.X);
+            Number(w,p.Z);
+            }
+        internal static NavPoint ReadPoint(BinaryReader r)=>new NavPoint(Number(r),Number(r));
+
+        internal static void Write(BinaryWriter w,BallisticPoint p){Number(w,p.X);
+            Number(w,p.Y);
+            Number(w,p.Z);
+            }
+        internal static BallisticPoint ReadBallisticPoint(BinaryReader r)=>new BallisticPoint(Number(r),Number(r),Number(r));
+
+        internal static void Write(BinaryWriter w,NavObstacle o){w.Write(o.CircleRadius>0?1:o.Polygon!=null?2:0);
+            Number(w,o.MinX);
+            Number(w,o.MinZ);
+            Number(w,o.MaxX);
+            Number(w,o.MaxZ);
+            Number(w,o.CircleRadius);
+            Number(w,o.Bottom);
+            w.Write(double.IsNaN(o.Top));
+            if(!double.IsNaN(o.Top))Number(w,o.Top);
+            if(o.Polygon!=null)Array(w,o.Polygon.Vertices.ToArray(),p=>Write(w,p));
+            }
+        internal static NavObstacle ReadObstacle(BinaryReader r){int kind=r.ReadInt32();
+            double minX=Number(r),minZ=Number(r),maxX=Number(r),maxZ=Number(r),radius=Number(r),bottom=Number(r),top=Boolean(r)?double.NaN:Number(r);
+            if(minX>maxX||minZ>maxZ)throw new ArgumentException("Invalid obstacle.");
+            if(kind==0){if(radius!=0||bottom!=0||!double.IsNaN(top))throw new ArgumentException("Invalid box tags.");
+            return new NavObstacle(minX,minZ,maxX,maxZ);
+            }if(kind==1){if(bottom!=0||!double.IsNaN(top))throw new ArgumentException("Invalid circle tags.");
+            return NavObstacle.RestoreCircle(minX,minZ,maxX,maxZ,radius);
+            }if(kind!=2||radius!=0)throw new ArgumentException("Invalid obstacle tag.");
+            var polygon=new NavPolygon(Array(r,()=>ReadPoint(r)));
+            if(polygon.MinX!=minX||polygon.MinZ!=minZ||polygon.MaxX!=maxX||polygon.MaxZ!=maxZ)throw new ArgumentException("Polygon bounds mismatch.");
+            return new NavObstacle(polygon,bottom,top);
+            }
+        internal static void Write(BinaryWriter w,BallisticFlight f){w.Write(f!=null);
+            if(f==null)return;
+            Write(w,f.Start);
+            Write(w,f.End);
+            Number(w,f.ArcHeight);
+            Number(w,f.Duration);
+            }
+        internal static BallisticFlight ReadFlight(BinaryReader r)=>Boolean(r)?BallisticFlight.Restore(ReadBallisticPoint(r),ReadBallisticPoint(r),Number(r),Number(r)):null;
+
+        internal static void Write(BinaryWriter w,NavigationGeometryState v) {w.Write(v!=null);
+            if(v==null)return;
+            Number(w,v.HalfExtent);
+            w.Write(v.Revision);
+            Array(w,v.Obstacles,x=>{WorldWire.Write(w,x);
+            });
+            }
+        internal static NavigationGeometryState ReadNavigationGeometryState(BinaryReader r) {if(!Boolean(r))return null;
+            return new NavigationGeometryState{HalfExtent=Number(r),Revision=r.ReadInt32(),Obstacles=Array(r,()=>ReadObstacle(r))};
+            }
+        internal static void Write(BinaryWriter w,NavigationRequestState v) {w.Write(v!=null);
+            if(v==null)return;
+            w.Write(v.Session);
+            w.Write(v.Request);
+            w.Write(v.Order);
+            w.Write(v.Entity);
+            WorldWire.Write(w,v.Start);
+            WorldWire.Write(w,v.Goal);
+            String(w,v.ProfileId);
+            w.Write(v.ProfileRevision);
+            Array(w,v.ProfileValues,x=>{Number(w,x);
+            });
+            WorldWire.Write(w,v.Geometry);
+            WorldWire.Write(w,v.BaseGeometry);
+            String(w,v.HeldIdentity);
+            w.Write(v.UsesCurrentGeometry);
+            w.Write(v.UsesCurrentBaseGeometry);
+            w.Write(v.GeometryIndex);
+            w.Write(v.BaseGeometryIndex);
+            }
+        internal static NavigationRequestState ReadNavigationRequestState(BinaryReader r) {if(!Boolean(r))return null;
+            return new NavigationRequestState{Session=r.ReadInt64(),Request=r.ReadInt64(),Order=r.ReadInt64(),Entity=r.ReadInt32(),Start=ReadPoint(r),Goal=ReadPoint(r),ProfileId=String(r),ProfileRevision=r.ReadInt32(),ProfileValues=Array(r,()=>Number(r)),Geometry=ReadNavigationGeometryState(r),BaseGeometry=ReadNavigationGeometryState(r),HeldIdentity=String(r),UsesCurrentGeometry=Boolean(r),UsesCurrentBaseGeometry=Boolean(r),GeometryIndex=r.ReadInt32(),BaseGeometryIndex=r.ReadInt32()};
+            }
+        internal static void Write(BinaryWriter w,NavigationAnswerState v) {w.Write(v!=null);
+            if(v==null)return;
+            w.Write(v.RequestIndex);
+            Array(w,v.Route,x=>{WorldWire.Write(w,x);
+            });
+            }
+        internal static NavigationAnswerState ReadNavigationAnswerState(BinaryReader r) {if(!Boolean(r))return null;
+            return new NavigationAnswerState{RequestIndex=r.ReadInt32(),Route=Array(r,()=>ReadPoint(r))};
+            }
+        internal static void Write(BinaryWriter w,NavigationEntityPointState v) {w.Write(v!=null);
+            if(v==null)return;
+            w.Write(v.Entity);
+            WorldWire.Write(w,v.Point);
+            }
+        internal static NavigationEntityPointState ReadNavigationEntityPointState(BinaryReader r) {if(!Boolean(r))return null;
+            return new NavigationEntityPointState{Entity=r.ReadInt32(),Point=ReadPoint(r)};
+            }
+        internal static void Write(BinaryWriter w,NavigationEntityOrderState v) {w.Write(v!=null);
+            if(v==null)return;
+            w.Write(v.Entity);
+            w.Write(v.Order);
+            }
+        internal static NavigationEntityOrderState ReadNavigationEntityOrderState(BinaryReader r) {if(!Boolean(r))return null;
+            return new NavigationEntityOrderState{Entity=r.ReadInt32(),Order=r.ReadInt64()};
+            }
+        internal static void Write(BinaryWriter w,NavigationMovementIdentityState v) {w.Write(v!=null);
+            if(v==null)return;
+            w.Write(v.Entity);
+            String(w,v.Identity);
+            }
+        internal static NavigationMovementIdentityState ReadNavigationMovementIdentityState(BinaryReader r) {if(!Boolean(r))return null;
+            return new NavigationMovementIdentityState{Entity=r.ReadInt32(),Identity=String(r)};
+            }
+        internal static void Write(BinaryWriter w,NavigationSessionState v) {w.Write(v!=null);
+            if(v==null)return;
+            w.Write(v.Generation);
+            w.Write(v.RequestSequence);
+            WorldWire.Write(w,v.Geometry);
+            WorldWire.Write(w,v.NavigationGeometry);
+            Array(w,v.GeometryTable,x=>{WorldWire.Write(w,x);
+            });
+            w.Write(v.NavigationGeometryIndex);
+            WorldWire.Write(w,v.Crowd);
+            Array(w,v.Requests,x=>{WorldWire.Write(w,x);
+            });
+            Array(w,v.Orders,x=>{WorldWire.Write(w,x);
+            });
+            Array(w,v.Reservations,x=>{WorldWire.Write(w,x);
+            });
+            Array(w,v.RetainedGoals,x=>{WorldWire.Write(w,x);
+            });
+            Array(w,v.PendingRequestIndices,x=>{w.Write(x);
+            });
+            Array(w,v.RequestMailboxIndices,x=>{w.Write(x);
+            });
+            Array(w,v.ProbeRequestIndices,x=>{w.Write(x);
+            });
+            Array(w,v.MovementIdentities,x=>{WorldWire.Write(w,x);
+            });
+            Array(w,v.ProbeAnswers,x=>{WorldWire.Write(w,x);
+            });
+            Array(w,v.AnswerMailbox,x=>{WorldWire.Write(w,x);
+            });
+            w.Write(v.RejectedResults);
+            w.Write(v.AppliedResults);
+            w.Write(v.UnreachableResults);
+            Array(w,v.CollectionLayouts,x=>Array(w,x,i=>w.Write(i)));
+            }
+        internal static NavigationSessionState ReadNavigationSessionState(BinaryReader r) {if(!Boolean(r))return null;
+            return new NavigationSessionState{Generation=r.ReadInt64(),RequestSequence=r.ReadInt64(),Geometry=ReadNavigationGeometryState(r),NavigationGeometry=ReadNavigationGeometryState(r),GeometryTable=Array(r,()=>ReadNavigationGeometryState(r)),NavigationGeometryIndex=r.ReadInt32(),Crowd=ReadNavCrowdSaveState(r),Requests=Array(r,()=>ReadNavigationRequestState(r)),Orders=Array(r,()=>ReadNavigationEntityOrderState(r)),Reservations=Array(r,()=>ReadNavigationEntityPointState(r)),RetainedGoals=Array(r,()=>ReadNavigationEntityPointState(r)),PendingRequestIndices=Array(r,()=>r.ReadInt32()),RequestMailboxIndices=Array(r,()=>r.ReadInt32()),ProbeRequestIndices=Array(r,()=>r.ReadInt32()),MovementIdentities=Array(r,()=>ReadNavigationMovementIdentityState(r)),ProbeAnswers=Array(r,()=>ReadNavigationAnswerState(r)),AnswerMailbox=Array(r,()=>ReadNavigationAnswerState(r)),RejectedResults=r.ReadInt32(),AppliedResults=r.ReadInt32(),UnreachableResults=r.ReadInt32(),CollectionLayouts=Array(r,()=>Array(r,()=>r.ReadInt32()))};
+            }
+        internal static void Write(BinaryWriter w,NavCrowdSaveState v) {w.Write(v!=null);
+            if(v==null)return;
+            w.Write(v.NextIncarnation);
+            Number(w,v.HalfExtent);
+            Number(w,v.MaximumRadius);
+            w.Write(v.GeometryRevision);
+            w.Write(v.ProfileRevision);
+            w.Write(v.RepairCount);
+            w.Write(v.RepairFailed);
+            w.Write(v.MaxNoProgressTicks);
+            String(w,v.ProfileId);
+            Array(w,v.Obstacles,x=>{WorldWire.Write(w,x);
+            });
+            Array(w,v.ProfileValues,x=>{Number(w,x);
+            });
+            Array(w,v.Units,x=>{WorldWire.Write(w,x);
+            });
+            }
+        internal static NavCrowdSaveState ReadNavCrowdSaveState(BinaryReader r) {if(!Boolean(r))return null;
+            return new NavCrowdSaveState{NextIncarnation=r.ReadInt64(),HalfExtent=Number(r),MaximumRadius=Number(r),GeometryRevision=r.ReadInt32(),ProfileRevision=r.ReadInt32(),RepairCount=r.ReadInt32(),RepairFailed=r.ReadInt32(),MaxNoProgressTicks=r.ReadInt32(),ProfileId=String(r),Obstacles=Array(r,()=>ReadObstacle(r)),ProfileValues=Array(r,()=>Number(r)),Units=Array(r,()=>ReadNavUnitSaveState(r))};
+            }
+        internal static void Write(BinaryWriter w,NavUnitSaveState v) {w.Write(v!=null);
+            if(v==null)return;
+            w.Write(v.Incarnation);
+            w.Write(v.MobilityRevision);
+            w.Write(v.Team);
+            w.Write(v.Id);
+            w.Write(v.RouteIndex);
+            w.Write(v.LocalIndex);
+            w.Write(v.NoProgressTicks);
+            WorldWire.Write(w,v.Position);
+            WorldWire.Write(w,v.Goal);
+            Number(w,v.Radius);
+            Number(w,v.Speed);
+            Number(w,v.TurnSpeed);
+            Number(w,v.Heading);
+            Number(w,v.BlockedSeconds);
+            w.Write(v.Moving);
+            w.Write(v.Held);
+            w.Write((int)v.Outcome);
+            Array(w,v.Route,x=>{WorldWire.Write(w,x);
+            });
+            Array(w,v.LocalRoute,x=>{WorldWire.Write(w,x);
+            });
+            }
+        internal static NavUnitSaveState ReadNavUnitSaveState(BinaryReader r) {if(!Boolean(r))return null;
+            return new NavUnitSaveState{Incarnation=r.ReadInt64(),MobilityRevision=r.ReadInt64(),Team=r.ReadInt32(),Id=r.ReadInt32(),RouteIndex=r.ReadInt32(),LocalIndex=r.ReadInt32(),NoProgressTicks=r.ReadInt32(),Position=ReadPoint(r),Goal=ReadPoint(r),Radius=Number(r),Speed=Number(r),TurnSpeed=Number(r),Heading=Number(r),BlockedSeconds=Number(r),Moving=Boolean(r),Held=Boolean(r),Outcome=EnumValue<NavigationOutcome>(r),Route=Array(r,()=>ReadPoint(r)),LocalRoute=Array(r,()=>ReadPoint(r))};
+            }
+        internal static void Write(BinaryWriter w,PlayableVisionState v) {w.Write(v!=null);
+            if(v==null)return;
+            w.Write(v.Version);
+            w.Write(v.Team);
+            w.Write(v.RasterResolution);
+            w.Write(v.Revision);
+            w.Write(v.CoverageUpdates);
+            Number(w,v.HalfWidth);
+            Number(w,v.HalfDepth);
+            Number(w,v.CellSize);
+            Number(w,v.Feather);
+            Array(w,v.Sources,x=>{WorldWire.Write(w,x);
+            });
+            Array(w,v.DiscoveredCells,x=>{w.Write(x);
+            });
+            Array(w,v.Coverage,x=>{w.Write(x);
+            });
+            Array(w,v.KnownBuildings,x=>{WorldWire.Write(w,x);
+            });
+            }
+        internal static PlayableVisionState ReadPlayableVisionState(BinaryReader r) {if(!Boolean(r))return null;
+            return new PlayableVisionState{Version=r.ReadInt32(),Team=r.ReadInt32(),RasterResolution=r.ReadInt32(),Revision=r.ReadInt64(),CoverageUpdates=r.ReadInt64(),HalfWidth=Number(r),HalfDepth=Number(r),CellSize=Number(r),Feather=Number(r),Sources=Array(r,()=>ReadVisionSourceState(r)),DiscoveredCells=Array(r,()=>r.ReadInt64()),Coverage=Array(r,()=>r.ReadByte()),KnownBuildings=Array(r,()=>ReadKnownBuildingState(r))};
+            }
+        internal static void Write(BinaryWriter w,VisionSourceState v) {w.Write(v!=null);
+            if(v==null)return;
+            Number(w,v.X);
+            Number(w,v.Z);
+            Number(w,v.Radius);
+            }
+        internal static VisionSourceState ReadVisionSourceState(BinaryReader r) {if(!Boolean(r))return null;
+            return new VisionSourceState{X=Number(r),Z=Number(r),Radius=Number(r)};
+            }
+        internal static void Write(BinaryWriter w,KnownBuildingState v) {w.Write(v!=null);
+            if(v==null)return;
+            w.Write(v.Id);
+            w.Write(v.Team);
+            w.Write((int)v.Owner);
+            w.Write((int)v.Kind);
+            Number(w,v.X);
+            Number(w,v.Z);
+            Number(w,v.Heading);
+            w.Write(v.RefineryUpgraded);
+            }
+        internal static KnownBuildingState ReadKnownBuildingState(BinaryReader r) {if(!Boolean(r))return null;
+            return new KnownBuildingState{Id=r.ReadInt32(),Team=r.ReadInt32(),Owner=EnumValue<PlayableOwner>(r),Kind=EnumValue<PlayableBuildingKind>(r),X=Number(r),Z=Number(r),Heading=Number(r),RefineryUpgraded=Boolean(r)};
+            }
+        internal static void Write(BinaryWriter w,PlayableRallyIntentState v) {w.Write(v!=null);
+            if(v==null)return;
+            w.Write(v.Generation);
+            w.Write(v.Sequence);
+            w.Write(v.Building);
+            w.Write((int)v.Owner);
+            Number(w,v.TargetX);
+            Number(w,v.TargetZ);
+            }
+        internal static PlayableRallyIntentState ReadPlayableRallyIntentState(BinaryReader r) {if(!Boolean(r))return null;
+            return new PlayableRallyIntentState{Generation=r.ReadInt64(),Sequence=r.ReadInt64(),Building=r.ReadInt32(),Owner=EnumValue<PlayableOwner>(r),TargetX=Number(r),TargetZ=Number(r)};
+            }
+        internal static void Write(BinaryWriter w,PlayableTacticalOrderSnapshot v) {w.Write(v!=null);
+            if(v==null)return;
+            w.Write(v.UnitId);
+            w.Write((int)v.Owner);
+            w.Write(v.Generation);
+            w.Write(v.CommandSequence);
+            w.Write(v.IssuedTick);
+            w.Write((int)v.Kind);
+            WorldWire.Write(w,v.Destination);
+            w.Write(v.TargetId);
+            }
+        internal static PlayableTacticalOrderSnapshot ReadPlayableTacticalOrderSnapshot(BinaryReader r) {if(!Boolean(r))return null;
+            return new PlayableTacticalOrderSnapshot(r.ReadInt32(),EnumValue<PlayableOwner>(r),r.ReadInt64(),r.ReadInt64(),r.ReadInt64(),EnumValue<PlayableTacticalOrderKind>(r),ReadPoint(r),r.ReadInt32());
+            }
+        internal static void Write(BinaryWriter w,PlayableCenterDamageSnapshot v) {w.Write(v!=null);
+            if(v==null)return;
+            w.Write(v.CenterId);
+            w.Write((int)v.Owner);
+            w.Write(v.AttackerId);
+            w.Write(v.Generation);
+            w.Write(v.Tick);
+            w.Write(v.Damage);
+            }
+        internal static PlayableCenterDamageSnapshot ReadPlayableCenterDamageSnapshot(BinaryReader r) {if(!Boolean(r))return null;
+            return new PlayableCenterDamageSnapshot(r.ReadInt32(),EnumValue<PlayableOwner>(r),r.ReadInt32(),r.ReadInt64(),r.ReadInt64(),r.ReadInt32());
+            }
+        internal static void Write(BinaryWriter w,PlayableImpactSnapshot v) {w.Write(v!=null);
+            if(v==null)return;
+            w.Write(v.Id);
+            w.Write((int)v.Owner);
+            WorldWire.Write(w,v.Point);
+            Number(w,v.Radius);
+            w.Write(v.Tick);
+            w.Write(v.VisibleMask);
+            }
+        internal static PlayableImpactSnapshot ReadPlayableImpactSnapshot(BinaryReader r) {if(!Boolean(r))return null;
+            return new PlayableImpactSnapshot(r.ReadInt32(),EnumValue<PlayableOwner>(r),ReadBallisticPoint(r),Number(r),r.ReadInt64(),r.ReadInt32());
+            }
+        internal static void Write(BinaryWriter w,PlayableCommandReceipt v) {w.Write(v!=null);
+            if(v==null)return;
+            w.Write(v.Sequence);
+            w.Write(v.AppliedTick);
+            w.Write((int)v.Status);
+            String(w,v.Message);
+            Number(w,v.LatencyMilliseconds);String(w,v.OwnerId);
+            }
+        internal static PlayableCommandReceipt ReadPlayableCommandReceipt(BinaryReader r) {if(!Boolean(r))return null;
+            return new PlayableCommandReceipt(r.ReadInt64(),r.ReadInt64(),EnumValue<PlayableCommandStatus>(r),String(r),Number(r),String(r));
+            }
+        internal static void Write(BinaryWriter w,BallisticContact v) {Number(w,v.Progress);
+            WorldWire.Write(w,v.Point);
+            w.Write(v.BuildingId);
+            }
+        internal static BallisticContact ReadBallisticContact(BinaryReader r) {return new BallisticContact(Number(r),ReadBallisticPoint(r),r.ReadInt32());
+            }
+        internal static byte[] Binding(PlayableProfile p)=>Pack(w=>{w.Write(PlayableCommand.CurrentSchemaVersion);
+            w.Write(PlayableAiObservation.CurrentSchemaVersion);
+            Number(w,p.MinimapCompactSize);
+            Number(w,p.MinimapTacticalSize);
+            Number(w,p.MinimapTerrainSaturation);
+            Number(w,p.MinimapTerrainBrightness);
+            Number(w,p.MinimapTerrainTierContrast);
+            Number(w,p.MinimapMarkerSize);
+            Number(w,p.MinimapMarkerStroke);
+            Number(w,p.MinimapTerrainStroke);
+            Number(w,p.MinimapCameraStroke);
+            Number(w,p.HeadquartersVisionRange);
+            Number(w,p.OutpostVisionRange);
+            Number(w,p.FactoryVisionRange);
+            Number(w,p.RefineryVisionRange);
+            Number(w,p.MineVisionRange);
+            Number(w,p.ConstructionVisionMultiplier);
+            Number(w,p.VisionCellSize);
+            Number(w,p.FogRevealMs);
+            Number(w,p.FogConcealMs);
+            Number(w,p.FogEdgeFeather);
+            Number(w,p.FogExploredOpacity);
+            Number(w,p.FogUnseenOpacity);
+            Number(w,p.MinimapLandmarkSize);
+            Number(w,p.MinimapLandmarkOutline);
+            Number(w,p.MinimapUnitMarkerSize);
+            Number(w,p.FogTintR);
+            Number(w,p.FogTintG);
+            Number(w,p.FogTintB);
+            Number(w,p.FogMemoryBrightness);
+            Number(w,p.FogMemoryDesaturation);
+            Number(w,p.ScienceHealth);
+            Number(w,p.ScienceBuildSeconds);
+            Number(w,p.ScienceVisionRange);
+            Number(w,p.ScienceFootprintRadius);
+            Number(w,p.ScienceCreditCost);
+            Number(w,p.ScienceModelHeightMeters);
+            Number(w,p.ScienceModelScale);
+            Number(w,p.RefineryUpgradeCost);
+            Number(w,p.RefineryUpgradeSeconds);
+            Number(w,p.RefineryUpgradedIncome);
+            Number(w,p.RefineryTurbineSpeed);
+            Number(w,p.TankChassisGlowIntensity);
+            Number(w,p.TankChassisCost);
+            Number(w,p.TankChassisSeconds);
+            Number(w,p.TankChassisSpeed);
+            Number(w,p.ExplorerAssaultCost);
+            Number(w,p.ExplorerAssaultSeconds);
+            w.Write(p.ExplorerAssaultBurstSize);
+            Number(w,p.ExplorerAssaultSpreadDeg);
+            Number(w,p.ShkvalGuidanceCost);
+            Number(w,p.ShkvalGuidanceSeconds);
+            Number(w,p.ShkvalGuidanceRange);
+            Number(w,p.ShkvalCollisionRadius);
+            Number(w,p.ShkvalModelRadius);
+            Number(w,p.ShkvalModelScale);
+            Number(w,p.ShkvalSpeed);
+            Number(w,p.ShkvalTurnSpeed);
+            Number(w,p.ShkvalTurretTurnSpeed);
+            Number(w,p.ShkvalAimToleranceRad);
+            Number(w,p.ShkvalRange);
+            Number(w,p.ShkvalVision);
+            w.Write(p.ShkvalHealth);
+            Number(w,p.ShkvalStopForMs);
+            w.Write(p.ShkvalPopulationCost);
+            w.Write(p.ShkvalCreditCost);
+            w.Write(p.ShkvalProductionMenuOrder);
+            Number(w,p.ShkvalProductionDurationSec);
+            w.Write(p.ShkvalDamage);
+            Number(w,p.ShkvalFireIntervalMs);
+            Number(w,p.ShkvalProjectileSpeed);
+            Number(w,p.ShkvalArcHeight);
+            Number(w,p.ShkvalBlastRadius);
+            Number(w,p.ShkvalMarkerStartRadius);
+            Number(w,p.ShkvalMarkerOpacity);
+            Number(w,p.ShkvalLeadSpeedThreshold);
+            Number(w,p.ShkvalLeadFalloff);
+            Number(w,p.ShkvalLaunchHeight);
+            Number(w,p.ShkvalProjectileRadius);
+            Number(w,p.ShkvalProjectileLength);
+            Number(w,p.ShkvalBuildingCollisionHeight);
+            Number(w,p.ShkvalMaxLeadTimeSec);
+            Number(w,p.ShkvalFriendlyFirePenalty);
+            Number(w,p.ShkvalBaseRange);
+            Number(w,p.ShkvalExhaustStartupSec);
+            Number(w,p.ShkvalExhaustRadius);
+            Number(w,p.ShkvalExhaustLength);
+            Number(w,p.ShkvalExhaustStartBoost);
+            Number(w,p.ShkvalExhaustOpacity);
+            Number(w,p.WeaponMuzzleCoreRatio);
+            Number(w,p.ImpactEffectSec);
+            Number(w,p.BallisticWallHeight);
+            Number(w,p.ExplorerCollisionRadius);
+            Number(w,p.ExplorerModelRadius);
+            Number(w,p.ExplorerModelScale);
+            Number(w,p.ExplorerSpeed);
+            Number(w,p.ExplorerTurnSpeed);
+            Number(w,p.ExplorerTurretTurnSpeed);
+            Number(w,p.ExplorerAimToleranceRad);
+            Number(w,p.ExplorerRange);
+            Number(w,p.ExplorerVision);
+            w.Write(p.ExplorerHealth);
+            w.Write(p.ExplorerStopForMs);
+            w.Write(p.ExplorerPopulationCost);
+            w.Write(p.ExplorerCreditCost);
+            w.Write(p.ExplorerProductionMenuOrder);
+            w.Write(p.ExplorerProductionDurationSec);
+            w.Write(p.ExplorerDamage);
+            w.Write(p.ExplorerBurstSize);
+            w.Write(p.ExplorerBurstShotIntervalMs);
+            w.Write(p.ExplorerBurstPauseMs);
+            Number(w,p.ExplorerProjectileSpeed);
+            Number(w,p.ExplorerSpreadDeg);
+            Number(w,p.ExplorerTracerLength);
+            Number(w,p.ExplorerTracerThickness);
+            Number(w,p.ExplorerMuzzleOffset);
+            Number(w,p.BuildingSaleRefundRatio);
+            Number(w,p.BuildingSaleCombatLockoutSec);
+            Number(w,p.BuildingSaleDemolitionSec);
+            Number(w,p.BuildingRepairDurationSec);
+            Number(w,p.BuildingRepairCostRatio);
+            Number(w,p.BuildingRepairCombatLockoutSec);
+            Number(w,p.SaleMarkerScale);
+            Number(w,p.LifecycleMarkerPixels);
+            Number(w,p.LifecycleMarkerPulseHz);
+            Number(w,p.LifecycleMarkerMinOpacity);
+            Number(w,p.LifecycleMarkerOffsetMeters);
+            Number(w,p.OutpostHealth);
+            Number(w,p.OutpostBuildSeconds);
+            Number(w,p.OutpostCreditCost);
+            Number(w,p.OutpostIncomePerPeriod);
+            Number(w,p.OutpostFootprintRadius);
+            Number(w,p.OutpostModelHeightMeters);
+            Number(w,p.OutpostModelScale);
+            Number(w,p.MineHealth);
+            Number(w,p.MineBuildSeconds);
+            Number(w,p.MineCreditCost);
+            Number(w,p.MineIncomePerPeriod);
+            Number(w,p.MineFootprintRadius);
+            Number(w,p.MineModelHeightMeters);
+            Number(w,p.MineModelScale);
+            Number(w,p.HeadquartersCaptureRadius);
+            Number(w,p.HeadquartersCaptureSeconds);
+            Number(w,p.OutpostCaptureRadius);
+            Number(w,p.OutpostCaptureSeconds);
+            Number(w,p.MineCaptureRadius);
+            Number(w,p.MineCaptureSeconds);
+            Number(w,p.HeadquartersSlots);
+            Number(w,p.OutpostSlots);
+            Number(w,p.SlotRingRadius);
+            Number(w,p.OrdinaryPadRadius);
+            Number(w,p.PadBorderRatio);
+            Number(w,p.CapturePulseHz);
+            Number(w,p.ConstructionDamageMultiplier);
+            Number(w,p.EvacuationClearance);
+            Number(w,p.EvacuationRetrySeconds);
+            Number(w,p.OutpostX);
+            Number(w,p.OutpostZ);
+            Number(w,p.MineX);
+            Number(w,p.MineZ);
+            Number(w,p.DefenderOffsetX);
+            Number(w,p.DefenderOffsetZ);
+            w.Write(p.SchemaVersion);
+            String(w,p.ProfileId);
+            w.Write(p.Revision);
+            String(w,p.SourceCommit);
+            String(w,p.SourceProfileId);
+            w.Write(p.SourceProfileRevision);
+            String(w,p.SourceManifestSha256);
+            Number(w,p.TankCollisionRadius);
+            Number(w,p.TankModelRadius);
+            Number(w,p.TankModelScale);
+            Number(w,p.TankSpeed);
+            Number(w,p.TankTurnSpeed);
+            Number(w,p.TankTurretTurnSpeed);
+            Number(w,p.TankAimToleranceRadians);
+            Number(w,p.TankRange);
+            Number(w,p.TankVisionRange);
+            w.Write(p.TankHealth);
+            w.Write(p.TankFiresWhileMoving);
+            w.Write(p.TankStopForMilliseconds);
+            w.Write(p.TankPopulationCost);
+            w.Write(p.TankCreditCost);
+            w.Write(p.TankProductionMenuOrder);
+            w.Write(p.TankProductionSeconds);
+            w.Write(p.TankWeaponDamage);
+            w.Write(p.TankWeaponReloadMilliseconds);
+            String(w,p.TankProjectileType);
+            Number(w,p.TankProjectileSpeed);
+            Number(w,p.TankProjectileCollisionRadius);
+            Number(w,p.ProjectileExtraRangePercent);
+            Number(w,p.IdleAutoDefenseMultiplier);
+            Number(w,p.FollowDistance);Number(w,p.FollowArrivalTolerance);
+            Number(w,p.TankPreparationSeconds);
+            Number(w,p.TankWeaponReloadSeconds);
+            Number(w,p.TankProjectileMaxTravel);
+            w.Write(p.ArmyCapacity);
+            w.Write(p.StartingCredits);
+            w.Write(p.IncomePeriodSeconds);
+            Number(w,p.BuildingCancellationRefundRatio);
+            Number(w,p.UnitCancellationRefundRatio);
+            w.Write(p.HeadquartersHealth);
+            w.Write(p.HeadquartersBuildSeconds);
+            w.Write(p.HeadquartersCreditCost);
+            w.Write(p.HeadquartersIncomePerPeriod);
+            Number(w,p.HeadquartersFootprintRadius);
+            Number(w,p.HeadquartersModelHeightMeters);
+            Number(w,p.HeadquartersModelScale);
+            w.Write(p.FactoryHealth);
+            w.Write(p.FactoryBuildSeconds);
+            w.Write(p.FactoryCreditCost);
+            Number(w,p.FactoryFootprintRadius);
+            Number(w,p.FactoryModelHeightMeters);
+            Number(w,p.FactoryModelScale);
+            w.Write(p.RefineryHealth);
+            w.Write(p.RefineryBuildSeconds);
+            w.Write(p.RefineryCreditCost);
+            w.Write(p.RefineryIncomePerPeriod);
+            Number(w,p.RefineryFootprintRadius);
+            Number(w,p.RefineryModelHeightMeters);
+            Number(w,p.RefineryModelScale);
+            Number(w,p.HeadquartersIncomePerSecond);
+            Number(w,p.RefineryIncomePerSecond);
+            Number(w,p.ArenaHalfExtent);
+            Number(w,p.GroundHalfExtent);
+            Number(w,p.PlayerHeadquartersX);
+            Number(w,p.EnemyHeadquartersX);
+            Number(w,p.HeadquartersZ);
+            Number(w,p.PlayerFactoryPadX);
+            Number(w,p.PlayerFactoryPadZ);
+            Number(w,p.PlayerRefineryPadX);
+            Number(w,p.PlayerRefineryPadZ);
+            Number(w,p.EnemyFactoryPadX);
+            Number(w,p.EnemyFactoryPadZ);
+            Number(w,p.EnemyRefineryPadX);
+            Number(w,p.EnemyRefineryPadZ);
+            Number(w,p.CentralObstacleHalfWidth);
+            Number(w,p.CentralObstacleHalfDepth);
+            Number(w,p.PassageHalfWidth);
+            Number(w,p.EnemyAdvanceDelaySeconds);
+            Number(w,p.AttackApproachRangeRatio);
+            Number(w,p.AttackRepathSeconds);
+            Number(w,p.FactoryExitDistance);
+            Number(w,p.DefaultRallyDistance);
+            Number(w,p.TargetPickRadiusMultiplier);
+            Number(w,p.BuildingPickRadius);
+            w.Write(p.NavigationRequestsPerFrame);
+            w.Write(p.RenderTargetFramesPerSecond);
+            Number(w,p.CameraOrthoSize);
+            Number(w,p.CameraHeight);
+            Number(w,p.CameraOffsetZ);
+            Number(w,p.CameraPanSpeed);
+            Number(w,p.CameraMinZoom);
+            Number(w,p.CameraMaxZoom);
+            Number(w,p.CameraZoomSpeed);
+            Number(w,p.SelectionDragPixels);
+            w.Write(p.AuthoredMap!=null);
+            if(p.AuthoredMap!=null){var m=p.AuthoredMap;
+            String(w,m.Id);
+            w.Write(m.Revision);
+            Number(w,m.HalfExtent);
+            Number(w,m.RiverHalfWidth);
+            Number(w,m.CrossingZ);
+            Number(w,m.SideBridgeWidth);
+            Number(w,m.CentralBridgeWidth);
+            Number(w,m.CentralBridgeHalfSpan);
+            Number(w,m.BaseCoordinate);
+            Number(w,m.MineX);
+            Number(w,m.MineZ);
+            Number(w,m.PocketX);
+            Number(w,m.RailHeight);
+            Number(w,m.RailThickness);
+            Number(w,m.PostHeight);
+            Number(w,m.PostWidth);
+            Number(w,m.DirectFireHeight);
+            Number(w,m.WaterDepth);
+            Number(w,m.DeckThickness);
+            Number(w,m.PlatformInspectionSize);
+            Number(w,m.OverviewSize);
+            Number(w,m.OverviewHeight);
+            Number(w,m.OverviewOffset);
+            Array(w,m.MovementBlockers.ToArray(),x=>Write(w,x));
+            Array(w,m.Solids.ToArray(),x=>Write(w,x));
+            Array(w,m.Water.ToArray(),x=>Write(w,x));
+            w.Write(m.Supports.Count);
+            foreach(var s in m.Supports){String(w,s.Id);
+            Write(w,s.Bounds);
+            w.Write(s.IsBridge);
+            Number(w,s.Height);
+            Write(w,s.Gradient);
+            Write(w,s.Origin);
+            }}});
+
+    }
+}

@@ -1,0 +1,13 @@
+{
+  "source": "src/sim/config:palette",
+  "colors": [
+    "#59d8ff",
+    "#ff5a73",
+    "#a8ff53",
+    "#ffd34e",
+    "#c682ff",
+    "#ff9e58",
+    "#54f0c4",
+    "#f1f1f1"
+  ]
+}
