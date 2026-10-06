@@ -73,6 +73,10 @@ $reinstall=Start-Process $Installer -ArgumentList '/S' -Wait -PassThru
 if ($reinstall.ExitCode -ne 0 -or (Get-Content (Join-Path $install 'active.json') -Raw) -ne $before) {throw 'Reinstall changed valid active pointer'}
 @{version=$record.version;sha256=$record.sha256;defaultDirectory=$install;shortcut=$link;target=$shortcut.TargetPath;icon=$shortcut.IconLocation;finalRunChecked=$true;finalShortcutChecked=$true;reinstall='passed'} | ConvertTo-Json | Set-Content artifacts/windows-readback.json
 $uninstall=Start-Process (Join-Path $install 'Uninstall.exe') -ArgumentList '/S' -Wait -PassThru
-Start-Sleep -Seconds 3
+$uninstallDeadline=(Get-Date).AddSeconds(30)
+while ((Test-Path $install) -and (Get-Date) -lt $uninstallDeadline) {Start-Sleep -Milliseconds 500}
 if (Test-Path $link) {throw 'Uninstall left desktop shortcut'}
-if (Test-Path $install) {throw 'Uninstall left application directory'}
+if (Test-Path $install) {throw ('Uninstall left application directory: '+((Get-ChildItem $install -Recurse -Force | Select-Object -ExpandProperty FullName) -join '; '))}
+$readback=Get-Content artifacts/windows-readback.json -Raw | ConvertFrom-Json
+$readback | Add-Member -NotePropertyName uninstall -NotePropertyValue 'passed'
+$readback | ConvertTo-Json | Set-Content artifacts/windows-readback.json

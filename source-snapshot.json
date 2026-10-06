@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "build_source_commit": "0d3514395eedd02e18302ba567647ad0121aef7c",
+  "build_source_commit": "1fa5ba38067fa5a8166d1f1dfb5d09eae53ffcfb",
   "export_policy": "current allowlisted source; no private history, keys, generated builds or internal planning",
   "files": {
     ".github/workflows/installer-windows.yml": "621f5a097df052a1e7e9c760ce89161220bd0f940bac25cfafbeab9917882a13",
@@ -19,7 +19,7 @@
     "tools/native-release/icons/Spacewars.ico": "55ccbb5604628a2a413d72679f208a836bba906cd0e83d3478fbcdc4b34566ef",
     "tools/native-release/installer.nsi": "01b7a0b52e10336c7226d598110acbc8010cdd293fa37f42490eb8d4eab953fa",
     "tools/native-release/package.py": "b4bf991fe2ea8b3a3b1c1738c9bc4beba06db491756f47906151ce5ec7d43266",
-    "tools/native-release/test_windows_installer.ps1": "026ee4d98419aefc59d830d6050991fe3b4cc5235adbbc4de8ec9158010dc7fb",
+    "tools/native-release/test_windows_installer.ps1": "16e9fd13955989b23b00b15b1931e00c94a29572c9d262f22a4e01fb78db49c8",
     "tools/native-release/trust.json": "79591e65050cae512e89fac07ada8a3672c8ed544d24ff742ec2fac1daeadba3",
     "tools/native-release/updater/go.mod": "af37c3cc9eab867095780c64f299f4b787a9fd3cb26a3b3efbf3591eedc39b72",
     "tools/native-release/updater/go.sum": "3e83ce3f03ded7bdc8c5ba212e4de6eb8a55ce6f977f98c484575de70805b6e6",
