@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "build_source_commit": "f532a647710bf962b71c62e768a90ebe6df64777",
+  "build_source_commit": "768a7e0c63daa0eb21290e53ae06e7eea7df287b",
   "export_policy": "current allowlisted source; no private history, keys, generated builds or internal planning",
   "files": {
     ".github/workflows/installer-windows.yml": "621f5a097df052a1e7e9c760ce89161220bd0f940bac25cfafbeab9917882a13",
@@ -70,7 +70,7 @@
     "unity/Assets/Spacewars/Content/BalanceLabContract/provenance.json.meta": "76f8c94a6100cff343b53a17677f7019722fc5daab835a76c7c772188df0a3c8",
     "unity/Assets/Spacewars/Content/Brand.meta": "57e24400475beedc9bf7c0c6a02f45bf8e9163eb15b99cd5627499649fc9f62e",
     "unity/Assets/Spacewars/Content/Brand/Icon.png": "aaad6d66de437706456c897a9868cfcf0059f8acd96ee2cb4e5a1061e2ed1e09",
-    "unity/Assets/Spacewars/Content/Brand/Icon.png.meta": "093489df78e19070619a06a82f9877816985f1e833196ef9a9329289c1345ca6",
+    "unity/Assets/Spacewars/Content/Brand/Icon.png.meta": "9bffcb7ec60de8934cd89eefe47d4b9dc3f6d92669d60012474200c9534462fe",
     "unity/Assets/Spacewars/Content/FoundationPipeline.asset": "22b9cd9f3cf6df6ba61418bb0f837328d9d25a2382930c6777c11a4f8a8fea63",
     "unity/Assets/Spacewars/Content/FoundationPipeline.asset.meta": "7fe684d5275f39aa5a8504b085dd92b9741c9d53bd8673e9b801584ca90cdc97",
     "unity/Assets/Spacewars/Content/FoundationRenderer.asset": "fcc18697d2a344b9ae5ce8c3271f8340daeacc0e93dfd35f6657e09519f6753a",
