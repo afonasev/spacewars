@@ -28,7 +28,7 @@ Section "Spacewars (обязательно)" SEC_GAME
  SectionIn RO
  SetRegView 64
  SetOutPath "$INSTDIR"
- File /r /x active.json "${PAYLOAD}/*"
+ File /r /x active.json /x "._*" /x ".DS_Store" "${PAYLOAD}/*"
  ExecWait '"$INSTDIR\Spacewars.exe" --activate ${RELEASE}' $0
  ${If} $0 != 0
   MessageBox MB_ICONSTOP "Не удалось активировать установленную версию. Закройте игру и повторите установку. Рабочая версия сохранена."

@@ -15,3 +15,5 @@ Tests: `cd tools/native-release/updater && go test -race ./...`; Windows cross-c
 The canonical planet icon is `unity/Assets/Spacewars/Content/Brand/Icon.png` (recovered from the game's original production icon). ICO/ICNS variants preserve that artwork. Windows bootstrap and UpdateHost embed the ICO with pinned rsrc v0.10.2. Both final-screen checkboxes default checked; the desktop link is machine-wide (Public Desktop). Silent installs create the desktop link but do not launch the game. Reinstallation validates signed payload/monotonic sequence before switching active.json, preserving a previous release.
 
 Full installers live in versioned GitHub Releases; `publish.py` transfers only OTA chunks/manifests/catalog and landing to VPS, verifies GitHub bytes, and removes dedicated full native installers after successful public catalog readback. Keep the private signing key: a public clone alone cannot sign trusted production updates.
+
+Remote NSIS transfers disable macOS AppleDouble/xattr exports; the installer also excludes `._*` and `.DS_Store`. Windows uninstall must leave neither known application files nor packaging metadata.
