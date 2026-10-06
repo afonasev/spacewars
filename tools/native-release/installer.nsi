@@ -9,6 +9,15 @@ InstallDir "$PROGRAMFILES64\Spacewars"
 InstallDirRegKey HKLM "Software\Spacewars" "InstallDir"
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma
+; Exact AppleDouble names emitted by older macOS packaging, not user data.
+!macro RemoveLegacyPackagingMetadata
+ Delete "$INSTDIR\._"
+ Delete "$INSTDIR\._active.json"
+ Delete "$INSTDIR\._releases"
+ Delete "$INSTDIR\._Spacewars.exe"
+ Delete "$INSTDIR\._Spacewars.ico"
+ Delete "$INSTDIR\.DS_Store"
+!macroend
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "Добро пожаловать в Spacewars"
 !define MUI_WELCOMEPAGE_TEXT "Установите Spacewars — стратегию о борьбе за территории.$\r$\n$\r$\nОбновления доступны отдельным пунктом в главном меню. Загрузка начинается только по вашему нажатию.$\r$\n$\r$\nЭто тестовая сборка без подписи издателя."
@@ -29,6 +38,7 @@ Section "Spacewars (обязательно)" SEC_GAME
  SetRegView 64
  SetOutPath "$INSTDIR"
  File /r /x active.json /x "._*" /x ".DS_Store" "${PAYLOAD}/*"
+ !insertmacro RemoveLegacyPackagingMetadata
  ExecWait '"$INSTDIR\Spacewars.exe" --activate ${RELEASE}' $0
  ${If} $0 != 0
   MessageBox MB_ICONSTOP "Не удалось активировать установленную версию. Закройте игру и повторите установку. Рабочая версия сохранена."
@@ -75,6 +85,7 @@ Section "Uninstall"
  Delete "$INSTDIR\Spacewars.exe"
  Delete "$INSTDIR\Spacewars.ico"
  Delete "$INSTDIR\Uninstall.exe"
+ !insertmacro RemoveLegacyPackagingMetadata
  RMDir "$INSTDIR"
  DeleteRegKey HKLM "Software\Spacewars"
  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Spacewars"

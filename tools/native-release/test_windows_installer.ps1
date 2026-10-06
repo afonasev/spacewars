@@ -69,9 +69,12 @@ if (-not (Test-Path $link)) {throw 'Public Desktop shortcut absent'}
 $shortcut=(New-Object -ComObject WScript.Shell).CreateShortcut($link)
 if ($shortcut.TargetPath -ne (Join-Path $install 'Spacewars.exe') -or $shortcut.IconLocation -notlike '*Spacewars.ico*') {throw 'Shortcut target/icon invalid'}
 $before=Get-Content (Join-Path $install 'active.json') -Raw
+$legacyMetadata=@('._','._active.json','._releases','._Spacewars.exe','._Spacewars.ico','.DS_Store')
+foreach ($name in $legacyMetadata) {Set-Content -LiteralPath (Join-Path $install $name) -Value 'legacy packaging metadata fixture'}
 $reinstall=Start-Process $Installer -ArgumentList '/S' -Wait -PassThru
 if ($reinstall.ExitCode -ne 0 -or (Get-Content (Join-Path $install 'active.json') -Raw) -ne $before) {throw 'Reinstall changed valid active pointer'}
-@{version=$record.version;sha256=$record.sha256;defaultDirectory=$install;shortcut=$link;target=$shortcut.TargetPath;icon=$shortcut.IconLocation;finalRunChecked=$true;finalShortcutChecked=$true;reinstall='passed'} | ConvertTo-Json | Set-Content artifacts/windows-readback.json
+foreach ($name in $legacyMetadata) {if (Test-Path -LiteralPath (Join-Path $install $name)) {throw ('Legacy metadata retained on reinstall: '+$name)}}
+@{legacyMetadataCleanup='passed';version=$record.version;sha256=$record.sha256;defaultDirectory=$install;shortcut=$link;target=$shortcut.TargetPath;icon=$shortcut.IconLocation;finalRunChecked=$true;finalShortcutChecked=$true;reinstall='passed'} | ConvertTo-Json | Set-Content artifacts/windows-readback.json
 $uninstall=Start-Process (Join-Path $install 'Uninstall.exe') -ArgumentList '/S' -Wait -PassThru
 $uninstallDeadline=(Get-Date).AddSeconds(30)
 while ((Test-Path $install) -and (Get-Date) -lt $uninstallDeadline) {Start-Sleep -Milliseconds 500}
