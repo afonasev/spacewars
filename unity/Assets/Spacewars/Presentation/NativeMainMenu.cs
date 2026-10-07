@@ -60,7 +60,7 @@ namespace Spacewars.Presentation
         {
             if(busy)yield break;busy=true;playButton.SetEnabled(false);
             bool allowed=string.IsNullOrEmpty(endpoint);if(!allowed)yield return Request("/play","POST",s=>allowed=s!=null);
-            if(allowed){var action=Play;NativeUpdateProgress.Show(endpoint,token);GetComponent<UIDocument>().enabled=false;action?.Invoke();Destroy(gameObject);}else{busy=false;playButton.SetEnabled(true);}
+            if(allowed){var action=Play;GetComponent<UIDocument>().enabled=false;action?.Invoke();Destroy(gameObject);}else{busy=false;playButton.SetEnabled(true);}
         }
         private IEnumerator CheckGame()
         {

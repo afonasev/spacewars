@@ -7,6 +7,18 @@ ROOT=pathlib.Path(__file__).resolve().parents[2]
 REPO='afonasev/spacewars'
 PLATFORMS=('windows-x64','macos-universal')
 def run(args,**kw):return subprocess.check_output([str(x) for x in args],text=True,**kw).strip()
+def repository_url(protocol='auto'):
+ if protocol=='auto':
+  configured=subprocess.run(['gh','config','get','git_protocol','--host','github.com'],capture_output=True,text=True,check=True)
+  protocol=configured.stdout.strip()
+ if protocol not in ('ssh','https'):raise ValueError('configure gh git_protocol or pass --git-protocol ssh|https')
+ return 'git@github.com:'+REPO+'.git' if protocol=='ssh' else 'https://github.com/'+REPO+'.git'
+def prepare_output(path):
+ # Never mix stale catalogs, packages or receipts into a new signed inventory.
+ path=path.resolve()
+ if path.exists() and any(path.iterdir()):raise ValueError('release output must be empty; preserve failed evidence and choose a fresh --output')
+ path.mkdir(parents=True,exist_ok=True)
+ return path
 def hashfile(path):
  with path.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
 def validate_catalog(catalog,version,channel,head):
@@ -24,17 +36,18 @@ def source_names():
  names=run(['git','ls-files'],cwd=ROOT).splitlines()
  return [n for n in names if n.startswith(('unity/Assets/','unity/Packages/','unity/ProjectSettings/','unity/Tests/','tools/','landing/','.github/')) or n=='docs/NATIVE_PROTOTYPE.md']
 def export_source(clone,head):
- names=source_names();previous=clone/'source-snapshot.json'
+ names=source_names();previous=clone/'source-snapshot.json';removed=[]
  if previous.exists():
   old=json.loads(previous.read_text())['files']
   for n in old:
-   if n not in names and (clone/n).is_file():(clone/n).unlink()
+   if n not in names and (clone/n).is_file():
+    (clone/n).unlink();removed.append(n)
  files={};modes={}
  for n in names:
   target=clone/n;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(ROOT/n,target);files[n]=hashfile(target);modes[n]=oct((ROOT/n).stat().st_mode&0o777)
  snapshot={'schema':1,'build_source_commit':head,'export_policy':'current Unity/tooling/landing only; no private Git history','files':files,'file_modes':modes}
  previous.write_text(json.dumps(snapshot,indent=2)+'\n')
- run(['git','add','--',*names,'source-snapshot.json'],cwd=clone)
+ run(['git','add','--',*names,*removed,'source-snapshot.json'],cwd=clone)
  if run(['git','status','--porcelain'],cwd=clone):run(['git','commit','-m','Spacewars desktop source '+head[:12]],cwd=clone)
  run(['git','push','origin','HEAD:main'],cwd=clone)
  return run(['git','rev-parse','HEAD'],cwd=clone),previous
@@ -45,7 +58,7 @@ def restore_build_generation():
  if any(not allowed(n) for n in names):raise ValueError('unexpected source changes during build; preserving all')
  if names:run(['git','restore','--',*names],cwd=ROOT)
 def main():
- p=argparse.ArgumentParser();p.add_argument('--version',required=True);p.add_argument('--sequence',type=int,required=True);p.add_argument('--channel',choices=['test','production'],required=True);p.add_argument('--production-approved',action='store_true');p.add_argument('--reuse-builds',action='store_true');p.add_argument('--publish',action='store_true');p.add_argument('--output',type=pathlib.Path,default=ROOT/'.local/github-release');a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--version',required=True);p.add_argument('--sequence',type=int,required=True);p.add_argument('--channel',choices=['test','production'],required=True);p.add_argument('--production-approved',action='store_true');p.add_argument('--reuse-builds',action='store_true');p.add_argument('--publish',action='store_true');p.add_argument('--git-protocol',choices=['auto','ssh','https'],default='auto',help='use existing gh Git protocol by default; never change global Git authentication');p.add_argument('--output',type=pathlib.Path,help='fresh empty directory; default .local/github-release/<channel>/<version>');a=p.parse_args()
  if a.channel=='production' and not a.production_approved:raise ValueError('production requires explicit --production-approved; test is the approved default delivery')
  head=run(['git','rev-parse','HEAD'],cwd=ROOT)
  if run(['git','status','--porcelain'],cwd=ROOT):raise ValueError('clean committed source required')
@@ -53,9 +66,10 @@ def main():
  prior=subprocess.run(['gh','release','view',tag,'--repo',REPO],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
  if prior.returncode==0:raise ValueError('release already exists; never overwrite published/draft versions')
  # Also never retarget a previously published tag.
- refs=run(['git','ls-remote','https://github.com/'+REPO+'.git','refs/tags/'+tag])
+ repo_url=repository_url(a.git_protocol)
+ refs=run(['git','ls-remote',repo_url,'refs/tags/'+tag])
  if refs:raise ValueError('immutable tag already exists')
- out=a.output.resolve();out.mkdir(parents=True,exist_ok=True)
+ out=prepare_output(a.output or ROOT/'.local/github-release'/a.channel/a.version)
  for platform in PLATFORMS:
   if not a.reuse_builds:
    subprocess.check_call([sys.executable,str(ROOT/'tools/native-release/build.py'),'--version',a.version,'--platform',platform]);restore_build_generation()
@@ -79,7 +93,7 @@ def main():
  if not a.publish:print(json.dumps({'status':'packaged-only','assets':str(assets)}));return
  # Fresh clone preserves only the public history. Never push the private repository.
  with tempfile.TemporaryDirectory(prefix='spacewars-public-source-') as temp:
-  clone=pathlib.Path(temp)/'repo';run(['git','clone','https://github.com/'+REPO+'.git',clone])
+  clone=pathlib.Path(temp)/'repo';run(['git','clone',repo_url,clone])
   public_commit,snapshot=export_source(clone,head);shutil.copy2(snapshot,assets/'source-snapshot.json')
  # Re-sign the final complete inventory including the public source snapshot.
  inventory={x.name:{'size':x.stat().st_size,'sha256':hashfile(x)} for x in sorted(assets.iterdir()) if x.is_file() and x.name!='release.json'}

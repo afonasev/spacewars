@@ -17,7 +17,8 @@ public sealed class NativeMainMenuTests
         {
             var root=go.GetComponent<UIDocument>().rootVisualElement;
             var actions=root.Query<Button>().ToList();
-            Assert.That(actions.Count,Is.EqualTo(3));Assert.That(actions[0].text,Is.EqualTo("В бой!"));Assert.That(actions[1].text,Is.EqualTo("Обновить"));Assert.That(actions[2].text,Is.EqualTo("Выйти"));
+            Assert.That(actions.ConvertAll(b=>b.text),Is.EqualTo(new[]{"В бой!","Обновить","Проверить","Перезапустить","Выйти"}));
+            Assert.That(actions[3].style.display.value,Is.EqualTo(DisplayStyle.None),"Restart is visible only for a prepared update.");
             Assert.That(played,Is.False,"Displaying the main menu must not start a match.");
             Assert.That(actions[1].enabledSelf,Is.False,"A Player without the trusted installed launcher must not start updating.");
             Assert.That(actions[0].enabledSelf,Is.True,"Offline installed gameplay remains available.");
