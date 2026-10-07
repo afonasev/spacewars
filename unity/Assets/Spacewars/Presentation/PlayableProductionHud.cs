@@ -34,8 +34,8 @@ namespace Spacewars.Presentation
                 var slot=new ProductionSlot();
                 slot.Button=Button("—",()=>CancelProductionSlot(slot));
                 slot.Button.name="production-slot-"+i;
-                slot.Button.style.flexGrow=1;slot.Button.style.flexBasis=0;
-                slot.Button.style.height=42;slot.Button.style.fontSize=11;
+                slot.Button.style.flexGrow=1;slot.Button.style.flexBasis=0;slot.Button.style.minWidth=0;slot.Button.style.paddingLeft=4;slot.Button.style.paddingRight=4;
+                slot.Button.style.height=52;slot.Button.style.fontSize=13;
                 slot.Button.style.whiteSpace=WhiteSpace.Normal;
                 // Resolve the order at press time: an intervening spawn must not retarget cancellation.
                 slot.Button.RegisterCallback<PointerDownEvent>(evt=>
@@ -61,9 +61,9 @@ namespace Spacewars.Presentation
             queueLabel.style.display=factory==null?DisplayStyle.None:DisplayStyle.Flex;
             var state=factory?.PrivateState;
             bool enabled=factory!=null&&factory.Phase==ConstructionPhase.Ready&&state?.Lifecycle?.Selling!=true&&view.Outcome==PlayableMatchOutcome.Playing&&!paused&&!restarting;
-            shkvalButton.SetEnabled(enabled);shkvalButton.text="Шквал · "+profile.ShkvalCreditCost+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Shkval?" · Повтор ВКЛ":" · ПКМ: повтор");
-            explorerButton.SetEnabled(enabled);explorerButton.text="Исследователь · "+profile.ExplorerCreditCost+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Explorer?" · Повтор ВКЛ":" · ПКМ: повтор");
-            tankButton.text="Танк · "+profile.TankCreditCost+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Tank?" · Повтор ВКЛ":" · ПКМ: повтор");
+            shkvalButton.SetEnabled(enabled);shkvalButton.text="Шквал · "+profile.ShkvalCreditCost+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Shkval?" · Повтор ВКЛ":"");
+            explorerButton.SetEnabled(enabled);explorerButton.text="Исследователь · "+profile.ExplorerCreditCost+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Explorer?" · Повтор ВКЛ":"");
+            tankButton.text="Танк · "+profile.TankCreditCost+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Tank?" · Повтор ВКЛ":"");
             var population=view.Population;
             if(population!=null)selectionLabel.text+=" · Армия: "+population.Living+" (+"+population.Reserved+") / "+population.Capacity;
             var orders=state?.Orders;

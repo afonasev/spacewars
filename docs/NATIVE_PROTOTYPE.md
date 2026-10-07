@@ -15,12 +15,13 @@ Current consolidation scope: `consolidate-unity-playable-prototype`, canonical p
 - Refinery upgrade and sequential owner research (chassis, assault guns, guidance); paid active work and waiting orders; domain world capture/restore regressions.
 - Native AI policy for ordinary match: economic development, production, opening/composition, mission defense, scouting, research and artillery support. Old separate SOURCE crisis/technology qualification is not the ordinary runtime.
 - Opt-in two-local-human flat arena (`-twoLocalHumans`): keyboard/mouse plus gamepad, readiness/disconnect pause, split views, personal/shared map, selection/groups/menus and persistent allied Follow. Device acceptance remains pending; this mode has no autonomous opponent and is not the authored multilayer mode.
-- Native Balance Lab repository primitives: validation, effective revision, immutable records and atomic disk storage. A complete end-user editor is not claimed.
+- Orbital Command main menu with disabled network action, settings, laboratory, updater entry and exit. Main/pause settings share one view and local preferences. Scoped keyboard/controller navigation includes visible focus, repeat, back, field adjustment and on-screen text entry.
+- Native laboratory for gameplay/unit parameters, with immutable named revisions, atomic disk storage, selection for the next match and queued application to the current match after resume. Map and geometry fields are excluded. Current health is clamped to the new maximum; already paid costs/durations and launched projectiles retain their terms. Capacity conflicts reject the whole apply. World capture/restore retains transaction profiles (wire version 5; older envelopes rejected).
 
 ## Prototype limits / historical original capabilities not delivered
 
 - No online rooms/server/reconnect/chat/spectator delivery, Electron client/updater or web runtime in the maintained Unity base.
-- No complete original map catalogue/generator/editor, authored multilayer local split-screen, 3–4-local-player shell, complete settings/menu flow or replay/save UI.
+- No complete original map catalogue/generator/editor, authored multilayer local split-screen, 3–4-local-player shell, replay/save UI.
 - No audiovisual polish, sound acceptance, physical controller approval, signed installers or measured target-device/performance acceptance.
 - Primitive native restore integrity is retained; compatibility with original saves is not a requirement.
 

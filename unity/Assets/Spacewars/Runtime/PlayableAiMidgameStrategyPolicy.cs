@@ -25,7 +25,8 @@ namespace Spacewars.Runtime
     {
         private static readonly PlayableAiMidgameStrategy[] Ordered={PlayableAiMidgameStrategy.MapControl,PlayableAiMidgameStrategy.MassAssault,PlayableAiMidgameStrategy.Raids};
         private readonly string OwnerId;
-        private readonly PlayableProfile profile;
+        private PlayableProfile profile;
+        internal void Rebind(PlayableProfile next){profile=next;if(checkpoint!=null){var c=checkpoint;checkpoint=new PlayableAiMidgameCheckpoint(c.Seed,c.Generation,c.ReviewedTick,c.LastStrategyTick,c.OpeningCompletedTick,c.DecisionSequence,c.Phase,c.Strategy,c.OwnerId,c.SourceIdentity,next.ProfileId,next.Revision);}}
         private PlayableAiMidgameCheckpoint checkpoint;
         public PlayableAiMidgameStrategyPolicy(PlayableProfile profile,string ownerId="player-1"){this.profile=profile??throw new ArgumentNullException(nameof(profile));OwnerId=ownerId;}
         public PlayableAiMidgameCheckpoint Capture()=>checkpoint;

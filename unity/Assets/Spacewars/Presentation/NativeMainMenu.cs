@@ -10,7 +10,13 @@ namespace Spacewars.Presentation
     public sealed class NativeMainMenu : MonoBehaviour
     {
         [Serializable] private sealed class UpdateState { public string version,available,state,error,notice; public long done,total; }
-        public Action Play;
+        public Action Play, Laboratory;
+        public VisualElement HostRoot;
+        public NativeMenuNavigation Navigation;
+        public VisualElement ScreenRoot { get; private set; }
+        private bool ownsNavigation;
+        private VisualElement card;
+        private Label hints;
         private string endpoint,token;
         private Label stateLabel,versionLabel;
         private Button playButton,updateButton,checkButton,restartButton;
@@ -20,26 +26,41 @@ namespace Spacewars.Presentation
         private void Start()
         {
             endpoint=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT");token=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_TOKEN");
-            panel=ScriptableObject.CreateInstance<PanelSettings>();panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");panel.scaleMode=PanelScaleMode.ScaleWithScreenSize;panel.referenceResolution=new Vector2Int(1280,800);
-            var doc=gameObject.AddComponent<UIDocument>();doc.panelSettings=panel;var root=doc.rootVisualElement;
-            root.style.backgroundColor=new Color(.025f,.044f,.065f);root.style.justifyContent=Justify.Center;root.style.alignItems=Align.Center;root.style.unityFont=Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");root.style.color=new Color(.87f,.94f,.98f);
-            var card=new VisualElement();card.style.width=500;card.style.maxWidth=Length.Percent(90);card.style.paddingTop=45;card.style.paddingBottom=45;card.style.paddingLeft=40;card.style.paddingRight=40;card.style.backgroundColor=new Color(.055f,.09f,.12f);root.Add(card);
-            var eyebrow=new Label("ТЕРРИТОРИЯ РЕШАЕТ ВСЁ");eyebrow.style.fontSize=13;eyebrow.style.letterSpacing=3;eyebrow.style.color=new Color(.37f,.84f,.94f);card.Add(eyebrow);
-            var title=new Label("SPACEWARS");title.style.fontSize=48;title.style.unityFontStyleAndWeight=FontStyle.Bold;title.style.marginTop=12;title.style.marginBottom=28;card.Add(title);
-            playButton=ActionButton("В бой!",()=>StartCoroutine(EnterGame()));card.Add(playButton);
-            updateButton=ActionButton("Обновить",()=>StartCoroutine(UpdateGame()));card.Add(updateButton);
-            checkButton=ActionButton("Проверить",()=>StartCoroutine(CheckGame()));card.Add(checkButton);
-            restartButton=ActionButton("Перезапустить",()=>StartCoroutine(RestartGame()));card.Add(restartButton);restartButton.style.display=DisplayStyle.None;
-            card.Add(ActionButton("Выйти",()=>Application.Quit()));
-            versionLabel=new Label("Версия "+Application.version);versionLabel.style.fontSize=13;versionLabel.style.marginTop=25;versionLabel.style.color=new Color(.54f,.65f,.72f);card.Add(versionLabel);
-            stateLabel=new Label(string.IsNullOrEmpty(endpoint)?"Запустите игру через установленный Spacewars для проверки обновлений.":"Проверяем наличие обновления…");stateLabel.style.fontSize=15;stateLabel.style.marginTop=10;stateLabel.style.whiteSpace=WhiteSpace.Normal;card.Add(stateLabel);
-            updateButton.SetEnabled(false);playButton.Focus();
+            VisualElement root=HostRoot;
+            if(root==null){panel=ScriptableObject.CreateInstance<PanelSettings>();panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");panel.scaleMode=PanelScaleMode.ScaleWithScreenSize;panel.referenceResolution=new Vector2Int(1280,800);var doc=gameObject.AddComponent<UIDocument>();doc.panelSettings=panel;root=doc.rootVisualElement;OrbitalTheme.ConfigurePanel(panel,root);}
+            OrbitalTheme.Install(root);ScreenRoot=OrbitalTheme.Screen(root,"native-main-menu",true);
+            if(Navigation==null){Navigation=new NativeMenuNavigation(root);ownsNavigation=true;}
+            card=new VisualElement();card.AddToClassList("orbital-main-stack");ScreenRoot.Add(card);
+            card.Add(OrbitalTheme.Text("SPACEWARS","orbital-logo"));
+            playButton=OrbitalTheme.Action("В бой!",()=>StartCoroutine(EnterGame()),"main-play",true);card.Add(playButton);
+            var network=OrbitalTheme.Action("Сетевая игра",()=>{},"main-network");network.SetEnabled(false);network.tooltip="Пока недоступно";card.Add(network);
+            var settings=OrbitalTheme.Action("Настройки",()=>OpenSettings(),"main-settings");card.Add(settings);
+            card.Add(OrbitalTheme.Action("Лаборатория геймдизайна",()=>Laboratory?.Invoke(),"main-laboratory"));
+            updateButton=OrbitalTheme.Action("Обновить",()=>StartCoroutine(UpdateGame()),"main-update");card.Add(updateButton);
+            card.Add(OrbitalTheme.Action("Выйти",()=>Application.Quit(),"main-exit"));
+            var footer=new VisualElement();footer.AddToClassList("orbital-menu-footer");card.Add(footer);
+            versionLabel=OrbitalTheme.Text("Версия "+Application.version,"orbital-muted");footer.Add(versionLabel);
+            stateLabel=OrbitalTheme.Text(string.IsNullOrEmpty(endpoint)?"Проверка обновлений доступна в установленной игре.":"Проверяем наличие обновления…","orbital-muted");footer.Add(stateLabel);
+            var updateActions=new VisualElement();updateActions.AddToClassList("orbital-toolbar");footer.Add(updateActions);
+            checkButton=OrbitalTheme.Action("Проверить",()=>StartCoroutine(CheckGame()),"main-check");updateActions.Add(checkButton);checkButton.SetEnabled(!string.IsNullOrEmpty(endpoint));checkButton.style.display=string.IsNullOrEmpty(endpoint)?DisplayStyle.None:DisplayStyle.Flex;
+            restartButton=OrbitalTheme.Action("Перезапустить",()=>StartCoroutine(RestartGame()),"main-restart");updateActions.Add(restartButton);restartButton.style.display=DisplayStyle.None;
+            hints=OrbitalTheme.Text("","orbital-hints");footer.Add(hints);
+            ScreenRoot.RegisterCallback<GeometryChangedEvent>(_=>{
+                bool small=ScreenRoot.resolvedStyle.width<850;card.style.left=Length.Percent(small?8:53);card.style.width=Length.Percent(small?84:40);
+                card.style.top=Length.Percent(ScreenRoot.resolvedStyle.height<650?3:10);
+                var logo=card.Q<Label>(className:"orbital-logo");logo.style.fontSize=ScreenRoot.resolvedStyle.height<650?36:52;
+            });
+            updateButton.SetEnabled(false);RestoreFocus(playButton);
             if(!string.IsNullOrEmpty(endpoint))StartCoroutine(Poll());
         }
-        private Button ActionButton(string text,Action action)
+        public void RestoreFocus(VisualElement preferred=null)
+        {ScreenRoot.style.display=DisplayStyle.Flex;Navigation.SetScope(ScreenRoot,null,preferred??playButton,hints);}
+        private void OpenSettings()
         {
-            var b=new Button(action){text=text};b.style.height=50;b.style.fontSize=20;b.style.marginBottom=10;b.style.backgroundColor=new Color(.08f,.18f,.23f);b.style.color=new Color(.82f,.96f,1);b.style.borderTopWidth=0;b.style.borderBottomWidth=0;b.style.borderLeftWidth=0;b.style.borderRightWidth=0;return b;
+            ScreenRoot.style.display=DisplayStyle.None;
+            NativeSettingsView.Open(HostRoot??GetComponent<UIDocument>().rootVisualElement,Navigation,()=>RestoreFocus(card.Q<Button>("main-settings")));
         }
+        private void Update(){if(ownsNavigation)Navigation?.Tick();}
         private IEnumerator Request(string path,string method,Action<UpdateState> done)
         {
             using(var r=new UnityWebRequest(endpoint+path,method)){r.downloadHandler=new DownloadHandlerBuffer();r.timeout=15;r.SetRequestHeader("Authorization","Bearer "+token);yield return r.SendWebRequest();if(r.result!=UnityWebRequest.Result.Success){stateLabel.text="Не удалось связаться с обновлением. Установленная игра доступна.";done?.Invoke(null);yield break;}var s=JsonUtility.FromJson<UpdateState>(r.downloadHandler.text);done?.Invoke(s);}
@@ -60,7 +81,7 @@ namespace Spacewars.Presentation
         {
             if(busy)yield break;busy=true;playButton.SetEnabled(false);
             bool allowed=string.IsNullOrEmpty(endpoint);if(!allowed)yield return Request("/play","POST",s=>allowed=s!=null);
-            if(allowed){var action=Play;GetComponent<UIDocument>().enabled=false;action?.Invoke();Destroy(gameObject);}else{busy=false;playButton.SetEnabled(true);}
+            if(allowed){var action=Play;ScreenRoot.style.display=DisplayStyle.None;Navigation.SetScope(null);action?.Invoke();Destroy(gameObject);}else{busy=false;playButton.SetEnabled(true);}
         }
         private IEnumerator CheckGame()
         {
@@ -77,6 +98,6 @@ namespace Spacewars.Presentation
             bool accepted=false;yield return Request("/commit","POST",s=>accepted=s!=null);
             if(accepted)Application.Quit();else{busy=false;ShowStatus();}
         }
-        private void OnDestroy(){if(panel)Destroy(panel);}
+        private void OnDestroy(){ScreenRoot?.RemoveFromHierarchy();if(ownsNavigation)Navigation?.Dispose();if(panel)Destroy(panel);}
     }
 }

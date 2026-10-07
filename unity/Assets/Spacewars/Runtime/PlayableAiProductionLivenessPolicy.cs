@@ -8,7 +8,8 @@ namespace Spacewars.Runtime
     public sealed class PlayableAiProductionLivenessPolicy
     {
 
-        private readonly PlayableProfile profile;
+        private PlayableProfile profile;
+        internal void Rebind(PlayableProfile next){profile=next;}
         private readonly string ownerId;
         private long nextActionId;
         private long pendingActionId;

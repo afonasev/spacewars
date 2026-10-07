@@ -15,10 +15,10 @@ namespace Spacewars.Presentation
         private void CreateMaps(VisualElement row)
         {
             mapTerrain=new PlayableMapTerrain(profile);
-            var column=new VisualElement();column.style.width=(float)profile.MinimapCompactSize+20;column.style.flexShrink=0;column.style.marginRight=4;StyleRegion(column);column.Add(Section("ТАКТИЧЕСКАЯ КАРТА"));row.Add(column);
+            var column=new VisualElement();column.style.width=(float)profile.MinimapCompactSize+30;column.style.flexShrink=0;column.style.marginRight=4;StyleRegion(column);column.name="tactical-minimap-frame";row.Add(column);
             compactMap=new PlayableMapSurface(profile,mapTerrain.Texture){OwnerPaint=owner=>matchSetup!=null?LobbyPaint(owner):owner==PlayableOwner.Player?new Color(.19f,.72f,.77f):owner==PlayableOwner.Enemy?new Color(.93f,.34f,.23f):Color.white};compactMap.style.width=(float)profile.MinimapCompactSize;compactMap.style.height=(float)profile.MinimapCompactSize;column.Add(compactMap);
             mapClock=new Label();mapClock.style.unityTextAlign=TextAnchor.MiddleCenter;column.Add(mapClock);
-            tacticalOverlay=Panel();tacticalOverlay.style.left=0;tacticalOverlay.style.right=0;tacticalOverlay.style.top=80;tacticalOverlay.style.bottom=240;tacticalOverlay.style.alignItems=Align.Center;tacticalOverlay.style.justifyContent=Justify.Center;tacticalOverlay.style.display=DisplayStyle.None;root.Add(tacticalOverlay);
+            tacticalOverlay=Panel();tacticalOverlay.style.left=0;tacticalOverlay.style.right=0;tacticalOverlay.style.top=90;tacticalOverlay.style.bottom=24;StyleRegion(tacticalOverlay);tacticalOverlay.style.alignItems=Align.Center;tacticalOverlay.style.justifyContent=Justify.Center;tacticalOverlay.style.display=DisplayStyle.None;root.Add(tacticalOverlay);
             tacticalMap=new PlayableMapSurface(profile,mapTerrain.Texture){OwnerPaint=owner=>matchSetup!=null?LobbyPaint(owner):owner==PlayableOwner.Player?new Color(.19f,.72f,.77f):owner==PlayableOwner.Enemy?new Color(.93f,.34f,.23f):Color.white};tacticalOverlay.Add(tacticalMap);
             var hint=new Label("ЛКМ — камера · рамка — танки · ПКМ — движение / сбор · A — движение с атакой · Tab — закрыть");hint.style.fontSize=14;tacticalOverlay.Add(hint);
             tacticalOverlay.RegisterCallback<GeometryChangedEvent>(_=>{float size=Mathf.Min((float)profile.MinimapTacticalSize,tacticalOverlay.contentRect.width,tacticalOverlay.contentRect.height-hint.resolvedStyle.height);tacticalMap.style.width=size;tacticalMap.style.height=size;});

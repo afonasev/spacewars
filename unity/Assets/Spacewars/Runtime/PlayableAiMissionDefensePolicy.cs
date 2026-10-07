@@ -38,7 +38,8 @@ namespace Spacewars.Runtime
         private const double EmergencyThreatRatio=.75; // ai/release.json midgame.emergencyThreatRatio
         private const long ReinforcementTicks=120; // ai/release.json tactics.reinforcementIntervalSec * fixed 30 Hz
         private const long StallTicks=1800; // ai/release.json liveness.missionStallSec * fixed 30 Hz
-        private readonly PlayableProfile nativeProfile;
+        private PlayableProfile nativeProfile;
+        internal void Rebind(PlayableProfile next){nativeProfile=next;}
         private long nextActionId,pendingActionId,pendingGeneration;
         private int[] pendingAdded=Array.Empty<int>();
         private bool pendingDefense;

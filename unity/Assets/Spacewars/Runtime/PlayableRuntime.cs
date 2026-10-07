@@ -25,6 +25,26 @@ namespace Spacewars.Runtime
         private readonly PlayableAiOwnerLoop enemyAi;
         private readonly int seed;
         private PlayableSnapshot latest;
+        private PlayableProfile requestedBalance;
+        private int requestedBalanceBase;
+        private string completedBalanceStatus;
+        private string balanceApplyStatus;
+        public string BalanceApplyStatus {get{lock(gate)return balanceApplyStatus;}}
+        public string RequestBalance(PlayableProfile candidate,long generation,int expectedRevision)
+        {
+            lock(gate){if(stopping!=0||stopped!=0)return "Матч остановлен.";
+                if(candidate==null||generation!=Generation||latest==null||latest.ProfileRevision!=expectedRevision)return "Матч или ревизия изменились.";
+                if(requestedBalance!=null)return "Предыдущее применение ещё ожидает продолжения.";
+                requestedBalance=candidate;requestedBalanceBase=expectedRevision;balanceApplyStatus="Применение после продолжения";}
+            Signal();return null;
+        }
+        private void ApplyRequestedBalance(bool isPaused)
+        {
+            if(isPaused)return;PlayableProfile next;int expected;lock(gate){next=requestedBalance;expected=requestedBalanceBase;}if(next==null)return;
+            var error=expected!=domain.CurrentBalanceRevision?"Ревизия матча изменилась; повторите применение.":domain.ValidateBalance(next);
+            if(error==null){domain.ApplyBalance(next);ownerAi?.Rebind(next);enemyAi?.Rebind(next);}
+            completedBalanceStatus=error??("Применена ревизия "+next.DisplayName+" · "+next.Revision);
+        }
         private NavGeometry navigationGeometry;
         private int stopping,stopped,paused,outstanding,errors;
         private long snapshotSequence,lastAcceptedSequence;
@@ -137,13 +157,13 @@ namespace Spacewars.Runtime
                     double now=clock.Elapsed.TotalSeconds;
                     if(now<next){wake.WaitOne((int)Math.Min(20,Math.Ceiling((next-now)*1000)));continue;}
                     var timer=Stopwatch.StartNew();bool isPaused=Volatile.Read(ref paused)!=0;
-                    domain.SetRallyPaused(isPaused);ApplyCommands(isPaused);
+                    ApplyRequestedBalance(isPaused);domain.SetRallyPaused(isPaused);ApplyCommands(isPaused);
                     var snapshot=PlayableAiAuthorityCycle.Advance(domain,ownerAi,enemyAi,LastHumanSequence,isPaused,++snapshotSequence,seed,
                         ()=>Metrics(lastCpu,lastAt==0?0:(now-lastAt)*1000));
                     foreach(var receipt in domain.DrainRallyReceipts())RecordReceipt(receipt);
                     if(ownerAi!=null)Volatile.Write(ref aiCheckpoint,ownerAi.Checkpoint);
                     if(enemyAi!=null)Volatile.Write(ref enemyAiCheckpoint,enemyAi.Checkpoint);
-                    PublishParticipantViews(RuntimeStatus.Running,null);Volatile.Write(ref navigationGeometry,domain.Geometry);Volatile.Write(ref latest,snapshot);lastCpu=timer.Elapsed.TotalMilliseconds;maxCpu=Math.Max(maxCpu,lastCpu);if(lastCpu>TickSeconds*1000)missedDeadlines++;lastAt=now;
+                    PublishParticipantViews(RuntimeStatus.Running,null);Volatile.Write(ref navigationGeometry,domain.Geometry);Volatile.Write(ref latest,snapshot);if(completedBalanceStatus!=null){lock(gate){balanceApplyStatus=completedBalanceStatus;requestedBalance=null;completedBalanceStatus=null;}}lastCpu=timer.Elapsed.TotalMilliseconds;maxCpu=Math.Max(maxCpu,lastCpu);if(lastCpu>TickSeconds*1000)missedDeadlines++;lastAt=now;
                     next+=TickSeconds;if(next<clock.Elapsed.TotalSeconds)next=clock.Elapsed.TotalSeconds;
                 }
             }

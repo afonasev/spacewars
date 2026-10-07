@@ -45,7 +45,7 @@ namespace Spacewars.Presentation
         private void Start()
         {
             var args=Environment.GetCommandLineArgs();
-            nativeMainMenuEnabled=!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT"))||Array.IndexOf(args,"-nativeMenu")>=0;
+            nativeMainMenuEnabled=true;
 #if !UNITY_EDITOR && !DEVELOPMENT_BUILD
             nativeMainMenuEnabled=true;
 #endif
@@ -59,9 +59,17 @@ namespace Spacewars.Presentation
                 if(Array.IndexOf(commandLine,"-twoLocalHumans")>=0){gameObject.AddComponent<OfflineTwoLocalBootstrap>();enabled=false;return;}
                 if(Array.IndexOf(commandLine,"-threeCrossingsEvidence")>=0){gameObject.AddComponent<ThreeCrossingsInspection>();enabled=false;return;}
                 profile=PlayableProfile.Create(JsonUtility.FromJson<PlayableProfileData>(Resources.Load<TextAsset>("PlayableProfile").text),new ThreeCrossingsMap(JsonUtility.FromJson<ThreeCrossingsProfileData>(Resources.Load<TextAsset>("ThreeCrossingsProfile").text)));
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                if(Array.IndexOf(commandLine,"-orbitalHudEvidence")>=0)
+                {
+                    // Diagnostic economy only: expose occupied queues promptly; never a shipping default.
+                    var fixture=profile.CopyData();fixture.startingCredits=10000;fixture.factoryBuildSeconds=1;fixture.scienceBuildSeconds=1;
+                    profile=PlayableProfile.Create(fixture,profile.AuthoredMap,"UI review");
+                }
+#endif
                 // Render cadence belongs to this prototype profile; the domain remains 30 Hz.
                 QualitySettings.vSyncCount=0;Application.targetFrameRate=profile.RenderTargetFramesPerSecond;
-                AudioListener.volume=0;
+                AudioListener.volume=NativeUserSettings.Volume;
                 Application.runInBackground=true;
                 var args=Environment.GetCommandLineArgs();for(int i=0;i+1<args.Length;i++)if(args[i]=="-playableEvidence")evidence=args[i+1];
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -78,12 +86,16 @@ namespace Spacewars.Presentation
                 input.Capture=()=>{if(evidence!=null){CaptureProductionSnapshot(++captures);ScreenCapture.CaptureScreenshot(Path.Combine(evidence,"native-"+captures.ToString("D2")+".png"));Record("capture "+captures);}};
                 input.Select=Select;input.Order=Order;input.Stop=()=>Submit(PlayableCommandKind.Stop);input.Hold=()=>Submit(PlayableCommandKind.Hold);
                 input.TogglePause=()=>Pause(!paused);input.Restart=Restart;input.FocusLost=()=>Pause(true);
-                input.IsPointerOverUi=OverUi;input.IsKeyboardInUi=()=>inLobby||preparing||root?.focusController?.focusedElement is Button||root?.focusController?.focusedElement is TextField;
+                input.IsPointerOverUi=OverUi;input.IsKeyboardInUi=()=>MenuOwnsInput||root?.focusController?.focusedElement is Button||root?.focusController?.focusedElement is TextField;
                 input.MapAt=MapAt;input.MapSelect=MapSelect;input.MapOrder=MapOrder;input.ToggleMap=ToggleMap;input.CloseMap=CloseMap;
                 input.Pan=Pan;input.Zoom=Zoom;input.Drag=DrawDrag;
                 input.AttackModeChanged=active=>{notice=active?"Выберите цель атаки или точку движения с атакой.":"";};
                 for(int i=0;i+1<args.Length;i++)if(args[i]=="-lobbyEvidence")lobbyEvidence=args[i+1];
                 CreateLobby();
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                for(int i=0;i+1<args.Length;i++)if(args[i]=="-orbitalUiEvidence")orbitalEvidence=args[i+1];
+                if(orbitalEvidence!=null)StartCoroutine(CaptureOrbitalUiEvidence());
+#endif
                 // Existing opt-in diagnostic routes retain their direct-match entry.
                 if(evidence!=null&&lobbyEvidence==null){inLobby=false;menuScreen.style.display=lobbyScreen.style.display=DisplayStyle.None;SetMatchUi(true);StartSession();}
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -107,15 +119,15 @@ namespace Spacewars.Presentation
         private void CreateHud()
         {
             var panel=ScriptableObject.CreateInstance<PanelSettings>();panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");panel.scaleMode=PanelScaleMode.ConstantPixelSize;
-            var doc=gameObject.AddComponent<UIDocument>();doc.panelSettings=panel;root=doc.rootVisualElement;root.pickingMode=PickingMode.Ignore;root.focusable=true;root.tabIndex=-1;
+            var doc=gameObject.AddComponent<UIDocument>();doc.panelSettings=panel;root=doc.rootVisualElement;OrbitalTheme.ConfigurePanel(panel,root);root.pickingMode=PickingMode.Ignore;root.focusable=true;root.tabIndex=-1;OrbitalTheme.Install(root);menuNavigation=new NativeMenuNavigation(root);
             root.style.unityFont=Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");root.style.fontSize=16;root.style.color=Ink;
-            top=Panel();top.style.left=20;top.style.right=20;top.style.top=16;top.style.minHeight=70;top.style.flexDirection=FlexDirection.Row;top.style.flexWrap=Wrap.Wrap;top.style.alignItems=Align.Center;StyleRegion(top);root.Add(top);
-            var brand=new Label("SPACEWARS");brand.style.fontSize=25;brand.style.color=Cyan;brand.style.unityFontStyleAndWeight=FontStyle.Bold;brand.style.letterSpacing=2;brand.style.marginRight=26;top.Add(brand);
-            objective=new Label("ЦЕЛЬ  /  Захватите территории · уничтожьте центры противника");objective.style.flexGrow=1;objective.style.minWidth=220;objective.style.color=Ink;objective.style.whiteSpace=WhiteSpace.Normal;top.Add(objective);
+            top=Panel();top.name="match-header";top.style.left=20;top.style.right=20;top.style.top=16;top.style.minHeight=66;top.style.flexDirection=FlexDirection.Row;top.style.flexWrap=Wrap.Wrap;top.style.alignItems=Align.Center;StyleRegion(top);root.Add(top);
+            var brand=new Label("SPACEWARS");brand.style.fontSize=18;brand.style.color=Cyan;brand.style.unityFontStyleAndWeight=FontStyle.Bold;brand.style.letterSpacing=2;brand.style.marginRight=20;top.Add(brand);
+            objective=new Label("ЦЕЛЬ  /  Захватите территории · уничтожьте центры противника");objective.style.flexGrow=1;objective.style.minWidth=140;objective.style.fontSize=12;objective.style.maxWidth=340;objective.style.marginRight=20;objective.style.color=Ink;objective.style.whiteSpace=WhiteSpace.Normal;top.Add(objective);
             creditsLabel=new Label();creditsLabel.style.fontSize=23;creditsLabel.style.unityFontStyleAndWeight=FontStyle.Bold;creditsLabel.style.color=Cyan;creditsLabel.style.marginRight=20;top.Add(creditsLabel);
-            hudFocusButton=Button("Пауза",()=>Pause(!paused));top.Add(hudFocusButton);top.Add(Button("Заново",Restart));hudLobbyButton=Button("В лобби",ReturnToLobby);hudLobbyButton.style.display=DisplayStyle.None;top.Add(hudLobbyButton);top.Add(Button("Выйти",Quit));
-            bottom=Panel();bottom.style.left=20;bottom.style.right=20;bottom.style.bottom=18;bottom.style.minHeight=(float)profile.MinimapCompactSize+74;StyleRegion(bottom);root.Add(bottom);
-            hudRow=new VisualElement();hudRow.style.flexDirection=FlexDirection.Row;bottom.Add(hudRow);
+            hudFocusButton=Button("Пауза",()=>Pause(!paused));top.Add(hudFocusButton);var quickRestart=Button("Заново",Restart);quickRestart.style.display=DisplayStyle.None;top.Add(quickRestart);hudLobbyButton=Button("В лобби",ReturnToLobby);hudLobbyButton.style.display=DisplayStyle.None;top.Add(hudLobbyButton);var quickQuit=Button("Выйти",Quit);quickQuit.style.display=DisplayStyle.None;top.Add(quickQuit);
+            bottom=Panel();bottom.style.left=20;bottom.style.right=20;bottom.style.bottom=18;bottom.name="match-command-deck";bottom.style.minHeight=0;bottom.pickingMode=PickingMode.Ignore;root.Add(bottom);
+            hudRow=new VisualElement();hudRow.style.flexDirection=FlexDirection.Row;hudRow.style.alignItems=Align.FlexEnd;hudRow.pickingMode=PickingMode.Ignore;bottom.Add(hudRow);
             CreateMaps(hudRow);
             buildRegion=new VisualElement();buildRegion.style.width=220;StyleRegion(buildRegion);buildRegion.Add(Section("СТРОИТЕЛЬСТВО"));hudRow.Add(buildRegion);
             siteLabel=new Label("Выберите свободную площадку");siteLabel.style.whiteSpace=WhiteSpace.Normal;buildRegion.Add(siteLabel);
@@ -125,32 +137,38 @@ namespace Spacewars.Presentation
             buildScience=Button("Научный центр",()=>BuildSelected(PlayableBuildingKind.ScientificCenter));buildActions.Add(buildScience);
             buildCenter=Button("⬡ Построить",()=>{var site=view.Sites.FirstOrDefault(x=>x.Site.Id==selectedSite);if(site!=null)BuildSelected(site.Site.Kind);});buildActions.Add(buildCenter);
             cancelBuilding=Button("Отменить стройку",()=>Submit(PlayableCommandKind.CancelBuilding));buildActions.Add(cancelBuilding);
-            armyRegion=new VisualElement();armyRegion.style.flexGrow=1;armyRegion.style.minWidth=380;armyRegion.style.marginLeft=14;StyleRegion(armyRegion);armyRegion.Add(Section("ВЫБОР И ОЧЕРЕДИ"));hudRow.Add(armyRegion);
-            selectionLabel=new Label("Выберите фабрику или танки");selectionLabel.style.fontSize=18;armyRegion.Add(selectionLabel);
+            armyRegion=new VisualElement();armyRegion.style.flexGrow=1;armyRegion.style.flexBasis=0;armyRegion.style.minWidth=380;armyRegion.style.marginLeft=14;StyleRegion(armyRegion);armyRegion.Add(Section("ВЫБОР И ОЧЕРЕДИ"));hudRow.Add(armyRegion);
+            selectionLabel=new Label("Выберите фабрику или танки");selectionLabel.style.fontSize=18;selectionLabel.style.unityFontStyleAndWeight=FontStyle.Bold;selectionLabel.style.whiteSpace=WhiteSpace.Normal;selectionLabel.style.marginBottom=12;armyRegion.Add(selectionLabel);
             var productionActions=new VisualElement();productionActions.style.flexDirection=FlexDirection.Row;armyRegion.Add(productionActions);
             shkvalButton=Button("Шквал · "+profile.ShkvalCreditCost,()=>Submit(PlayableCommandKind.QueueShkval,new[]{productionFactory}));productionActions.Add(shkvalButton);
             explorerButton=Button("Исследователь · "+profile.ExplorerCreditCost,()=>Submit(PlayableCommandKind.QueueExplorer,new[]{productionFactory}));productionActions.Add(explorerButton);
             tankButton=Button("Танк · "+profile.TankCreditCost,()=>Submit(PlayableCommandKind.QueueTank,new[]{productionFactory}));productionActions.Add(tankButton);
-            foreach(var action in new[]{shkvalButton,explorerButton,tankButton}){action.style.flexGrow=1;action.style.flexBasis=0;action.style.height=46;action.style.fontSize=12;action.style.whiteSpace=WhiteSpace.Normal;action.style.unityTextAlign=TextAnchor.MiddleCenter;}
+            foreach(var action in new[]{shkvalButton,explorerButton,tankButton}){action.style.flexGrow=1;action.style.flexBasis=0;action.style.height=46;action.style.fontSize=14;action.style.whiteSpace=WhiteSpace.Normal;action.style.unityTextAlign=TextAnchor.MiddleCenter;}
             progress=new ProgressBar{lowValue=0,highValue=100,title="Нет производства"};progress.style.height=22;armyRegion.Add(progress);
             StyleProgress(progress);
             queueLabel=new Label();armyRegion.Add(queueLabel);CreateProductionHud(armyRegion);CreateScienceHud(armyRegion);
             commandRegion=new VisualElement();commandRegion.style.width=220;commandRegion.style.marginLeft=14;StyleRegion(commandRegion);commandRegion.Add(Section("КОМАНДЫ"));hudRow.Add(commandRegion);
-            commandRegion.Add(Button("HOLD · H",()=>Submit(PlayableCommandKind.Hold)));
-            commandRegion.Add(Button("Стоп · S",()=>Submit(PlayableCommandKind.Stop)));CreateBuildingLifecycleHud(commandRegion);
-            var commandHint=new Label("ЛКМ/рамка · Shift добавить\nПКМ приказ · A атака\nСтрелки/колесо камера\nF6 — фокус HUD");commandHint.style.whiteSpace=WhiteSpace.Normal;commandRegion.Add(commandHint);
-            noticeLabel=new Label();noticeLabel.style.marginTop=10;noticeLabel.style.color=new Color(.92f,.78f,.48f);bottom.Add(noticeLabel);
+            var holdAction=Button("HOLD · H",()=>Submit(PlayableCommandKind.Hold));holdAction.name="command-hold";commandRegion.Add(holdAction);
+            var stopAction=Button("Стоп · S",()=>Submit(PlayableCommandKind.Stop));stopAction.name="command-stop";commandRegion.Add(stopAction);CreateBuildingLifecycleHud(commandRegion);
+            var commandHint=new Label("ПКМ — приказ\nA — атаковать\nF6 — выбрать действие");commandHint.style.whiteSpace=WhiteSpace.Normal;commandHint.style.color=Muted;commandHint.style.fontSize=13;commandHint.style.marginTop=10;commandRegion.Add(commandHint);
+            noticeLabel=new Label();noticeLabel.style.marginTop=8;noticeLabel.style.fontSize=13;noticeLabel.style.whiteSpace=WhiteSpace.Normal;noticeLabel.style.backgroundColor=PanelColor;noticeLabel.style.color=new Color(.92f,.78f,.48f);bottom.Add(noticeLabel);
             modal=new VisualElement();modal.style.position=Position.Absolute;modal.style.left=0;modal.style.right=0;modal.style.top=0;modal.style.bottom=0;modal.style.backgroundColor=new Color(.015f,.035f,.045f,.84f);modal.style.alignItems=Align.Center;modal.style.justifyContent=Justify.Center;modal.style.display=DisplayStyle.None;root.Add(modal);
-            modalCard=new VisualElement();modalCard.style.width=460;modalCard.style.maxWidth=Length.Percent(100);modalCard.style.paddingLeft=30;modalCard.style.paddingRight=30;modalCard.style.paddingTop=28;modalCard.style.paddingBottom=28;StyleRegion(modalCard);modal.Add(modalCard);
-            modalCard.Add(Section("SPACEWARS  /  МАТЧ"));modalTitle=new Label();modalTitle.style.fontSize=32;modalTitle.style.unityFontStyleAndWeight=FontStyle.Bold;modalTitle.style.color=Cyan;modalTitle.style.unityTextAlign=TextAnchor.MiddleCenter;modalTitle.style.marginTop=16;modalTitle.style.marginBottom=8;modalCard.Add(modalTitle);
+            modalCard=new VisualElement{name="match-menu-card"};modalCard.AddToClassList("orbital-match-menu");modalCard.style.width=540;modalCard.style.maxWidth=Length.Percent(100);modalCard.style.paddingLeft=30;modalCard.style.paddingRight=30;modalCard.style.paddingTop=28;modalCard.style.paddingBottom=28;StyleRegion(modalCard);modal.Add(modalCard);
+            modalCard.Add(Section("SPACEWARS  /  КОМАНДОВАНИЕ"));modalTitle=new Label();modalTitle.style.fontSize=32;modalTitle.style.unityFontStyleAndWeight=FontStyle.Bold;modalTitle.style.color=Cyan;modalTitle.style.unityTextAlign=TextAnchor.MiddleCenter;modalTitle.style.marginTop=16;modalTitle.style.marginBottom=8;modalCard.Add(modalTitle);
             modalCaption=new Label("Бой приостановлен");modalCaption.style.unityTextAlign=TextAnchor.MiddleCenter;modalCaption.style.color=Muted;modalCaption.style.marginBottom=20;modalCard.Add(modalCaption);
             resumeButton=Button("Продолжить",()=>Pause(false));modalCard.Add(resumeButton);
+            modalCard.Add(pauseSettings=OrbitalTheme.Action("Настройки",OpenPauseSettings,"pause-settings"));
+            modalCard.Add(pauseLab=OrbitalTheme.Action("Лаборатория геймдизайна",OpenLaboratory,"pause-laboratory"));
+            modalCard.Add(pauseMain=OrbitalTheme.Action("Выйти в меню",ReturnToMainMenu,"pause-main"));
             modalRestartButton=Button("Начать заново",Restart);modalCard.Add(modalRestartButton);
             modalExitButton=Button("Выйти",Quit);modalCard.Add(modalExitButton);modalLobbyButton=Button("В лобби",ReturnToLobby);modalLobbyButton.style.display=DisplayStyle.None;modalCard.Add(modalLobbyButton);
+            foreach(var action in modalCard.Query<Button>().ToList()){action.style.height=44;action.style.minHeight=44;action.style.fontSize=18;action.style.marginBottom=7;}
+            resumeButton.AddToClassList("orbital-primary");modalRestartButton.AddToClassList("orbital-primary");
             dragBox=new VisualElement();dragBox.pickingMode=PickingMode.Ignore;dragBox.style.position=Position.Absolute;dragBox.style.backgroundColor=new Color(.15f,.85f,.75f,.12f);dragBox.style.borderLeftWidth=1;dragBox.style.borderRightWidth=1;dragBox.style.borderTopWidth=1;dragBox.style.borderBottomWidth=1;dragBox.style.borderLeftColor=Color.cyan;dragBox.style.borderRightColor=Color.cyan;dragBox.style.borderTopColor=Color.cyan;dragBox.style.borderBottomColor=Color.cyan;dragBox.style.display=DisplayStyle.None;root.Add(dragBox);
             root.RegisterCallback<GeometryChangedEvent>(_=>ApplyResponsiveHud());
             root.RegisterCallback<KeyDownEvent>(evt=>
             {
+                if(menuNavigation.Active)return;
                 if(evt.keyCode==KeyCode.F6)ToggleHudFocus();
                 else if(evt.keyCode==KeyCode.Tab&&(ModalVisible()||root.focusController?.focusedElement is Button))MoveHudFocus(evt.shiftKey);
                 else if(evt.keyCode==KeyCode.Escape&&ModalVisible())
@@ -224,7 +242,7 @@ namespace Spacewars.Presentation
             Record(kind+" ids="+string.Join(",",ids??selection.ToArray())+" target="+target.X+","+target.Z+" order="+productionOrderId+" admission="+result.Status);
         }
         private string Friendly(PlayableCommandStatus status){switch(status){case PlayableCommandStatus.Accepted:return "Проверяем точку сбора";case PlayableCommandStatus.Cancelled:return "Проверка точки отменена";case PlayableCommandStatus.Applied:return "Приказ выполнен";case PlayableCommandStatus.InsufficientCredits:return "Недостаточно кредитов";case PlayableCommandStatus.OccupiedPad:return "Площадка занята";case PlayableCommandStatus.InvalidEntity:return "Выберите готовую фабрику или свои танки";case PlayableCommandStatus.InvalidTarget:return "Недоступная цель";case PlayableCommandStatus.Overflow:return "Слишком много приказов, повторите";default:return "Приказ отклонён";}}
-        private void Pause(bool value){if(runtime==null||restarting||quitting||(!value&&matchSetup!=null&&!devicesReady))return;confirmSaleBuilding=0;paused=value;runtime.RequestPause(value);input?.ClearMode();CloseMap();Record("pause="+value);}
+        private void Pause(bool value){if(runtime==null||restarting||quitting||(!value&&matchSetup!=null&&!devicesReady))return;confirmSaleBuilding=0;paused=value;if(!value){CloseChildMenu();menuNavigation?.SetScope(null);}runtime.RequestPause(value);input?.ClearMode();CloseMap();Record("pause="+value);}
         private void Restart(){if(runtime==null||restarting||quitting)return;Record("restart requested");restarting=true;runtime.RequestStop();}
         private void Quit(){if(quitting)return;Record("exit requested");quitting=true;runtime?.RequestStop();}
         private void Pan(Vector2 axis){cameraView.transform.position+=new Vector3(axis.x,0,axis.y)*(float)profile.CameraPanSpeed*Time.unscaledDeltaTime;Record("camera pan");}
@@ -240,14 +258,14 @@ namespace Spacewars.Presentation
         }
         private void UpdateFrame()
         {
-            UpdateLobby();
-            if(returningToLobby&&(runtime==null||runtime.IsStopped)){returningToLobby=false;runtime=null;view=null;world.Clear();selection.Clear();CloseMap();ShowLobby();return;}
+            TickMenuInput();UpdateLobby();
+            if(returningToLobby&&(runtime==null||runtime.IsStopped)){returningToLobby=false;runtime=null;view=null;world.Clear();selection.Clear();CloseMap();if(returningToMain){returningToMain=false;ShowMainMenu();}else ShowLobby();return;}
             if(inLobby&&!preparing)return;
             if(runtime==null)return;
             if(runtime.IsStopped){if(quitting){Flush();Application.Quit();return;}if(restarting)StartSession();}
             view=runtime.Latest;if(view==null)return;
-            input.WorldInputEnabled=!inLobby&&!preparing&&!returningToLobby&&devicesReady&&!paused&&!restarting&&!quitting&&view.Outcome==PlayableMatchOutcome.Playing&&string.IsNullOrEmpty(view.Failure);
-            ServiceRoutes();Render();UpdateHud();UpdateMaps();UpdateLifecycleMarkers();
+            input.WorldInputEnabled=childMenu==null&&!inLobby&&!preparing&&!returningToLobby&&devicesReady&&!paused&&!restarting&&!quitting&&view.Outcome==PlayableMatchOutcome.Playing&&string.IsNullOrEmpty(view.Failure);
+            RebindPresentation();ServiceRoutes();Render();UpdateHud();UpdateMaps();UpdateLifecycleMarkers();
             foreach(var receipt in runtime.DrainReceipts()){if(receipt.Sequence>=noticeSequence){noticeSequence=receipt.Sequence;notice=Friendly(receipt.Status);}Record("receipt "+receipt.Sequence+" "+receipt.Status+" latency_ms="+receipt.LatencyMilliseconds);}
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
             DriveResponsiveUiEvidence();
@@ -305,20 +323,26 @@ namespace Spacewars.Presentation
         private void UpdateHud()
         {
             if(matchSetup!=null)objective.text=matchSetup.MatchHumanName+" · Команда "+matchSetup.HumanTeam+"  /  "+matchSetup.MatchAiName+" · Команда "+matchSetup.AiTeam;
-            creditsLabel.text=view.Credits+"  (+"+view.IncomePerSecond.ToString("0.#")+"/с)";
+            creditsLabel.text="КРЕДИТЫ  "+view.Credits+"   +"+view.IncomePerSecond.ToString("0.#")+"/с";
             UpdateSiteHud();
             var factory=view.Buildings.FirstOrDefault(b=>selection.Contains(b.Id)&&b.Kind==PlayableBuildingKind.Factory&&b.Owner==PlayableOwner.Player);
             var building=view.Buildings.FirstOrDefault(b=>selection.Contains(b.Id));
             tankButton.SetEnabled(factory!=null&&factory.Progress>=1&&factory.PrivateState?.Lifecycle?.Selling!=true&&view.Outcome==PlayableMatchOutcome.Playing&&!paused);
-            selectionLabel.text=building!=null?BuildingName(building.Kind)+" · HP "+building.Health:"ЮНИТЫ · "+selection.Count+(view.Entities.Any(e=>selection.Contains(e.Id)&&e.Held)?" · HOLD":"");
+            selectionLabel.text=building!=null?BuildingName(building.Kind)+" · HP "+building.Health:selection.Count==0?"Ничего не выбрано":"ЮНИТЫ · "+selection.Count+(view.Entities.Any(e=>selection.Contains(e.Id)&&e.Held)?" · HOLD":"");
             double value=building!=null&&building.Progress<1?building.Progress:factory?.ProductionProgress??0;
             progress.value=(float)Math.Min(100,value*100);progress.title=building!=null&&building.Phase==ConstructionPhase.Pending?(building.BlockedReason??"Ожидает начала"):building!=null&&building.Progress<1?"Строительство · "+(int)(value*100)+"%":factory!=null&&factory.QueueCount>0?"Танк · "+(int)Math.Min(100,value*100)+"%":"Нет активного производства";
             progress.style.display=building!=null&&(building.Progress<1||factory!=null)?DisplayStyle.Flex:DisplayStyle.None;
             UpdateProductionHud(factory);UpdateBuildingLifecycleHud(building);UpdateScienceHud(building);
-            noticeLabel.text=notice;modal.style.display=paused||view.Outcome!=PlayableMatchOutcome.Playing||restarting||!string.IsNullOrEmpty(view.Failure)?DisplayStyle.Flex:DisplayStyle.None;
+            bool hasUnits=view.Entities.Any(e=>selection.Contains(e.Id)),hasBuilding=building?.PrivateState!=null;
+            commandRegion.Q<Button>("command-hold").style.display=commandRegion.Q<Button>("command-stop").style.display=hasUnits?DisplayStyle.Flex:DisplayStyle.None;
+            sellBuilding.style.display=repairBuilding.style.display=lifecycleLabel.style.display=hasBuilding?DisplayStyle.Flex:DisplayStyle.None;
+            commandRegion.style.display=hasUnits||hasBuilding?DisplayStyle.Flex:DisplayStyle.None;
+            noticeLabel.text=notice;modal.style.display=childMenu==null&&(paused||view.Outcome!=PlayableMatchOutcome.Playing||restarting||!string.IsNullOrEmpty(view.Failure))?DisplayStyle.Flex:DisplayStyle.None;
+            foreach(var action in new[]{pauseSettings,pauseLab,pauseMain})action.style.display=view.Outcome==PlayableMatchOutcome.Playing&&!restarting?DisplayStyle.Flex:DisplayStyle.None;
             resumeButton.style.display=view.Outcome==PlayableMatchOutcome.Playing&&!restarting?DisplayStyle.Flex:DisplayStyle.None;
             modalTitle.text=!string.IsNullOrEmpty(view.Failure)?"ОШИБКА СИМУЛЯЦИИ":restarting?"НОВЫЙ БОЙ…":view.Outcome==PlayableMatchOutcome.PlayerWon?"ПОБЕДА":view.Outcome==PlayableMatchOutcome.PlayerLost?"ЦЕНТРЫ ПОТЕРЯНЫ":"ПАУЗА";
-            modalCaption.text=(!string.IsNullOrEmpty(view.Failure)?"Матч остановлен":restarting?"Подготовка нового матча":view.Outcome==PlayableMatchOutcome.PlayerWon?"Противник побеждён":view.Outcome==PlayableMatchOutcome.PlayerLost?"Ваши центры уничтожены":"Бой приостановлен")+"\nSeed "+view.Seed+" · "+view.ProfileId+"@"+view.ProfileRevision;modalCaption.style.whiteSpace=WhiteSpace.Normal;
+            modalCaption.text=(!string.IsNullOrEmpty(view.Failure)?"Матч остановлен":restarting?"Подготовка нового матча":view.Outcome==PlayableMatchOutcome.PlayerWon?"Противник побеждён":view.Outcome==PlayableMatchOutcome.PlayerLost?"Ваши центры уничтожены":"Бой приостановлен")+"\nПрофиль: "+profile.DisplayName+" · "+view.ProfileRevision;modalCaption.style.whiteSpace=WhiteSpace.Normal;
+            if(!string.IsNullOrEmpty(runtime?.BalanceApplyStatus))modalCaption.text+="\n"+runtime.BalanceApplyStatus;
             if(matchSetup!=null)modalCaption.text+="\n"+matchSetup.MatchHumanName+"  /  "+matchSetup.MatchAiName;
             modalTitle.style.color=!string.IsNullOrEmpty(view.Failure)||view.Outcome==PlayableMatchOutcome.PlayerLost?Danger:view.Outcome==PlayableMatchOutcome.PlayerWon?Cyan:Ink;
             SyncModalFocus();
@@ -327,6 +351,6 @@ namespace Spacewars.Presentation
         private void Record(string message){actions?.WriteLine((Time.realtimeSinceStartup-started).ToString("F3")+" generation="+generation+" tick="+(view?.Tick??0)+" "+message);actions?.Flush();}
         private void Flush(){metrics?.Flush();actions?.Flush();}
         private void OnApplicationQuit(){runtime?.RequestStop();Flush();}
-        private void OnDestroy(){ClearArtilleryEffects();if(artilleryTransparent)Destroy(artilleryTransparent);lobbyTerrain?.Dispose();mapTerrain?.Dispose();world?.Dispose();runtime?.RequestStop();router?.Dispose();metrics?.Dispose();actions?.Dispose();}
+        private void OnDestroy(){menuNavigation?.Dispose();if(nativeMainMenu!=null)Destroy(nativeMainMenu.gameObject);ClearArtilleryEffects();if(artilleryTransparent)Destroy(artilleryTransparent);lobbyTerrain?.Dispose();mapTerrain?.Dispose();world?.Dispose();runtime?.RequestStop();router?.Dispose();metrics?.Dispose();actions?.Dispose();}
     }
 }

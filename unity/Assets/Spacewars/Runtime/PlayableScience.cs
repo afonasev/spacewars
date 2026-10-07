@@ -7,7 +7,7 @@ namespace Spacewars.Runtime
     internal sealed partial class PlayableDomain
     {
         [Serializable] private sealed class RefineryUpgrade
-        {
+        { public int TermsRevision;
             public double PaidCost,Duration,Elapsed;
             public bool Complete;
         }
@@ -24,7 +24,7 @@ namespace Spacewars.Runtime
             if(!buildings.TryGetValue(id,out var b)||b.Owner!=owner)return PlayableCommandStatus.InvalidEntity;
             message=UpgradeBlocked(b);if(message!=null)return PlayableCommandStatus.Rejected;
             AddCredits(owner,-profile.RefineryUpgradeCost);
-            b.Upgrade=new RefineryUpgrade{PaidCost=profile.RefineryUpgradeCost,Duration=profile.RefineryUpgradeSeconds};
+            b.Upgrade=new RefineryUpgrade{TermsRevision=profile.Revision,PaidCost=profile.RefineryUpgradeCost,Duration=profile.RefineryUpgradeSeconds};
             message="Улучшение завода начато";return PlayableCommandStatus.Applied;
         }
         private PlayableCommandStatus CancelRefineryUpgrade(int id,PlayableOwner owner,out string message)

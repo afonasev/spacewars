@@ -10,7 +10,7 @@ namespace Spacewars.Runtime
         internal const int MaximumProductionOrders=6;
         private long nextProductionSequence=1;
         private sealed class ProductionOrder
-        {
+        { public int TermsRevision;
             public long Id;
             public PlayableEntityKind Kind;
             public int PaidCost,PopulationCost;
@@ -20,7 +20,7 @@ namespace Spacewars.Runtime
         private Building Producer(int id,PlayableOwner owner)
             =>buildings.TryGetValue(id,out var b)&&b.Owner==owner&&b.Kind==PlayableBuildingKind.Factory&&b.Ready&&b.Sale==null?b:null;
         private ProductionOrder NewOrder(PlayableEntityKind kind,bool active)
-            =>new ProductionOrder{Id=nextProductionSequence++,Kind=kind,PaidCost=PlayableUnitRules.Cost(profile,kind),
+            =>new ProductionOrder{TermsRevision=profile.Revision,Id=nextProductionSequence++,Kind=kind,PaidCost=PlayableUnitRules.Cost(profile,kind),
                 PopulationCost=PlayableUnitRules.Population(profile,kind),Duration=PlayableUnitRules.Duration(profile,kind),Remaining=PlayableUnitRules.Duration(profile,kind),Active=active};
         private PlayableCommandStatus QueueTank(int id,PlayableOwner owner,out string message)=>QueueUnit(id,owner,PlayableEntityKind.Tank,out message);
         private PlayableCommandStatus QueueUnit(int id,PlayableOwner owner,PlayableEntityKind kind,out string message)
@@ -59,7 +59,7 @@ namespace Spacewars.Runtime
         {
             int living=0,reserved=0;
             foreach(var u in units.Values)if(u.Owner==owner&&u.Health>0)living+=PlayableUnitRules.Population(profile,u.Kind);
-            foreach(var b in buildings.Values)if(b.Owner==owner)foreach(var o in b.Orders)if(o.Active)reserved+=o.PopulationCost;
+            foreach(var b in buildings.Values)if(b.Owner==owner)foreach(var o in b.Orders)if(o.Active)reserved+=PlayableUnitRules.Population(profile,o.Kind);
             return new PlayablePopulationSnapshot(living,reserved,profile.ArmyCapacity);
         }
         private PlayableProductionOrderSnapshot[] ProductionSnapshot(Building b)
@@ -72,13 +72,13 @@ namespace Spacewars.Runtime
                 var population=Population(owner);int usage=population.Living+population.Reserved;
                 foreach(var b in factories.Where(b=>b.Owner==owner&&b.Orders.Count>0&&!b.Orders[0].Active).OrderBy(b=>b.Orders[0].Id).ThenBy(b=>b.Id))
                 {
-                    var order=b.Orders[0];if(usage+order.PopulationCost>profile.ArmyCapacity)continue;
-                    order.Active=true;usage+=order.PopulationCost;
+                    var order=b.Orders[0];if(usage+PlayableUnitRules.Population(profile,order.Kind)>profile.ArmyCapacity)continue;
+                    order.Active=true;usage+=PlayableUnitRules.Population(profile,order.Kind);
                 }
                 foreach(var b in factories)
                 {
                     if(b.Owner!=owner||!b.RepeatTank||b.Orders.Count!=0||usage+PlayableUnitRules.Population(profile,b.RepeatKind)>profile.ArmyCapacity||Balance(owner)<PlayableUnitRules.Cost(profile,b.RepeatKind))continue;
-                    var order=NewOrder(b.RepeatKind,true);AddCredits(owner,-order.PaidCost);b.Orders.Add(order);usage+=order.PopulationCost;
+                    var order=NewOrder(b.RepeatKind,true);AddCredits(owner,-order.PaidCost);b.Orders.Add(order);usage+=PlayableUnitRules.Population(profile,order.Kind);
                 }
             }
             foreach(var b in factories)

@@ -52,7 +52,7 @@ namespace Spacewars.Runtime
             var flight=UnitUpgraded(u)?GuidedFlight(u,self.Position,target):BaselineFlight(self.Position,target);
             // Launch prediction is observation-bound. Physical contacts below use full current state.
             var prediction=PlayableBallistics.FirstContact(flight,profile.ShkvalProjectileRadius,SolidObstacles(),profile.BallisticWallHeight,BallisticBodies(u.Owner),u.Id,terrain:TerrainHeight).Value;
-            projectiles.Add(new Projectile{Id=nextProjectile++,Owner=u.Id,Target=u.Target,Faction=u.Owner,Kind=PlayableEntityKind.Shkval,Position=self.Position,Damage=profile.ShkvalDamage,
+            projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=u.Id,Target=u.Target,Faction=u.Owner,Kind=PlayableEntityKind.Shkval,Position=self.Position,Damage=profile.ShkvalDamage,
                 Rocket=new Rocket{Flight=flight,Predicted=prediction,Radius=profile.ShkvalProjectileRadius,BlastRadius=profile.ShkvalBlastRadius,MarkerStartRadius=profile.ShkvalMarkerStartRadius,MarkerOpacity=profile.ShkvalMarkerOpacity,BuildingHeight=profile.ShkvalBuildingCollisionHeight}});
             u.Reload=profile.ShkvalFireIntervalMs/1000;
         }

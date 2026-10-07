@@ -32,10 +32,10 @@ public sealed class PlayableUiShellTests
     {
         using(var evt=KeyDownEvent.GetPooled('\0',key,modifiers))target.SendEvent(evt);
     }
-    private static void SubmitButton(Button button)
+    private void SubmitButton(Button button)
     {
         button.Focus();
-        using(var evt=NavigationSubmitEvent.GetPooled(EventModifiers.None))button.SendEvent(evt);
+        Get<NativeMenuNavigation>("menuNavigation").Activate();
     }
     private void ShowTerminal(PlayableMatchOutcome outcome)
     {
@@ -47,17 +47,18 @@ public sealed class PlayableUiShellTests
     [Test] public void ExistingActionsAreGroupedAndFocusable()
     {
         var root=Get<VisualElement>("root");
-        foreach(var heading in new[]{"ТАКТИЧЕСКАЯ КАРТА","СТРОИТЕЛЬСТВО","ВЫБОР И ОЧЕРЕДИ","КОМАНДЫ"})
+        foreach(var heading in new[]{"СТРОИТЕЛЬСТВО","ВЫБОР И ОЧЕРЕДИ","КОМАНДЫ"})
             Assert.True(root.Query<Label>().ToList().Any(label=>label.text==heading),heading);
+        Assert.NotNull(root.Q("tactical-minimap-frame"));
         Assert.True(root.Query<Button>().ToList().Any(button=>button.text=="Продолжить"&&button.focusable));
         Assert.True(root.Query<Button>().ToList().Any(button=>button.text=="Начать заново"&&button.focusable));
         Assert.True(root.Query<Button>().ToList().Any(button=>button.text=="Выйти"&&button.focusable));
         Assert.AreEqual(6,root.Query<Button>().ToList().Count(button=>button.name.StartsWith("production-slot-")));
         var pause=root.Query<Button>().ToList().First(button=>button.text=="Пауза");
         pause.Focus();
-        Assert.AreEqual(new Color(.48f,.88f,.81f),pause.style.borderLeftColor.value);
+        Assert.AreEqual(OrbitalTheme.Cyan,pause.style.borderLeftColor.value);
         root.Focus();
-        Assert.AreEqual(new Color(.18f,.39f,.43f),pause.style.borderLeftColor.value);
+        Assert.AreEqual(OrbitalTheme.Line,pause.style.borderLeftColor.value);
     }
 
     [TestCase(PlayableMatchOutcome.Playing,"ПАУЗА",true)]
@@ -72,7 +73,7 @@ public sealed class PlayableUiShellTests
         Assert.AreEqual(title,Get<Label>("modalTitle").text);
         Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>("modal").style.display.value);
         Assert.AreEqual(canContinue?DisplayStyle.Flex:DisplayStyle.None,Get<Button>("resumeButton").style.display.value);
-        Assert.True(Get<Label>("modalCaption").text.Contains("Seed 7 · "+PlayableProfile.RequiredProfileId+"@1"));
+        Assert.True(Get<Label>("modalCaption").text.Contains("Профиль: "+PlayableProfile.Default.DisplayName+" · 1"));
         Assert.AreSame(canContinue?Get<Button>("resumeButton"):Get<Button>("modalRestartButton"),Get<VisualElement>("root").focusController.focusedElement);
     }
 
@@ -91,7 +92,7 @@ public sealed class PlayableUiShellTests
         move.Invoke(hud,new object[]{false});Assert.AreSame(restart,root.focusController.focusedElement);
         move.Invoke(hud,new object[]{true});Assert.AreSame(exit,root.focusController.focusedElement);
         Call("ToggleHudFocus");Assert.AreSame(restart,root.focusController.focusedElement);
-        Assert.AreEqual(new Color(.48f,.88f,.81f),restart.style.borderLeftColor.value);
+        Assert.AreEqual(OrbitalTheme.Cyan,restart.style.borderLeftColor.value);
     }
 
     [TestCase(PlayableMatchOutcome.PlayerWon)]
@@ -156,7 +157,7 @@ public sealed class PlayableUiShellTests
     }
 
     [TestCase(1440f,false)]
-    [TestCase(1024f,true)]
+    [TestCase(800f,true)]
     public void ResponsiveLayoutKeepsTheSameActionsAndFocus(float width,bool compact)
     {
         typeof(PlayableBootstrap).GetMethods(Flags).Single(method=>method.Name=="ApplyResponsiveHud"&&method.GetParameters().Length==1)
@@ -170,7 +171,7 @@ public sealed class PlayableUiShellTests
         Assert.AreEqual(6,Get<VisualElement>("root").Query<Button>().ToList().Count(button=>button.name.StartsWith("production-slot-")));
         var pause=Get<VisualElement>("root").Query<Button>().ToList().First(button=>button.text=="Пауза");
         pause.Focus();
-        Assert.AreEqual(new Color(.48f,.88f,.81f),pause.style.borderLeftColor.value);
+        Assert.AreEqual(OrbitalTheme.Cyan,pause.style.borderLeftColor.value);
     }
 
     [Test]
@@ -180,9 +181,10 @@ public sealed class PlayableUiShellTests
         root.Focus();
         Call("ToggleHudFocus");
         Assert.AreSame(Get<Button>("hudFocusButton"),root.focusController.focusedElement);
-        Assert.AreEqual(new Color(.48f,.88f,.81f),Get<Button>("hudFocusButton").style.borderLeftColor.value);
+        Assert.AreEqual(OrbitalTheme.Cyan,Get<Button>("hudFocusButton").style.borderLeftColor.value);
         typeof(PlayableBootstrap).GetMethod("MoveHudFocus",Flags).Invoke(hud,new object[]{false});
-        Assert.AreEqual("Заново",((Button)root.focusController.focusedElement).text);
+        Assert.AreNotEqual("Заново",((Button)root.focusController.focusedElement).text,"Restart belongs to pause, not the combat header.");
+        Assert.AreNotEqual("Выйти",((Button)root.focusController.focusedElement).text);
         typeof(PlayableBootstrap).GetMethod("MoveHudFocus",Flags).Invoke(hud,new object[]{true});
         Assert.AreSame(Get<Button>("hudFocusButton"),root.focusController.focusedElement);
         Call("ToggleHudFocus");
@@ -218,6 +220,22 @@ public sealed class PlayableUiShellTests
     }
 
     [UnityTest]
+    public IEnumerator PopulatedResearchStaysBesideMapWithoutCoveringHeaderAt800()
+    {
+        var root=Get<VisualElement>("root");root.style.width=800;root.style.height=620;
+        var orders=new[]{new PlayableResearchOrderSnapshot(1,PlayableResearchKind.TankChassis,7,300,15,30,true,false),new PlayableResearchOrderSnapshot(2,PlayableResearchKind.ExplorerAssaultGuns,7,0,0,30,false,false),new PlayableResearchOrderSnapshot(3,PlayableResearchKind.ShkvalGuidance,7,0,0,30,false,false)};
+        var lifecycle=new PlayableBuildingLifecycleSnapshot(false,0,false,false,0,0,null,null,1,300,false);
+        var building=new PlayableBuildingSnapshot(7,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,default,250,1,0,0,default,lifecycle:lifecycle,research:orders);
+        Set("view",new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,900,null,Array.Empty<PlayableEntitySnapshot>(),new[]{building},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
+        Get<System.Collections.Generic.HashSet<int>>("selection").Add(7);Call("UpdateHud");
+        yield return null;yield return null;Call("UpdateHud");yield return null;
+        var map=root.Q("tactical-minimap-frame");var army=Get<VisualElement>("armyRegion");
+        Assert.LessOrEqual(map.worldBound.xMax,army.worldBound.xMin+1,"Research must not wrap the full card below the map.");
+        Assert.Greater(map.worldBound.yMin,Get<VisualElement>("top").worldBound.yMax+60,"Keep visible combat space between header and deck.");
+        foreach(var button in army.Query<Button>().ToList())if(button.worldBound.height>0)AssertInside(army.worldBound,button.worldBound,button.name);
+    }
+
+    [UnityTest]
     public IEnumerator TerminalResultsFitAndKeepFocusAtCheckedViewports()
     {
         var root=Get<VisualElement>("root");
@@ -240,7 +258,7 @@ public sealed class PlayableUiShellTests
             Assert.AreEqual(DisplayStyle.Flex,modal.style.display.value,context);
             Assert.AreEqual(DisplayStyle.None,resume.style.display.value,context);
             Assert.AreEqual(outcome==PlayableMatchOutcome.PlayerWon?"ПОБЕДА":"ЦЕНТРЫ ПОТЕРЯНЫ",title.text,context);
-            StringAssert.Contains("Seed 7 · "+PlayableProfile.RequiredProfileId+"@1",caption.text,context);
+            StringAssert.Contains("Профиль: "+PlayableProfile.Default.DisplayName+" · 1",caption.text,context);
             Assert.AreSame(restart,root.focusController.focusedElement,context);
             AssertInside(root.worldBound,card.worldBound,"card "+context);
             AssertInside(card.worldBound,title.worldBound,"title "+context);

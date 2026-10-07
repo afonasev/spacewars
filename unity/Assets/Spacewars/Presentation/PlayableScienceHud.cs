@@ -18,7 +18,7 @@ namespace Spacewars.Presentation
         private bool scienceActionAllowed,scienceCancelling;
         private void CreateScienceHud(VisualElement parent)
         {
-            scienceControls=new VisualElement{name="science-controls"};parent.Add(scienceControls);
+            scienceControls=new VisualElement{name="science-controls"};scienceControls.style.minWidth=0;parent.Add(scienceControls);
             upgradeRefinery=Button("Улучшить завод",()=>
             {
                 if(scienceActionAllowed&&scienceRefinery!=0)Submit(scienceCancelling?PlayableCommandKind.CancelRefineryUpgrade:PlayableCommandKind.UpgradeRefinery,new[]{scienceRefinery});
@@ -26,9 +26,9 @@ namespace Spacewars.Presentation
             upgradeProgress=new ProgressBar{lowValue=0,highValue=100,name="refinery-upgrade-progress"};scienceControls.Add(upgradeProgress);StyleProgress(upgradeProgress);
             upgradeReason=new Label{name="refinery-upgrade-reason"};upgradeReason.style.whiteSpace=WhiteSpace.Normal;scienceControls.Add(upgradeReason);
             var row=new VisualElement{name="research-queue"};row.style.flexDirection=FlexDirection.Row;scienceControls.Add(row);
-            for(int i=0;i<researchButtons.Length;i++){var kind=(PlayableResearchKind)i;var button=Button(ResearchName(kind),()=>ResearchClick(kind));button.name="research-"+kind;button.style.flexGrow=1;row.Add(button);researchButtons[i]=button;}
+            for(int i=0;i<researchButtons.Length;i++){var kind=(PlayableResearchKind)i;var button=Button(ResearchName(kind),()=>ResearchClick(kind));button.name="research-"+kind;button.style.flexGrow=1;button.style.flexBasis=0;button.style.minWidth=0;button.style.flexShrink=1;button.style.paddingLeft=6;button.style.paddingRight=6;button.style.whiteSpace=WhiteSpace.Normal;button.style.height=48;row.Add(button);researchButtons[i]=button;}
             var slots=new VisualElement{name="research-slots"};slots.style.flexDirection=FlexDirection.Row;scienceControls.Add(slots);
-            for(int i=0;i<researchSlots.Length;i++){var slot=new ResearchSlot();slot.Button=Button("—",()=>CancelResearchSlot(slot));slot.Button.name="research-slot-"+i;slot.Button.style.flexGrow=1;slot.Button.style.flexBasis=0;slot.Button.style.height=38;slot.Button.style.fontSize=10;slots.Add(slot.Button);researchSlots[i]=slot;}
+            for(int i=0;i<researchSlots.Length;i++){var slot=new ResearchSlot();slot.Button=Button("—",()=>CancelResearchSlot(slot));slot.Button.name="research-slot-"+i;slot.Button.style.flexGrow=1;slot.Button.style.flexBasis=0;slot.Button.style.minWidth=0;slot.Button.style.paddingLeft=4;slot.Button.style.paddingRight=4;slot.Button.style.height=52;slot.Button.style.fontSize=12;slot.Button.style.whiteSpace=WhiteSpace.Normal;slots.Add(slot.Button);researchSlots[i]=slot;}
         }
         private void UpdateScienceHud(PlayableBuildingSnapshot building)
         {

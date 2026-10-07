@@ -19,7 +19,8 @@ namespace Spacewars.Runtime
     public sealed class PlayableAiArtillerySupportPolicy
     {
         private readonly string OwnerId;
-        private readonly PlayableProfile profile;
+        private PlayableProfile profile;
+        internal void Rebind(PlayableProfile next){profile=next;}
         private long nextActionId,pendingActionId,pendingGeneration;
         private int seed,earlyOrdinal,earlyCount,heldUnitId;
         private bool initialized,earlyAdopted,fulfilled,adopted;

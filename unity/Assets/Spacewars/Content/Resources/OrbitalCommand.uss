@@ -1,0 +1,41 @@
+.orbital-root { color: rgb(227,240,247); font-size: 16px; }
+.orbital-screen { position: absolute; left: 0; right: 0; top: 0; bottom: 0; background-color: rgb(9,13,17); padding: 28px; align-items: center; justify-content: center; }
+.orbital-art { -unity-background-scale-mode: scale-and-crop; }
+.orbital-card { background-color: rgba(9,17,21,0.97); border-width: 1px; border-color: rgb(58,84,99); padding: 24px; width: 560px; max-width: 96%; max-height: 96%; }
+.orbital-title { font-size: 32px; -unity-font-style: bold; color: rgb(227,240,247); margin-bottom: 20px; white-space: normal; }
+.orbital-body { white-space: normal; margin-bottom: 12px; }
+.orbital-muted { color: rgb(135,163,179); white-space: normal; font-size: 13px; margin-top: 8px; margin-bottom: 8px; }
+.orbital-button { min-height: 40px; height: 44px; flex-shrink: 0; margin: 0 0 7px 0; padding: 6px 16px; background-color: rgba(12,28,37,0.97); border-width: 1px; border-color: rgb(58,84,99); border-radius: 2px; color: rgb(227,240,247); font-size: 17px; -unity-text-align: middle-left; white-space: normal; }
+.orbital-primary { border-left-width: 4px; border-color: rgb(69,217,240); -unity-font-style: bold; }
+.orbital-button:hover, .orbital-button:focus, .orbital-focused { background-color: rgb(20,49,61); border-color: rgb(69,217,240); color: white; }
+.orbital-button:disabled { opacity: 1; color: rgb(116,139,152); background-color: rgb(16,25,30); border-color: rgb(47,58,64); }
+.orbital-root .unity-base-field { flex-shrink: 0; min-height: 38px; margin-bottom: 12px; color: rgb(227,240,247); }
+.orbital-root .unity-base-field__label { color: rgb(227,240,247); min-width: 190px; white-space: normal; }
+.orbital-root .unity-base-field__input { background-color: rgb(18,32,41); color: rgb(227,240,247); border-width: 1px; border-color: rgb(58,84,99); padding: 6px; }
+.orbital-root .unity-base-field:focus > .unity-base-field__input { border-color: rgb(69,217,240); }
+.orbital-root .unity-toggle__checkmark { background-color: rgb(35,66,78); border-color: rgb(69,217,240); }
+.orbital-root .unity-base-slider__tracker { background-color: rgb(58,84,99); }
+.orbital-root .unity-base-slider__dragger { background-color: rgb(69,217,240); }
+.orbital-main-stack { position: absolute; left: 53%; top: 12%; width: 40%; max-width: 560px; }
+.orbital-logo { font-size: 52px; -unity-font-style: bold; letter-spacing: 2px; margin-bottom: 22px; color: white; }
+.orbital-main-stack .orbital-button { height: 46px; font-size: 19px; }
+.orbital-hints { color: rgb(164,190,203); font-size: 13px; white-space: normal; margin-top: 12px; }
+.orbital-lab-card { width: 1120px; height: 94%; }
+.orbital-toolbar { flex-direction: row; flex-wrap: wrap; }
+.orbital-toolbar .orbital-button { margin-right: 8px; flex-grow: 1; }
+.orbital-keyboard { position: absolute; left: 8%; right: 8%; top: 16%; bottom: 10%; background-color: rgb(9,17,21); border-width: 2px; border-color: rgb(69,217,240); padding: 20px; }
+.orbital-keyboard-keys { flex-direction: row; flex-wrap: wrap; }
+.orbital-keyboard-keys .orbital-button { width: 44px; margin-right: 4px; -unity-text-align: middle-center; }
+
+.orbital-menu-footer { background-color: rgba(9,17,21,0.9); padding: 6px 12px; margin-top: 8px; border-left-width: 1px; border-left-color: rgb(58,84,99); }
+.orbital-menu-footer .orbital-muted { margin-top: 5px; margin-bottom: 5px; }
+.orbital-menu-footer .orbital-hints { margin-top: 5px; margin-bottom: 5px; }
+.orbital-root .unity-scroller__low-button, .orbital-root .unity-scroller__high-button { display: none; }
+.orbital-root .unity-scroller--vertical { width: 10px; min-width: 10px; }
+
+.orbital-lab-toolbar .orbital-button { padding-left: 10px; padding-right: 10px; font-size: 15px; }
+.orbital-root .unity-scroller .unity-base-field__input { padding: 0; border-width: 0; background-color: transparent; }
+
+.orbital-menu-footer .orbital-button { min-height: 36px; height: 36px; font-size: 14px; }
+
+.orbital-lab-groups .orbital-button { height: auto; min-height: 44px; padding: 10px 12px; font-size: 15px; }

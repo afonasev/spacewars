@@ -369,7 +369,7 @@ namespace Spacewars.Runtime
             }
         internal static BallisticContact ReadBallisticContact(BinaryReader r) {return new BallisticContact(Number(r),ReadBallisticPoint(r),r.ReadInt32());
             }
-        internal static byte[] Binding(PlayableProfile p)=>Pack(w=>{w.Write(PlayableCommand.CurrentSchemaVersion);
+        internal static byte[] Binding(PlayableProfile p)=>Pack(w=>{w.Write(PlayableCommand.CurrentSchemaVersion);String(w,p.DisplayName);
             w.Write(PlayableAiObservation.CurrentSchemaVersion);
             Number(w,p.MinimapCompactSize);
             Number(w,p.MinimapTacticalSize);

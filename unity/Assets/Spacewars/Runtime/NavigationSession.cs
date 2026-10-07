@@ -86,7 +86,7 @@ namespace Spacewars.Runtime
         private long requestSequence;
         private NavGeometry geometry;
         private NavGeometry navigationGeometry;
-        private readonly NavigationProfile profile;
+        private NavigationProfile profile;
         public NavigationSession(long generation,NavGeometry geometry,NavigationProfile profile,NavGeometry navigationGeometry=null){if(generation<1)throw new ArgumentOutOfRangeException("generation");Generation=generation;this.geometry=geometry;this.navigationGeometry=navigationGeometry??geometry;this.profile=profile;Crowd=new NavCrowd(geometry,profile);}
         public long Generation {get;}
         public NavCrowd Crowd {get;}
@@ -273,6 +273,17 @@ namespace Spacewars.Runtime
         {
             long order; orders.TryGetValue(id,out order); orders[id]=order+1;
             pending.Remove(id); reservations.Remove(id); retainedGoals.Remove(id);movementIdentities.Remove(id); return Crowd.Remove(id);
+        }
+        public bool CanRebind => pending.Count<=NavMailbox<NavigationRequest>.Capacity;
+        public void Rebind(NavigationProfile next)
+        {
+            if(!CanRebind)throw new InvalidOperationException("Navigation still has too many in-flight routes to rebind atomically.");
+            // Geometry and existing routes are unchanged. Reissue only in-flight solves
+            // so a rule change neither restarts moving actors nor floods the mailbox.
+            var waiting=new List<NavigationRequest>(pending.Values);
+            profile=next;Crowd.Rebind(next);pending.Clear();probes.Clear();probeAnswers.Clear();
+            while(Requests.TryDequeue(out _)){}while(Answers.TryDequeue(out _)){}
+            foreach(var request in waiting)if(Crowd.TryGet(request.Entity,out _))Move(request.Entity,request.Goal);
         }
         public void ChangeGeometry(NavGeometry next)
         {

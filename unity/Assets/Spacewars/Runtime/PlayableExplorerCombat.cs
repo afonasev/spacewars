@@ -21,7 +21,7 @@ namespace Spacewars.Runtime
             double x=Math.Cos(angle),z=Math.Sin(angle),offset=profile.ExplorerMuzzleOffset;
             var predicted=new NavPoint(target.X+velocity.X*t,target.Z+velocity.Z*t);double slope=(GroundHeight(predicted)-GroundHeight(from))/Math.Max(1e-9,Distance(from,predicted));
             // Web burst projectiles are physical points (radius 0), not tracer-thickness collision capsules.
-            projectiles.Add(new Projectile{Id=nextProjectile++,Owner=u.Id,Faction=u.Owner,Target=u.Target,Kind=u.Kind,
+            projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=u.Id,Faction=u.Owner,Target=u.Target,Kind=u.Kind,
                 Position=new NavPoint(from.X+x*offset,from.Z+z*offset),Height=GroundHeight(from)+DirectFireHeight+slope*offset,VerticalSlope=slope,DirectionX=x,DirectionZ=z,Radius=0,Speed=speed,Damage=profile.ExplorerDamage,
                 Remaining=Math.Max(0,profile.ExplorerRange*(1+profile.ProjectileExtraRangePercent/100)-offset)});
         }

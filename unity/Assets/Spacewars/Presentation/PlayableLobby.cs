@@ -65,7 +65,7 @@ namespace Spacewars.Presentation
         }
         private void CreateLobby()
         {
-            hudLobbyButton.style.display=modalLobbyButton.style.display=DisplayStyle.Flex;
+            hudLobbyButton.style.display=DisplayStyle.None;modalLobbyButton.style.display=DisplayStyle.Flex;
             var popupStyle=Resources.Load<StyleSheet>("NativeLobby");
             void ApplyPopupStyle(IPanel panel){if(panel!=null&&popupStyle!=null&&!panel.visualTree.styleSheets.Contains(popupStyle))panel.visualTree.styleSheets.Add(popupStyle);}
             ApplyPopupStyle(root.panel);root.RegisterCallback<AttachToPanelEvent>(evt=>ApplyPopupStyle(evt.destinationPanel));
@@ -126,7 +126,7 @@ namespace Spacewars.Presentation
         private void RebuildRoster()
         {
             rosterPanel.Clear();rosterPanel.Add(LobbyText("СОСТАВ МАТЧА",18));
-            rosterPanel.Add(LobbyText("2 места  /  Человек против ИИ",12,Muted));
+            var summary=LobbyText("2 места  /  Человек против ИИ",12,Muted);summary.name="lobby-roster-summary";rosterPanel.Add(summary);
             Seat(true);Seat(false);
             var reason=LobbyText("Доступно: 1 человек + ИИ Боец. Геймпад и зритель пока не поддерживаются.",12,Muted);
             reason.name="lobby-mode-reason";reason.style.marginTop=12;rosterPanel.Add(reason);ResizeLobby();
@@ -170,6 +170,7 @@ namespace Spacewars.Presentation
         {
             bool narrow=root.resolvedStyle.width<800;
             bool compact=narrow||root.resolvedStyle.height<860;
+            lobbyColumns.style.marginTop=lobbyColumns.style.marginBottom=compact?8:18;
             lobbyColumns.style.flexDirection=narrow?FlexDirection.Column:FlexDirection.Row;
             rosterPanel.style.marginRight=narrow?0:18;rosterPanel.style.marginBottom=narrow?12:0;
             rosterPanel.style.flexGrow=narrow?0:2;rosterPanel.style.flexBasis=narrow?new StyleLength(StyleKeyword.Auto):new StyleLength(0f);
@@ -184,17 +185,19 @@ namespace Spacewars.Presentation
             lobbyPreview.style.height=narrow?new StyleLength(150f):new StyleLength(StyleKeyword.Auto);
             lobbyPreview.style.flexGrow=narrow?0:1;lobbyPreview.style.flexShrink=0;
             lobbyPreview.style.marginTop=lobbyPreview.style.marginBottom=narrow?0:14;
-            foreach(var panel in new[]{rosterPanel,mapPanel}){panel.style.paddingLeft=panel.style.paddingRight=narrow?12:20;panel.style.paddingTop=panel.style.paddingBottom=narrow?10:18;panel.MarkDirtyRepaint();}
-            foreach(var row in rosterPanel.Query<VisualElement>(className:"lobby-seat").ToList()){row.style.marginTop=compact?6:16;row.style.paddingTop=compact?4:12;}
-            foreach(var button in rosterPanel.Query<Button>().ToList())button.style.height=compact?28:42;
+            foreach(var panel in new[]{rosterPanel,mapPanel}){panel.style.paddingLeft=panel.style.paddingRight=narrow?12:20;panel.style.paddingTop=panel.style.paddingBottom=compact?10:18;panel.MarkDirtyRepaint();}
+            foreach(var row in rosterPanel.Query<VisualElement>(className:"lobby-seat").ToList()){row.style.marginTop=compact?6:16;row.style.paddingTop=compact?4:12;row.style.flexShrink=0;foreach(var child in row.Children())child.style.flexShrink=0;}
+            foreach(var button in rosterPanel.Query<Button>().ToList()){button.style.height=button.style.minHeight=compact?32:42;button.style.fontSize=compact?14:15;}
             foreach(var field in rosterPanel.Query<VisualElement>(className:"unity-base-field").ToList())
             {
-                field.style.minHeight=compact?28:42;field.style.marginBottom=compact?4:8;
-                var box=field.Q(className:"unity-base-field__input");if(box!=null)box.style.minHeight=compact?26:36;
+                field.style.height=field.style.minHeight=compact?32:42;field.style.marginBottom=compact?4:8;
+                var box=field.Q(className:"unity-base-field__input");if(box!=null){box.style.minHeight=compact?26:36;box.style.paddingTop=box.style.paddingBottom=compact?2:6;}
             }
             foreach(var label in rosterPanel.Query<Label>().ToList())label.style.marginBottom=compact?3:8;
             var description=mapPanel.Q<Label>("lobby-map-description");if(description!=null)description.style.display=narrow?DisplayStyle.None:DisplayStyle.Flex;
-            var reason=rosterPanel.Q<Label>("lobby-mode-reason");if(reason!=null)reason.style.marginTop=compact?4:12;
+            var reason=rosterPanel.Q<Label>("lobby-mode-reason");if(reason!=null){reason.style.marginTop=compact?4:12;reason.text=compact?"1 игрок + ИИ · без геймпада в бою и зрителей.":"Доступно: 1 человек + ИИ Боец. Геймпад и зритель пока не поддерживаются.";}
+            var summary=rosterPanel.Q<Label>("lobby-roster-summary");if(summary!=null)summary.style.display=compact?DisplayStyle.None:DisplayStyle.Flex;
+            if(aiReady!=null){aiReady.text=compact?"Боец · Готов":"Боец · Готов\nБез бонусов ресурсов или характеристик";aiReady.tooltip="Без бонусов ресурсов или характеристик";}
         }
         private void RefreshLobbyValidation()
         {
@@ -217,15 +220,15 @@ namespace Spacewars.Presentation
             if(nativeMainMenuEnabled&&nativeMainMenu==null)
             {
                 nativeMainMenu=new GameObject("Spacewars main menu").AddComponent<NativeMainMenu>();
-                nativeMainMenu.Play=ShowLobby;
+                nativeMainMenu.HostRoot=root;nativeMainMenu.Navigation=menuNavigation;nativeMainMenu.Play=ShowLobby;nativeMainMenu.Laboratory=OpenLaboratory;
             }
         }
-        private void ShowLobby(){inLobby=true;matchSetup=null;menuScreen.style.display=DisplayStyle.None;lobbyScreen.style.display=DisplayStyle.Flex;SetMatchUi(false);RefreshLobbyValidation();RefreshLobbyPreview();launchButton.Focus();}
+        private void ShowLobby(){inLobby=true;matchSetup=null;menuScreen.style.display=DisplayStyle.None;lobbyScreen.style.display=DisplayStyle.Flex;SetMatchUi(false);RefreshLobbyValidation();RefreshLobbyPreview();menuNavigation?.SetScope(lobbyScreen,ShowMainMenu,launchButton);}
         private void SetMatchUi(bool visible){top.style.display=bottom.style.display=visible?DisplayStyle.Flex:DisplayStyle.None;modal.style.display=DisplayStyle.None;input.WorldInputEnabled=visible;}
         private void LaunchLobbyMatch()
         {
             RefreshLobbyValidation();if(!launchButton.enabledSelf||preparing)return;
-            matchSetup=lobbySetup.Copy();preparing=true;loadingScreen.style.display=DisplayStyle.Flex;lobbyScreen.style.display=DisplayStyle.None;
+            menuNavigation?.SetScope(null);matchSetup=lobbySetup.Copy();preparing=true;loadingScreen.style.display=DisplayStyle.Flex;lobbyScreen.style.display=DisplayStyle.None;
             StartCoroutine(PrepareLobbyMatch());
         }
         private IEnumerator PrepareLobbyMatch()
@@ -235,12 +238,12 @@ namespace Spacewars.Presentation
             while(runtime.Latest==null)yield return null;
             view=runtime.Latest;ServiceRoutes();Render();UpdateHud();UpdateMaps();
             yield return new WaitForEndOfFrame();
-            inLobby=false;preparing=false;loadingScreen.style.display=DisplayStyle.None;SetMatchUi(true);Pause(false);
+            inLobby=false;preparing=false;menuNavigation?.SetScope(null);loadingScreen.style.display=DisplayStyle.None;SetMatchUi(true);Pause(false);
             Record("lobby launch "+matchSetup.MatchHumanName+" team="+matchSetup.HumanTeam+" vs "+matchSetup.MatchAiName+" team="+matchSetup.AiTeam);
         }
         private bool TryPrepareLobbySession()
         {
-            try{StartSession();paused=true;return true;}
+            try{EnsureBalanceStore();profile=balanceStore.Selected;world.Rebind(profile);StartSession();paused=true;return true;}
             catch(Exception error)
             {
                 Debug.LogException(error);runtime?.RequestStop();runtime=null;preparing=false;

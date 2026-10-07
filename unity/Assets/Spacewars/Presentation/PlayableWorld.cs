@@ -18,7 +18,8 @@ namespace Spacewars.Presentation
         }
         private readonly Material material;
         public PlayableFogMask Fog{get;}
-        private readonly PlayableProfile profile;
+        private PlayableProfile profile;
+        public void Rebind(PlayableProfile next){profile=next;foreach(var id in new List<int>(actors.Keys))Remove(id);}
         private readonly Transform root;
         private readonly Dictionary<int, Actor> actors = new Dictionary<int, Actor>();
         public IReadOnlyDictionary<int, Actor> Actors => actors;
@@ -161,6 +162,7 @@ namespace Spacewars.Presentation
             // Preserve existing visual dimensions. Camera basis and left anchoring are
             // presentation invariants; never inherit model heading/construction scale.
             var healthRoot=actor.Health.parent;
+            healthRoot.gameObject.SetActive(NativeUserSettings.AlwaysHealth||ratio<.999f||actor.Selection.activeSelf);
             healthRoot.position=actor.Root.position+Vector3.up*3.8f;
             healthRoot.rotation=camera.transform.rotation;
             float width=2f*Mathf.Clamp01(ratio);

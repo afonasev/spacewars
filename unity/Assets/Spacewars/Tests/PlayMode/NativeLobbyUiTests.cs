@@ -57,14 +57,17 @@ public sealed class NativeLobbyUiTests
             Assert.LessOrEqual(control.worldBound.yMax,bounds.yMax+.5f,control.name);
         }
     }
-    [UnityTest] public IEnumerator StandardWindowSettingsDoNotOverlapDeviceAssignment()
+    [UnityTest] public IEnumerator StandardAndCompactWindowSettingsDoNotOverlapDeviceAssignment()
     {
-        Call("ShowLobby");var root=Get<VisualElement>("root");root.style.width=1280;root.style.height=800;
+        Call("ShowLobby");var root=Get<VisualElement>("root");foreach(var size in new[]{new Vector2Int(1280,800),new Vector2Int(800,620)})
+        {root.style.width=size.x;root.style.height=size.y;
         yield return null;yield return null;
         var lobby=Get<VisualElement>("lobbyScreen");var bind=lobby.Q<Button>("lobby-bind-devices");
         foreach(var field in lobby.Query<DropdownField>().ToList().Take(2))
             Assert.LessOrEqual(field.worldBound.yMax,bind.worldBound.yMin+.5f,"Settings overlap device assignment");
         Assert.LessOrEqual(Get<VisualElement>("rosterPanel").worldBound.yMax,Get<Label>("lobbyStatus").worldBound.yMin+.5f);
+        Assert.LessOrEqual(lobby.Q<Label>("lobby-mode-reason").worldBound.yMax,Get<VisualElement>("rosterPanel").worldBound.yMax+.5f,"Mode explanation must fit before footer, not overlap launch status.");
+        }
     }
     [UnityTest] public IEnumerator InstalledMenuOpensLobbyAndRetainsUpdateOnReturn()
     {
@@ -74,14 +77,14 @@ public sealed class NativeLobbyUiTests
         try
         {
             Assert.IsNull(Get<Spacewars.Runtime.PlayableRuntime>("runtime"));
-            Assert.IsNotNull(menu.GetComponent<UIDocument>().rootVisualElement.Query<Button>().ToList().Single(b=>b.text=="Обновить"));
+            Assert.IsNotNull(menu.ScreenRoot.Query<Button>().ToList().Single(b=>b.text=="Обновить"));
             yield return (IEnumerator)typeof(NativeMainMenu).GetMethod("EnterGame",Flags).Invoke(menu,null);
             yield return null;
             Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>("lobbyScreen").style.display.value);
             Assert.IsNull(Get<Spacewars.Runtime.PlayableRuntime>("runtime"));
             Call("ShowMainMenu");yield return null;
             menu=Get<NativeMainMenu>("nativeMainMenu");
-            Assert.IsNotNull(menu.GetComponent<UIDocument>().rootVisualElement.Query<Button>().ToList().Single(b=>b.text=="Обновить"));
+            Assert.IsNotNull(menu.ScreenRoot.Query<Button>().ToList().Single(b=>b.text=="Обновить"));
         }
         finally{if(menu!=null)Object.DestroyImmediate(menu.gameObject);}
     }

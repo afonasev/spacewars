@@ -8,13 +8,13 @@ namespace Spacewars.Presentation
     {
         // Style A presentation colors are shared with the established native HUD;
         // they do not alter gameplay, camera behavior or player profile values.
-        private static readonly Color PanelColor=new Color(.025f,.055f,.07f,.96f);
-        private static readonly Color Ink=new Color(.90f,.95f,.94f);
-        private static readonly Color Muted=new Color(.64f,.74f,.76f);
-        private static readonly Color Cyan=new Color(.48f,.88f,.81f);
+        private static readonly Color PanelColor=OrbitalTheme.Panel;
+        private static readonly Color Ink=OrbitalTheme.Ink;
+        private static readonly Color Muted=OrbitalTheme.Muted;
+        private static readonly Color Cyan=OrbitalTheme.Cyan;
         private static readonly Color Danger=new Color(.95f,.47f,.43f);
-        private static readonly Color Line=new Color(.18f,.39f,.43f);
-        private static readonly Color ActionColor=new Color(.09f,.22f,.25f);
+        private static readonly Color Line=OrbitalTheme.Line;
+        private static readonly Color ActionColor=new Color(.045f,.105f,.135f);
 
         private static void StyleRegion(VisualElement element)
         {
@@ -22,15 +22,15 @@ namespace Spacewars.Presentation
             element.style.borderLeftWidth=1;element.style.borderRightWidth=1;
             element.style.borderTopWidth=1;element.style.borderBottomWidth=1;
             element.style.borderLeftColor=Line;element.style.borderRightColor=Line;
-            element.style.borderTopColor=Line;element.style.borderBottomColor=Line;
-            element.style.paddingLeft=10;element.style.paddingRight=10;
-            element.style.paddingTop=8;element.style.paddingBottom=8;
+            element.style.borderTopColor=Cyan;element.style.borderBottomColor=Line;
+            element.style.paddingLeft=14;element.style.paddingRight=14;
+            element.style.paddingTop=12;element.style.paddingBottom=12;
         }
 
         private static Label Section(string title)
         {
             var label=new Label(title);
-            label.style.color=Cyan;label.style.fontSize=12;
+            label.style.color=Cyan;label.style.fontSize=13;
             label.style.unityFontStyleAndWeight=FontStyle.Bold;
             label.style.letterSpacing=1;
             label.style.marginBottom=8;
@@ -39,7 +39,7 @@ namespace Spacewars.Presentation
 
         private static void StyleAction(Button button)
         {
-            button.style.height=34;button.style.marginRight=6;button.style.marginBottom=5;
+            OrbitalTheme.StyleButton(button);button.style.height=38;button.style.minHeight=38;button.style.fontSize=15;button.style.marginRight=6;button.style.marginBottom=5;
             button.style.backgroundColor=ActionColor;button.style.color=Ink;
             button.style.borderLeftWidth=1;button.style.borderRightWidth=1;
             button.style.borderTopWidth=1;button.style.borderBottomWidth=1;
@@ -65,7 +65,10 @@ namespace Spacewars.Presentation
         private bool ModalVisible()=>modal!=null&&modal.style.display.value==DisplayStyle.Flex;
         private void SyncModalFocus()
         {
+            if(childMenu!=null)return;
             bool visible=ModalVisible();
+            if(visible&&!modalWasVisible)menuNavigation?.SetScope(modalCard,()=>{if(paused)Pause(false);},resumeButton.style.display.value==DisplayStyle.Flex?resumeButton:modalRestartButton);
+            else if(!visible&&modalWasVisible)menuNavigation?.SetScope(null);
             if(visible)
             {
                 var focused=root.focusController?.focusedElement as Button;
@@ -159,7 +162,7 @@ namespace Spacewars.Presentation
         {
             // Structural minimum of the existing four regions, not a gameplay or designer-tunable size.
             // The minimap itself still uses the validated profile dimension.
-            float wideMinimum=(float)profile.MinimapCompactSize+20+4+220+380+220+14+14+40+32;
+            float wideMinimum=(float)profile.MinimapCompactSize+32+380+220+24+40+32;
             bool compact=panelWidth<wideMinimum;
             if(compact==compactHud)return;
             compactHud=compact;
@@ -187,7 +190,13 @@ namespace Spacewars.Presentation
             armyRegion.style.flexGrow=compact?0:1;
             armyRegion.style.marginLeft=compact?0:14;
             armyRegion.style.marginTop=compact?8:0;
-            commandRegion.style.marginLeft=compact?4:14;
+            commandRegion.style.marginLeft=compact?0:12;
+            commandRegion.style.marginTop=compact?8:0;
+            commandRegion.style.width=compact?new StyleLength(Length.Percent(100)):new StyleLength(220);
+            commandRegion.style.flexDirection=compact?FlexDirection.Row:FlexDirection.Column;
+            commandRegion.style.flexWrap=compact?Wrap.Wrap:Wrap.NoWrap;
+            foreach(var label in commandRegion.Children().OfType<Label>())
+                label.style.display=compact&&label.name!="building-lifecycle-status"?DisplayStyle.None:DisplayStyle.Flex;
             UpdateResponsiveVisibility();
             focused?.Focus();
         }
@@ -196,14 +205,6 @@ namespace Spacewars.Presentation
             if(view==null||hudRow==null)return;
             bool buildRelevant=selectedSite!=0||cancelBuilding.style.display.value==DisplayStyle.Flex;
             bool armyRelevant=!buildRelevant||selection.Count>0;
-            if(!compactHud)
-            {
-                if(buildRegion.style.display.value!=DisplayStyle.Flex)buildRegion.style.display=DisplayStyle.Flex;
-                if(armyRegion.style.display.value!=DisplayStyle.Flex)armyRegion.style.display=DisplayStyle.Flex;
-                compactBuildRelevant=null;
-                compactArmyRelevant=null;
-                return;
-            }
             if(compactBuildRelevant==buildRelevant&&compactArmyRelevant==armyRelevant)return;
             compactBuildRelevant=buildRelevant;
             compactArmyRelevant=armyRelevant;
@@ -216,8 +217,8 @@ namespace Spacewars.Presentation
                 if(hudRow.IndexOf(buildRegion)!=1){hudRow.Insert(1,buildRegion);moved=true;}
                 if(hudRow.IndexOf(commandRegion)!=2){hudRow.Insert(2,commandRegion);moved=true;}
                 if(hudRow.IndexOf(armyRegion)!=3){hudRow.Insert(3,armyRegion);moved=true;}
-                armyRegion.style.width=Length.Percent(100);
-                armyRegion.style.flexGrow=0;
+                armyRegion.style.width=compactHud?new StyleLength(Length.Percent(100)):new StyleLength(StyleKeyword.Auto);
+                armyRegion.style.flexGrow=compactHud?0:1;
                 armyRegion.style.marginLeft=0;
                 armyRegion.style.marginTop=8;
             }
@@ -227,7 +228,7 @@ namespace Spacewars.Presentation
                 if(hudRow.IndexOf(commandRegion)!=2){hudRow.Insert(2,commandRegion);moved=true;}
                 armyRegion.style.width=StyleKeyword.Auto;
                 armyRegion.style.flexGrow=1;
-                armyRegion.style.marginLeft=14;
+                armyRegion.style.marginLeft=12;
                 armyRegion.style.marginTop=0;
             }
             if(focused!=null&&((buildRegion.style.display.value==DisplayStyle.None&&buildRegion.Contains(focused))||(armyRegion.style.display.value==DisplayStyle.None&&armyRegion.Contains(focused))))root.Focus();

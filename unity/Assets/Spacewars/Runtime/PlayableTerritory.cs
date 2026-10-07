@@ -39,7 +39,7 @@ namespace Spacewars.Runtime
             int cost=TerritoryRules.Cost(profile,kind);
             if(Balance(owner)<cost){message="Insufficient credits.";return PlayableCommandStatus.InsufficientCredits;}
             AddCredits(owner,-cost);
-            var building=new Building{Id=nextId++,Owner=owner,Kind=kind,Position=position,SiteId=siteId,SlotId=slotId,ParentId=parentId,PaidCost=cost,Phase=ConstructionPhase.Pending,Heading=heading};
+            var building=new Building{TermsRevision=profile.Revision,Id=nextId++,Owner=owner,Kind=kind,Position=position,SiteId=siteId,SlotId=slotId,ParentId=parentId,PaidCost=cost,Phase=ConstructionPhase.Pending,Heading=heading};
             buildings.Add(building.Id,building);
             if(slotId==0){site.CenterId=building.Id;site.Locked=owner;}
             message="Construction ordered.";return PlayableCommandStatus.Applied;

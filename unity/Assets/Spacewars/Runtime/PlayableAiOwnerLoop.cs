@@ -43,7 +43,8 @@ namespace Spacewars.Runtime
             public bool Scout;
             public string PolicyName;
         }
-        private readonly PlayableProfile profile;
+        private PlayableProfile profile;
+        internal void Rebind(PlayableProfile next){if(pending!=null)Cancel(PlayableAiDeliveryStatus.Cancelled,"Balance revision changed.");profile=next;production.Rebind(next);mission.Rebind(next);midgame.Rebind(next);artillery.Rebind(next);Checkpoint=Capture();}
         private readonly PlayableAiOpeningCompositionState opening;
         private readonly PlayableAiEconomicLivenessPolicy economy;
         private readonly PlayableAiProductionLivenessPolicy production;

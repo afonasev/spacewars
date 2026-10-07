@@ -65,6 +65,7 @@ namespace Spacewars.Runtime
             }
         private static void WriteRecord(BinaryWriter w,Building v) {w.Write(v!=null);
             if(v==null)return;
+            w.Write(v.TermsRevision);
             WriteRecord(w,v.Upgrade);
             w.Write(v.LastDamageTime.HasValue);
             if(v.LastDamageTime.HasValue)Number(w,v.LastDamageTime.Value);
@@ -95,7 +96,7 @@ namespace Spacewars.Runtime
             w.Write((int)v.RepeatKind);
             }
         private static Building ReadBuilding(BinaryReader r) {if(!Boolean(r))return null;
-            var v=new Building();
+            var v=new Building();v.TermsRevision=r.ReadInt32();
             v.Upgrade=ReadRefineryUpgrade(r);
             v.LastDamageTime=Boolean(r)?(double?)Number(r):null;
             v.Sale=ReadSaleState(r);
@@ -125,6 +126,7 @@ namespace Spacewars.Runtime
             }
         private static void WriteRecord(BinaryWriter w,Projectile v) {w.Write(v!=null);
             if(v==null)return;
+            w.Write(v.TermsRevision);
             WriteRecord(w,v.Rocket);
             w.Write(v.Id);
             w.Write(v.Owner);
@@ -142,7 +144,7 @@ namespace Spacewars.Runtime
             w.Write((int)v.Faction);
             }
         private static Projectile ReadProjectile(BinaryReader r) {if(!Boolean(r))return null;
-            var v=new Projectile();
+            var v=new Projectile();v.TermsRevision=r.ReadInt32();
             v.Rocket=ReadRocket(r);
             v.Id=r.ReadInt32();
             v.Owner=r.ReadInt32();
@@ -162,6 +164,7 @@ namespace Spacewars.Runtime
             }
         private static void WriteRecord(BinaryWriter w,ProductionOrder v) {w.Write(v!=null);
             if(v==null)return;
+            w.Write(v.TermsRevision);
             w.Write(v.Id);
             w.Write((int)v.Kind);
             w.Write(v.PaidCost);
@@ -171,7 +174,7 @@ namespace Spacewars.Runtime
             w.Write(v.Active);
             }
         private static ProductionOrder ReadProductionOrder(BinaryReader r) {if(!Boolean(r))return null;
-            var v=new ProductionOrder();
+            var v=new ProductionOrder();v.TermsRevision=r.ReadInt32();
             v.Id=r.ReadInt64();
             v.Kind=EnumValue<PlayableEntityKind>(r);
             v.PaidCost=r.ReadInt32();
@@ -206,13 +209,14 @@ namespace Spacewars.Runtime
             }
         private static void WriteRecord(BinaryWriter w,RefineryUpgrade v) {w.Write(v!=null);
             if(v==null)return;
+            w.Write(v.TermsRevision);
             Number(w,v.PaidCost);
             Number(w,v.Duration);
             Number(w,v.Elapsed);
             w.Write(v.Complete);
             }
         private static RefineryUpgrade ReadRefineryUpgrade(BinaryReader r) {if(!Boolean(r))return null;
-            var v=new RefineryUpgrade();
+            var v=new RefineryUpgrade();v.TermsRevision=r.ReadInt32();
             v.PaidCost=Number(r);
             v.Duration=Number(r);
             v.Elapsed=Number(r);
@@ -221,17 +225,19 @@ namespace Spacewars.Runtime
             }
         private static void WriteRecord(BinaryWriter w,SaleState v) {w.Write(v!=null);
             if(v==null)return;
+            w.Write(v.TermsRevision);
             Number(w,v.Elapsed);
             Number(w,v.Duration);
             }
         private static SaleState ReadSaleState(BinaryReader r) {if(!Boolean(r))return null;
-            var v=new SaleState();
+            var v=new SaleState();v.TermsRevision=r.ReadInt32();
             v.Elapsed=Number(r);
             v.Duration=Number(r);
             return v;
             }
         private static void WriteRecord(BinaryWriter w,RepairState v) {w.Write(v!=null);
             if(v==null)return;
+            w.Write(v.TermsRevision);
             Number(w,v.MissingHealth);
             Number(w,v.TotalCost);
             Number(w,v.Duration);
@@ -240,7 +246,7 @@ namespace Spacewars.Runtime
             w.Write(v.Waiting);
             }
         private static RepairState ReadRepairState(BinaryReader r) {if(!Boolean(r))return null;
-            var v=new RepairState();
+            var v=new RepairState();v.TermsRevision=r.ReadInt32();
             v.MissingHealth=Number(r);
             v.TotalCost=Number(r);
             v.Duration=Number(r);

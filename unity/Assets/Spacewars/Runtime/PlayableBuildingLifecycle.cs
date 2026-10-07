@@ -7,9 +7,9 @@ namespace Spacewars.Runtime
 {
     internal sealed partial class PlayableDomain
     {
-        [Serializable] private sealed class SaleState { public double Elapsed,Duration; }
+        [Serializable] private sealed class SaleState { public int TermsRevision; public double Elapsed,Duration; }
         [Serializable] private sealed class RepairState
-        {
+        { public int TermsRevision;
             public double MissingHealth,TotalCost,Duration,PaidSeconds,SettlementElapsed;
             public bool Waiting;
         }
@@ -39,7 +39,7 @@ namespace Spacewars.Runtime
             foreach(var item in SaleGroup(b))
             {
                 AddCredits(owner,SaleRefund(item));
-                item.Sale=new SaleState{Duration=profile.BuildingSaleDemolitionSec};
+                item.Sale=new SaleState{TermsRevision=profile.Revision,Duration=profile.BuildingSaleDemolitionSec};
                 item.Repair=null;if(item.Upgrade?.Complete!=true)item.Upgrade=null;item.Orders.Clear();item.RepeatTank=false;
             }
             message="Продажа принята. Демонтаж необратим.";return PlayableCommandStatus.Applied;
@@ -50,7 +50,7 @@ namespace Spacewars.Runtime
             if(!buildings.TryGetValue(id,out var b)||b.Owner!=owner)return PlayableCommandStatus.InvalidEntity;
             message=RepairBlocked(b);if(message!=null)return PlayableCommandStatus.Rejected;
             double missing=TerritoryRules.Health(profile,b.Kind)-b.Health,ratio=missing/TerritoryRules.Health(profile,b.Kind);
-            b.Repair=new RepairState{MissingHealth=missing,TotalCost=TerritoryRules.Cost(profile,b.Kind)*profile.BuildingRepairCostRatio*ratio,Duration=profile.BuildingRepairDurationSec*ratio};
+            b.Repair=new RepairState{TermsRevision=profile.Revision,MissingHealth=missing,TotalCost=TerritoryRules.Cost(profile,b.Kind)*profile.BuildingRepairCostRatio*ratio,Duration=profile.BuildingRepairDurationSec*ratio};
             message="Ремонт начат";return PlayableCommandStatus.Applied;
         }
         private PlayableCommandStatus CancelRepair(int id,PlayableOwner owner,out string message)
@@ -86,9 +86,11 @@ namespace Spacewars.Runtime
                     if(Balance(b.Owner)+1e-9<cost){r.Waiting=true;continue;}
                     AddCredits(b.Owner,-cost);
                     double maximum=TerritoryRules.Health(profile,b.Kind);
-                    b.Health=terminal?maximum:Math.Min(maximum,b.Health+r.MissingHealth*slice/r.Duration);
+                    b.Health=Math.Min(maximum,b.Health+r.MissingHealth*slice/r.Duration);
+                    // Settle sub-nanohitpoint accumulation before the integer HUD ceiling.
+                    if(terminal)b.Health=Math.Round(b.Health,9);
                     r.PaidSeconds+=slice;r.Waiting=false;
-                    if(terminal||b.Health>=maximum-1e-9){b.Health=maximum;b.Repair=null;}
+                    if(terminal||b.Health>=maximum-1e-9){b.Repair=null;}
                 }
             }
             if(removed)RebuildGeometry();

@@ -9,7 +9,8 @@
     "UnityEditor.TestRunner",
     "Spacewars.Presentation",
     "Spacewars.Runtime",
-    "Spacewars.Simulation"
+    "Spacewars.Simulation",
+    "Spacewars.BalanceLab"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

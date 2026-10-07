@@ -8,7 +8,7 @@ namespace Spacewars.Simulation
     public sealed class NavUnit
     {
         internal NavUnit(int id, NavPoint position,double radius,double speed,double turn) { Id = id; Position = position;Radius=radius;Speed=speed;TurnSpeed=turn; }
-        public double Radius{get;} public double Speed{get; internal set;} public double TurnSpeed{get;}
+        public double Radius{get;} public double Speed{get; internal set;} public double TurnSpeed{get; internal set;}
         public NavigationOutcome Outcome {get;internal set;}
         public long Incarnation {get;internal set;} public long MobilityRevision {get;internal set;} public int Team {get;set;} public int Id { get; private set; } public NavPoint Position { get; internal set; } public double Heading { get; internal set; } public bool Moving { get; internal set; } public bool Held { get; internal set; } public NavPoint Goal { get; internal set; } public IReadOnlyList<NavPoint> Route { get { return routeView; } }
         internal NavPoint[] route = new NavPoint[0]; internal IReadOnlyList<NavPoint> routeView = Array.AsReadOnly(new NavPoint[0]); internal int routeIndex, noProgressTicks; internal NavPoint[] localRoute=Array.Empty<NavPoint>(); internal int localIndex; internal double blockedSeconds;
@@ -38,7 +38,7 @@ namespace Spacewars.Simulation
     public sealed class NavCrowd
     {
         private long nextIncarnation; private double maximumRadius;
-        private NavGeometry geometry; private readonly NavigationProfile profile; private readonly Dictionary<int, NavUnit> units = new Dictionary<int, NavUnit>(); private readonly List<NavUnit> orderedUnits = new List<NavUnit>(); private readonly IReadOnlyList<NavUnit> unitView; private readonly Dictionary<long, List<NavUnit>> spatial = new Dictionary<long, List<NavUnit>>();
+        private NavGeometry geometry; private NavigationProfile profile; private readonly Dictionary<int, NavUnit> units = new Dictionary<int, NavUnit>(); private readonly List<NavUnit> orderedUnits = new List<NavUnit>(); private readonly IReadOnlyList<NavUnit> unitView; private readonly Dictionary<long, List<NavUnit>> spatial = new Dictionary<long, List<NavUnit>>();
         public NavCrowd(NavGeometry geometry, NavigationProfile profile) { if (geometry == null || profile == null) throw new ArgumentNullException(); this.geometry = geometry; this.profile = profile; unitView = orderedUnits.AsReadOnly(); }
         public IReadOnlyList<NavUnit> Units { get { return unitView; } }
         public int NeighborCandidates { get; private set; }
@@ -94,6 +94,8 @@ namespace Spacewars.Simulation
             var unit=new NavUnit(id,point,radius,speed,turn){Incarnation=++nextIncarnation};units.Add(id,unit);maximumRadius=Math.Max(maximumRadius,radius);orderedUnits.Add(unit);orderedUnits.Sort((a,b)=>a.Id.CompareTo(b.Id));AddToIndex(unit);return unit;
         }
         public bool TryGet(int id,out NavUnit unit)=>units.TryGetValue(id,out unit);
+        public void Rebind(NavigationProfile next){profile=next;}
+        public void SetMobility(int id,double speed,double turn){if(units.TryGetValue(id,out var unit)){unit.Speed=speed;unit.TurnSpeed=turn;}}
         public void SetSpeed(int id,double speed){if(units.TryGetValue(id,out var unit)&&speed>0)unit.Speed=speed;}
         public bool CanPlace(NavPoint point)=>CanPlace(point,profile.Radius);
         public bool CanPlace(NavPoint point,double radius)=>geometry.IsFree(point,radius)&&UnitFree(null,point,point,radius);

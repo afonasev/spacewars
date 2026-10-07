@@ -251,6 +251,15 @@ namespace Spacewars.Tests.EditMode
             Assert.False(Buildings(a).Contains(1));Assert.Greater(((IDictionary)D.GetField("centerDamage",F).GetValue(a)).Count,0);
             Suffix(a,Restore(Bytes(a),p));
         }
+        private static int TransactionRegistryBytes(byte[] domain)
+        {
+            using(var stream=new MemoryStream(domain))using(var reader=new BinaryReader(stream))
+            {
+                int count=reader.ReadInt32();Assert.Greater(count,0);
+                for(int i=0;i<count;i++){Assert.Greater(reader.ReadInt32(),0);int nameBytes=reader.ReadInt32();Assert.GreaterOrEqual(nameBytes,0);reader.ReadBytes(nameBytes);foreach(var field in PlayableProfileMetadata.Fields)reader.ReadDouble();}
+                return (int)stream.Position;
+            }
+        }
         [Test] public void RejectsCorruptSchemaIdsPaymentCapacityAndBindingsWithoutLiveMutation()
         {
             var p=PlayableProfile.Default;var a=New(p);byte[] original=Bytes(a);
@@ -263,9 +272,9 @@ namespace Spacewars.Tests.EditMode
             state=PlayableWorldState.Decode(original);state.SourceIdentity+="changed";AssertRestoreRejected(state.Encode(),p);
             state=PlayableWorldState.Decode(original);state.Binding[5]^=1;AssertRestoreRejected(state.Encode(),p);
             state=PlayableWorldState.Decode(original);BitConverter.GetBytes(-1).CopyTo(state.Domain,state.Domain.Length-4);AssertRestoreRejected(state.Encode(),p); // malformed final rally slot layout
-            state=PlayableWorldState.Decode(original);Assert.AreEqual(4,state.Version);Assert.AreEqual((int)D.GetField("nextId",F).GetValue(a),BitConverter.ToInt32(state.Domain,46),"v4 allocator offset");BitConverter.GetBytes(1).CopyTo(state.Domain,46);AssertRestoreRejected(state.Encode(),p); // v4 next entity collides
-            state=PlayableWorldState.Decode(original);Assert.AreEqual((double)D.GetField("credits",F).GetValue(a),BitConverter.ToDouble(state.Domain,78),"v4 diagnostic credit offset");BitConverter.GetBytes(-1d).CopyTo(state.Domain,78);AssertRestoreRejected(state.Encode(),p); // v4 negative diagnostic credit balance
-            state=PlayableWorldState.Decode(original);Assert.AreEqual(p.StartingCredits,BitConverter.ToDouble(state.Domain,18),"v4 owner account offset");BitConverter.GetBytes(-1d).CopyTo(state.Domain,18);AssertRestoreRejected(state.Encode(),p); // v4 negative owner account
+            state=PlayableWorldState.Decode(original);Assert.AreEqual(5,state.Version);int prefix=TransactionRegistryBytes(state.Domain);Assert.AreEqual((int)D.GetField("nextId",F).GetValue(a),BitConverter.ToInt32(state.Domain,prefix+46),"v5 allocator offset");BitConverter.GetBytes(1).CopyTo(state.Domain,prefix+46);AssertRestoreRejected(state.Encode(),p); // v5 next entity collides
+            state=PlayableWorldState.Decode(original);Assert.AreEqual((double)D.GetField("credits",F).GetValue(a),BitConverter.ToDouble(state.Domain,prefix+78),"v5 diagnostic credit offset");BitConverter.GetBytes(-1d).CopyTo(state.Domain,prefix+78);AssertRestoreRejected(state.Encode(),p); // v5 negative diagnostic credit balance
+            state=PlayableWorldState.Decode(original);Assert.AreEqual(p.StartingCredits,BitConverter.ToDouble(state.Domain,prefix+18),"v5 owner account offset");BitConverter.GetBytes(-1d).CopyTo(state.Domain,prefix+18);AssertRestoreRejected(state.Encode(),p); // v5 negative owner account
             Call(a,"AddCredits",PlayableOwner.Player,10000d);int f=Build(a,PlayableBuildingKind.Factory,1,PlayableOwner.Player);Send(a,1,PlayableCommandKind.QueueTank,f);
             var order=((IList)Buildings(a)[f].GetType().GetField("Orders").GetValue(Buildings(a)[f]))[0];order.GetType().GetField("PaidCost").SetValue(order,1);AssertRestoreRejected(Bytes(a),p);
             order.GetType().GetField("PaidCost").SetValue(order,p.TankCreditCost);
