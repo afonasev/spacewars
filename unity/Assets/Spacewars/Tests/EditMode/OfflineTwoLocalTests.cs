@@ -39,6 +39,19 @@ namespace Spacewars.Tests.EditMode
                 }
             }finally{Stop(r);}
         }
+        [Test] public void KeyboardAppendAndGamepadForcedReplaceRemainOwnerLocalAcrossPause()
+        {
+            var r=new PlayableRuntime(Config(),71,true);try{using(var s=new OfflineLocalSession(r,Seats())){
+                Ready(s);
+                foreach(var seat in s.Seats){var view=s.Frame.Views[seat.OwnerId];var own=view.Entities.Single(e=>e.Owner==view.Owner);var goal=new NavPoint(own.Position.X+6,own.Position.Z);Assert.True(r.NavigationBinding.Geometry.IsFree(goal,PlayableUnitRules.Radius(Config().Profile,own.Kind)));Assert.True(s.Submit(seat.Id,PlayableCommandKind.Move,new[]{own.Id},goal).Accepted);}
+                for(int i=0;i<100;i++){while(r.Requests.TryDequeue(out var request))r.Answers.TryEnqueue(new NavigationAnswer(request,new SharedFlowRouter(request.Geometry,request.Profile).FindPath(request.Start,request.Goal)));Thread.Sleep(10);s.ReadFrame();if(s.Frame.Views.Values.All(v=>v.Entities.Single(e=>e.Owner==v.Owner).Queue?.Active!=null))break;}
+                foreach(var seat in s.Seats){var v=s.Frame.Views[seat.OwnerId];var own=v.Entities.Single(e=>e.Owner==v.Owner);Assert.NotNull(own.Queue.Active);var goal=new NavPoint(own.Position.X+6,own.Position.Z);Assert.True(s.Submit(seat.Id,PlayableCommandKind.AttackMove,new[]{own.Id},goal,mode:PlayableOrderMode.Append).Accepted);}
+                for(int i=0;i<100;i++){Thread.Sleep(10);s.ReadFrame();if(s.Frame.Views["owner-11"].Entities.Single(e=>e.Owner==s.Frame.Views["owner-11"].Owner).Queue.Deferred.Count==1)break;}
+                var keyboard=s.Frame.Views["owner-11"].Entities.Single(e=>e.Owner==s.Frame.Views["owner-11"].Owner).Queue;var pad=s.Frame.Views["owner-28"].Entities.Single(e=>e.Owner==s.Frame.Views["owner-28"].Owner).Queue;
+                Assert.AreEqual(1,keyboard.Deferred.Count);Assert.AreEqual(PlayableCommandKind.Move,keyboard.Active.Kind);Assert.Zero(pad.Deferred.Count);Assert.AreEqual(PlayableCommandKind.AttackMove,pad.Pending.Kind);
+                s.Pause();Thread.Sleep(60);s.ReadFrame();Assert.AreEqual(1,s.Frame.Views["owner-11"].Entities.Single(e=>e.Owner==s.Frame.Views["owner-11"].Owner).Queue.Deferred.Count);
+            }}finally{Stop(r);}
+        }
         [TestCase(false)][TestCase(true)] public void SimultaneousEqualSequencesFanOutOnceWithOneCoherentTick(bool allies)
         {
             var r=new PlayableRuntime(Config(allies),71,true);try{using(var s=new OfflineLocalSession(r,Seats())){

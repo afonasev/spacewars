@@ -6,6 +6,7 @@ using System.Threading;
 using NUnit.Framework;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
+using Spacewars.Presentation;
 
 namespace Spacewars.Tests.EditMode
 {
@@ -152,9 +153,12 @@ namespace Spacewars.Tests.EditMode
                 var move=new PlayableCommand(runtime.Generation,1,"player-1",PlayableCommandKind.Move,new[]{unit.Id},new NavPoint(-6,3));
                 Assert.IsTrue(runtime.TrySubmit(move).Accepted);
                 Assert.IsTrue(Until(()=>runtime.ReceiptsAfter(0).Any(r=>r.Sequence==1&&r.Status==PlayableCommandStatus.Applied)));
-                Assert.IsTrue(Until(()=>runtime.Latest.Entities.Single(e=>e.Id==unit.Id).CurrentOrder!=null));
+                using(var routes=new UnityHostRouteService())Assert.IsTrue(Until(()=>{routes.Service(runtime,PlayableRuntime.MaxOutstandingCommands);return runtime.Latest.Entities.Single(e=>e.Id==unit.Id).CurrentOrder!=null;}));
                 var active=runtime.Latest.Entities.Single(e=>e.Id==unit.Id).CurrentOrder;
                 Assert.AreEqual(PlayableTacticalOrderKind.Move,active.Kind);Assert.AreEqual(1,active.CommandSequence);Assert.AreEqual(-6,active.Destination.X);Assert.AreEqual(runtime.Generation,active.Generation);
+                // Complete the first ordinary route before the next ingress barrier.
+                // The later request remains deliberately held for terminal-order testing.
+                using(var routes=new UnityHostRouteService())routes.Service(runtime,PlayableRuntime.MaxOutstandingCommands);
                 Assert.IsTrue(runtime.TrySubmit(new PlayableCommand(runtime.Generation,2,"player-1",PlayableCommandKind.Move,new[]{unit.Id},new NavPoint(9999,9999))).Accepted);
                 Assert.IsTrue(Until(()=>runtime.ReceiptsAfter(1).Any(r=>r.Sequence==2&&r.Status==PlayableCommandStatus.InvalidTarget)));
                 Assert.AreEqual(1,runtime.Latest.Entities.Single(e=>e.Id==unit.Id).CurrentOrder.CommandSequence);
@@ -164,10 +168,12 @@ namespace Spacewars.Tests.EditMode
                 var position=runtime.Latest.Entities.Single(e=>e.Id==unit.Id).Position;
                 Assert.IsTrue(runtime.TrySubmit(new PlayableCommand(runtime.Generation,4,"player-1",PlayableCommandKind.Move,new[]{unit.Id},new NavPoint(position.X+2,position.Z))).Accepted);
                 Assert.IsTrue(Until(()=>runtime.ReceiptsAfter(3).Any(r=>r.Sequence==4&&r.Status==PlayableCommandStatus.Applied)));
-                Assert.IsTrue(Until(()=>runtime.Latest.Entities.Single(e=>e.Id==unit.Id).CurrentOrder!=null));
+                Assert.IsTrue(Until(()=>runtime.Latest.Entities.Single(e=>e.Id==unit.Id).Queue?.Pending!=null));
+                Assert.IsNull(runtime.Latest.Entities.Single(e=>e.Id==unit.Id).CurrentOrder,"The second route remains held at the ordinary pending barrier");
                 NavigationRequest current=null;
                 Assert.IsTrue(Until(()=>{NavigationRequest request;while(runtime.Requests.TryDequeue(out request))if(request.Entity==unit.Id&&request.Order>=3){current=request;return true;}return false;}));
                 Assert.IsTrue(runtime.Answers.TryEnqueue(new NavigationAnswer(current,new[]{current.Goal})));
+                Assert.IsTrue(Until(()=>runtime.Latest.Entities.Single(e=>e.Id==unit.Id).CurrentOrder!=null));
                 Assert.IsTrue(Until(()=>runtime.Latest.Entities.Single(e=>e.Id==unit.Id).CurrentOrder==null));
                 runtime.RequestStop();Assert.IsTrue(Until(()=>runtime.IsStopped));
             }

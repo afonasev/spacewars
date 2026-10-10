@@ -50,16 +50,19 @@ namespace Spacewars.Runtime
         {
             message="Select own unfinished building.";
             if(!buildings.TryGetValue(id,out var b)||b.Owner!=owner||b.Ready||b.Sale!=null)return PlayableCommandStatus.InvalidEntity;
+            Sound(PlayableSoundKind.ConstructionCancelled,b.Position,PlayableEntityKind.Tank,owner,true);
             AddCredits(owner,b.PaidCost*profile.BuildingCancellationRefundRatio);
             bool solid=b.Phase!=ConstructionPhase.Pending;RemoveBuilding(b,true);if(solid)RebuildGeometry();
             message="Construction cancelled.";return PlayableCommandStatus.Applied;
         }
-        private void RemoveBuilding(Building b,bool cancellation)
+        private void RemoveBuilding(Building b,bool cancellation)=>RemoveBuildingWithAttacker(b,cancellation,null);
+        private void RemoveBuildingWithAttacker(Building b,bool cancellation,PlayableOwner? attacker)
         {
             if(!buildings.Remove(b.Id))return;
+            RecordKill(attacker,b.Owner,b.Id,true,(int)b.Kind,TerritoryRules.Cost(profile,b.Kind));
             if(b.Kind==PlayableBuildingKind.ScientificCenter)InterruptResearchCenter(b.Id);
             var children=new List<Building>();foreach(var child in buildings.Values)if(child.ParentId==b.Id)children.Add(child);
-            foreach(var child in children)RemoveBuilding(child,false);
+            foreach(var child in children)RemoveBuildingWithAttacker(child,false,attacker);
             if(b.SlotId==0&&sites.TryGetValue(b.SiteId,out var site)&&site.CenterId==b.Id)
             {
                 site.CenterId=0;site.Contested=false;
@@ -106,7 +109,7 @@ namespace Spacewars.Runtime
                     if(TryEvacuate(b,u,n.Position))b.Evacuated.Add(u.Id);
                 }
                 if(occupied){b.BlockedReason=enemy?"Враг на площадке":"Освобождаем площадку";if(elapsed>=b.RetryAt)b.RetryAt=elapsed+profile.EvacuationRetrySeconds;continue;}
-                b.Phase=ConstructionPhase.Constructing;b.BlockedReason=null;b.Health=0;changed=true;
+                b.Phase=ConstructionPhase.Constructing;b.BlockedReason=null;b.Health=0;Sound(PlayableSoundKind.ConstructionStarted,b.Position,PlayableEntityKind.Tank,b.Owner,true);changed=true;
             }
             if(changed)RebuildGeometry();
         }

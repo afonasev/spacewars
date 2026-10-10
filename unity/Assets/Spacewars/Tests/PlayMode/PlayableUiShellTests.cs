@@ -47,21 +47,23 @@ public sealed class PlayableUiShellTests
     [Test] public void ExistingActionsAreGroupedAndFocusable()
     {
         var root=Get<VisualElement>("root");
-        foreach(var heading in new[]{"СТРОИТЕЛЬСТВО","ВЫБОР И ОЧЕРЕДИ","КОМАНДЫ"})
-            Assert.True(root.Query<Label>().ToList().Any(label=>label.text==heading),heading);
+        Assert.NotNull(root.Q("battle-context"));
+        Assert.NotNull(root.Q("building-action-ring"));
+        Assert.IsFalse(root.Query<Button>().ToList().Any(button=>button.text=="Пауза"),"Pause remains a physical input, not a HUD button.");
+        Assert.IsNull(root.Q("command-hold"));Assert.IsNull(root.Q("command-stop"));
         Assert.NotNull(root.Q("tactical-minimap-frame"));
         Assert.True(root.Query<Button>().ToList().Any(button=>button.text=="Продолжить"&&button.focusable));
         Assert.True(root.Query<Button>().ToList().Any(button=>button.text=="Начать заново"&&button.focusable));
         Assert.True(root.Query<Button>().ToList().Any(button=>button.text=="Выйти"&&button.focusable));
         Assert.AreEqual(6,root.Query<Button>().ToList().Count(button=>button.name.StartsWith("production-slot-")));
-        var pause=root.Query<Button>().ToList().First(button=>button.text=="Пауза");
+        var pause=root.Q<Button>("army-capacity");
         pause.Focus();
         Assert.AreEqual(OrbitalTheme.Cyan,pause.style.borderLeftColor.value);
         root.Focus();
         Assert.AreEqual(OrbitalTheme.Line,pause.style.borderLeftColor.value);
     }
 
-    [TestCase(PlayableMatchOutcome.Playing,"ПАУЗА",true)]
+    [TestCase(PlayableMatchOutcome.Playing,"Пауза",true)]
     [TestCase(PlayableMatchOutcome.PlayerWon,"ПОБЕДА",false)]
     [TestCase(PlayableMatchOutcome.PlayerLost,"ЦЕНТРЫ ПОТЕРЯНЫ",false)]
     public void ModalReflectsExistingSnapshotState(PlayableMatchOutcome outcome,string title,bool canContinue)
@@ -73,7 +75,8 @@ public sealed class PlayableUiShellTests
         Assert.AreEqual(title,Get<Label>("modalTitle").text);
         Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>("modal").style.display.value);
         Assert.AreEqual(canContinue?DisplayStyle.Flex:DisplayStyle.None,Get<Button>("resumeButton").style.display.value);
-        Assert.True(Get<Label>("modalCaption").text.Contains("Профиль: "+PlayableProfile.Default.DisplayName+" · 1"));
+        if(canContinue){Assert.AreEqual("",Get<Label>("modalCaption").text);Assert.AreEqual(DisplayStyle.None,Get<Label>("modalCaption").style.display.value);Assert.AreEqual(DisplayStyle.None,Get<VisualElement>("root").Q("match-menu-eyebrow").style.display.value);}
+        else Assert.True(Get<Label>("modalCaption").text.Contains("Профиль: "+PlayableProfile.Default.DisplayName+" · 1"));
         Assert.AreSame(canContinue?Get<Button>("resumeButton"):Get<Button>("modalRestartButton"),Get<VisualElement>("root").focusController.focusedElement);
     }
 
@@ -142,6 +145,25 @@ public sealed class PlayableUiShellTests
     }
 
     [Test]
+    public void RestartedSnapshotReleasesTerminalScopeBeforeWorldEscape()
+    {
+        var root=Get<VisualElement>("root");
+        Set("runtime",new PlayableRuntime(PlayableProfile.Default,2,7));
+        ShowTerminal(PlayableMatchOutcome.PlayerWon);
+        var navigation=Get<NativeMenuNavigation>("menuNavigation");
+        Assert.AreSame(Get<VisualElement>("modalCard"),navigation.Scope);
+        // StartSession resets this flag before the new playing snapshot is rendered.
+        Set("modalWasVisible",false);root.Focus();
+        Set("view",new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,2,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,900,null,
+            Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
+        Call("UpdateHud");
+        Assert.IsNull(navigation.Scope,"Hidden result scope must not own the restarted match.");
+        // The ordinary world Escape pauses first; its UI event must not immediately resume.
+        Set("paused",true);SendKey(root,KeyCode.Escape);
+        Assert.True(Get<bool>("paused"),"A stale result callback must not consume world Escape after restart.");
+    }
+
+    [Test]
     public void ResumeClosesModalAndReturnsFocusToField()
     {
         var root=Get<VisualElement>("root");
@@ -150,7 +172,7 @@ public sealed class PlayableUiShellTests
         Set("view",snapshot);Set("paused",true);Call("UpdateHud");
         Assert.AreSame(Get<Button>("resumeButton"),root.focusController.focusedElement);
         var move=typeof(PlayableBootstrap).GetMethod("MoveHudFocus",Flags);
-        move.Invoke(hud,new object[]{true});Assert.AreSame(Get<Button>("modalExitButton"),root.focusController.focusedElement);
+        move.Invoke(hud,new object[]{true});Assert.AreSame(Get<Button>("finishMatch"),root.focusController.focusedElement);
         Set("paused",false);Call("UpdateHud");
         Assert.AreEqual(DisplayStyle.None,Get<VisualElement>("modal").style.display.value);
         Assert.AreSame(root,root.focusController.focusedElement);
@@ -165,11 +187,12 @@ public sealed class PlayableUiShellTests
         var row=Get<VisualElement>("hudRow");
         var army=Get<VisualElement>("armyRegion");
         var commands=Get<VisualElement>("commandRegion");
-        Assert.AreEqual(compact?Wrap.Wrap:Wrap.NoWrap,row.style.flexWrap.value);
-        Assert.AreEqual(compact?3:2,row.IndexOf(army));
-        Assert.AreEqual(compact?2:3,row.IndexOf(commands));
+        Assert.AreEqual(Wrap.NoWrap,row.style.flexWrap.value);
+        Assert.AreEqual(1,row.IndexOf(army));
+        Assert.AreEqual(-1,row.IndexOf(commands));
+        Assert.AreEqual(DisplayStyle.None,commands.style.display.value);
         Assert.AreEqual(6,Get<VisualElement>("root").Query<Button>().ToList().Count(button=>button.name.StartsWith("production-slot-")));
-        var pause=Get<VisualElement>("root").Query<Button>().ToList().First(button=>button.text=="Пауза");
+        var pause=Get<VisualElement>("root").Q<Button>("army-capacity");
         pause.Focus();
         Assert.AreEqual(OrbitalTheme.Cyan,pause.style.borderLeftColor.value);
     }

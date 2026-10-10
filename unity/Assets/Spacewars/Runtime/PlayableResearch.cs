@@ -28,6 +28,7 @@ namespace Spacewars.Runtime
             if(orders.Count(o=>!o.Complete)>=MaximumResearchOrders){message="Очередь исследований заполнена";return PlayableCommandStatus.Overflow;}
             if(Balance(owner)<ResearchCost(kind)){message="Недостаточно кредитов";return PlayableCommandStatus.InsufficientCredits;}
             orders.Add(new ResearchOrder{Id=nextResearchSequence++,Kind=kind,CenterId=centerId});
+            Sound(PlayableSoundKind.ResearchQueued,center.Position,PlayableEntityKind.Tank,owner,true);
             StartResearchIfPossible(owner);
             message="Исследование добавлено в очередь";return PlayableCommandStatus.Applied;
         }
@@ -35,7 +36,7 @@ namespace Spacewars.Runtime
         {
             message="Нет активного исследования";var orders=Research(owner);var order=orders.FirstOrDefault(o=>o.Id==id&&o.Active&&!o.Complete);
             if(order==null||order.CenterId!=centerId||!ReadyResearchCenter(centerId,owner))return PlayableCommandStatus.InvalidTarget;
-            AddCredits(owner,order.PaidCost);orders.Remove(order);message="Исследование отменено: полный возврат";StartResearchIfPossible(owner);return PlayableCommandStatus.Applied;
+            AddCredits(owner,order.PaidCost);orders.Remove(order);Sound(PlayableSoundKind.ResearchCancelled,buildings[centerId].Position,PlayableEntityKind.Tank,owner,true);message="Исследование отменено: полный возврат";StartResearchIfPossible(owner);return PlayableCommandStatus.Applied;
         }
         private void StartResearchIfPossible(PlayableOwner owner)
         {
@@ -44,7 +45,7 @@ namespace Spacewars.Runtime
             var center=ReadyResearchCenter(next.CenterId,owner)?buildings[next.CenterId]:buildings.Values.Where(b=>ReadyResearchCenter(b.Id,owner)).OrderBy(b=>b.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),StringComparer.Ordinal).FirstOrDefault();
             if(center==null)return;
             double cost=ResearchCost(next.Kind);if(Balance(owner)<cost)return;
-            AddCredits(owner,-cost);next.CenterId=center.Id;next.PaidCost=cost;next.Duration=ResearchDuration(next.Kind);next.Elapsed=0;next.Active=true;
+            AddCredits(owner,-cost);next.CenterId=center.Id;next.PaidCost=cost;next.Duration=ResearchDuration(next.Kind);next.Elapsed=0;next.Active=true;Sound(PlayableSoundKind.ResearchStarted,center.Position,PlayableEntityKind.Tank,owner,true);
         }
         private bool ReadyResearchCenter(int id,PlayableOwner owner)=>buildings.TryGetValue(id,out var center)&&center.Owner==owner&&center.Kind==PlayableBuildingKind.ScientificCenter&&center.Ready&&center.Health>0&&center.Sale==null;
         private void AdvanceResearch(double dt)
@@ -53,9 +54,9 @@ namespace Spacewars.Runtime
             {
                 if(eliminated.Contains(owner))continue;
                 var active=Research(owner).FirstOrDefault(o=>o.Active&&!o.Complete);
-                if(active!=null&&!ReadyResearchCenter(active.CenterId,owner)){Research(owner).Remove(active);active=null;}
+                if(active!=null&&!ReadyResearchCenter(active.CenterId,owner)){Sound(PlayableSoundKind.ResearchCancelled,default(NavPoint),PlayableEntityKind.Tank,owner,true);Research(owner).Remove(active);active=null;}
                 // Source Number.EPSILON tolerance is a fixed floating-point parity rule, not a Balance Lab value.
-                if(active!=null){active.Elapsed=Math.Min(active.Duration,active.Elapsed+dt);if(active.Duration-active.Elapsed<=2.220446049250313e-16*active.Duration*128){active.Elapsed=active.Duration;active.Active=false;active.Complete=true;if(active.Kind==PlayableResearchKind.TankChassis)foreach(var u in units.Values)if(u.Owner==owner&&u.Kind==PlayableEntityKind.Tank&&!u.AuthoredUpgrade.HasValue)navigation.Crowd.SetSpeed(u.Id,profile.TankChassisSpeed);}}
+                if(active!=null){active.Elapsed=Math.Min(active.Duration,active.Elapsed+dt);if(active.Duration-active.Elapsed<=2.220446049250313e-16*active.Duration*128){active.Elapsed=active.Duration;active.Active=false;active.Complete=true;var center=buildings[active.CenterId];Sound(PlayableSoundKind.ResearchComplete,center.Position,PlayableEntityKind.Tank,owner,true);if(active.Kind==PlayableResearchKind.TankChassis)foreach(var u in units.Values)if(u.Owner==owner&&u.Kind==PlayableEntityKind.Tank&&!u.AuthoredUpgrade.HasValue)navigation.Crowd.SetSpeed(u.Id,profile.TankChassisSpeed);}}
                 StartResearchIfPossible(owner);
             }
         }
@@ -63,13 +64,17 @@ namespace Spacewars.Runtime
         {
             foreach(PlayableOwner owner in Owners)
             {
+                foreach(var order in Research(owner).Where(o=>o.Active&&!o.Complete&&o.CenterId==centerId))Sound(PlayableSoundKind.ResearchCancelled,default(NavPoint),PlayableEntityKind.Tank,owner,true);
                 Research(owner).RemoveAll(o=>o.Active&&!o.Complete&&o.CenterId==centerId);
             }
         }
         private void InterruptUnreadyResearchCenters()
         {
             foreach(PlayableOwner owner in Owners)
+            {
+                foreach(var order in Research(owner).Where(o=>o.Active&&!o.Complete&&!ReadyResearchCenter(o.CenterId,owner)))Sound(PlayableSoundKind.ResearchCancelled,default(NavPoint),PlayableEntityKind.Tank,owner,true);
                 Research(owner).RemoveAll(o=>o.Active&&!o.Complete&&!ReadyResearchCenter(o.CenterId,owner));
+            }
         }
         private PlayableResearchSaveState CaptureResearchState()
         {

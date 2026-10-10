@@ -33,21 +33,21 @@ public sealed class PlayableProductionHudTests
     }
     [Test] public void ShkvalQueueShowsActualKindAndPause()
     {
-        Show(new long[]{20,21},kind:PlayableEntityKind.Shkval);var slots=root.Query<Button>().ToList();Assert.AreEqual("Шквал\n50%",slots[0].text);Assert.AreEqual("Шквал\nОжидает",slots[1].text);Assert.True(((Button)Get("shkvalButton")).enabledSelf);
+        Show(new long[]{20,21},kind:PlayableEntityKind.Shkval);var slots=root.Query<Button>().ToList();Assert.AreEqual("50%\n8с",slots[0].text);Assert.AreEqual("Ждёт",slots[1].text);Assert.AreEqual("shkval",slots[0].Q<OrbitalGlyph>().Kind);Assert.That(slots[0].tooltip,Does.Contain("Шквал"));Assert.True(((Button)Get("shkvalButton")).enabledSelf);
         Show(new long[]{20,21},true,PlayableEntityKind.Shkval);Assert.False(((Button)Get("shkvalButton")).enabledSelf);
     }
     [Test] public void ExplorerQueueShowsKindProgressAndPausedControl()
     {
         Show(new long[]{20,21},kind:PlayableEntityKind.Explorer);var slots=root.Query<Button>().ToList();
-        Assert.AreEqual("Иссл.\n50%",slots[0].text);Assert.AreEqual("Иссл.\nОжидает",slots[1].text);
-        Assert.That(((ProgressBar)Get("progress")).title,Does.Contain("Исследователь"));Assert.True(((Button)Get("explorerButton")).enabledSelf);
+        Assert.AreEqual("50%\n8с",slots[0].text);Assert.AreEqual("Ждёт",slots[1].text);
+        Assert.AreEqual("explorer",slots[0].Q<OrbitalGlyph>().Kind);Assert.That(slots[0].tooltip,Does.Contain("Исследователь"));Assert.That(((ProgressBar)Get("progress")).title,Does.Contain("Исследователь"));Assert.True(((Button)Get("explorerButton")).enabledSelf);
         Show(new long[]{20,21},true,PlayableEntityKind.Explorer);Assert.False(((Button)Get("explorerButton")).enabledSelf);
     }
     [Test] public void SixControlsKeepIdentityWhileOrdersShiftAndPauseDisablesActions()
     {
         Show(new long[]{10,11,12});var before=root.Query<Button>().ToList();Assert.AreEqual(6,before.Count);
         Assert.That(((ProgressBar)Get("progress")).title,Does.Contain("8 с"));
-        Assert.AreEqual("Танк\n50%",before[0].text);Assert.AreEqual("Танк\nОжидает",before[1].text);
+        Assert.AreEqual("50%\n8с",before[0].text);Assert.AreEqual("Ждёт",before[1].text);
         Assert.True(before[2].enabledSelf);Assert.False(before[3].enabledSelf);
         Assert.That(((Label)Get("selectionLabel")).text,Does.Contain("9 (+3) / 100"));
         Show(new long[]{11,12});var after=root.Query<Button>().ToList();

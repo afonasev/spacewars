@@ -89,6 +89,18 @@ public sealed class OrbitalMenuTests : InputTestFixture
             Poll(new GamepadState(),.9f);Poll(new GamepadState().WithButton(GamepadButton.South),1f);Assert.AreEqual(2,calls);
         }finally{InputSystem.RemoveDevice(pad);}
     }
+    [UnityTest] public IEnumerator GamepadStartUsesTheActiveRouteActionBeforeBack()
+    {
+        int starts=0,backs=0;var action=OrbitalTheme.Action("Launch",()=>{});root.Add(action);yield return null;
+        navigation.SetScope(root,()=>backs++,action);navigation.Start=_=>{starts++;return true;};
+        var pad=InputSystem.AddDevice<Gamepad>();
+        void Poll(GamepadState state,float time){InputSystem.QueueStateEvent(pad,state);InputSystem.Update();typeof(NativeMenuNavigation).GetMethod("TickGamepad",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(navigation,new object[]{pad,time});}
+        try{
+            Poll(new GamepadState(),0);Poll(new GamepadState().WithButton(GamepadButton.Start),.1f);
+            Assert.AreEqual(1,starts);Assert.Zero(backs);
+            Poll(new GamepadState(),.2f);navigation.Start=null;Poll(new GamepadState().WithButton(GamepadButton.Start),.3f);Assert.AreEqual(1,backs);
+        }finally{InputSystem.RemoveDevice(pad);}
+    }
     [UnityTest] public IEnumerator SettingsBackRestoresCallerWithoutResumeAndPersistsPreference()
     {
         bool old=NativeUserSettings.AlwaysHealth;int resumed=0;var menu=new VisualElement();root.Add(menu);var opener=OrbitalTheme.Action("Настройки",()=>{});menu.Add(opener);yield return null;
@@ -119,6 +131,14 @@ public sealed class OrbitalMenuTests : InputTestFixture
             Assert.AreEqual(baseline.Revision,store.Selected.Revision,"Opening the active revision must not change the next-match choice.");
         }finally{Directory.Delete(directory,true);}
     }
+    [UnityTest] public IEnumerator ControlsHelpKeepsScrollingWithoutScrollbarControls()
+    {
+        root.style.width=800;root.style.height=620;var page=NativeControlsHelp.Open(root,navigation,()=>{});
+        for(int i=0;i<4;i++)yield return null;
+        var scroll=page.Q<ScrollView>("controls-scroll");Assert.AreEqual(ScrollerVisibility.Hidden,scroll.horizontalScrollerVisibility);Assert.AreEqual(ScrollerVisibility.Hidden,scroll.verticalScrollerVisibility);
+        Assert.Greater(scroll.verticalScroller.highValue,0);
+        scroll.Focus();navigation.Move(Vector2.down);Assert.Greater(scroll.scrollOffset.y,0,"D-pad navigation must retain access to the help content");
+    }
     [UnityTest] public IEnumerator NarrowLaboratoryKeepsToolbarAndFirstEditorInsideCard()
     {
         var directory=Path.Combine(Path.GetTempPath(),"spacewars-orbital-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
@@ -129,7 +149,7 @@ public sealed class OrbitalMenuTests : InputTestFixture
             var card=view.Page.Q(className:"orbital-lab-card");Assert.LessOrEqual(card.worldBound.yMax,root.worldBound.yMax+.5f);
             foreach(var key in new[]{"lab-save","lab-reset","lab-apply","lab-select","lab-back"}){var button=view.Page.Q<Button>(key);Assert.Greater(button.worldBound.width,0,key);Assert.LessOrEqual(button.worldBound.xMax,card.worldBound.xMax+.5f,key);Assert.LessOrEqual(button.worldBound.yMax,card.worldBound.yMax+.5f,key);}
             var editor=view.Page.Query<TextField>().ToList().First(t=>t.name!=null&&t.name.StartsWith("lab-field-"));Assert.Greater(editor.worldBound.width,150);Assert.LessOrEqual(editor.worldBound.xMax,card.worldBound.xMax);
-            var scroll=view.Page.Q<ScrollView>("lab-parameters");Assert.LessOrEqual(scroll.contentContainer.worldBound.xMax,scroll.worldBound.xMax+.5f);
+            var scroll=view.Page.Q<ScrollView>("lab-parameters");Assert.AreEqual(ScrollerVisibility.Auto,scroll.verticalScrollerVisibility,"Laboratory retains its scrollbar exception");Assert.AreEqual(Visibility.Visible,scroll.verticalScroller.resolvedStyle.visibility);Assert.LessOrEqual(scroll.contentContainer.worldBound.xMax,scroll.worldBound.xMax+.5f);
             var hints=view.Page.Q(className:"orbital-hints");Assert.LessOrEqual(hints.worldBound.yMax,card.worldBound.yMax+.5f);
         }finally{Directory.Delete(directory,true);}
     }

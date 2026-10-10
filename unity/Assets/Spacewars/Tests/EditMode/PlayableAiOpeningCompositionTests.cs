@@ -5,6 +5,7 @@ using System.Threading;
 using NUnit.Framework;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
+using Spacewars.Simulation.Ai;
 
 namespace Spacewars.Tests.EditMode
 {
@@ -12,11 +13,11 @@ namespace Spacewars.Tests.EditMode
     {
         private static bool Until(Func<bool> predicate)=>SpinWait.SpinUntil(predicate,8000);
 
-        [Test] public void FrozenReleaseDescriptorContainsExactlyTheAuditedOpenings()
+        [Test] public void NativeDescriptorRetainsTheSupportedOpenings()
         {
             CollectionAssert.AreEqual(new[]{PlayableAiOpening.Safe,PlayableAiOpening.GreedySafe,PlayableAiOpening.GreedyMine,PlayableAiOpening.BlindRush,PlayableAiOpening.ExplorerAllIn,PlayableAiOpening.DoubleMineExplorerRush},PlayableAiOpeningComposition.Supported);
-            Assert.AreEqual("adaptive-strategic-ai-v1@release:8",PlayableAiOpeningComposition.SourceProfileIdentity);
-            Assert.True(PlayableAiOpeningComposition.SourceIdentity.StartsWith("source:96a32f63:"));
+            Assert.AreEqual(PlayableAiOpeningComposition.ProfileBinding(AiProfile.Initial),PlayableAiOpeningComposition.SourceProfileIdentity);
+            Assert.AreEqual("native-strategic-ai:opening-v1",PlayableAiOpeningComposition.SourceIdentity);
             Assert.Throws<ArgumentException>(()=>PlayableAiOpeningComposition.Initialize(1,"player-1","foreign@1"));
         }
 

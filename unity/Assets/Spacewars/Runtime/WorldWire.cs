@@ -51,6 +51,18 @@ namespace Spacewars.Runtime
             w.Write(values.Length);
             foreach(var v in values)write(v);
             }
+        // Same length-prefixed byte sequence as Array<byte>, without a delegate per byte.
+        internal static void ByteArray(BinaryWriter w,byte[] values)
+        {
+            if(values==null||values.Length>MaxItems)throw new ArgumentException("Invalid array.");
+            w.Write(values.Length);w.Write(values);
+        }
+        internal static byte[] ByteArray(BinaryReader r)
+        {
+            int n=r.ReadInt32();
+            if(n<0||n>MaxItems||n>r.BaseStream.Length-r.BaseStream.Position)throw new ArgumentException("Invalid array length.");
+            return r.ReadBytes(n);
+        }
         internal static byte[] Pack(Action<BinaryWriter> write){using(var m=new MemoryStream()){using(var w=new BinaryWriter(m,Encoding.UTF8,true))write(w);
             if(m.Length>MaxBytes)throw new ArgumentException("World exceeds byte limit.");
             return m.ToArray();
@@ -204,9 +216,12 @@ namespace Spacewars.Runtime
             w.Write(v.AppliedResults);
             w.Write(v.UnreachableResults);
             Array(w,v.CollectionLayouts,x=>Array(w,x,i=>w.Write(i)));
+            Array(w,v.BarrierAnswers??System.Array.Empty<NavigationAnswerState>(),x=>WorldWire.Write(w,x));
+            GroupOrderWire.WriteExtension(w,v);
             }
         internal static NavigationSessionState ReadNavigationSessionState(BinaryReader r) {if(!Boolean(r))return null;
-            return new NavigationSessionState{Generation=r.ReadInt64(),RequestSequence=r.ReadInt64(),Geometry=ReadNavigationGeometryState(r),NavigationGeometry=ReadNavigationGeometryState(r),GeometryTable=Array(r,()=>ReadNavigationGeometryState(r)),NavigationGeometryIndex=r.ReadInt32(),Crowd=ReadNavCrowdSaveState(r),Requests=Array(r,()=>ReadNavigationRequestState(r)),Orders=Array(r,()=>ReadNavigationEntityOrderState(r)),Reservations=Array(r,()=>ReadNavigationEntityPointState(r)),RetainedGoals=Array(r,()=>ReadNavigationEntityPointState(r)),PendingRequestIndices=Array(r,()=>r.ReadInt32()),RequestMailboxIndices=Array(r,()=>r.ReadInt32()),ProbeRequestIndices=Array(r,()=>r.ReadInt32()),MovementIdentities=Array(r,()=>ReadNavigationMovementIdentityState(r)),ProbeAnswers=Array(r,()=>ReadNavigationAnswerState(r)),AnswerMailbox=Array(r,()=>ReadNavigationAnswerState(r)),RejectedResults=r.ReadInt32(),AppliedResults=r.ReadInt32(),UnreachableResults=r.ReadInt32(),CollectionLayouts=Array(r,()=>Array(r,()=>r.ReadInt32()))};
+            var state=new NavigationSessionState{Generation=r.ReadInt64(),RequestSequence=r.ReadInt64(),Geometry=ReadNavigationGeometryState(r),NavigationGeometry=ReadNavigationGeometryState(r),GeometryTable=Array(r,()=>ReadNavigationGeometryState(r)),NavigationGeometryIndex=r.ReadInt32(),Crowd=ReadNavCrowdSaveState(r),Requests=Array(r,()=>ReadNavigationRequestState(r)),Orders=Array(r,()=>ReadNavigationEntityOrderState(r)),Reservations=Array(r,()=>ReadNavigationEntityPointState(r)),RetainedGoals=Array(r,()=>ReadNavigationEntityPointState(r)),PendingRequestIndices=Array(r,()=>r.ReadInt32()),RequestMailboxIndices=Array(r,()=>r.ReadInt32()),ProbeRequestIndices=Array(r,()=>r.ReadInt32()),MovementIdentities=Array(r,()=>ReadNavigationMovementIdentityState(r)),ProbeAnswers=Array(r,()=>ReadNavigationAnswerState(r)),AnswerMailbox=Array(r,()=>ReadNavigationAnswerState(r)),RejectedResults=r.ReadInt32(),AppliedResults=r.ReadInt32(),UnreachableResults=r.ReadInt32(),CollectionLayouts=Array(r,()=>Array(r,()=>r.ReadInt32())),BarrierAnswers=r.BaseStream.Position<r.BaseStream.Length?Array(r,()=>ReadNavigationAnswerState(r)):System.Array.Empty<NavigationAnswerState>()};
+            GroupOrderWire.ReadExtension(r,state);return state;
             }
         internal static void Write(BinaryWriter w,NavCrowdSaveState v) {w.Write(v!=null);
             if(v==null)return;
@@ -271,13 +286,12 @@ namespace Spacewars.Runtime
             });
             Array(w,v.DiscoveredCells,x=>{w.Write(x);
             });
-            Array(w,v.Coverage,x=>{w.Write(x);
-            });
+            ByteArray(w,v.Coverage);
             Array(w,v.KnownBuildings,x=>{WorldWire.Write(w,x);
             });
             }
         internal static PlayableVisionState ReadPlayableVisionState(BinaryReader r) {if(!Boolean(r))return null;
-            return new PlayableVisionState{Version=r.ReadInt32(),Team=r.ReadInt32(),RasterResolution=r.ReadInt32(),Revision=r.ReadInt64(),CoverageUpdates=r.ReadInt64(),HalfWidth=Number(r),HalfDepth=Number(r),CellSize=Number(r),Feather=Number(r),Sources=Array(r,()=>ReadVisionSourceState(r)),DiscoveredCells=Array(r,()=>r.ReadInt64()),Coverage=Array(r,()=>r.ReadByte()),KnownBuildings=Array(r,()=>ReadKnownBuildingState(r))};
+            return new PlayableVisionState{Version=r.ReadInt32(),Team=r.ReadInt32(),RasterResolution=r.ReadInt32(),Revision=r.ReadInt64(),CoverageUpdates=r.ReadInt64(),HalfWidth=Number(r),HalfDepth=Number(r),CellSize=Number(r),Feather=Number(r),Sources=Array(r,()=>ReadVisionSourceState(r)),DiscoveredCells=Array(r,()=>r.ReadInt64()),Coverage=ByteArray(r),KnownBuildings=Array(r,()=>ReadKnownBuildingState(r))};
             }
         internal static void Write(BinaryWriter w,VisionSourceState v) {w.Write(v!=null);
             if(v==null)return;
@@ -369,8 +383,10 @@ namespace Spacewars.Runtime
             }
         internal static BallisticContact ReadBallisticContact(BinaryReader r) {return new BallisticContact(Number(r),ReadBallisticPoint(r),r.ReadInt32());
             }
-        internal static byte[] Binding(PlayableProfile p)=>Pack(w=>{w.Write(PlayableCommand.CurrentSchemaVersion);String(w,p.DisplayName);
-            w.Write(PlayableAiObservation.CurrentSchemaVersion);
+        internal static byte[] Binding(PlayableProfile p,bool legacyQueue=false)=>BindingCore(p,legacyQueue,false);
+        internal static byte[] BindingLegacyMarch(PlayableProfile p)=>BindingCore(p,false,true);
+        private static byte[] BindingCore(PlayableProfile p,bool legacyQueue,bool legacyMarch)=>Pack(w=>{w.Write(legacyQueue?9:PlayableCommand.CurrentSchemaVersion);String(w,p.DisplayName);
+            w.Write(legacyQueue?14:PlayableAiObservation.CurrentSchemaVersion);
             Number(w,p.MinimapCompactSize);
             Number(w,p.MinimapTacticalSize);
             Number(w,p.MinimapTerrainSaturation);
@@ -565,6 +581,7 @@ namespace Spacewars.Runtime
             Number(w,p.TankPreparationSeconds);
             Number(w,p.TankWeaponReloadSeconds);
             Number(w,p.TankProjectileMaxTravel);
+            w.Write(p.MatchScoreEarnedCreditsDivisor);
             w.Write(p.ArmyCapacity);
             w.Write(p.StartingCredits);
             w.Write(p.IncomePeriodSeconds);
@@ -619,6 +636,7 @@ namespace Spacewars.Runtime
             w.Write(p.RenderTargetFramesPerSecond);
             Number(w,p.CameraOrthoSize);
             Number(w,p.CameraHeight);
+            Number(w,p.CameraOffsetX);
             Number(w,p.CameraOffsetZ);
             Number(w,p.CameraPanSpeed);
             Number(w,p.CameraMinZoom);
@@ -630,29 +648,31 @@ namespace Spacewars.Runtime
             String(w,m.Id);
             w.Write(m.Revision);
             Number(w,m.HalfExtent);
-            Number(w,m.RiverHalfWidth);
-            Number(w,m.CrossingZ);
-            Number(w,m.SideBridgeWidth);
-            Number(w,m.CentralBridgeWidth);
-            Number(w,m.CentralBridgeHalfSpan);
-            Number(w,m.BaseCoordinate);
-            Number(w,m.MineX);
-            Number(w,m.MineZ);
-            Number(w,m.PocketX);
-            Number(w,m.RailHeight);
-            Number(w,m.RailThickness);
-            Number(w,m.PostHeight);
-            Number(w,m.PostWidth);
+            if(m is ThreeCrossingsMap crossings){
+            Number(w,crossings.RiverHalfWidth);
+            Number(w,crossings.CrossingZ);
+            Number(w,crossings.SideBridgeWidth);
+            Number(w,crossings.CentralBridgeWidth);
+            Number(w,crossings.CentralBridgeHalfSpan);
+            Number(w,crossings.BaseCoordinate);
+            Number(w,crossings.MineX);
+            Number(w,crossings.MineZ);
+            Number(w,crossings.PocketX);
+            Number(w,crossings.RailHeight);
+            Number(w,crossings.RailThickness);
+            Number(w,crossings.PostHeight);
+            Number(w,crossings.PostWidth);
             Number(w,m.DirectFireHeight);
-            Number(w,m.WaterDepth);
-            Number(w,m.DeckThickness);
-            Number(w,m.PlatformInspectionSize);
-            Number(w,m.OverviewSize);
-            Number(w,m.OverviewHeight);
-            Number(w,m.OverviewOffset);
+            Number(w,crossings.WaterDepth);
+            Number(w,crossings.DeckThickness);
+            Number(w,crossings.PlatformInspectionSize);
+            Number(w,crossings.OverviewSize);
+            Number(w,crossings.OverviewHeight);
+            Number(w,crossings.OverviewOffset);
             Array(w,m.MovementBlockers.ToArray(),x=>Write(w,x));
             Array(w,m.Solids.ToArray(),x=>Write(w,x));
-            Array(w,m.Water.ToArray(),x=>Write(w,x));
+            Array(w,crossings.Water.ToArray(),x=>Write(w,x));
+            }else if(m is FoundryMap foundry){Number(w,foundry.Scale);Number(w,foundry.UpperHeight);Number(w,m.DirectFireHeight);Array(w,m.MovementBlockers.ToArray(),x=>Write(w,x));Array(w,m.Solids.ToArray(),x=>Write(w,x));}else throw new ArgumentException("Unsupported native terrain binding.");
             w.Write(m.Supports.Count);
             foreach(var s in m.Supports){String(w,s.Id);
             Write(w,s.Bounds);
@@ -660,7 +680,8 @@ namespace Spacewars.Runtime
             Number(w,s.Height);
             Write(w,s.Gradient);
             Write(w,s.Origin);
-            }}});
+            }}if(!legacyQueue){w.Write(p.UnitOrderQueueLimit);Number(w,p.CameraEdgePanSpeed);Number(w,p.CameraEdgePanZonePixels);}
+            if(!legacyQueue&&!legacyMarch)Number(w,p.GroupMarchMaximumStretch);});
 
     }
 }

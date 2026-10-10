@@ -38,6 +38,7 @@ namespace Spacewars.Presentation
             toolbar.Add(OrbitalTheme.Action("Отменить",()=>Load(selected),"lab-reset"));
             applyButton=OrbitalTheme.Action("Применить",Apply,"lab-apply");toolbar.Add(applyButton);
             toolbar.Add(OrbitalTheme.Action("Для нового матча",()=>Try(()=>{store.Select(selected.Revision);status.text="Для следующего матча: "+selected.DisplayName+" · "+selected.Revision;}),"lab-select"));
+            toolbar.Add(OrbitalTheme.Action("Звук",()=>{Page.style.display=DisplayStyle.None;NativeGameplayAudioProfile.Open(root,navigation,()=>{Page.style.display=DisplayStyle.Flex;navigation.SetScope(Page,Back,save,hints);});},"lab-audio"));
             toolbar.Add(OrbitalTheme.Action("Назад",Back,"lab-back"));
             search=new TextField("Поиск параметра"){name="lab-search"};search.RegisterValueChangedCallback(_=>RenderFields());card.Add(search);
             var body=new VisualElement();body.style.flexDirection=FlexDirection.Row;body.style.flexGrow=1;body.style.minHeight=80;card.Add(body);

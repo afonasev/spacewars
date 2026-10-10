@@ -71,15 +71,15 @@ namespace Spacewars.Simulation
                 new NavPolygon(new[]{new NavPoint(HalfExtent,HalfExtent)}.Concat(east.AsEnumerable().Reverse()).Concat(new[]{new NavPoint(HalfExtent,-HalfExtent)}))};
             foreach(var band in new[]{new[]{0,2},new[]{3,7},new[]{8,12},new[]{13,15}}){var pts=west.Skip(band[0]).Take(band[1]-band[0]+1).Concat(east.Skip(band[0]).Take(band[1]-band[0]+1).Reverse());water.Add(new NavObstacle(new NavPolygon(pts)));}
             foreach(int sx in new[]{-1,1})foreach(int sz in new[]{-1,1})BuildPlatform(d,new NavPoint(sx*BaseCoordinate,sz*BaseCoordinate),sx,sz,supports,solids);
-            for(int i=0;i<2;i++)supports.Add(new MapSupport(i==0?"west-bank":"east-bank",new NavObstacle(banks[i]),false));
-            foreach(double z in new[]{-CrossingZ,0,CrossingZ}){double width=z==0?CentralBridgeWidth:SideBridgeWidth,span=z==0?CentralBridgeHalfSpan:RiverHalfWidth;supports.Add(new MapSupport(z==0?"central-bridge":z>0?"north-bridge":"south-bridge",new NavObstacle(-span,z-width/2,span,z+width/2),true));}
+            for(int i=0;i<2;i++)supports.Add(new MapSupport(i==0?"west-bank":"east-bank",new NavObstacle(banks[i]),false,surfaceId:i==0?"bank/west":"bank/east"));
+            foreach(double z in new[]{-CrossingZ,0,CrossingZ}){double width=z==0?CentralBridgeWidth:SideBridgeWidth,span=z==0?CentralBridgeHalfSpan:RiverHalfWidth;supports.Add(new MapSupport(z==0?"central-bridge":z>0?"north-bridge":"south-bridge",new NavObstacle(-span,z-width/2,span,z+width/2),true,surfaceId:z==0?"bridge/central":z>0?"bridge/north":"bridge/south"));}
         }
         private static void BuildPlatform(ThreeCrossingsProfileData d,NavPoint center,int sx,int sz,List<MapSupport> supports,List<NavObstacle> solids)
         {
             double r=d.platformRadius,c=d.platformChamfer,g=d.rampWidth/2,w=d.platformWallWidth;
             var local=new[]{new NavPoint(-r+c,-r),new NavPoint(r-c,-r),new NavPoint(r,-r+c),new NavPoint(r,r-c),new NavPoint(r-c,r),new NavPoint(-r+c,r),new NavPoint(-r,r-c),new NavPoint(-r,-r+c)};
             var polygon=new NavPolygon(local.Select(p=>new NavPoint(p.X+center.X,p.Z+center.Z)));
-            string id="platform-"+sx+"-"+sz;supports.Add(new MapSupport(id,new NavObstacle(polygon),false,d.platformHeight));
+            string id="platform-"+sx+"-"+sz;supports.Add(new MapSupport(id,new NavObstacle(polygon),false,d.platformHeight,surfaceId:"deck/"+sx+"/"+sz));
             for(int i=0;i<local.Length;i++)
             {
                 var a=local[i];var b=local[(i+1)%local.Length];bool xGate=a.X==b.X&&a.X==-sx*r,zGate=a.Z==b.Z&&a.Z==-sz*r;
@@ -93,7 +93,7 @@ namespace Spacewars.Simulation
                 var outer=new NavPoint(inner.X+(alongX?sign*d.rampLength:0),inner.Z+(alongX?0:sign*d.rampLength));
                 var footprint=alongX?new NavObstacle(Math.Min(inner.X,outer.X),center.Z-g,Math.Max(inner.X,outer.X),center.Z+g):new NavObstacle(center.X-g,Math.Min(inner.Z,outer.Z),center.X+g,Math.Max(inner.Z,outer.Z));
                 var gradient=alongX?new NavPoint(-sign*d.platformHeight/d.rampLength,0):new NavPoint(0,-sign*d.platformHeight/d.rampLength);
-                supports.Insert(0,new MapSupport(id+(alongX?"-east-west-ramp":"-north-south-ramp"),footprint,false,0,gradient,outer));
+                supports.Insert(0,new MapSupport(id+(alongX?"-east-west-ramp":"-north-south-ramp"),footprint,false,0,gradient,outer,surfaceId:"ramp/"+sx+"/"+sz+(alongX?"/x":"/z")));
                 foreach(int side in new[]{-1,1}){var a=new NavPoint(inner.X-center.X+(alongX?0:side*(g+w/2)),inner.Z-center.Z+(alongX?side*(g+w/2):0));var b=new NavPoint(outer.X-center.X+(alongX?0:side*(g+w/2)),outer.Z-center.Z+(alongX?side*(g+w/2):0));Wall(a,b);}
             }
             void Wall(NavPoint a,NavPoint b)

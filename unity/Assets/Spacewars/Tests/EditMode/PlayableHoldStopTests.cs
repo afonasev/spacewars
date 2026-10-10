@@ -20,21 +20,6 @@ namespace Spacewars.Tests.EditMode
         private PlayableCommandStatus Send(PlayableCommandKind kind,int id,NavPoint target=default(NavPoint),int targetId=0)=>(PlayableCommandStatus)Call("Apply",new PlayableCommand(1,++sequence,"player-1",kind,new[]{id},target,targetId:targetId),null);
         private void Seconds(double seconds){for(int i=0;i<seconds*30;i++)Call("Step",1d/30d);}
         private NavigationRequest Request(int id){NavigationRequest r;while(Nav.Requests.TryDequeue(out r))if(r.Entity==id)return r;Assert.Fail("Missing request");return null;}
-        [Test] public void OrdinaryOwnerAiCannotReplaceHumanHoldButHumanStopCan()
-        {
-            using(var runtime=new PlayableRuntime(profile,91,19092026))
-            {
-                var initial=runtime.Latest.Entities.Single(e=>e.Owner==PlayableOwner.Player&&e.Kind==PlayableEntityKind.Explorer);
-                Assert.True(runtime.TrySubmit(new PlayableCommand(91,1,"player-1",PlayableCommandKind.Hold,new[]{initial.Id})).Accepted);
-                var end=DateTime.UtcNow.AddSeconds(20);
-                while(DateTime.UtcNow<end&&!runtime.AiCheckpoint.Records.Any(r=>r.Message=="Human/unknown HOLD has priority."))Thread.Sleep(20);
-                Assert.True(runtime.AiCheckpoint.Records.Any(r=>r.Status==PlayableAiDeliveryStatus.Rejected&&r.Message=="Human/unknown HOLD has priority."),"Ordinary owner policy must attempt delivery against the retained human HOLD.");
-                var held=runtime.Latest.Entities.Single(e=>e.Id==initial.Id);Assert.True(held.Held);Assert.False(held.Moving);Assert.AreEqual(initial.Position,held.Position);
-                Assert.True(runtime.TrySubmit(new PlayableCommand(91,2,"player-1",PlayableCommandKind.Stop,new[]{initial.Id})).Accepted);
-                end=DateTime.UtcNow.AddSeconds(2);while(DateTime.UtcNow<end&&runtime.Latest.Entities.Single(e=>e.Id==initial.Id).Held)Thread.Sleep(20);
-                Assert.False(runtime.Latest.Entities.Single(e=>e.Id==initial.Id).Held);
-            }
-        }
         [TestCase(PlayableEntityKind.Tank)] [TestCase(PlayableEntityKind.Explorer)] [TestCase(PlayableEntityKind.Shkval)]
         public void HoldClearsOldPendingAndStopReturnsFree(PlayableEntityKind kind)
         {

@@ -20,7 +20,7 @@ namespace Spacewars.Tests.EditMode
             var config=OfflineParticipantAuthorityTests.Config(2);var a=new OfflineParticipantAuthority(config,77);var bytes=a.CaptureBytes();
             var d=Data();if(distance)d.followDistance+=.1;else d.followArrivalTolerance+=.05;
             var binding=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.WorldWire").GetMethod("Binding",BindingFlags.Static|BindingFlags.NonPublic);
-            var oldBytes=(byte[])binding.Invoke(null,new object[]{original});var next=(byte[])binding.Invoke(null,new object[]{PlayableProfile.Create(d)});Assert.False(oldBytes.SequenceEqual(next));
+            var oldBytes=(byte[])binding.Invoke(null,new object[]{original,false});var next=(byte[])binding.Invoke(null,new object[]{PlayableProfile.Create(d),false});Assert.False(oldBytes.SequenceEqual(next));
             // Replace only the profile in an otherwise identical immutable configuration.
             var costs=new double[config.Starts.Count,config.Starts.Count];for(int i=0;i<config.Starts.Count;i++)for(int j=0;j<config.Starts.Count;j++)costs[i,j]=config.RouteCost(i,j);
             var changed=new OfflineMatchConfiguration(PlayableProfile.Create(d),config.SourceIdentity,config.MapIdentity,config.RouteProvenance,config.Seed,config.Roster.ToArray(),config.Starts.ToArray(),config.Sites.ToArray(),config.Obstacles.ToArray(),costs,config.Spectators.ToArray());

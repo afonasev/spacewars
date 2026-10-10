@@ -1,0 +1,152 @@
+{
+  "catalogue": "hybrid-economy-v1",
+  "authorship": "Local deterministic oscillator/noise synthesis; no external content",
+  "generator_sha256": "6c642841d4fd0a0c3d555311330e4003acdf0687a0bcd37d54b1365ce440de8b",
+  "sample_rate": 24000,
+  "assets": [
+    {
+      "file": "construction-1.wav",
+      "seconds": 0.55,
+      "sample_peak": 0.6,
+      "sha256": "1df7d16f08937277f2c0b1c777dde87f6289179f36f5c1cd5f6ea60fc17227d4"
+    },
+    {
+      "file": "construction-2.wav",
+      "seconds": 0.55,
+      "sample_peak": 0.6,
+      "sha256": "224c176112c09362db09349f423cf8c143b5d5b3a5f27d9627afa2ac85268bb3"
+    },
+    {
+      "file": "construction-3.wav",
+      "seconds": 0.55,
+      "sample_peak": 0.6,
+      "sha256": "153554de36f1d273d6b1fcd6737d9dd403c793a0a48c3d554291a443832ebfca"
+    },
+    {
+      "file": "demolition-1.wav",
+      "seconds": 0.9,
+      "sample_peak": 0.6,
+      "sha256": "18e5025ad9f6d2a8e8ad2b6e490ada8cdb0cb4bf2e60c19c67696964bab20d87"
+    },
+    {
+      "file": "demolition-2.wav",
+      "seconds": 0.9,
+      "sample_peak": 0.6,
+      "sha256": "b20906f453528010a45219316bba323a220fbf2d77cc2a4d422ef7ca662225a4"
+    },
+    {
+      "file": "demolition-3.wav",
+      "seconds": 0.9,
+      "sample_peak": 0.6,
+      "sha256": "0ef416cef7ee86f8cb598eb693c6a98f3523aebbaf84a8a3d4621e2e008bb2ec"
+    },
+    {
+      "file": "repair-1.wav",
+      "seconds": 0.55,
+      "sample_peak": 0.6,
+      "sha256": "700d1d8dcbabb1e83a7d290f943c9547c14942a56ec2394bfc956e437ec4c1f7"
+    },
+    {
+      "file": "repair-2.wav",
+      "seconds": 0.55,
+      "sample_peak": 0.6,
+      "sha256": "7c8cf982bf4db7ee0aa329af64398fafba8d0936fa7b8762b4145dfecd70e424"
+    },
+    {
+      "file": "repair-3.wav",
+      "seconds": 0.55,
+      "sample_peak": 0.6,
+      "sha256": "68e09b80ebd3d1b4d8fa89f7180259c402465b6c3165d9c0ca17f6089e8b4297"
+    },
+    {
+      "file": "damage-1.wav",
+      "seconds": 0.4,
+      "sample_peak": 0.6,
+      "sha256": "f1afe8c9d68dfded80cc0624e8a81fcf9ccf8c810988407a2fd7af77673238f6"
+    },
+    {
+      "file": "damage-2.wav",
+      "seconds": 0.4,
+      "sample_peak": 0.6,
+      "sha256": "26b9cdd1f129c942ae9ac18a795948a742acc2a2e2ca44ab260b3226dd7901fb"
+    },
+    {
+      "file": "damage-3.wav",
+      "seconds": 0.4,
+      "sample_peak": 0.6,
+      "sha256": "0786e726e05aca787b184c26e2cd4dc385da0e143b7eea285c1ad99b3831fded"
+    },
+    {
+      "file": "motion-start-1.wav",
+      "seconds": 0.32,
+      "sample_peak": 0.6,
+      "sha256": "e92a569f7a1c2a2061ac3554f0c3a5ebfb95d40bb413bf54f185d3594063a953"
+    },
+    {
+      "file": "motion-stop-1.wav",
+      "seconds": 0.28,
+      "sample_peak": 0.5999999999999999,
+      "sha256": "8d19533995ed79bcf3872e3f1ef4179930e3ad286c7097d833a392ab9bd3525e"
+    },
+    {
+      "file": "queued-1.wav",
+      "seconds": 0.18,
+      "sample_peak": 0.6,
+      "sha256": "d472400a45b1d0beefe0b17317ef7b85001947c31dc7c9f2d509f85672de6d9b"
+    },
+    {
+      "file": "work-start-1.wav",
+      "seconds": 0.22,
+      "sample_peak": 0.6,
+      "sha256": "6bdb62dd2babcda14955f57251e5c0f6cb3babb9774451f569cddbcbee55696b"
+    },
+    {
+      "file": "ready-1.wav",
+      "seconds": 0.34,
+      "sample_peak": 0.6,
+      "sha256": "381ef1ca224b11f0cbb25110e8529a17caaf3eed50ac3b41a7a87c97d8722174"
+    },
+    {
+      "file": "cancel-1.wav",
+      "seconds": 0.22,
+      "sample_peak": 0.6,
+      "sha256": "5de5255b598797af5432c09f7c83d5bce3459403512bd9e21e7145ec0bd99ad7"
+    },
+    {
+      "file": "warning-1.wav",
+      "seconds": 0.45,
+      "sample_peak": 0.6,
+      "sha256": "51af619928bb77e0423b303cf1f7defe82acf232cd7bc4cf1a1213427337f7bd"
+    },
+    {
+      "file": "select-1.wav",
+      "seconds": 0.09,
+      "sample_peak": 0.6,
+      "sha256": "b856a757953e6fecdfca6d732c104adef3ef15d0bb7182cf53f5c31b033bc4d5"
+    },
+    {
+      "file": "ui-1.wav",
+      "seconds": 0.12,
+      "sample_peak": 0.6,
+      "sha256": "9616088216bb60a881f4e23f07d2392ba0a4a0f15ed686520c4d624432961236"
+    },
+    {
+      "file": "match-start-1.wav",
+      "seconds": 0.42,
+      "sample_peak": 0.6,
+      "sha256": "330caed586b9fa8da30641af227ab2eaf1f2f96e372a9a6dc7625ad8f7323291"
+    },
+    {
+      "file": "pause-1.wav",
+      "seconds": 0.18,
+      "sample_peak": 0.6,
+      "sha256": "a4caf66d405ba30c572c05611c162c906912041090bedbde6bbf6a1f57457b79"
+    },
+    {
+      "file": "result-1.wav",
+      "seconds": 0.65,
+      "sample_peak": 0.6,
+      "sha256": "b2298e743aba764f607d3c9829b28f17f9e022ef81c85ff7b8f5773a5699d196"
+    }
+  ]
+}

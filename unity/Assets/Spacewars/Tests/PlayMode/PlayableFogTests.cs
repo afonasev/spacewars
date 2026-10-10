@@ -104,6 +104,10 @@ public sealed class PlayableFogTests
             world.RenderMemories(snapshot());Assert.AreEqual(1,world.MemoryCount);Assert.IsEmpty(world.Actors);
             var root=parent.GetComponentsInChildren<Transform>().Single(t=>t.name=="Remembered building 22");
             Assert.False(root.GetComponentsInChildren<Transform>().Any(t=>t.name=="Health"||t.name=="Selection"));
+            var expected=new Vector3((float)p.CameraOffsetX,0,(float)p.CameraOffsetZ);expected=expected==Vector3.zero?Vector3.back:expected.normalized;
+            Assert.That(Vector3.Dot(root.GetChild(0).forward,expected),Is.GreaterThan(.999),"Fog memories face the approved current camera regardless of remembered domain heading.");
+            var live=world.Building(23,"Factory",false);world.FaceBuilding(live);
+            Assert.That(Vector3.Dot(root.GetChild(0).forward,live.Hull.forward),Is.GreaterThan(.999),"Memory and actual live model use the same current presentation front.");
             vision.Refresh(new[]{new VisionSource(new NavPoint(0,0),13)},Empty);world.RenderMemories(snapshot());Assert.Zero(world.MemoryCount);
             var shader=Resources.Load<Shader>("TerritoryFog");Assert.IsNotNull(shader);Assert.True(shader.isSupported);
         }

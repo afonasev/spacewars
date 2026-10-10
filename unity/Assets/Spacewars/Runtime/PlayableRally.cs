@@ -78,7 +78,10 @@ namespace Spacewars.Runtime
                 }
                 if(work.Request!=null){
                     if(!answers.TryGetValue(work.Request,out var answer))continue;
-                    if(CompleteRallyRoute(work.Request,answer.CopyRoute())){work.Kind++;work.Candidate=0;}
+                    if(answer.Status==NavSolveStatus.CapacityExceeded){FinishRally(id,work,PlayableCommandStatus.Overflow,"Route capacity exceeded.");continue;}
+                    if(answer.Status==NavSolveStatus.InvalidEndpoint){FinishRally(id,work,PlayableCommandStatus.InvalidTarget,"Invalid rally route endpoint.");continue;}
+                    if(answer.Status==NavSolveStatus.Stale){work.Request=null;continue;}
+                    if(answer.Status==NavSolveStatus.Ready&&CompleteRallyRoute(work.Request,answer.CopyRoute())){work.Kind++;work.Candidate=0;}
                     else work.Candidate++;
                     work.Request=null;
                 }

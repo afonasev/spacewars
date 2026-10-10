@@ -1,0 +1,7 @@
+{
+  "tool": "built-in image_gen",
+  "date": "2026-10-09",
+  "scope": "chosen C geology with A layered basalt",
+  "Basalt": "single seamless flat orthographic albedo, grey fractured large volcanic planes, irregular horizontal layers, muted rust; no glow, props, vegetation or fabric",
+  "SlagAsh": "single seamless flat orthographic albedo, compacted rust-brown cooled slag with grey charcoal ash patches; no loose stones, vegetation, props or lava"
+}

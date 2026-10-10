@@ -5,8 +5,10 @@ using Spacewars.Simulation;
 namespace Spacewars.Runtime
 {
     // Diagnostic U6 policy: one owner, one public authored start approach, and no domain access.
-    public sealed class PlayableAiScoutLivenessPolicy
+    public sealed partial class PlayableAiScoutLivenessPolicy
     {
+        internal PlayableAiScoutLivenessPolicy Fork() => (PlayableAiScoutLivenessPolicy)MemberwiseClone();
+
 
         private long nextActionId;
         private long pendingActionId;
@@ -36,7 +38,7 @@ namespace Spacewars.Runtime
 
         public void ObserveReceipt(PlayableAiTraceRecord record)
         {
-            if(record==null||record.OwnerId!=ownerId||record.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity||!HasPendingObligation||record.ActionId!=pendingActionId)return;
+            if(record==null||!AiStateWire.CallbackGenerationMatches(record,pendingGeneration)||record.OwnerId!=ownerId||record.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity||!HasPendingObligation||record.ActionId!=pendingActionId)return;
             if(record.Status==PlayableAiDeliveryStatus.Applied||record.Status==PlayableAiDeliveryStatus.Rejected||record.Status==PlayableAiDeliveryStatus.Stale||record.Status==PlayableAiDeliveryStatus.Cancelled||record.Status==PlayableAiDeliveryStatus.Stopped||record.Status==PlayableAiDeliveryStatus.InvalidAction||record.Status==PlayableAiDeliveryStatus.InvalidOwner)ClearPending();
         }
 

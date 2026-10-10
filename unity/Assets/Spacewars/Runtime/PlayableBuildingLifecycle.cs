@@ -9,7 +9,7 @@ namespace Spacewars.Runtime
     {
         [Serializable] private sealed class SaleState { public int TermsRevision; public double Elapsed,Duration; }
         [Serializable] private sealed class RepairState
-        { public int TermsRevision;
+        { public int TermsRevision; public string AllocationReceipt;
             public double MissingHealth,TotalCost,Duration,PaidSeconds,SettlementElapsed;
             public bool Waiting;
         }
@@ -41,6 +41,7 @@ namespace Spacewars.Runtime
                 AddCredits(owner,SaleRefund(item));
                 item.Sale=new SaleState{TermsRevision=profile.Revision,Duration=profile.BuildingSaleDemolitionSec};
                 item.Repair=null;if(item.Upgrade?.Complete!=true)item.Upgrade=null;item.Orders.Clear();item.RepeatTank=false;
+                Sound(PlayableSoundKind.DemolitionStarted,item.Position,PlayableEntityKind.Tank,owner,true);
             }
             message="Продажа принята. Демонтаж необратим.";return PlayableCommandStatus.Applied;
         }
@@ -51,13 +52,14 @@ namespace Spacewars.Runtime
             message=RepairBlocked(b);if(message!=null)return PlayableCommandStatus.Rejected;
             double missing=TerritoryRules.Health(profile,b.Kind)-b.Health,ratio=missing/TerritoryRules.Health(profile,b.Kind);
             b.Repair=new RepairState{TermsRevision=profile.Revision,MissingHealth=missing,TotalCost=TerritoryRules.Cost(profile,b.Kind)*profile.BuildingRepairCostRatio*ratio,Duration=profile.BuildingRepairDurationSec*ratio};
+            Sound(PlayableSoundKind.RepairStarted,b.Position,PlayableEntityKind.Tank,owner,true);
             message="Ремонт начат";return PlayableCommandStatus.Applied;
         }
         private PlayableCommandStatus CancelRepair(int id,PlayableOwner owner,out string message)
         {
             message="Нет активного ремонта";
             if(!buildings.TryGetValue(id,out var b)||b.Owner!=owner||b.Repair==null)return PlayableCommandStatus.InvalidEntity;
-            b.Repair=null;message="Ремонт отменён";return PlayableCommandStatus.Applied;
+            b.Repair=null;Sound(PlayableSoundKind.RepairCancelled,b.Position,PlayableEntityKind.Tank,owner,true);message="Ремонт отменён";return PlayableCommandStatus.Applied;
         }
         private readonly List<Building> lifecycleWork=new List<Building>();
         private void AdvanceBuildingLifecycle(double dt)
@@ -71,7 +73,7 @@ namespace Spacewars.Runtime
                 if(b.Sale!=null)
                 {
                     b.Sale.Elapsed+=dt;
-                    if(b.Sale.Elapsed+1e-9>=b.Sale.Duration){RemoveBuilding(b,false);removed=true;}
+                    if(b.Sale.Elapsed+1e-9>=b.Sale.Duration){Sound(PlayableSoundKind.Demolished,b.Position,PlayableEntityKind.Tank,b.Owner,true);RemoveBuilding(b,false);removed=true;}
                     continue;
                 }
                 var r=b.Repair;if(r==null)continue;
@@ -90,7 +92,7 @@ namespace Spacewars.Runtime
                     // Settle sub-nanohitpoint accumulation before the integer HUD ceiling.
                     if(terminal)b.Health=Math.Round(b.Health,9);
                     r.PaidSeconds+=slice;r.Waiting=false;
-                    if(terminal||b.Health>=maximum-1e-9){b.Repair=null;}
+                    if(terminal||b.Health>=maximum-1e-9){b.Repair=null;Sound(PlayableSoundKind.RepairComplete,b.Position,PlayableEntityKind.Tank,b.Owner,true);}
                 }
             }
             if(removed)RebuildGeometry();
@@ -106,7 +108,9 @@ namespace Spacewars.Runtime
                 if(c.ParentId==b.Id&&c.Sale==null){count++;refund+=SaleRefund(c);}
             }
             return new PlayableBuildingLifecycleSnapshot(b.Sale!=null,b.Sale==null?0:b.Sale.Elapsed/b.Sale.Duration,b.Repair!=null,b.Repair?.Waiting??false,
-                b.Repair?.PaidSeconds??0,b.Repair?.Duration??0,SaleBlocked(b),RepairBlocked(b),count,refund,lastCenter);
+                b.Repair?.PaidSeconds??0,b.Repair?.Duration??0,SaleBlocked(b),RepairBlocked(b),count,refund,lastCenter,
+                b.Repair==null?TerritoryRules.Cost(profile,b.Kind)*profile.BuildingRepairCostRatio*Math.Max(0,1-b.Health/TerritoryRules.Health(profile,b.Kind)):
+                    Math.Max(0,b.Repair.TotalCost-b.Repair.TotalCost*Math.Min(1,b.Repair.PaidSeconds/b.Repair.Duration)),b.Repair?.TermsRevision??profile.Revision);
         }
     }
 }

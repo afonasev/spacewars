@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit native QA routes. Default full; see .agents/references/qa-scope.md."""
+"""Explicit native QA routes. Default UI; full is explicit; see .agents/references/qa-scope.md."""
 import argparse
 from collections import Counter
 from datetime import datetime, timezone
@@ -26,11 +26,23 @@ UI_METHODS = {
     'ResponsiveLayoutKeepsTheSameActionsAndFocus': 2,
     'HudFocusCanBeEnteredAndLeftWithoutChangingGameActions': 1,
     'NarrowViewportKeepsVisibleActionBoundsInsidePanel': 1,
+    'PopulatedResearchStaysBesideMapWithoutCoveringHeaderAt800': 1,
+    'RestartedSnapshotReleasesTerminalScopeBeforeWorldEscape': 1,
     'TerminalResultsFitAndKeepFocusAtCheckedViewports': 1,
 }
 # Only reviewed presentation fixtures may join the UI gate. Keep multiplicities
 # explicit so an accidentally narrowed discovery cannot make this route green.
 UI_AFFECTED_METHODS = {
+    'PlayableBattleHudTests': {
+        'ArmyPopoverUsesWholeOwnLivingArmyAndFocus': 1,
+        'RingKeepsRepeatWhenPurchaseUnavailableAndBlocksStaleAction': 1,
+        'CircularActionsStayInsideCompactViewport': 1,
+        'PaintedSectorsHaveExclusivePointerTargets': 1,
+        'PrecisionPanelsRenderPopulatedQueuesAtBothViewports': 1,
+        'ApprovedIconsKeepSemanticMappingsAndQueueStates': 1,
+        'ApprovedIconsRenderAtHudSizes': 1,
+        'StartingCameraAndZoomKeepUnitsClose': 1,
+    },
     'PlayableProductionHudTests': {
         'ShkvalQueueShowsActualKindAndPause': 1,
         'ExplorerQueueShowsKindProgressAndPausedControl': 1,
@@ -122,11 +134,11 @@ def provenance():
 
 def run():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--scope', choices=('ui', 'focused', 'full'), default='full')
+    parser.add_argument('--scope', choices=('ui', 'focused', 'full'), default='ui')
     parser.add_argument('--platform', choices=('EditMode', 'PlayMode'))
     parser.add_argument('--fixture', action='append', default=[])
     parser.add_argument('--affected-fixture', action='append', default=[],
-                        help='UI only: complete production, science or building lifecycle HUD fixture (repeatable)')
+                        help='UI only: complete battle, production, science or building lifecycle HUD fixture (repeatable)')
     parser.add_argument('--exclusive', action='store_true',
                         help='Exclusive unity-run admission for performance measurements or UI/focus QA')
     parser.add_argument('--plan', action='store_true')

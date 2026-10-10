@@ -20,7 +20,7 @@ namespace Spacewars.Presentation
             foreach(var u in view.Entities)
                 text.AppendLine($"unit id={u.Id} owner={u.Owner} kind={u.Kind} health={u.Health} x={N(u.Position.X)} z={N(u.Position.Z)} radius={N(PlayableUnitRules.Radius(profile,u.Kind))} moving={u.Moving} held={u.Held} navigation={u.NavigationOutcome} target={u.TargetId} order={u.CurrentOrder?.Kind.ToString()??"none"}");
             foreach(var b in view.Buildings)text.AppendLine($"building id={b.Id} owner={b.Owner} kind={b.Kind} health={b.Health} phase={b.Phase} x={N(b.Position.X)} z={N(b.Position.Z)}");
-            foreach(var b in view.Buildings.Where(b=>b.Owner==PlayableOwner.Player&&b.Kind==PlayableBuildingKind.Factory&&b.PrivateState!=null))
+            foreach(var b in view.Buildings.Where(b=>b.Owner==LocalOwner&&b.Kind==PlayableBuildingKind.Factory&&b.PrivateState!=null))
             {
                 text.AppendLine($"factory id={b.Id} phase={b.Phase} queue={b.QueueCount} progress={N(b.ProductionProgress)} hasRally={b.PrivateState?.HasRally} pendingRally={b.PrivateState?.PendingRally.HasValue} rallyX={N(b.Rally.X)} rallyZ={N(b.Rally.Z)}");
                 foreach(var o in b.PrivateState.Orders)text.AppendLine($"order id={o.Id} kind={o.Kind} remaining={N(o.Remaining)} active={o.Active} paid={o.PaidCost} population={o.PopulationCost}");

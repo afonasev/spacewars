@@ -52,7 +52,7 @@ namespace Spacewars.Presentation
             yield return new WaitForSecondsRealtime(.5f);
             LaunchLobbyMatch();yield return new WaitForSecondsRealtime(3);
             if(inLobby||runtime.Generation!=3)throw new InvalidOperationException("Relaunch failed.");
-            File.WriteAllText(Path.Combine(lobbyEvidence,"smoke.json"),"{\"result\":\"passed\",\"scope\":\"Development Player auto route: menu/lobby/invalid colors/configure/launch/paused tick/restart/return/relaunch\",\"seed\":19092026,\"generation\":3,\"physical_device_acceptance\":false,\"natural_outcome_tested\":false}");
+            File.WriteAllText(Path.Combine(lobbyEvidence,"smoke.json"),"{\"result\":\"passed\",\"scope\":\"Development Player auto route: menu/lobby/invalid colors/configure/launch/paused tick/restart/return/relaunch\",\"seed\":"+runtime.Latest.Seed+",\"generation\":3,\"physical_device_acceptance\":false,\"natural_outcome_tested\":false}");
             Debug.Log("LOBBY_PLAYER_SMOKE_PASS");Quit();
         }
     }

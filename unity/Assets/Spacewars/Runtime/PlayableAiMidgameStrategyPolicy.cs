@@ -21,7 +21,7 @@ namespace Spacewars.Runtime
     }
 
     // Separate diagnostic policy. Frozen release:8 values are source AI rules, not new native gameplay balance.
-    public sealed class PlayableAiMidgameStrategyPolicy
+    public sealed partial class PlayableAiMidgameStrategyPolicy
     {
         private static readonly PlayableAiMidgameStrategy[] Ordered={PlayableAiMidgameStrategy.MapControl,PlayableAiMidgameStrategy.MassAssault,PlayableAiMidgameStrategy.Raids};
         private readonly string OwnerId;
@@ -38,7 +38,7 @@ namespace Spacewars.Runtime
             checkpoint=state;
         }
         public PlayableAiMidgameCheckpoint Review(PlayableAiObservation observation,PlayableAiOpeningCompositionState opening,
-            PlayableAiCombatMission mission=null,bool emergency=false)
+            PlayableAiCombatMission mission=null,bool emergency=false,AiArmyDeployment nativeDeployment=null)
         {
             if(observation==null||opening==null)throw new ArgumentNullException(observation==null?nameof(observation):nameof(opening));
             if(observation.OwnerId!=OwnerId||opening.OwnerId!=OwnerId||opening.MatchSeed!=observation.Seed||opening.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity)
@@ -47,6 +47,10 @@ namespace Spacewars.Runtime
                 throw new ArgumentException("Native gameplay profile differs from the policy.",nameof(observation));
             if(mission!=null&&(mission.OwnerId!=OwnerId||mission.SourceIdentity!=opening.SourceIdentity||mission.Generation!=observation.Generation))
                 throw new ArgumentException("Mission is not an owner/source/generation match.",nameof(mission));
+            if(nativeDeployment!=null&&(nativeDeployment.OwnerId!=OwnerId||nativeDeployment.Generation!=observation.Generation||nativeDeployment.Seed!=observation.Seed||
+                nativeDeployment.ProfileId!=observation.ProfileId||nativeDeployment.ProfileRevision!=observation.ProfileRevision||
+                nativeDeployment.ObservedTick!=observation.Tick||nativeDeployment.StartedTick>observation.Tick||nativeDeployment.ArmyId<=0))
+                throw new ArgumentException("Native deployment is not a current bound owner observation.",nameof(nativeDeployment));
             var current=checkpoint;
             if(current==null||current.Seed!=observation.Seed||current.Generation!=observation.Generation)
                 current=new PlayableAiMidgameCheckpoint(observation.Seed,observation.Generation,-1,0,0,0,PlayableAiOpeningPhase.Active,null,OwnerId,opening.SourceIdentity,observation.ProfileId,observation.ProfileRevision);
@@ -56,7 +60,7 @@ namespace Spacewars.Runtime
             if(phase==PlayableAiOpeningPhase.Active)
             {
                 if(observation.Tick>=Deadline(opening.Opening)*30){phase=PlayableAiOpeningPhase.Aborted;completed=observation.Tick;}
-                else if(OpeningComplete(observation,opening.Opening,mission)){phase=PlayableAiOpeningPhase.Complete;completed=observation.Tick;}
+                else if(OpeningComplete(observation,opening.Opening,mission,nativeDeployment!=null)){phase=PlayableAiOpeningPhase.Complete;completed=observation.Tick;}
             }
             var sequence=current.DecisionSequence+1;var strategy=current.Strategy;var strategyTick=current.LastStrategyTick;
             // Source runOpening marks the transition and returns; midgame starts on a later decision.
@@ -73,14 +77,14 @@ namespace Spacewars.Runtime
             checkpoint=new PlayableAiMidgameCheckpoint(observation.Seed,observation.Generation,observation.Tick,strategyTick,completed,sequence,phase,strategy,OwnerId,opening.SourceIdentity,observation.ProfileId,observation.ProfileRevision);
             return checkpoint;
         }
-        private static bool OpeningComplete(PlayableAiObservation o,PlayableAiOpening opening,PlayableAiCombatMission mission)
+        private static bool OpeningComplete(PlayableAiObservation o,PlayableAiOpening opening,PlayableAiCombatMission mission,bool nativeDeployed=false)
         {
             int buildings(PlayableBuildingKind kind)=>o.Buildings.Count(b=>b.Owner==o.Owner&&b.Kind==kind&&b.Health>0);
             int units(PlayableEntityKind kind)=>o.Entities.Count(e=>e.Owner==o.Owner&&e.Kind==kind&&e.Health>0);
             if(opening==PlayableAiOpening.Safe)return buildings(PlayableBuildingKind.Factory)>=1&&buildings(PlayableBuildingKind.Refinery)>=1;
             if(opening==PlayableAiOpening.GreedySafe)return buildings(PlayableBuildingKind.Factory)>=1&&buildings(PlayableBuildingKind.Refinery)>=2;
             if(opening==PlayableAiOpening.GreedyMine)return buildings(PlayableBuildingKind.Mine)>=1;
-            if(mission==null||!mission.Deployed||mission.StartedTick>o.Tick)return false;
+            if(!nativeDeployed&&(mission==null||!mission.Deployed||mission.StartedTick>o.Tick))return false;
             if(opening==PlayableAiOpening.BlindRush)return units(PlayableEntityKind.Tank)>=1;
             if(opening==PlayableAiOpening.ExplorerAllIn)return units(PlayableEntityKind.Explorer)>=4;
             return buildings(PlayableBuildingKind.Mine)>=2&&units(PlayableEntityKind.Explorer)>=5;
@@ -93,7 +97,7 @@ namespace Spacewars.Runtime
         {
             var centers=observation.Buildings.Where(b=>b.Owner==observation.Owner&&b.Health>0&&
                 (b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost)).ToArray();
-            var enemies=observation.Entities.Where(e=>e.Owner!=observation.Owner&&e.Health>0).ToArray();
+            var enemies=observation.Entities.Where(e=>observation.IsHostile(e.Owner)&&e.Health>0).ToArray();
             if(!enemies.Any(e=>centers.Any(c=>Distance(e.Position,c.Position)<=30)))return false;
             double force(IEnumerable<PlayableEntitySnapshot> units)=>units.Sum(e=>(e.Kind==PlayableEntityKind.Explorer?.55:1)*Math.Min(1,e.Health/(double)(e.Kind==PlayableEntityKind.Explorer?profile.ExplorerHealth:e.Kind==PlayableEntityKind.Shkval?profile.ShkvalHealth:profile.TankHealth)));
             return force(enemies)/Math.Max(.1,force(observation.Entities.Where(e=>e.Owner==observation.Owner&&e.Health>0)))>=.75;
@@ -103,13 +107,13 @@ namespace Spacewars.Runtime
         {
             var seed=opening.PersonalitySeed;
             var own=o.Entities.Where(e=>e.Owner==o.Owner&&e.Health>0).ToArray();
-            var enemy=o.Entities.Where(e=>e.Owner!=o.Owner&&e.Health>0).ToArray();
+            var enemy=o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0).ToArray();
             // Native health-weighted values approximate source threat; no hidden enemies are consulted.
             double force(IEnumerable<PlayableEntitySnapshot> units)=>units.Sum(e=>(e.Kind==PlayableEntityKind.Explorer?.55:1)*Math.Min(1,e.Health/(double)(e.Kind==PlayableEntityKind.Explorer?profile.ExplorerHealth:e.Kind==PlayableEntityKind.Shkval?profile.ShkvalHealth:profile.TankHealth)));
             var enemyForce=force(enemy);var advantage=enemyForce>0?Math.Min(3,force(own)/Math.Max(.1,enemyForce)):1;
             var opportunities=o.Sites.Count(s=>s.Owner==null&&(s.Site.Kind==PlayableBuildingKind.Mine||s.Site.Kind==PlayableBuildingKind.Outpost));
             var mapOpportunity=Math.Min(1,opportunities/3d);
-            var vulnerable=o.Buildings.Count(b=>b.Owner!=o.Owner&&b.Health>0&&(b.Kind==PlayableBuildingKind.Mine||b.Kind==PlayableBuildingKind.Refinery));
+            var vulnerable=o.Buildings.Count(b=>o.IsHostile(b.Owner)&&b.Health>0&&(b.Kind==PlayableBuildingKind.Mine||b.Kind==PlayableBuildingKind.Refinery));
             var openingWeights=Readiness(opening.InitialOpening);
             var result=new Dictionary<PlayableAiMidgameStrategy,double>{
                 {PlayableAiMidgameStrategy.MassAssault,.36*openingWeights[0]+Math.Max(Trait(seed,"aggression",.15,.95),Trait(seed,"allIn",.05,.65))+Math.Max(0,advantage-1)*.8},

@@ -41,7 +41,7 @@ namespace Spacewars.Editor
             PlayerSettings.SetApplicationIdentifier(UnityEditor.Build.NamedBuildTarget.Standalone, "local.spacewars.foundation");
             PlayerSettings.defaultScreenWidth = 1280; // U1 observation resolution, not product balance.
             PlayerSettings.defaultScreenHeight = 800;
-            PlayerSettings.fullScreenMode = FullScreenMode.Windowed;
+            PlayerSettings.fullScreenMode = FullScreenMode.FullScreenWindow;
             PlayerSettings.runInBackground = true;
             PlayerSettings.resizableWindow = true;
             PlayerSettings.colorSpace = ColorSpace.Linear;

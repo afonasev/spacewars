@@ -10,6 +10,16 @@ namespace Spacewars.Tests.EditMode
     public sealed class OfflineParticipantRestoreTests
     {
         private static string Facts(object value,bool authority=false)=>PlayableWorldRestoreTests.Facts(value,authority);
+        private static string AuthorityDiff(object left,object right,string path="domain",int depth=0)
+        {
+            if(depth>8||left==null||right==null||left.GetType()!=right.GetType())return path;
+            var type=left.GetType();if(left is string||type.IsPrimitive||type.IsEnum||type==typeof(decimal))return path;
+            if(left is System.Collections.IEnumerable a&&right is System.Collections.IEnumerable b){var x=a.Cast<object>().ToArray();var y=b.Cast<object>().ToArray();if(x.Length!=y.Length)return path+" [length "+x.Length+" vs "+y.Length+"]";for(int i=0;i<x.Length;i++)if(Facts(x[i],true)!=Facts(y[i],true))return AuthorityDiff(x[i],y[i],path+"["+i+"]",depth+1);return path+" [ordered collection/reference identity]";}
+            foreach(var field in type.GetFields(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance).OrderBy(f=>f.Name)){var x=field.GetValue(left);var y=field.GetValue(right);if(Facts(x,true)!=Facts(y,true))return AuthorityDiff(x,y,path+"."+field.Name,depth+1);}
+            return path+" [reference alias]";
+        }
+        // Correctness fixture under shared Unity admission, not a wall-time performance gate.
+        [Timeout(600000)]
         [TestCase(2,0)][TestCase(4,450)][TestCase(8,1000)]
         public void DetachedBytesMatchEveryTickAndOwnerThroughSeededSettlement(int owners,int cut)
         {
@@ -32,7 +42,7 @@ namespace Spacewars.Tests.EditMode
             {
             for(int tick=0;tick<3600;tick++){
                 OfflineParticipantAuthorityTests.Deliver(a,tick);OfflineParticipantAuthorityTests.Deliver(b,tick);a.Step(1d/30);b.Step(1d/30);
-                var authorityA=Facts(OfflineParticipantAuthorityTests.Domain(a),true);var authorityB=Facts(OfflineParticipantAuthorityTests.Domain(b),true);Assert.AreEqual(authorityA,authorityB,"full authority tick "+tick);
+                var authorityA=Facts(OfflineParticipantAuthorityTests.Domain(a),true);var authorityB=Facts(OfflineParticipantAuthorityTests.Domain(b),true);Assert.AreEqual(authorityA,authorityB,"full authority tick "+tick+" "+(authorityA==authorityB?"":AuthorityDiff(OfflineParticipantAuthorityTests.Domain(a),OfflineParticipantAuthorityTests.Domain(b))));
                 foreach(var p in config.Roster){var viewA=Facts(a.View(p.Id));var viewB=Facts(b.View(p.Id));Assert.AreEqual(viewA,viewB,"owner "+p.Id+" tick "+tick);}
                 if(tick>=600&&config.Roster.All(p=>a.View(p.Id).OwnerResearch.Count==3&&a.View(p.Id).OwnerResearch.All(r=>r.Complete))){
                     foreach(var p in config.Roster){var v=a.View(p.Id);Assert.AreEqual(2,v.Entities.Count(e=>e.Owner==v.Owner));Assert.True(v.Entities.Any(e=>e.Owner==v.Owner&&e.Kind==PlayableEntityKind.Tank));Assert.AreEqual(0,v.Buildings.Single(x=>x.Owner==v.Owner&&x.Kind==PlayableBuildingKind.Factory).QueueCount);}

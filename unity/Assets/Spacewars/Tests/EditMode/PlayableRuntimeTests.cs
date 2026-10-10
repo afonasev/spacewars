@@ -18,6 +18,31 @@ namespace Spacewars.Tests.EditMode
         private static PlayableCommand Command(long generation,long sequence,PlayableCommandKind kind,int[] ids=null,NavPoint target=default(NavPoint))
         {return new PlayableCommand(generation,sequence,"player-1",kind,ids??new int[0],target);}
 
+        [Test] public void AuthorityPublishesRealPreBarrierTankPaymentWithoutAdvancingIncomeOrTick()
+        {
+            var basic=OfflineParticipantAuthorityTests.Config(2,false);var costs=new double[basic.Starts.Count,basic.Starts.Count];
+            for(int i=0;i<basic.Starts.Count;i++)for(int j=0;j<basic.Starts.Count;j++)costs[i,j]=basic.RouteCost(i,j);
+            var config=new OfflineMatchConfiguration(basic.Profile,basic.SourceIdentity,basic.MapIdentity,basic.RouteProvenance,basic.Seed,basic.Roster.Select(p=>new OfflineParticipant(p.Id,p.LogicalPlayer,p.Team,OfflineControl.Human)).ToArray(),basic.Starts.ToArray(),basic.Sites.ToArray(),basic.Obstacles.ToArray(),costs);
+            var a=new PlayableAuthorityTick(config,71);var home=a.Latest.Sites.Single(x=>x.Site.Id==a.Latest.HomeSiteId);
+            Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,1,config.Roster[0].Id,PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:home.Site.Id,slotId:1,parentId:home.CenterId,buildingKind:PlayableBuildingKind.Factory)).Status);
+            for(int i=0;i<(config.Profile.FactoryBuildSeconds+1)*30;i++)Assert.True(a.TryAdvance());
+            int factory=a.Latest.Buildings.Single(b=>b.Owner==PlayableOwner.Player&&b.Kind==PlayableBuildingKind.Factory).Id;
+            Assert.AreEqual(ConstructionPhase.Ready,a.Latest.Buildings.Single(b=>b.Id==factory).Phase);
+            var stale=a.Latest;
+            var paid=a.Apply(new PlayableCommand(71,2,config.Roster[0].Id,PlayableCommandKind.QueueTank,new[]{factory}));
+            Assert.AreEqual(PlayableCommandStatus.Applied,paid.Status);Assert.AreEqual(stale.Credits,a.Latest.Credits,"A receipt can precede its next snapshot publication.");
+            int explorer=stale.Entities.Single(e=>e.Owner==PlayableOwner.Player&&e.Kind==PlayableEntityKind.Explorer).Id;
+            Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,3,config.Roster[0].Id,PlayableCommandKind.Move,new[]{explorer},new NavPoint(-8,8))).Status);
+            NavigationRequest request=null;Assert.True(a.Requests.TryDequeue(out request));Assert.AreEqual(explorer,request.Entity);
+            Assert.False(a.TryAdvance());var held=a.Latest;Assert.True(a.AwaitingRoutes);
+            Assert.AreEqual(stale.Tick,held.Tick);Assert.AreEqual(stale.SettledIncome,held.SettledIncome);
+            Assert.AreEqual(stale.Credits-config.Profile.TankCreditCost,held.Credits,"Only the actual pre-barrier Tank debit is published; income has not advanced.");
+            var order=held.Buildings.Single(b=>b.Id==factory).PrivateState.Orders.Single();Assert.AreEqual(PlayableEntityKind.Tank,order.Kind);Assert.AreEqual(config.Profile.TankCreditCost,order.PaidCost);Assert.AreEqual((double)config.Profile.TankProductionSeconds,order.Duration);
+            for(int i=0;i<3;i++){Assert.False(a.TryAdvance());Assert.AreEqual(held.Tick,a.Latest.Tick);Assert.AreEqual(held.Credits,a.Latest.Credits);Assert.AreEqual(held.SettledIncome,a.Latest.SettledIncome);Assert.AreEqual(held.Entities.Single(e=>e.Id==explorer).Position,a.Latest.Entities.Single(e=>e.Id==explorer).Position);}
+            TestContext.WriteLine("E3_ACTUAL_BARRIER_PAYMENT "+Newtonsoft.Json.JsonConvert.SerializeObject(new{Receipt=paid,Before=new{stale.Tick,stale.Credits,stale.SettledIncome},Held=new{held.Tick,held.Credits,held.SettledIncome},Order=order,RequestEntity=request.Entity}));
+            a.Stop();
+        }
+
         [Test] public void HumanMatchRetainsEnemyAiWithoutSpendingOrOrderingForTheHuman()
         {
             var runtime=PlayableRuntime.CreateHumanMatch(PlayableProfile.ThreeCrossingsDefault,19,19092026);
@@ -35,7 +60,7 @@ namespace Spacewars.Tests.EditMode
             finally{runtime.RequestStop();Assert.IsTrue(Until(()=>runtime.IsStopped));}
         }
 
-        [Test] public void RuntimePublishesTicksWhilePlannerHasNoAnswerAndStopKeepsReceipts()
+        [Test] public void RuntimePublishesWhileFixedRouteBarrierFreezesTickAndStopKeepsReceipts()
         {
             var data=Data(); data.factoryBuildSeconds=1;data.tankProductionSeconds=1;data.startingCredits=1000;
             var runtime=new PlayableRuntime(PlayableProfile.Create(data),9,41,false);
@@ -46,11 +71,20 @@ namespace Spacewars.Tests.EditMode
                 Assert.IsTrue(Until(()=>runtime.Latest.Buildings.Any(b=>b.Kind==PlayableBuildingKind.Factory&&b.Progress>=1d)));
                 int factory=runtime.Latest.Buildings.Single(b=>b.Kind==PlayableBuildingKind.Factory).Id;
                 Assert.IsTrue(runtime.TrySubmit(Command(9,2,PlayableCommandKind.QueueTank,new[]{factory})).Accepted);
-                Assert.IsTrue(Until(()=>runtime.Latest.Entities.Any(e=>e.Owner==PlayableOwner.Player)));
-                int tank=runtime.Latest.Entities.First(e=>e.Owner==PlayableOwner.Player).Id;
+                PlayableCommandReceipt paid=null;
+                Assert.IsTrue(Until(()=>{paid=runtime.DrainReceipts().FirstOrDefault(r=>r.Sequence==2&&r.Status==PlayableCommandStatus.Applied);return paid!=null;}),"The ordinary human Tank purchase must actually be applied before the freeze baseline.");
+                Assert.IsTrue(Until(()=>runtime.Latest.Entities.Any(e=>e.Owner==PlayableOwner.Player&&e.Kind==PlayableEntityKind.Tank)));
+                int tank=runtime.Latest.Entities.First(e=>e.Owner==PlayableOwner.Player&&e.Kind==PlayableEntityKind.Tank).Id;
                 Assert.IsTrue(runtime.TrySubmit(Command(9,3,PlayableCommandKind.Move,new[]{tank},new NavPoint(-8,8))).Accepted);
+                long movePublication=runtime.Latest.Sequence;
                 NavigationRequest request=null; Assert.IsTrue(Until(()=>runtime.Requests.TryDequeue(out request)));
-                long before=runtime.Latest.Tick; Assert.IsTrue(Until(()=>runtime.Latest.Tick>=before+3));
+                Assert.AreEqual(tank,request.Entity,"Hold the actual moved Tank route, not an earlier unrelated request.");
+                Assert.IsTrue(Until(()=>runtime.Latest.Sequence>movePublication&&runtime.Latest.Metrics.NavigationPending>0),"Observe the held barrier publication after pre-barrier command admission.");
+                var before=runtime.Latest;
+                Assert.IsTrue(Until(()=>runtime.Latest.Sequence>=before.Sequence+3),"Authority must publish while the route answer is held.");
+                Assert.AreEqual(before.Tick,runtime.Latest.Tick,"The fixed route barrier freezes gameplay tick.");
+                Assert.AreEqual(before.Credits,runtime.Latest.Credits,"Income clocks cannot advance at a route barrier.");
+                Assert.AreEqual(before.Entities.First(e=>e.Id==tank).Position,runtime.Latest.Entities.First(e=>e.Id==tank).Position,"Movement clocks cannot advance without the answer.");
                 runtime.RequestStop(); Assert.IsTrue(Until(()=>runtime.IsStopped));
                 var receipts=runtime.DrainReceipts(); Assert.IsTrue(receipts.Any(r=>r.Sequence==3));
                 Assert.AreEqual(RuntimeStatus.Stopped,runtime.Latest.Status);

@@ -44,10 +44,15 @@ namespace Spacewars.Tests.EditMode
         }
         // Independent oracle: reads actual private authority fields, never CaptureWorldBytes
         // or DTOs. New fields are included by default. Only explicitly classified cache,
-        // synchronization and wall-clock diagnostic fields below are excluded.
+        // synchronization, transient presentation and wall-clock diagnostic fields below are excluded.
         private static readonly Dictionary<string,string> Exclusions=new Dictionary<string,string>{
+            {"PlayableDomain.soundJournal","Transient observer audio feed intentionally empty after cold restore; dedicated checkpoint test proves byte independence"},
+            {"PlayableDomain.nextSoundEvent","Transient audio ID sequence belongs to the non-persisted feed, never gameplay/RNG"},
+            {"PlayableDomain.soundMotion","Transient sound motion baseline re-seeded after restore; no navigation authority"},
+            {"PlayableDomain.soundProductionLimits","Transient audio restriction edge baseline, never production authority"},
             {"PlayableDomain.lifecycleWork","Scratch list cleared before each lifecycle tick"},
             {"NavCrowd.spatial","Derived spatial index rebuilt from units"},
+            {"NavigationSession.admission","Derived immutable publication rebuilt from groups, pending requests, geometry and profile"},
             {"NavCrowd.unitView","Read-only view of orderedUnits"},
             {"NavCrowd.<NeighborCandidates>k__BackingField","Per-step diagnostic metric"},
             {"NavCrowd.<RepairCpuMs>k__BackingField","Wall-clock solver CPU metric"},
@@ -63,14 +68,49 @@ namespace Spacewars.Tests.EditMode
         private static PropertyInfo[] Properties(Type type){lock(PropertyCache){if(!PropertyCache.TryGetValue(type,out var props)){props=type.GetProperties(BindingFlags.Public|BindingFlags.Instance).Where(x=>x.GetIndexParameters().Length==0).OrderBy(x=>x.Name).ToArray();PropertyCache.Add(type,props);}return props;}}
         internal static string Facts(object value,bool authority=false)
         {
+            using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(FactBytes(value,authority)));
+        }
+        // Cached bytes are only BinaryWriter's immutable type/member name encoding.
+        // Mutable field values, ordering and alias IDs are still visited every time.
+        private static readonly Dictionary<string,byte[]> EncodedNames=new Dictionary<string,byte[]>();
+        private static byte[] NameBytes(string name)
+        {
+            lock(EncodedNames){if(!EncodedNames.TryGetValue(name,out var bytes)){
+                using(var stream=new MemoryStream())using(var writer=new BinaryWriter(stream)){writer.Write(name);writer.Flush();bytes=stream.ToArray();}
+                EncodedNames.Add(name,bytes);
+            }return bytes;}
+        }
+        private sealed class Reader
+        {
+            internal byte[] Name; internal Func<object,object> Read; internal bool Ordered;
+        }
+        private sealed class Description
+        {
+            internal byte[] Name; internal Reader[] Authority,Projection;
+        }
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type,Description> Descriptions=new System.Collections.Concurrent.ConcurrentDictionary<Type,Description>();
+        private static Description Describe(Type type)=>Descriptions.GetOrAdd(type,t=>{
+            Func<MemberInfo,Reader> reader=member=>{
+                var value=System.Linq.Expressions.Expression.Parameter(typeof(object),"value");
+                var target=System.Linq.Expressions.Expression.Convert(value,t);
+                var access=member is FieldInfo field?System.Linq.Expressions.Expression.Field(target,field):(System.Linq.Expressions.Expression)System.Linq.Expressions.Expression.Property(target,(PropertyInfo)member);
+                return new Reader{Name=NameBytes(member.Name),Read=System.Linq.Expressions.Expression.Lambda<Func<object,object>>(System.Linq.Expressions.Expression.Convert(access,typeof(object)),value).Compile(),Ordered=t==typeof(PlayableVision)&&member.Name=="known"||t==typeof(NavCrowd)&&member.Name=="units"};
+            };
+            return new Description{Name=NameBytes(t.FullName),Authority=Fields(t,true).Where(field=>!Exclusions.ContainsKey(t.Name+"."+field.Name)&&!(t.IsGenericType&&t.GetGenericTypeDefinition()==typeof(NavMailbox<>)&&field.Name=="gate")).Select(field=>reader(field)).ToArray(),Projection=Properties(t).Where(prop=>!(t==typeof(PlayableSnapshot)&&prop.Name=="Sounds")).Select(prop=>reader(prop)).Concat(Fields(t,false).Select(field=>reader(field))).ToArray()};
+        });
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type,byte[]> TypeNames=new System.Collections.Concurrent.ConcurrentDictionary<Type,byte[]>();
+        private static byte[] TypeName(Type type)=>TypeNames.GetOrAdd(type,t=>NameBytes(t.FullName));
+        internal static byte[] FactBytes(object value,bool authority=false,bool cachedNames=true)
+        {
             var identities=new Dictionary<object,int>();
             using(var memory=new MemoryStream())using(var writer=new BinaryWriter(memory)){
+                void Name(string name){if(cachedNames)writer.Write(NameBytes(name));else writer.Write(name);}
                 void Visit(object v){
-                    if(v==null){writer.Write("null");return;}var t=v.GetType();writer.Write(t.FullName);
+                    if(v==null){writer.Write("null");return;}var t=v.GetType();if(cachedNames)writer.Write(TypeName(t));else Name(t.FullName);
                     if(v is string str){writer.Write(str);return;}if(v is double number){writer.Write(number);return;}
                     if(v is int integer){writer.Write(integer);return;}if(v is long wide){writer.Write(wide);return;}if(v is bool flag){writer.Write(flag);return;}if(v is byte octet){writer.Write(octet);return;}
                     if(t.IsEnum){writer.Write(Convert.ToInt32(v));return;}
-                    if(v is IEnumerable<byte> raw){var bytes=raw.ToArray();writer.Write(bytes.Length);writer.Write(bytes);return;}
+                    if(v is IEnumerable<byte> raw){var bytes=v as byte[]??raw.ToArray();writer.Write(bytes.Length);writer.Write(bytes);return;}
                     // Geometry/request reference aliases are operational authority. Others
                     // are values or views; profile object aliases do not change execution.
                     if(authority&&(v is NavGeometry||v is NavigationRequest)){if(identities.TryGetValue(v,out var identity)){writer.Write(identity);return;}writer.Write(identities.Count);identities.Add(v,identities.Count);}
@@ -81,19 +121,25 @@ namespace Spacewars.Tests.EditMode
                         var lookup=(IDictionary)t.GetField("index",F).GetValue(v);writer.Write(lookup.Count);
                         foreach(var key in lookup.Keys.Cast<object>().OrderBy(x=>Convert.ToString(x,CultureInfo.InvariantCulture),StringComparer.Ordinal)){Visit(key);Visit(lookup[key]);}return;
                     }
+                    if(cachedNames&&v is double[] doubles){writer.Write(doubles.Length);var name=TypeName(typeof(double));foreach(double item in doubles){writer.Write(name);writer.Write(item);}return;}
+                    if(cachedNames&&v is int[] integers){writer.Write(integers.Length);var name=TypeName(typeof(int));foreach(int item in integers){writer.Write(name);writer.Write(item);}return;}
                     if(v is IEnumerable rows){var items=rows.Cast<object>().ToArray();if(t.IsGenericType&&t.GetGenericTypeDefinition()==typeof(HashSet<>))items=items.OrderBy(x=>Convert.ToString(x,CultureInfo.InvariantCulture)).ToArray();writer.Write(items.Length);foreach(var row in items)Visit(row);return;}
+                    if(cachedNames){foreach(var reader in authority?Describe(t).Authority:Describe(t).Projection){
+                        writer.Write(reader.Name);var item=reader.Read(v);
+                        if(authority&&reader.Ordered){var dictionary=(IDictionary)item;foreach(object knownKey in dictionary.Keys.Cast<object>().OrderBy(x=>(int)x)){Visit(knownKey);Visit(dictionary[knownKey]);}}else Visit(item);
+                    }return;}
                     if(authority){foreach(var f in Fields(t,true)){
                         string key=t.Name+"."+f.Name;if(Exclusions.ContainsKey(key)||t.IsGenericType&&t.GetGenericTypeDefinition()==typeof(NavMailbox<>)&&f.Name=="gate")continue;
-                        writer.Write(f.Name);var item=f.GetValue(v);
+                        Name(f.Name);var item=f.GetValue(v);
                         // Vision memory and crowd lookup tables do not use insertion order for decisions;
                         // all mutable facts/counters are still read independently.
                         if(t==typeof(PlayableVision)&&f.Name=="known"||t==typeof(NavCrowd)&&f.Name=="units"){var dictionary=(IDictionary)item;foreach(object knownKey in dictionary.Keys.Cast<object>().OrderBy(x=>(int)x)){Visit(knownKey);Visit(dictionary[knownKey]);}}else Visit(item);
                     }}else{
-                        foreach(var prop in Properties(t)){writer.Write(prop.Name);Visit(prop.GetValue(v));}
-                        foreach(var f in Fields(t,false)){writer.Write(f.Name);Visit(f.GetValue(v));}
+                        foreach(var prop in Properties(t)){if(t==typeof(PlayableSnapshot)&&prop.Name=="Sounds")continue;Name(prop.Name);Visit(prop.GetValue(v));}
+                        foreach(var f in Fields(t,false)){Name(f.Name);Visit(f.GetValue(v));}
                     }
                 }
-                Visit(value);writer.Flush();using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(memory.ToArray()));
+                Visit(value);writer.Flush();return memory.ToArray();
             }
         }
         private static void Equal(object a,object b,int tick,bool projections=true)
@@ -204,6 +250,30 @@ namespace Spacewars.Tests.EditMode
             Nav(a).Move(mover,new NavPoint(-4,10));Deliver(a,0);Call(a,"Step",1d/30);Nav(a).Stop(held,true);
             var b=Restore(Bytes(a),p);long before=Nav(a).CaptureState().RequestSequence;Suffix(a,b);Assert.Greater(Nav(a).CaptureState().RequestSequence,before);
         }
+        [Test] public void RegisteredRouteWorldWireRestoresAsOriginalPendingMailboxInput()
+        {
+            var p=PlayableProfile.Default;var a=New(p);
+            int id=(int)Call(a,"SpawnUnit",new NavPoint(-10,10),PlayableOwner.Player,PlayableEntityKind.Explorer);
+            var nav=Nav(a);Assert.True(nav.Move(id,new NavPoint(-5,10)));
+            Assert.True(nav.TryTransferRoute(_=>true,out var registered));
+            var bytes=Bytes(a);var b=Restore(bytes,p);var replayNav=Nav(b);
+            Assert.AreEqual(1,replayNav.Requests.Count);
+            Assert.AreEqual(0,replayNav.RegisteredRouteCount);
+            Assert.True(replayNav.Requests.TryDequeue(out var replay));
+            Assert.AreEqual(registered.Request,replay.Request);
+            Assert.AreEqual(nav.Admission.Groups[0].GroupId,replayNav.Admission.Groups[0].GroupId);
+            Assert.AreEqual(nav.Admission.Groups[0].RootOrderRevision,replayNav.Admission.Groups[0].RootOrderRevision);
+            Assert.AreEqual(nav.Admission.Groups[0].Members[0].AssignedEndpoint,replayNav.Admission.Groups[0].Members[0].AssignedEndpoint);
+            Assert.AreEqual(nav.Admission.Requests[0].Request,replayNav.Admission.Requests[0].Request);
+            Assert.AreEqual(Facts(nav.Admission),Facts(replayNav.Admission),
+                "Complete immutable admission including ordered members, typed endpoints, profile, geometry, HOLD and probes");
+            Assert.False(replayNav.Requests.TryDequeue(out _));
+            Assert.True(nav.TryCompleteRegisteredRoute(new NavigationAnswer(registered,new[]{registered.Goal})));
+            Assert.True(replayNav.Answers.TryEnqueue(new NavigationAnswer(replay,new[]{replay.Goal})));
+            Call(a,"Step",1d/30);Call(b,"Step",1d/30);
+            Assert.AreEqual(nav.AppliedResults,replayNav.AppliedResults);
+            Assert.True(Bytes(a).SequenceEqual(Bytes(b)),"world wire suffix after replay");
+        }
         [Test] public void SellingCenterCascadesToUnfinishedChildrenWithoutNormalization()
         {
             var p=PlayableProfile.Default;var a=New(p);Call(a,"AddCredits",PlayableOwner.Player,10000d);int child=Build(a,PlayableBuildingKind.Factory,1,PlayableOwner.Player,false);
@@ -272,16 +342,23 @@ namespace Spacewars.Tests.EditMode
             state=PlayableWorldState.Decode(original);state.SourceIdentity+="changed";AssertRestoreRejected(state.Encode(),p);
             state=PlayableWorldState.Decode(original);state.Binding[5]^=1;AssertRestoreRejected(state.Encode(),p);
             state=PlayableWorldState.Decode(original);BitConverter.GetBytes(-1).CopyTo(state.Domain,state.Domain.Length-4);AssertRestoreRejected(state.Encode(),p); // malformed final rally slot layout
-            state=PlayableWorldState.Decode(original);Assert.AreEqual(5,state.Version);int prefix=TransactionRegistryBytes(state.Domain);Assert.AreEqual((int)D.GetField("nextId",F).GetValue(a),BitConverter.ToInt32(state.Domain,prefix+46),"v5 allocator offset");BitConverter.GetBytes(1).CopyTo(state.Domain,prefix+46);AssertRestoreRejected(state.Encode(),p); // v5 next entity collides
-            state=PlayableWorldState.Decode(original);Assert.AreEqual((double)D.GetField("credits",F).GetValue(a),BitConverter.ToDouble(state.Domain,prefix+78),"v5 diagnostic credit offset");BitConverter.GetBytes(-1d).CopyTo(state.Domain,prefix+78);AssertRestoreRejected(state.Encode(),p); // v5 negative diagnostic credit balance
-            state=PlayableWorldState.Decode(original);Assert.AreEqual(p.StartingCredits,BitConverter.ToDouble(state.Domain,prefix+18),"v5 owner account offset");BitConverter.GetBytes(-1d).CopyTo(state.Domain,prefix+18);AssertRestoreRejected(state.Encode(),p); // v5 negative owner account
+            state=PlayableWorldState.Decode(original);Assert.AreEqual(9,state.Version);int prefix=TransactionRegistryBytes(state.Domain);Assert.AreEqual((int)D.GetField("nextId",F).GetValue(a),BitConverter.ToInt32(state.Domain,prefix+54),"v9 allocator offset");BitConverter.GetBytes(1).CopyTo(state.Domain,prefix+54);AssertRestoreRejected(state.Encode(),p); // v9 next entity collides
+            state=PlayableWorldState.Decode(original);Assert.AreEqual((long)D.GetField("nextAiSequence",F).GetValue(a),BitConverter.ToInt64(state.Domain,prefix+38),"v9 AI allocator offset");BitConverter.GetBytes(0L).CopyTo(state.Domain,prefix+38);AssertRestoreRejected(state.Encode(),p);
+            state=PlayableWorldState.Decode(original);int incomeCount=BitConverter.ToInt32(state.Domain,prefix+86);Assert.Zero(incomeCount,"cold v9 settlement table");int creditOffset=prefix+90+incomeCount*12;Assert.AreEqual((double)D.GetField("credits",F).GetValue(a),BitConverter.ToDouble(state.Domain,creditOffset),"v9 diagnostic credit offset");BitConverter.GetBytes(-1d).CopyTo(state.Domain,creditOffset);AssertRestoreRejected(state.Encode(),p); // v9 negative diagnostic credit balance
+            state=PlayableWorldState.Decode(original);Assert.AreEqual(p.StartingCredits,BitConverter.ToDouble(state.Domain,prefix+18),"v9 owner account offset");BitConverter.GetBytes(-1d).CopyTo(state.Domain,prefix+18);AssertRestoreRejected(state.Encode(),p); // v9 negative owner account
+            state=PlayableWorldState.Decode(original);BitConverter.GetBytes(-1).CopyTo(state.Domain,prefix+86);AssertRestoreRejected(state.Encode(),p); // invalid settled-income count
+            var income=(System.Collections.Generic.IDictionary<PlayableOwner,double>)D.GetField("settledIncome",F).GetValue(a);
+            income.Add(PlayableOwner.Player,-1d);AssertRestoreRejected(Bytes(a),p);income[PlayableOwner.Player]=0d;
+            state=PlayableWorldState.Decode(Bytes(a));Assert.AreEqual(1,BitConverter.ToInt32(state.Domain,prefix+86));Assert.AreEqual((int)PlayableOwner.Player,BitConverter.ToInt32(state.Domain,prefix+90));
+            BitConverter.GetBytes((int)PlayableOwner.Player+100).CopyTo(state.Domain,prefix+90);AssertRestoreRejected(state.Encode(),p); // foreign income owner
+            income.Clear();
             Call(a,"AddCredits",PlayableOwner.Player,10000d);int f=Build(a,PlayableBuildingKind.Factory,1,PlayableOwner.Player);Send(a,1,PlayableCommandKind.QueueTank,f);
             var order=((IList)Buildings(a)[f].GetType().GetField("Orders").GetValue(Buildings(a)[f]))[0];order.GetType().GetField("PaidCost").SetValue(order,1);AssertRestoreRejected(Bytes(a),p);
             order.GetType().GetField("PaidCost").SetValue(order,p.TankCreditCost);
             var orders=(IList)Buildings(a)[f].GetType().GetField("Orders").GetValue(Buildings(a)[f]);
             for(int i=0;i<6;i++){var extra=Activator.CreateInstance(order.GetType());foreach(var field in order.GetType().GetFields())field.SetValue(extra,field.GetValue(order));extra.GetType().GetField("Id").SetValue(extra,2L+i);orders.Add(extra);}D.GetField("nextProductionSequence",F).SetValue(a,8L);AssertRestoreRejected(Bytes(a),p);
-            var decoded=PlayableWorldState.Decode(original);var independent=Restore(decoded.Encode(),p);Array.Clear(decoded.Domain,0,decoded.Domain.Length);Array.Clear(decoded.Navigation,0,decoded.Navigation.Length);foreach(var vision in decoded.Vision)Array.Clear(vision,0,vision.Length);CollectionAssert.AreEqual(original,Bytes(independent),"Decoded arrays cannot mutate hydrated authority.");
-            CollectionAssert.AreEqual(original,Bytes(Restore(original,p)),"Valid source bytes remain reusable after failed candidates.");
+            var decoded=PlayableWorldState.Decode(original);var independent=Restore(decoded.Encode(),p);Array.Clear(decoded.Domain,0,decoded.Domain.Length);Array.Clear(decoded.Navigation,0,decoded.Navigation.Length);foreach(var vision in decoded.Vision)Array.Clear(vision,0,vision.Length);ExactByteAssert.AreEqual(original,Bytes(independent),"Decoded arrays cannot mutate hydrated authority.");
+            ExactByteAssert.AreEqual(original,Bytes(Restore(original,p)),"Valid source bytes remain reusable after failed candidates.");
         }
         [Test] public void ResearchWireRejectsOldVersionAndInvalidWaitingButAcceptsHistoricalCenter()
         {
@@ -295,7 +372,7 @@ namespace Spacewars.Tests.EditMode
             preferred.SetValue(waiting,999999);AssertRestoreRejected(Bytes(a),p);preferred.SetValue(waiting,center);
             var old=PlayableWorldState.Decode(Bytes(a));old.Version=2;Assert.Throws<ArgumentException>(()=>PlayableWorldState.Decode(old.Encode()));
             Call(a,"Damage",center,(int)p.ScienceHealth+1);
-            var sourceBytes=Bytes(a);var detached=Restore(sourceBytes,p);CollectionAssert.AreEqual(sourceBytes,Bytes(detached));
+            var sourceBytes=Bytes(a);var detached=Restore(sourceBytes,p);ExactByteAssert.AreEqual(sourceBytes,Bytes(detached));
             Assert.AreEqual(1,View(detached,PlayableOwner.Player).OwnerResearch.Count);
             Assert.False(View(detached,PlayableOwner.Player).OwnerResearch[0].Active);
             Assert.AreEqual(center,View(detached,PlayableOwner.Player).OwnerResearch[0].CenterId);
@@ -305,8 +382,8 @@ namespace Spacewars.Tests.EditMode
         {
             var wire=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.WorldWire",true);var binding=wire.GetMethod("Binding",BindingFlags.Static|BindingFlags.NonPublic);
             foreach(var prop in typeof(PlayableProfile).GetProperties(BindingFlags.Public|BindingFlags.Instance).Where(x=>x.GetSetMethod(true)!=null&&(x.PropertyType==typeof(double)||x.PropertyType==typeof(int)||x.PropertyType==typeof(bool)||x.PropertyType==typeof(string)))){
-                var profile=PlayableProfile.Default;var before=(byte[])binding.Invoke(null,new object[]{profile});var value=prop.GetValue(profile);object altered=prop.PropertyType==typeof(double)?(object)((double)value+.001):prop.PropertyType==typeof(int)?(object)((int)value+1):prop.PropertyType==typeof(bool)?(object)!(bool)value:(object)((string)value+":changed");
-                prop.SetValue(profile,altered);Assert.False(before.SequenceEqual((byte[])binding.Invoke(null,new object[]{profile})),"Wire identity must cover effective profile field "+prop.Name);
+                var profile=PlayableProfile.Default;var before=(byte[])binding.Invoke(null,new object[]{profile,false});var value=prop.GetValue(profile);object altered=prop.PropertyType==typeof(double)?(object)((double)value+.001):prop.PropertyType==typeof(int)?(object)((int)value+1):prop.PropertyType==typeof(bool)?(object)!(bool)value:(object)((string)value+":changed");
+                prop.SetValue(profile,altered);Assert.False(before.SequenceEqual((byte[])binding.Invoke(null,new object[]{profile,false})),"Wire identity must cover effective profile field "+prop.Name);
             }
         }
         [Test] public void CircleWireRetainsExactBoundsAtNonRepresentableMidpoint()

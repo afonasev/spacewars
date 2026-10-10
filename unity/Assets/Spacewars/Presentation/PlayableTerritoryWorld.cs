@@ -63,7 +63,7 @@ namespace Spacewars.Presentation
                 }
                 SetMesh(pad.Mesh,clipped);pad.Progress=progress;
             }
-            var color=owner==PlayableOwner.Enemy?Enemy:Ally;
+            var color=OwnerPaint!=null&&owner.HasValue?OwnerPaint(owner):owner==PlayableOwner.Enemy?Enemy:Ally;
             if(contested)color*=.65f+.35f*(float)(.5+.5*Math.Sin(tick/30d*Math.PI*2*profile.CapturePulseHz));
             if(color!=pad.Color){var block=new MaterialPropertyBlock();block.SetColor("_BaseColor",color);pad.Fill.GetComponent<Renderer>().SetPropertyBlock(block);pad.Color=color;}
         }

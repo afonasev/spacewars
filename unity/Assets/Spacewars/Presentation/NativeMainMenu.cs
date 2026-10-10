@@ -22,6 +22,7 @@ namespace Spacewars.Presentation
         private Button playButton,updateButton,checkButton,restartButton;
         private UpdateState current;
         private PanelSettings panel;
+        public NativeLocalControlSettings LocalControls;
         private bool busy;
         private void Start()
         {
@@ -35,6 +36,7 @@ namespace Spacewars.Presentation
             playButton=OrbitalTheme.Action("В бой!",()=>StartCoroutine(EnterGame()),"main-play",true);card.Add(playButton);
             var network=OrbitalTheme.Action("Сетевая игра",()=>{},"main-network");network.SetEnabled(false);network.tooltip="Пока недоступно";card.Add(network);
             var settings=OrbitalTheme.Action("Настройки",()=>OpenSettings(),"main-settings");card.Add(settings);
+            card.Add(OrbitalTheme.Action("Управление",()=>{ScreenRoot.style.display=DisplayStyle.None;NativeControlsHelp.Open(HostRoot??GetComponent<UIDocument>().rootVisualElement,Navigation,()=>RestoreFocus(card.Q<Button>("main-controls")));},"main-controls"));
             card.Add(OrbitalTheme.Action("Лаборатория геймдизайна",()=>Laboratory?.Invoke(),"main-laboratory"));
             updateButton=OrbitalTheme.Action("Обновить",()=>StartCoroutine(UpdateGame()),"main-update");card.Add(updateButton);
             card.Add(OrbitalTheme.Action("Выйти",()=>Application.Quit(),"main-exit"));
@@ -47,7 +49,9 @@ namespace Spacewars.Presentation
             hints=OrbitalTheme.Text("","orbital-hints");footer.Add(hints);
             ScreenRoot.RegisterCallback<GeometryChangedEvent>(_=>{
                 bool small=ScreenRoot.resolvedStyle.width<850;card.style.left=Length.Percent(small?8:53);card.style.width=Length.Percent(small?84:40);
-                card.style.top=Length.Percent(ScreenRoot.resolvedStyle.height<650?3:10);
+                bool compact=ScreenRoot.resolvedStyle.height<650;
+                card.style.top=Length.Percent(compact?3:10);
+                foreach(var element in card.Children())if(element is Button action){action.style.height=compact?42:46;action.style.fontSize=compact?17:19;}
                 var logo=card.Q<Label>(className:"orbital-logo");logo.style.fontSize=ScreenRoot.resolvedStyle.height<650?36:52;
             });
             updateButton.SetEnabled(false);RestoreFocus(playButton);
@@ -58,7 +62,7 @@ namespace Spacewars.Presentation
         private void OpenSettings()
         {
             ScreenRoot.style.display=DisplayStyle.None;
-            NativeSettingsView.Open(HostRoot??GetComponent<UIDocument>().rootVisualElement,Navigation,()=>RestoreFocus(card.Q<Button>("main-settings")));
+            NativeSettingsView.Open(HostRoot??GetComponent<UIDocument>().rootVisualElement,Navigation,()=>RestoreFocus(card.Q<Button>("main-settings")),LocalControls);
         }
         private void Update(){if(ownsNavigation)Navigation?.Tick();}
         private IEnumerator Request(string path,string method,Action<UpdateState> done)

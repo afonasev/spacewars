@@ -1,0 +1,13 @@
+{
+  "id": "spacewars-music-v1",
+  "fadeSeconds": 3,
+  "attackSeconds": 2,
+  "releaseSeconds": 12,
+  "combatHoldSeconds": 6,
+  "silenceSeconds": 3,
+  "calmBedGain": 0.55,
+  "battleBedGain": 0.85,
+  "battlePulseGain": 0.85,
+  "minimumThemeSeconds": 120,
+  "fullIntensityEvents": 6
+}

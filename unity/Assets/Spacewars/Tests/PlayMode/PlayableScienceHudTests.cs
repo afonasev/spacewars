@@ -48,11 +48,14 @@ public sealed class PlayableScienceHudTests
         var parent=new GameObject("refinery model test");
         try
         {
-            using var world=new PlayableWorld(parent.transform,PlayableProfile.Default);var a=world.Building(1,"Refinery",true);var rootBefore=a.Root;
+            using var world=new PlayableWorld(parent.transform,PlayableProfile.Default);var a=world.Building(1,"Refinery",true);var rootBefore=a.Root;var facing=a.Hull.rotation;
             var snapshot=new PlayableBuildingSnapshot(1,PlayableOwner.Player,PlayableBuildingKind.Refinery,default,123,1,0,0,default,refineryUpgraded:true);
-            world.UpdateRefineryModel(a,snapshot,30);Assert.AreSame(rootBefore,a.Root);Assert.True(a.RefineryUpgraded);Assert.NotNull(a.Turbine);
+            world.UpdateRefineryModel(a,snapshot,30);Assert.AreSame(rootBefore,a.Root);Assert.True(a.RefineryUpgraded);Assert.NotNull(a.Turbine);Assert.Less(Quaternion.Angle(facing,a.Hull.rotation),.001f);
+            a.Root.rotation=Quaternion.Euler(0,73,0);world.FaceBuilding(a);Assert.Less(Quaternion.Angle(facing,a.Hull.rotation),.001f);
             Assert.Less(Quaternion.Angle(a.Turbine.localRotation,Quaternion.Euler(0,0,-90)),.001f);
             var rotation=a.Turbine.localRotation;world.UpdateRefineryModel(a,snapshot,30);Assert.AreEqual(rotation,a.Turbine.localRotation);
+            var camera=new GameObject("seat camera").AddComponent<Camera>();camera.transform.SetParent(parent.transform);camera.transform.rotation=Quaternion.Euler(45,0,0);
+            world.FaceBuilding(a,camera);Assert.That(Vector3.Dot(a.Hull.forward,Vector3.back),Is.GreaterThan(.999));
             Assert.NotNull(world.Building(2,"ScientificCenter",true).Hull);
         }
         finally{UnityEngine.Object.DestroyImmediate(parent);}

@@ -7,8 +7,8 @@ namespace Spacewars.Simulation
     // Presentation-safe owner policy input, never a view of PlayableDomain.
     public sealed class PlayableAiObservation
     {
-        public const int CurrentSchemaVersion=14;
-        public const int ParticipantSchemaVersion=15;
+        public const int CurrentSchemaVersion=16;
+        public const int ParticipantSchemaVersion=17;
         public int SchemaVersion{get;}
         private readonly PlayableEntitySnapshot[] entities;
         private readonly PlayableBuildingSnapshot[] buildings;
@@ -21,18 +21,23 @@ namespace Spacewars.Simulation
         private readonly PlayableArtillerySupportSnapshot[] artillerySupport;
         private PlayableAiObservation(PlayableSnapshot snapshot)
         {
-            SchemaVersion=snapshot.Participants.Count>0?ParticipantSchemaVersion:CurrentSchemaVersion;OwnerId=snapshot.OwnerId;Team=snapshot.Team;Participants=snapshot.Participants;Owner=snapshot.Owner;ProfileId=snapshot.ProfileId; ProfileRevision=snapshot.ProfileRevision; Generation=snapshot.Generation; Seed=snapshot.Seed;
+            Intel=new Spacewars.Simulation.Ai.AiIntelDelta(snapshot.Tick,snapshot.IntelEnvelopes,snapshot.Vision);Vision=snapshot.Vision;SchemaVersion=snapshot.Participants.Count>0?ParticipantSchemaVersion:CurrentSchemaVersion;HomeSiteId=snapshot.HomeSiteId;OwnerId=snapshot.OwnerId;Team=snapshot.Team;Participants=snapshot.Participants;Owner=snapshot.Owner;ProfileId=snapshot.ProfileId; ProfileRevision=snapshot.ProfileRevision; Generation=snapshot.Generation; Seed=snapshot.Seed;
             var owner=Owner;
-            SnapshotSequence=snapshot.Sequence; Tick=snapshot.Tick; Credits=snapshot.Credits; IncomePerSecond=snapshot.IncomePerSecond;
+            SnapshotSequence=snapshot.Sequence; Tick=snapshot.Tick; Credits=snapshot.Credits; SettledIncome=snapshot.SettledIncome; IncomePerSecond=snapshot.IncomePerSecond;
             Population=snapshot.Population; entities=snapshot.Entities.Select(x=>new PlayableEntitySnapshot(x.Id,x.Owner,x.Kind,x.Position,x.Health,x.Moving,x.TargetId,x.HullHeading,x.TurretHeading,
-                x.Owner==owner&&x.CurrentOrder?.Owner==owner&&x.CurrentOrder.UnitId==x.Id&&x.CurrentOrder.Generation==snapshot.Generation&&x.CurrentOrder.IssuedTick<=snapshot.Tick?x.CurrentOrder:null)).ToArray(); buildings=snapshot.Buildings.ToArray();
+                x.Owner==owner&&x.CurrentOrder?.Owner==owner&&x.CurrentOrder.UnitId==x.Id&&x.CurrentOrder.Generation==snapshot.Generation&&x.CurrentOrder.IssuedTick<=snapshot.Tick?x.CurrentOrder:null,
+                completion:x.Owner==owner&&x.Completion?.Order.Owner==owner&&x.Completion.Order.Generation==snapshot.Generation?x.Completion:null,location:x.Owner==owner?x.Location:null,upgraded:x.Upgraded,held:x.Owner==owner&&x.Held,navigationOutcome:x.Owner==owner?x.NavigationOutcome:NavigationOutcome.Idle,orderStamp:x.Owner==owner?x.OrderStamp:null,queue:x.Owner==owner?x.Queue:null)).ToArray(); buildings=snapshot.Buildings.ToArray();
             ownCenterDamage=snapshot.OwnCenterDamage.Where(x=>x.Owner==owner&&x.Generation==snapshot.Generation&&x.Tick<=snapshot.Tick&&x.Damage>0&&snapshot.Buildings.Any(b=>b.Id==x.CenterId&&b.Owner==owner&&b.Health>0&&b.Phase!=ConstructionPhase.Pending&&(b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost))&&entities.Any(e=>e.Id==x.AttackerId&&snapshot.IsHostile(e.Owner)&&e.Health>0)).Select(x=>x.Copy()).ToArray();
             routeProofs=snapshot.RouteProofs.Where(p=>p.Owner==owner&&p.Generation==snapshot.Generation&&p.Tick==snapshot.Tick&&p.GeometryRevision>0&&p.Radius>0&&p.Path.Count>0&&
                 entities.Any(e=>e.Id==p.UnitId&&e.Owner==owner&&e.Position.X==p.Origin.X&&e.Position.Z==p.Origin.Z)&&
                 (p.Kind==PlayableRouteTargetKind.VisibleEnemy&&entities.Any(e=>e.Id==p.TargetId&&snapshot.IsHostile(e.Owner)&&e.Position.X==p.Target.X&&e.Position.Z==p.Target.Z)||
+                 p.Kind==PlayableRouteTargetKind.VisibleEnemy&&buildings.Any(b=>b.Id==p.TargetId&&snapshot.IsHostile(b.Owner)&&b.Position.X==p.Target.X&&b.Position.Z==p.Target.Z)||
                  p.Kind==PlayableRouteTargetKind.FriendlyAnchor&&entities.Any(e=>e.Id==p.TargetId&&e.Owner==owner&&e.Position.X==p.Target.X&&e.Position.Z==p.Target.Z)||
+                 p.Kind==PlayableRouteTargetKind.FriendlyAnchor&&snapshot.ActiveProfile!=null&&snapshot.ActiveProfile.ProfileId==snapshot.ProfileId&&snapshot.ActiveProfile.Revision==snapshot.ProfileRevision&&entities.Any(e=>e.Id==p.TargetId&&e.Id!=p.UnitId&&e.Owner==owner&&PlayableUnitRules.FollowGoal(snapshot.ActiveProfile,e.Position,e.HullHeading).Equals(p.Target))||
+                 p.Kind==PlayableRouteTargetKind.FriendlyAnchor&&entities.Any(e=>e.Id==p.TargetId&&e.Id==p.UnitId&&e.Owner==owner&&e.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move&&e.CurrentOrder.Destination.Equals(p.Target))||
+                 p.Kind==PlayableRouteTargetKind.FriendlyAnchor&&buildings.Any(b=>b.Id==p.TargetId&&b.Owner==owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.Position.Equals(p.Target))||
                  p.Kind==PlayableRouteTargetKind.PublicObjective&&snapshot.PublicScoutObjectives.Any(o=>o.SiteId==p.TargetId&&o.Reachable&&o.Approach.X==p.Target.X&&o.Approach.Z==p.Target.Z))&&
-                p.Path.All(point=>snapshot.Vision!=null&&snapshot.Vision.IsVisible(point))).Select(p=>p.Copy()).ToArray();
+                (p.Kind==PlayableRouteTargetKind.PublicObjective||p.Path.All(point=>snapshot.Vision!=null&&snapshot.Vision.IsVisible(point)))).Select(p=>p.Copy()).ToArray();
             artillerySupport=snapshot.ArtillerySupport.Where(a=>a.Generation==snapshot.Generation&&a.Tick==snapshot.Tick&&entities.Any(e=>e.Id==a.UnitId&&e.Owner==owner&&e.Kind==PlayableEntityKind.Shkval&&e.Health>0)&&(!a.Position.HasValue||snapshot.Vision!=null&&snapshot.Vision.IsVisible(a.Position.Value))).ToArray();
             sites=snapshot.Sites.ToArray(); impacts=snapshot.Impacts.ToArray();researchAvailability=snapshot.ResearchAvailability.ToArray();publicScoutObjectives=snapshot.PublicScoutObjectives.ToArray();
         }
@@ -41,8 +46,12 @@ namespace Spacewars.Simulation
             if(snapshot==null)throw new ArgumentNullException(nameof(snapshot));
             return new PlayableAiObservation(snapshot);
         }
+        public Spacewars.Simulation.Ai.AiIntelDelta Intel{get;}
+        public TeamVisionSnapshot Vision{get;}
+        public int HomeSiteId{get;}
+        public bool IsHostile(PlayableOwner other)=>Participants.Count==0?other!=Owner:Participants[(int)other].Team!=Team;
         public PlayableOwner Owner{get;} public string OwnerId{get;} public int Team{get;} public IReadOnlyList<OfflineParticipant> Participants{get;} public string ProfileId{get;} public int ProfileRevision{get;} public long Generation{get;} public int Seed{get;}
-        public long SnapshotSequence{get;} public long Tick{get;} public int Credits{get;} public double IncomePerSecond{get;}
+        public long SnapshotSequence{get;} public long Tick{get;} public int Credits{get;} public double IncomePerSecond{get;} public double SettledIncome{get;}
         public PlayablePopulationSnapshot Population{get;}
         public IReadOnlyList<PlayableResearchAvailabilitySnapshot> ResearchAvailability=>Array.AsReadOnly(researchAvailability);
         public IReadOnlyList<PlayablePublicScoutObjective> PublicScoutObjectives=>Array.AsReadOnly(publicScoutObjectives);
@@ -75,10 +84,12 @@ namespace Spacewars.Simulation
     [Serializable]
     public sealed class PlayableAiTraceRecord
     {
-        public PlayableAiTraceRecord(string observationIdentity,long actionId,long dueTick,long commandSequence,long applicationTick,PlayableAiDeliveryStatus status,PlayableCommandStatus? runtimeStatus,string message,string ownerId=null,string sourceIdentity=null)
-        {ObservationIdentity=observationIdentity;ActionId=actionId;DueTick=dueTick;CommandSequence=commandSequence;ApplicationTick=applicationTick;Status=status;RuntimeStatus=runtimeStatus;Message=message??"";
-            var parts=(observationIdentity??"").Split(':');var parsed=parts.Length>=7&&(parts[0]=="observation-13"||parts[0]=="observation-14")?parts[parts.Length-5]:null;
+        public PlayableAiTraceRecord(string observationIdentity,long actionId,long dueTick,long commandSequence,long applicationTick,PlayableAiDeliveryStatus status,PlayableCommandStatus? runtimeStatus,string message,string ownerId=null,string sourceIdentity=null,Spacewars.Simulation.Ai.AiReceiptIdentity receiptIdentity=null,string policy=null,PlayableCommandKind? kind=null)
+        {Policy=policy;Kind=kind;ReceiptIdentity=receiptIdentity;ObservationIdentity=observationIdentity;ActionId=actionId;DueTick=dueTick;CommandSequence=commandSequence;ApplicationTick=applicationTick;Status=status;RuntimeStatus=runtimeStatus;Message=message??"";
+            var parts=(observationIdentity??"").Split(':');var parsed=parts.Length>=7&&(parts[0]=="observation-13"||parts[0]=="observation-14"||parts[0]=="observation-"+PlayableAiObservation.CurrentSchemaVersion||parts[0]=="observation-"+PlayableAiObservation.ParticipantSchemaVersion)?parts[parts.Length-5]:null;
             OwnerId=ownerId??(parsed=="player-1"||parsed=="enemy-1"?parsed:null);SourceIdentity=sourceIdentity;}
+        public string Policy{get;} public PlayableCommandKind? Kind{get;}
+        public Spacewars.Simulation.Ai.AiReceiptIdentity ReceiptIdentity{get;}
         public string ObservationIdentity{get;} public string OwnerId{get;} public string SourceIdentity{get;} public long ActionId{get;} public long DueTick{get;} public long CommandSequence{get;} public long ApplicationTick{get;} public PlayableAiDeliveryStatus Status{get;} public PlayableCommandStatus? RuntimeStatus{get;} public string Message{get;}
     }
 
@@ -92,7 +103,9 @@ namespace Spacewars.Simulation
             if(observation==null)throw new ArgumentNullException(nameof(observation));
             ScenarioId=scenarioId;SourceIdentity=sourceIdentity;FixtureBankIdentity=fixtureBankIdentity;OwnerId=observation.OwnerId;ProfileId=observation.ProfileId;ProfileRevision=observation.ProfileRevision;SchemaVersion=PlayableCommand.CurrentSchemaVersion;ObservationSchemaVersion=observation.SchemaVersion;ObservationIdentity=observation.Identity;
         }
-        public string ScenarioId{get;} public string SourceIdentity{get;} public string FixtureBankIdentity{get;} public string OwnerId{get;} public string ProfileId{get;} public int ProfileRevision{get;} public int SchemaVersion{get;} public int ObservationSchemaVersion{get;} public string ObservationIdentity{get;}
+        public string ScenarioId{get;} public string SourceIdentity{get;} public string FixtureBankIdentity{get;} public string OwnerId{get;} public string ProfileId{get;} public int ProfileRevision{get;} public int SchemaVersion{get;} public int ObservationSchemaVersion{get;} public string Policy{get;} public PlayableCommandKind? Kind{get;}
+        public Spacewars.Simulation.Ai.AiReceiptIdentity ReceiptIdentity{get;}
+        public string ObservationIdentity{get;}
         public bool Matches(PlayableAiObservation observation)=>observation!=null&&observation.OwnerId==OwnerId&&observation.ProfileId==ProfileId&&observation.ProfileRevision==ProfileRevision&&SchemaVersion==PlayableCommand.CurrentSchemaVersion&&ObservationSchemaVersion==observation.SchemaVersion;
     }
 

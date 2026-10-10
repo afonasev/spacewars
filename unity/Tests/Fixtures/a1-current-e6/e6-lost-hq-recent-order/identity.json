@@ -1,0 +1,86 @@
+{
+  "Schema": "native-army-checkpoint-input-v1",
+  "CodeRevision": "a34c4bcb4bbd6c37e7c3d3dad376c129170ab9bd",
+  "AiStateSchema": 7,
+  "Checkpoint": "checkpoint-2040.world",
+  "CheckpointHash": "96437fce89c097ba4bf39e3aa4acd99a3ecb8841e2556e4d0e09b340f3626ac8",
+  "OriginalManifestHash": "6d61afae42aeff28ff5d40f17de25fecfaf62861551c663cc558c7b70ea188a4",
+  "OriginalCheckpointHash": "222ae02cd26d8bedd80ae1ef18c104073a2c3f4eaa8e0368f26326f689cb303f",
+  "Tick": 2040,
+  "RequestedHistoricalTick": 2400,
+  "Generation": 71,
+  "Seed": 19092026,
+  "MapIdentity": "economy-lost-hq-v1",
+  "Profile": "unity-owner-research-queue-u6-v1@1",
+  "AiHash": "4b4743e8dc41e0244323684a1a24d29d83e614d8ff6c40d9b535005f8b7f7bbd",
+  "RouteDeliveryPolicy": "native-fixed-before-step-v1",
+  "UnityVersion": "6000.3.23f1",
+  "Host": "Editor UnityHostRouteService",
+  "Observed": {
+    "Credits": 100,
+    "LastScoutTick": 1740
+  },
+  "Opportunity": {
+    "Liquid": 100,
+    "SafetyReserve": 0,
+    "NetAvailable": 100,
+    "Unpaid": [],
+    "Reserved": [],
+    "PendingScout": false,
+    "QueuedScout": false,
+    "PriorPaidScouts": 1,
+    "RecoveryLegal": true,
+    "Factories": [
+      {
+        "Id": 12,
+        "SiteId": 3,
+        "Health": 250,
+        "Phase": "Ready",
+        "QueueCount": 0
+      }
+    ],
+    "PublicGoals": [
+      {
+        "SiteId": 2,
+        "Reachable": true,
+        "Role": "PossibleEnemyStart"
+      },
+      {
+        "SiteId": 3,
+        "Reachable": true,
+        "Role": "ExpansionOutpost"
+      }
+    ],
+    "VisibleHostiles": [
+      {
+        "Id": 6,
+        "Kind": "Tank",
+        "Health": 68,
+        "Position": {
+          "X": -24.038424436006185,
+          "Z": -5.06542795396032
+        }
+      },
+      {
+        "Id": 9,
+        "Kind": "Tank",
+        "Health": 100,
+        "Position": {
+          "X": -20.38906127112562,
+          "Z": -8.569599635553242
+        }
+      },
+      {
+        "Id": 11,
+        "Kind": "Tank",
+        "Health": 94,
+        "Position": {
+          "X": -20.398587651606405,
+          "Z": -5.110685990349987
+        }
+      }
+    ]
+  },
+  "Selection": "first actual state with unchanged role/affordability/history predicates in [requested-600,requested+300]",
+  "GeneratedCheckpoint": "checkpoint-2400.world"
+}

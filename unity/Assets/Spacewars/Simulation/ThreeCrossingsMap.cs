@@ -27,13 +27,13 @@ namespace Spacewars.Simulation
     }
     public sealed class MapSupport
     {
-        public MapSupport(string id,NavObstacle bounds,bool bridge,double height=0,NavPoint gradient=default(NavPoint),NavPoint origin=default(NavPoint)){Id=id;Bounds=bounds;IsBridge=bridge;Height=height;Gradient=gradient;Origin=origin;}
-        public string Id{get;} public NavObstacle Bounds{get;} public bool IsBridge{get;}
+        public MapSupport(string id,NavObstacle bounds,bool bridge,double height=0,NavPoint gradient=default(NavPoint),NavPoint origin=default(NavPoint),string surfaceId=null){SurfaceId=surfaceId;Id=id;Bounds=bounds;IsBridge=bridge;Height=height;Gradient=gradient;Origin=origin;}
+        public string SurfaceId{get;} public string Id{get;} public NavObstacle Bounds{get;} public bool IsBridge{get;}
         public double Height{get;} public NavPoint Gradient{get;} public NavPoint Origin{get;}
         public double HeightAt(NavPoint p)=>Height+(p.X-Origin.X)*Gradient.X+(p.Z-Origin.Z)*Gradient.Z;
         public bool Contains(NavPoint p)=>Bounds.Contains(p);
     }
-    public sealed partial class ThreeCrossingsMap
+    public sealed partial class ThreeCrossingsMap : IPlayableTerrain
     {
         public static readonly IReadOnlyList<ThreeCrossingsField> Fields=Array.AsReadOnly(new[]{
             new ThreeCrossingsField("halfExtent","Layout","Half extent","Overall bank and route reserve.",48,96,1),
@@ -77,6 +77,14 @@ namespace Spacewars.Simulation
         public double DirectFireHeight{get;} public double WaterDepth{get;} public double DeckThickness{get;} public double PlatformInspectionSize{get;} public double OverviewSize{get;} public double OverviewHeight{get;} public double OverviewOffset{get;}
         public IReadOnlyList<MapSupport> Supports{get;} public IReadOnlyList<NavObstacle> Water{get;} public IReadOnlyList<NavObstacle> Solids{get;} public IReadOnlyList<NavObstacle> MovementBlockers{get;}
         private readonly NavGeometry geometry;
+        private readonly TerrainLocations locations;
+        public int SurfaceSemanticsVersion=>1;
+        public IReadOnlyList<NavSurfaceTransition> SurfaceTransitions=>locations.Transitions;
+        public bool TryLocate(NavPoint point,double radius,out NavLocation location)=>locations.TryLocate(point,radius,out location);
+        public bool IsValidLocation(NavLocation location,double radius)=>locations.Valid(location,radius);
+        public bool TryTraverse(NavLocation from,NavPoint to,double radius,out NavLocation location)=>locations.Traverse(from,to,radius,out location);
+        public bool CompatibleCombatSurface(NavLocation anchor,NavLocation other)=>locations.Combat(anchor,other);
+
         public ThreeCrossingsMap(ThreeCrossingsProfileData d)
         {
             if(d==null||d.id!="three-crossings-greybox-v1"||d.revision<1)throw new ArgumentException("Invalid map profile identity.");
@@ -86,7 +94,16 @@ namespace Spacewars.Simulation
             BuildContours(d,out var supports,out var water,out var rocks);
             Supports=Array.AsReadOnly(supports.ToArray());Water=Array.AsReadOnly(water.ToArray());
             Solids=Array.AsReadOnly(rocks.ToArray());MovementBlockers=Array.AsReadOnly(rocks.Concat(water).ToArray());geometry=new NavGeometry(HalfExtent,MovementBlockers.ToArray(),Revision);
+            var transitions=new List<NavSurfaceTransition>();
+            void Link(string a,string b)=>transitions.Add(new NavSurfaceTransition(a+"~"+b,a,b));
+            foreach(string bridge in new[]{"bridge/south","bridge/central","bridge/north"}){Link("bank/west",bridge);Link("bank/east",bridge);}
+            foreach(int sx in new[]{-1,1})foreach(int sz in new[]{-1,1})foreach(string axis in new[]{"x","z"}){
+                string ramp="ramp/"+sx+"/"+sz+"/"+axis;Link(ramp,"deck/"+sx+"/"+sz);Link(ramp,sx<0?"bank/west":"bank/east");
+            }
+            locations=new TerrainLocations(geometry,Supports,transitions);
+
         }
+        public NavPoint Headquarters(PlayableOwner owner)=>new NavPoint(owner==PlayableOwner.Player?-BaseCoordinate:BaseCoordinate,owner==PlayableOwner.Player?-BaseCoordinate:BaseCoordinate);
         public static ThreeCrossingsMap Default=>new ThreeCrossingsMap(new ThreeCrossingsProfileData());
         public MapSupport SupportAt(NavPoint point)=>Supports.FirstOrDefault(s=>s.Contains(point));
         public bool SupportsFootprint(NavPoint point,double radius)=>geometry.IsFree(point,radius);

@@ -14,13 +14,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--suite', choices=['editmode', 'playmode', 'build', 'all'], default='all')
+    parser.add_argument('--suite', choices=['editmode', 'playmode', 'build', 'all', 'player'], required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    steps = ['build', 'editmode', 'playmode'] if args.suite == 'all' else [args.suite]
+    steps = (['editmode', 'playmode'] if args.suite == 'all' else
+             ['build', 'editmode', 'playmode'] if args.suite == 'player' else [args.suite])
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     diff = subprocess.check_output(['git', 'diff', 'HEAD', '--', 'unity', 'tools/native_qa.py'], cwd=ROOT)
     (output / 'tracked.diff').write_bytes(diff)

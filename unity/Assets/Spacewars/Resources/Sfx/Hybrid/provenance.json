@@ -1,0 +1,81 @@
+{
+  "palette": "03-hybrid",
+  "source_commit": "42e01bd93769e3c64530bf203267fa050aa176d9",
+  "clips": [
+    {
+      "path": "burst-shot-1.wav",
+      "sha256": "f478bd4289f53476e6f7e7bf63d55e2be694012a4207e69ff5f86fe2945922b3",
+      "source": "docs/audio-concepts/gameplay-v1/03-hybrid/burst-shot-1.wav"
+    },
+    {
+      "path": "burst-shot-2.wav",
+      "sha256": "128bd50232098cb2cf9a34c114d8a1581b5646c351bf20718a493b2e48a4bffb",
+      "source": "docs/audio-concepts/gameplay-v1/03-hybrid/burst-shot-2.wav"
+    },
+    {
+      "path": "burst-shot-3.wav",
+      "sha256": "f4268ed18178873de932640f88364392d2780003e2db1cd5ff071249a269a546",
+      "source": "docs/audio-concepts/gameplay-v1/03-hybrid/burst-shot-3.wav"
+    },
+    {
+      "path": "explosion-1.wav",
+      "sha256": "cb54355fa8643359d02919e5c2e61e5fc2248f2bedcd998195da0555e83cca82",
+      "source": "docs/audio-concepts/gameplay-v1/03-hybrid/explosion-1.wav"
+    },
+    {
+      "path": "explosion-2.wav",
+      "sha256": "4c2e7847fe915d161a497e69efd5ae7b37e3148f148429c4bf702d729e62345e",
+      "source": "docs/audio-concepts/gameplay-v1/03-hybrid/explosion-2.wav"
+    },
+    {
+      "path": "explosion-3.wav",
+      "sha256": "06b6e45d257b963e78717d7d0986603939c4318d6d965f0631b0e7bd8ec8f3eb",
+      "source": "docs/audio-concepts/gameplay-v1/03-hybrid/explosion-3.wav"
+    },
+    {
+      "path": "impact-1.wav",
+      "sha256": "605855cf28eeb573a650625d7bd0c7a20c0d51267a77d8522e4aa0c69e1027b5",
+      "source": "docs/audio-concepts/gameplay-v1/03-hybrid/impact-1.wav"
+    },
+    {
+      "path": "impact-2.wav",
+      "sha256": "f7940a23d57690582aafef3970a312691c13046795e9eb8d0feb3e631c99cc1f",
+      "source": "docs/audio-concepts/gameplay-v1/03-hybrid/impact-2.wav"
+    },
+    {
+      "path": "impact-3.wav",
+      "sha256": "291cbb806b17f53839e96a578d75d8b3009d3be8107a8beeb10d83fd0fc4853a",
+      "source": "docs/audio-concepts/gameplay-v1/03-hybrid/impact-3.wav"
+    },
+    {
+      "path": "order-1.wav",
+      "sha256": "54f8fc727417c232994407974b0d8f1cfab814eca28e9176734408e13da8d042",
+      "source": "docs/audio-concepts/gameplay-v1/03-hybrid/order-1.wav"
+    },
+    {
+      "path": "tank-shot-1.wav",
+      "sha256": "a5ed22adbf2d3c013365d078ecd799cbe0a575587127c5a0e54ef6fa636b92d9",
+      "source": "docs/audio-concepts/gameplay-v1/03-hybrid/tank-shot-1.wav"
+    },
+    {
+      "path": "tank-shot-2.wav",
+      "sha256": "3dcb386128b991e3025c45f2ab0feaae93214cde1c08e5356af7a093f1a8b9a5",
+      "source": "docs/audio-concepts/gameplay-v1/03-hybrid/tank-shot-2.wav"
+    },
+    {
+      "path": "tank-shot-3.wav",
+      "sha256": "a8811a86ce2768d006a44b6b1c03520f7a21db4fa53029dd4b2bde5f7da07fc4",
+      "source": "docs/audio-concepts/gameplay-v1/03-hybrid/tank-shot-3.wav"
+    },
+    {
+      "path": "movement-loop-1.wav",
+      "sha256": "5c40512fe85e06df41734b5355257ee2e2c68d8dac5c82c9b9b8b1a8b2cef1db",
+      "transform": "crop .9..3.9s; .25s cyclic linear overlap in interior; rotate halfway"
+    },
+    {
+      "path": "reject-1.wav",
+      "sha256": "af6e47b6432b5625cf2c8a21dab50b19c5002eebafb21f5ffde97a46a9324dc6",
+      "transform": "swap two acknowledgement notes with 35ms gap"
+    }
+  ]
+}

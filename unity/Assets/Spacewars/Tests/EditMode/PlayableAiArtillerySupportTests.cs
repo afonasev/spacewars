@@ -54,6 +54,8 @@ namespace Spacewars.Tests.EditMode
             var command=new PlayableCommand(1,2,"player-1",retry.Kind,retry.CopyEntityIds(),retry.Target);
             Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",command,null));
             policy.ObserveReceipt(new PlayableAiTraceRecord(observation.Identity,retry.ActionId,0,2,0,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"applied",sourceIdentity:PlayableAiOpeningComposition.SourceIdentity));
+            using(var routes=new Spacewars.Presentation.UnityHostRouteService())routes.Service(Nav.Requests,Nav.Answers,1,(NavGeometry)Domain.GetProperty("Geometry",Flags).GetValue(domain),profile,64);
+            Nav.ApplyResults();Call("Step",1d/30);
             var current=PlayableAiObservation.From(View());Assert.Null(policy.TryPlan(current,opening));
             var restored=new PlayableAiArtillerySupportPolicy(profile);restored.Restore(policy.Capture());
             Assert.AreEqual(policy.Capture().HeldPosition.X,restored.Capture().HeldPosition.X);

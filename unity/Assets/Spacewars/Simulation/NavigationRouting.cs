@@ -11,6 +11,9 @@ namespace Spacewars.Simulation
         public SharedFlowRouter(NavGeometry geometry, NavigationProfile profile) { if (geometry == null || profile == null) throw new ArgumentNullException(); this.geometry = geometry; this.profile = profile; }
         public int RebuildCount { get; private set; }
         public int FieldCacheHits {get;private set;}
+        public int CachedFieldCount => fields.Count;
+        public long ExpandedCells {get;private set;}
+        public long CachedCells {get;private set;}
         public NavPoint[] FindPath(NavPoint start, NavPoint goal)
         {
             if (!geometry.IsFree(start, profile.Radius) || !geometry.IsFree(goal, profile.Radius)) return new NavPoint[0];
@@ -75,8 +78,10 @@ namespace Spacewars.Simulation
             Field field; if (fields.TryGetValue(key, out field)){FieldCacheHits++;return field;}
             field = new Field(); var queue = new Queue<Cell>();
             foreach (Cell target in targets) { field.Distance[target] = 0; queue.Enqueue(target); }
-            while (queue.Count > 0) { Cell cell = queue.Dequeue(); int d = field.Distance[cell]; foreach (Cell next in Neighbors(cell)) if (IsFree(next) && geometry.SegmentFree(ToPoint(cell), ToPoint(next), profile.Radius) && !field.Distance.ContainsKey(next)) { field.Distance[next] = d + 1; queue.Enqueue(next); } }
-            fields[key] = field; RebuildCount++; return field;
+            // A visited cell already has its shortest distance. Reject it before the
+            // pure geometric checks; this keeps the same queue order and exact routes.
+            while (queue.Count > 0) { Cell cell = queue.Dequeue(); ExpandedCells++; int d = field.Distance[cell]; foreach (Cell next in Neighbors(cell)) if (!field.Distance.ContainsKey(next) && IsFree(next) && geometry.SegmentFree(ToPoint(cell), ToPoint(next), profile.Radius)) { field.Distance[next] = d + 1; queue.Enqueue(next); } }
+            fields[key] = field; CachedCells += field.Distance.Count; RebuildCount++; return field;
         }
         private Cell BestNeighbor(Field field, Cell current) { int best; if (!field.Distance.TryGetValue(current, out best)) return current; Cell result = current; foreach (Cell next in Neighbors(current)) { int d; if (field.Distance.TryGetValue(next, out d) && d < best && geometry.SegmentFree(ToPoint(current), ToPoint(next), profile.Radius)) { best = d; result = next; } } return result; }
         private IEnumerable<Cell> Neighbors(Cell cell) { yield return new Cell(cell.X, cell.Z + 1); yield return new Cell(cell.X + 1, cell.Z); yield return new Cell(cell.X, cell.Z - 1); yield return new Cell(cell.X - 1, cell.Z); }

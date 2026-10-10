@@ -44,13 +44,15 @@ namespace Spacewars.Runtime
         {
             if(observation==null)throw new ArgumentNullException(nameof(observation));
             if(intent==null||intent.Generation!=observation.Generation)return new PlayableAiResearchReadiness(observation.Generation,observation.Tick,-1,false,0,0,0,1);
-            var own=Math.Max(1,observation.Entities.Count(x=>x.Owner==observation.Owner));var enemy=observation.Entities.Count(x=>x.Owner==(observation.Owner==PlayableOwner.Player?PlayableOwner.Enemy:PlayableOwner.Player));
+            var own=Math.Max(1,observation.Entities.Count(x=>x.Owner==observation.Owner));var enemy=observation.Entities.Count(x=>observation.IsHostile(x.Owner));
             double danger=enemy/(double)own,advantage=enemy==0?1.25:Math.Min(3,own/(double)enemy);
             return new PlayableAiResearchReadiness(observation.Generation,observation.Tick,intent.LastScoutTick,intent.Emergency,intent.TankCompositionTarget,danger,enemy,advantage);
         }
     }
-    public sealed class PlayableAiResearchLivenessPolicy
+    public sealed partial class PlayableAiResearchLivenessPolicy
     {
+        internal PlayableAiResearchLivenessPolicy Fork() => (PlayableAiResearchLivenessPolicy)MemberwiseClone();
+
         private readonly PlayableAiResearchPolicyProfile profile;private readonly string ownerId;private long nextActionId,pendingActionId,pendingGeneration;
         public PlayableAiResearchLivenessPolicy(PlayableAiResearchPolicyProfile profile=null,long firstActionId=1,string ownerId="player-1"){this.profile=profile??PlayableAiResearchPolicyProfile.Release;this.ownerId=ownerId;if(firstActionId<1)throw new ArgumentOutOfRangeException(nameof(firstActionId));nextActionId=firstActionId;}
         public bool HasPendingObligation=>pendingActionId!=0;
@@ -66,7 +68,7 @@ namespace Spacewars.Runtime
             if(chassis==null||!chassis.Available||Double.IsNaN(chassis.Cost)||Double.IsInfinity(chassis.Cost)||chassis.Cost<0||observation.Credits<chassis.Cost||tanks==0||tanks<profile.DefensiveReserveUnits||refineries<profile.MinimumRefineries||center==null)return null;pendingActionId=nextActionId++;pendingGeneration=observation.Generation;
             return new PlayableAiAction(pendingActionId,observation.OwnerId,observation.ProfileId,observation.ProfileRevision,observation.Generation,observation.SnapshotSequence,PlayableCommandKind.QueueResearch,new[]{center.Id},researchKind:PlayableResearchKind.TankChassis,seed:observation.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
         }
-        public void ObserveReceipt(PlayableAiTraceRecord record){if(record==null||record.OwnerId!=ownerId||record.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity||!HasPendingObligation||record.ActionId!=pendingActionId)return;if(record.Status==PlayableAiDeliveryStatus.Applied||record.Status==PlayableAiDeliveryStatus.Rejected||record.Status==PlayableAiDeliveryStatus.Stale||record.Status==PlayableAiDeliveryStatus.Cancelled||record.Status==PlayableAiDeliveryStatus.Stopped||record.Status==PlayableAiDeliveryStatus.InvalidAction||record.Status==PlayableAiDeliveryStatus.InvalidOwner)Clear();}
+        public void ObserveReceipt(PlayableAiTraceRecord record){if(record==null||!AiStateWire.CallbackGenerationMatches(record,pendingGeneration)||record.OwnerId!=ownerId||record.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity||!HasPendingObligation||record.ActionId!=pendingActionId)return;if(record.Status==PlayableAiDeliveryStatus.Applied||record.Status==PlayableAiDeliveryStatus.Rejected||record.Status==PlayableAiDeliveryStatus.Stale||record.Status==PlayableAiDeliveryStatus.Cancelled||record.Status==PlayableAiDeliveryStatus.Stopped||record.Status==PlayableAiDeliveryStatus.InvalidAction||record.Status==PlayableAiDeliveryStatus.InvalidOwner)Clear();}
         private void Clear(){pendingActionId=0;pendingGeneration=0;}
     }
 }

@@ -238,7 +238,7 @@ namespace Spacewars.Runtime
         private static void WriteRecord(BinaryWriter w,RepairState v) {w.Write(v!=null);
             if(v==null)return;
             w.Write(v.TermsRevision);
-            Number(w,v.MissingHealth);
+            String(w,v.AllocationReceipt);Number(w,v.MissingHealth);
             Number(w,v.TotalCost);
             Number(w,v.Duration);
             Number(w,v.PaidSeconds);
@@ -247,7 +247,7 @@ namespace Spacewars.Runtime
             }
         private static RepairState ReadRepairState(BinaryReader r) {if(!Boolean(r))return null;
             var v=new RepairState();v.TermsRevision=r.ReadInt32();
-            v.MissingHealth=Number(r);
+            v.AllocationReceipt=String(r);v.MissingHealth=Number(r);
             v.TotalCost=Number(r);
             v.Duration=Number(r);
             v.PaidSeconds=Number(r);

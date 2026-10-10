@@ -18,7 +18,7 @@ namespace Spacewars.Presentation
                 artilleryTransparent.SetFloat("_Surface",1);artilleryTransparent.SetFloat("_SrcBlend",(float)BlendMode.SrcAlpha);artilleryTransparent.SetFloat("_DstBlend",(float)BlendMode.OneMinusSrcAlpha);artilleryTransparent.SetFloat("_ZWrite",0);artilleryTransparent.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");artilleryTransparent.renderQueue=3000;return artilleryTransparent;
             }
         }
-        private Color ShotColor(PlayableOwner owner,float alpha=1)=>owner==PlayableOwner.Player?new Color(.19f,.72f,.77f,alpha):new Color(.93f,.34f,.23f,alpha);
+        private Color ShotColor(PlayableOwner owner,float alpha=1)=>owner==LocalOwner?new Color(.19f,.72f,.77f,alpha):new Color(.93f,.34f,.23f,alpha);
         private GameObject EffectPart(string name,Transform parent,Vector3 position,Vector3 scale,Color color,PrimitiveType shape,bool transparent=false)
         {
             var g=world.Part(name,parent,position,scale,color,shape);

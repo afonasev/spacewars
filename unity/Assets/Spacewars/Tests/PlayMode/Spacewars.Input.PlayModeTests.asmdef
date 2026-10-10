@@ -10,14 +10,16 @@
     "Spacewars.Presentation",
     "Spacewars.Runtime",
     "Spacewars.Simulation",
-    "Spacewars.BalanceLab"
+    "Spacewars.BalanceLab",
+    "Unity.Newtonsoft.Json"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
   "overrideReferences": true,
   "precompiledReferences": [
-    "nunit.framework.dll"
+    "nunit.framework.dll",
+    "Newtonsoft.Json.dll"
   ],
   "autoReferenced": false,
   "defineConstraints": [

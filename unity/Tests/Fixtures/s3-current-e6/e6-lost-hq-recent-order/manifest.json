@@ -1,0 +1,225 @@
+{
+  "Schema": "native-a3-e6-derived-v1",
+  "OriginalFixture": "e6-lost-hq-recent-order",
+  "OriginalManifestHash": "6d61afae42aeff28ff5d40f17de25fecfaf62861551c663cc558c7b70ea188a4",
+  "SourceIdentity": "native-a3-e6-hq-guard-v1",
+  "MapIdentity": "a3-derived-e6-lost-hq-recent-order-hq-guard-v1",
+  "OriginalManifest": {
+    "Schema": "native-ai-run-v1",
+    "Worker": {
+      "CodeRevision": "78732170e9353e39d9bac64ab13b225585c9c4fc",
+      "UnityVersion": "6000.3.23f1",
+      "Platform": "macOS",
+      "Architecture": "arm64",
+      "ExecutableHash": "7966e1f2eef6b2cef2763ec6d415891f9ba33a710b946b52775c87763df7d442",
+      "BundleHash": "d990b8fb00623d68496451718d61631166fa269d3d362d9071c99d24cc84d6fd",
+      "GameplayId": "unity-owner-research-queue-u6-v1",
+      "GameplayRevision": 1,
+      "GameplayHash": "b112079ad54eb87d3e2f9295630249d1e38b2efb4f1d0600a6f0c117cfb7f81b",
+      "AiId": "native-strategic-ai-v1",
+      "AiRevision": 1,
+      "AiHash": "4b4743e8dc41e0244323684a1a24d29d83e614d8ff6c40d9b535005f8b7f7bbd",
+      "CatalogHash": "7e7232d2df9ef48e71f4c5d2b62f1ca6e6b96561225e69e56e0801ebcd0d8824",
+      "NavMeshSettings": "<>f__AnonymousType15`8{AgentClimb=0;AgentHeight=1;AgentRadius=0.91999999999999993;AgentSlope=0;HalfExtent=32;Provider=21:UnityNavigationRouter;SettingsIndex=0;VoxelSize=0.2}",
+      "RouteDeliveryPolicy": "native-fixed-before-step-v1"
+    },
+    "WorkerRoot": "/Users/eaafonasev/.codex/worktrees/da4f/spacewars/.local/e6-worker-repaired/SpacewarsAiWorker.app",
+    "Executable": "/Users/eaafonasev/.codex/worktrees/da4f/spacewars/.local/e6-worker-repaired/SpacewarsAiWorker.app/Contents/MacOS/Spacewars",
+    "Launcher": "/Users/eaafonasev/.codex/worktrees/da4f/spacewars/tools/unity.sh",
+    "Mode": "duel",
+    "Fixture": "economy-lost-hq-v1",
+    "MapId": "economy-lost-hq-v1",
+    "MapHash": "e53ffd5b0439c4225679e2791f5504a9e47df128cc35bc60620decfaa5e4d8cc",
+    "GeometryHash": "2ef2e7d3f2e3f032f94816bcabbc96a92c1ded2233528412517d771c2bea90f3",
+    "RosterHash": "82e9ea131bd1503fb5e5e4cf0a5288a5044210b5950dd30419a2e8a27a3b47f0",
+    "Roster": [
+      {
+        "Id": "west-owner",
+        "LogicalPlayer": 1,
+        "Team": 1,
+        "Control": "ai",
+        "Difficulty": "fighter"
+      },
+      {
+        "Id": "east-owner",
+        "LogicalPlayer": 2,
+        "Team": 2,
+        "Control": "human",
+        "Difficulty": "fighter"
+      }
+    ],
+    "Seed": 19092026,
+    "Generation": 71,
+    "TickRate": 30,
+    "TicksLimit": 5400,
+    "Checkpoints": [
+      0,
+      300,
+      600,
+      900,
+      1200,
+      1500,
+      1800,
+      2100,
+      2400,
+      2700,
+      3000,
+      3300,
+      3600,
+      3900,
+      4200,
+      4500,
+      4800,
+      5100,
+      5400
+    ],
+    "TickBatch": 64,
+    "RouteBudget": 64,
+    "TraceLimit": 4096,
+    "EvaluationPolicy": "native-ai-behavior-v1@1",
+    "Openings": "diagnostic-coverage",
+    "Commands": [
+      {
+        "Tick": 0,
+        "OwnerId": "east-owner",
+        "Kind": "AttackMove",
+        "Selector": "Tanks",
+        "Site": 0,
+        "Slot": 0,
+        "X": -24.0,
+        "Z": -5.0,
+        "Building": "Headquarters",
+        "Research": "TankChassis"
+      }
+    ],
+    "Expected": {
+      "States": [
+        {
+          "Tick": 0,
+          "Hash": "f353ea461159a2388a4060fef8c180dd1ae754830ea24b5afa042f116bb67058"
+        },
+        {
+          "Tick": 300,
+          "Hash": "83b3bb9598e634545fedfcd79df1e44cf9488407c01f23ef1aac555bc18d4e6c"
+        },
+        {
+          "Tick": 600,
+          "Hash": "33d7a0cbbecdea3433dc9bd1115bddb314dc6a98596f2abae12e19404bd2ab70"
+        },
+        {
+          "Tick": 900,
+          "Hash": "a5833095877825d6df2b5c98735aefc8c366a1138ded2115be12557ec9a13bdb"
+        },
+        {
+          "Tick": 1200,
+          "Hash": "05ce44b670f460774d7223cb855d5e67be78fd460196e3f0daf772772e692534"
+        },
+        {
+          "Tick": 1500,
+          "Hash": "ef40c3aa723a23be0f06606502327f1ba55231e3a64b9ac1389c6de826f4ea28"
+        },
+        {
+          "Tick": 1800,
+          "Hash": "6e4d17b43eea9d3c4332b3de74d987a572c5e60b589358349e4a9eed3bfe3cbb"
+        },
+        {
+          "Tick": 2100,
+          "Hash": "b44fd18bbbe209126eba1360ddb0060c258deef0628ca0ea94847b6f1a7c9d89"
+        },
+        {
+          "Tick": 2400,
+          "Hash": "222ae02cd26d8bedd80ae1ef18c104073a2c3f4eaa8e0368f26326f689cb303f"
+        },
+        {
+          "Tick": 2700,
+          "Hash": "a1e340925807b72a03c61da2ae611e35c121bf4179c4c21ef8ff7ac05f7dd741"
+        },
+        {
+          "Tick": 3000,
+          "Hash": "47d5c3b2848300c250a6ad7a557b47888ed0448bafc5fb64acd3cd288afc08cd"
+        },
+        {
+          "Tick": 3300,
+          "Hash": "8952edbd256c7e41fe7c2189f95086290ad40b0b0f4133b6378e875a8afa639d"
+        },
+        {
+          "Tick": 3600,
+          "Hash": "a9be0df1058e2fa1ea20ad8c9cf25b4c34665129a48bc5807d7f2738b87f24bb"
+        },
+        {
+          "Tick": 3900,
+          "Hash": "6cfa519fc2c6d3a88684f6e49b505e9a80159c45a8342b1eb1fd442be692c2f6"
+        },
+        {
+          "Tick": 4200,
+          "Hash": "880617ccc368ab6903b1173612e6e15cc0f898751d85216c1be5149474906e4a"
+        },
+        {
+          "Tick": 4500,
+          "Hash": "472220814432dc37c6c66a8d7c626ac65282a67e6d7bde90cf94b011cbf29c07"
+        },
+        {
+          "Tick": 4800,
+          "Hash": "b145649b914a2d4fd6ee5616cb06eb1f1a5087eef65cb7e32c19bf5d1a112655"
+        },
+        {
+          "Tick": 5100,
+          "Hash": "c3741e6ff4ea149a9f4af3c92eaf8c3e75cd6c18bd73246b382d20df6bf40314"
+        },
+        {
+          "Tick": 5400,
+          "Hash": "daa689605d05c412747978ddbc4693bbcd1c786deca7116dde30a8e7092d9067"
+        }
+      ],
+      "DecisionsHash": "a0f2bc1a70f922c381f600359e5e702bd9476a67da75c8d1fe1b2b2b175c04d3",
+      "Termination": "timeout",
+      "Outcome": "Playing",
+      "FinalTick": 5400
+    }
+  },
+  "GuardLogicalPlayer": 2,
+  "GuardKind": 0,
+  "GuardX": 18.0,
+  "GuardZ": 18.0,
+  "GuardHeading": 0.0,
+  "OriginalRaidIds": [
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "GuardId": 12,
+  "Commands": [
+    {
+      "Tick": 0,
+      "OwnerId": "east-owner",
+      "Kind": "AttackMove",
+      "Purpose": "original raid, exact six IDs resolved before guard addition",
+      "EntityIds": [
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "X": -24.0,
+      "Z": -5.0,
+      "Sequence": 1
+    },
+    {
+      "Tick": 0,
+      "OwnerId": "east-owner",
+      "Kind": "Hold",
+      "Purpose": "separate stock enemy HQ guard",
+      "EntityIds": [
+        12
+      ],
+      "X": 18.0,
+      "Z": 18.0,
+      "Sequence": 2
+    }
+  ]
+}

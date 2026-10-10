@@ -35,7 +35,7 @@ namespace Spacewars.Tests.PlayMode
         [UnityTest] public IEnumerator NativeRoutesAndMixedGroupMotionRespectFullyBuiltMap()
         {
             var p=PlayableProfile.Create(JsonUtility.FromJson<PlayableProfileData>(Resources.Load<TextAsset>("PlayableProfile").text),new ThreeCrossingsMap(JsonUtility.FromJson<ThreeCrossingsProfileData>(Resources.Load<TextAsset>("ThreeCrossingsProfile").text)));
-            var m=p.AuthoredMap;var obstacles=PlayableMap.StaticObstacles(p).ToList();
+            var m=(ThreeCrossingsMap)p.AuthoredMap;var obstacles=PlayableMap.StaticObstacles(p).ToList();
             foreach(var site in TerritoryRules.Sites(p)){Add(site.Position,TerritoryRules.Radius(p,site.Kind));foreach(var slot in site.Slots)Add(slot.Position,Math.Max(p.ScienceFootprintRadius,Math.Max(p.FactoryFootprintRadius,p.RefineryFootprintRadius)));}
             var g=new NavGeometry(p.ArenaHalfExtent,obstacles.ToArray(),1);
             using(var router=new UnityNavigationRouter(g,p.Navigation))

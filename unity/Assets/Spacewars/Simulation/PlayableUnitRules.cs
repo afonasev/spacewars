@@ -1,8 +1,28 @@
+using System;
+
 namespace Spacewars.Simulation
 {
     // Immutable kind dispatch shared by simulation and native presentation.
     public static class PlayableUnitRules
     {
+        // Detached counterpart of the ordinary native Follow goal. The existing
+        // Follow execution/arrival algorithm remains authoritative and unchanged.
+        public static NavPoint FollowGoal(PlayableProfile p,NavPoint leader,double heading)=>new NavPoint(leader.X-Math.Cos(heading)*p.FollowDistance,leader.Z-Math.Sin(heading)*p.FollowDistance);
+        // Shared enumeration from the ordinary combat authority: same math, order,
+        // gameplay range ratio and slot spacing. Each caller retains its own legality checks.
+        public static NavPoint[] AttackApproachCandidates(PlayableProfile profile,NavPoint from,NavPoint target,double range)
+        {
+            double radius=range*profile.AttackApproachRangeRatio;
+            int count=Math.Max(1,(int)Math.Ceiling(2*Math.PI*radius/profile.Navigation.ArrivalSlotSpacing));
+            double facing=Math.Atan2(from.Z-target.Z,from.X-target.X);
+            var result=new NavPoint[count];
+            for(int i=0;i<count;i++)
+            {
+                double angle=facing+i*2*Math.PI/count;
+                result[i]=new NavPoint(target.X+Math.Cos(angle)*radius,target.Z+Math.Sin(angle)*radius);
+            }
+            return result;
+        }
         public static bool Supported(PlayableEntityKind k)=>k==PlayableEntityKind.Tank||k==PlayableEntityKind.Explorer||k==PlayableEntityKind.Shkval;
         public static double Radius(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Shkval?p.ShkvalCollisionRadius:k==PlayableEntityKind.Explorer?p.ExplorerCollisionRadius:p.TankCollisionRadius;
         public static double Speed(PlayableProfile p,PlayableEntityKind k,bool chassis=false)=>k==PlayableEntityKind.Shkval?p.ShkvalSpeed:k==PlayableEntityKind.Explorer?p.ExplorerSpeed:chassis?p.TankChassisSpeed:p.TankSpeed;

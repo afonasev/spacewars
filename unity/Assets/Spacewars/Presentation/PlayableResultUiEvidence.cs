@@ -20,7 +20,7 @@ namespace Spacewars.Presentation
 
         private void DriveResultUiEvidence()
         {
-            if(evidence==null||(resultUiEvidence!="victory"&&resultUiEvidence!="defeat")||view==null)return;
+            if(evidence==null||(resultUiEvidence!="victory"&&resultUiEvidence!="defeat")||(view==null&&resultEvidenceStage<91))return;
             if(resultEvidenceStarted==0)resultEvidenceStarted=Time.realtimeSinceStartup;
             // This opt-in Player driver submits only ordinary player commands. A capture
             // requires the runtime's published terminal snapshot, never a UI-only result.
@@ -34,14 +34,18 @@ namespace Spacewars.Presentation
                 if(resultActionEvidence=="manual")return;
                 if(resultEvidenceStage==90&&Time.frameCount>resultCaptureFrame+2)
                 {
-                    var action=resultActionEvidence=="restart"?modalRestartButton:modalExitButton;
+                    var action=postMatch?.Root.Q<Button>(resultActionEvidence=="restart"?"result-repeat":"result-menu")??(resultActionEvidence=="restart"?modalRestartButton:modalExitButton);
                     action.Focus();
                     Record("result UI action submit="+resultActionEvidence+" focused="+(root.focusController.focusedElement==action));
-                    using(var submit=NavigationSubmitEvent.GetPooled(EventModifiers.None))action.SendEvent(submit);
-                    bool requested=resultActionEvidence=="restart"?restarting:quitting;
+                    menuNavigation.Activate();
+                    bool requested=resultActionEvidence=="restart"?restarting:returningToMain;
                     Record("result UI action callback="+(requested?"PASS":"FAIL")+" action="+resultActionEvidence);
-                    resultEvidenceStage=91;
+                    resultEvidenceStarted=Time.realtimeSinceStartup;resultEvidenceStage=91;
                     return;
+                }
+                if(resultEvidenceStage==91&&resultActionEvidence!="restart"&&inLobby&&runtime==null)
+                {
+                    Record("result UI menu PASS main_menu=true");ScreenCapture.CaptureScreenshot(Path.Combine(evidence,"result-menu.png"));resultCaptureFrame=Time.frameCount;resultEvidenceStage=92;return;
                 }
                 if(resultEvidenceStage==91&&resultActionEvidence=="restart"&&view.Generation>resultTerminalGeneration)
                 {
@@ -68,7 +72,7 @@ namespace Spacewars.Presentation
                 string actual=view.Outcome==PlayableMatchOutcome.PlayerWon?"victory":"defeat";
                 Record("authoritative result="+view.Outcome+" seed="+view.Seed+" profile="+view.ProfileId+"@"+view.ProfileRevision);
                 resultTerminalGeneration=view.Generation;
-                modalRestartButton.Focus();
+                (postMatch?.Root.Q<Button>("result-repeat")??modalRestartButton).Focus();
                 ScreenCapture.CaptureScreenshot(Path.Combine(evidence,"result-"+resultUiEvidence+"-attempt-actual-"+actual+".png"));
                 resultCaptureFrame=Time.frameCount;resultEvidenceStage=90;return;
             }

@@ -22,6 +22,8 @@ namespace Spacewars.Runtime
     public sealed class OfflineLocalSession : IDisposable
     {
         private readonly PlayableRuntime runtime;
+        public Action<PlayableCommand> CommandSubmitted;
+        public Action<PlayableCommand,PlayableCommandSubmitResult> CommandAttempted;
         private readonly LocalSeat[] seats;
         private long consumedOrdinal;
         private bool started;private string lostSeat;
@@ -58,6 +60,9 @@ namespace Spacewars.Runtime
             if(!seats.All(s=>s.Ready&&s.Connected&&s.Neutral))return false;
             started=true;lostSeat=null;Paused=false;runtime.RequestPause(false);return true;
         }
+        public MatchResult Result=>runtime.Result;
+        public void RecordHumanAction(string seatId){if(!Paused)runtime.RecordHumanAction(Seat(seatId).OwnerId);}
+        public void FinishManually()=>runtime.RequestFinish();
         public void Pause()
         {
             Paused=true;foreach(var seat in seats)seat.Neutral=false;runtime.RequestPause(true);
@@ -72,13 +77,14 @@ namespace Spacewars.Runtime
             // Transport capacity is consumed once by the coordinator, never a viewport.
             runtime.DrainReceipts();
         }
-        public PlayableCommandSubmitResult Submit(string seatId,PlayableCommandKind kind,int[] entities,NavPoint point=default(NavPoint),int targetId=0,int siteId=0,int slotId=0,int parentId=0,PlayableBuildingKind buildingKind=PlayableBuildingKind.Factory,PlayableEntityKind unitKind=PlayableEntityKind.Tank,PlayableResearchKind researchKind=PlayableResearchKind.TankChassis)
+        public PlayableCommandSubmitResult Submit(string seatId,PlayableCommandKind kind,int[] entities,NavPoint point=default(NavPoint),int targetId=0,int siteId=0,int slotId=0,int parentId=0,PlayableBuildingKind buildingKind=PlayableBuildingKind.Factory,PlayableEntityKind unitKind=PlayableEntityKind.Tank,PlayableResearchKind researchKind=PlayableResearchKind.TankChassis,PlayableOrderMode mode=PlayableOrderMode.Replace)
         {
             var seat=Seat(seatId);
             if(!started||Paused||!seat.Connected||!seat.Neutral)return new PlayableCommandSubmitResult(PlayableCommandStatus.Rejected);
             var view=Frame.Views[seat.OwnerId];
             if((entities??Array.Empty<int>()).Any(id=>!view.Entities.Any(e=>e.Id==id&&e.Owner==view.Owner)&&!view.Buildings.Any(b=>b.Id==id&&b.Owner==view.Owner)))return new PlayableCommandSubmitResult(PlayableCommandStatus.InvalidEntity);
-            return runtime.TrySubmit(new PlayableCommand(Frame.Generation,++seat.Sequence,seat.OwnerId,kind,entities,point,targetId:targetId,siteId:siteId,slotId:slotId,parentId:parentId,buildingKind:buildingKind,unitKind:unitKind,researchKind:researchKind));
+            var command=new PlayableCommand(Frame.Generation,++seat.Sequence,seat.OwnerId,kind,entities,point,targetId:targetId,siteId:siteId,slotId:slotId,parentId:parentId,buildingKind:buildingKind,unitKind:unitKind,researchKind:researchKind,mode:seat.DeviceId.StartsWith("gamepad:",StringComparison.Ordinal)?PlayableOrderMode.Replace:mode);
+            var result=runtime.TrySubmit(command);CommandAttempted?.Invoke(command,result);if(result.Accepted)CommandSubmitted?.Invoke(command);return result;
         }
         public void Dispose()=>runtime.RequestStop();
     }

@@ -43,6 +43,6 @@ namespace Spacewars.Presentation
             lifecycleLabel.text=state==null?"":state.Selling?"Демонтаж · "+(int)(state.SaleProgress*100)+"%":state.Repairing?(state.WaitingForCredits?"Ремонт: ожидает кредитов":"Ремонт · "+state.PaidSeconds.ToString("0.#")+" / "+state.RepairDuration.ToString("0.#")+" с"):
                 "$ "+state.Refund+" · зданий: "+state.CascadeCount+(state.LastCenter?"\nПоследний центр: поражение после демонтажа":"");
         }
-        private void OnApplicationFocus(bool focused){if(!focused)confirmSaleBuilding=0;}
+        private void OnApplicationFocus(bool focused){localInputFocused=focused;if(localCoordinator==null)foreach(var seat in localPresentations){seat.localInputFocused=focused;seat.input?.SetFocus(focused);}if(!focused){confirmSaleBuilding=0;if(localCoordinator==null&&runtime!=null)Pause(true);}}
     }
 }

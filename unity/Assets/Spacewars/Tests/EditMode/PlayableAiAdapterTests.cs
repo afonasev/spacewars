@@ -26,7 +26,7 @@ namespace Spacewars.Tests.EditMode
             var enemy=new PlayableBuildingSnapshot(2,PlayableOwner.Enemy,PlayableBuildingKind.ScientificCenter,new NavPoint(3,0),100,1,0,0,default(NavPoint),includePrivateState:false);
             var snapshot=new PlayableSnapshot("native",9,4,7,8,9,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,500,null,Array.Empty<PlayableEntitySnapshot>(),new[]{own,enemy},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null);
             var observation=PlayableAiObservation.From(snapshot);
-            Assert.AreEqual("observation-14:native@9:player-1:4:8:9:7",observation.Identity);
+            Assert.AreEqual("observation-16:native@9:player-1:4:8:9:7",observation.Identity);
             Assert.AreEqual(1,observation.Buildings.Single(b=>b.Owner==PlayableOwner.Player).PrivateState.Research.Count);
             Assert.IsNull(observation.Buildings.Single(b=>b.Owner==PlayableOwner.Enemy).PrivateState);
             Assert.False(typeof(PlayableAiObservation).GetProperties().Any(p=>p.Name.Contains("Geometry")));

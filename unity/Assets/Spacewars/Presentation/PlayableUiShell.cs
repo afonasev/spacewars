@@ -14,6 +14,7 @@ namespace Spacewars.Presentation
         private static readonly Color Cyan=OrbitalTheme.Cyan;
         private static readonly Color Danger=new Color(.95f,.47f,.43f);
         private static readonly Color Line=OrbitalTheme.Line;
+        private static readonly Color MinimapOutline=new Color(.78f,.61f,.40f);
         private static readonly Color ActionColor=new Color(.045f,.105f,.135f);
 
         private static void StyleRegion(VisualElement element)
@@ -68,7 +69,7 @@ namespace Spacewars.Presentation
             if(childMenu!=null)return;
             bool visible=ModalVisible();
             if(visible&&!modalWasVisible)menuNavigation?.SetScope(modalCard,()=>{if(paused)Pause(false);},resumeButton.style.display.value==DisplayStyle.Flex?resumeButton:modalRestartButton);
-            else if(!visible&&modalWasVisible)menuNavigation?.SetScope(null);
+            else if(!visible&&(modalWasVisible||menuNavigation?.Scope==modalCard))menuNavigation?.SetScope(null);
             if(visible)
             {
                 var focused=root.focusController?.focusedElement as Button;
@@ -109,11 +110,11 @@ namespace Spacewars.Presentation
             // The opt-in unattended Development Player keeps its fixture running when macOS
             // moves focus to the test harness. Normal Player focus-loss pause is unchanged.
             if(paused&&responsiveEvidenceStage<5){Pause(false);return;}
-            var factory=view.Buildings.FirstOrDefault(building=>building.Kind==Spacewars.Simulation.PlayableBuildingKind.Factory&&building.Owner==Spacewars.Simulation.PlayableOwner.Player);
+            var factory=view.Buildings.FirstOrDefault(building=>building.Kind==Spacewars.Simulation.PlayableBuildingKind.Factory&&building.Owner==LocalOwner);
             switch(responsiveEvidenceStage)
             {
                 case 0:
-                    var home=view.Sites.FirstOrDefault(site=>site.Owner==Spacewars.Simulation.PlayableOwner.Player&&site.Ready&&site.Site.Slots.Count>0);
+                    var home=view.Sites.FirstOrDefault(site=>site.Owner==LocalOwner&&site.Ready&&site.Site.Slots.Count>0);
                     if(home==null)return;
                     selectedSite=home.Site.Id;selectedSlot=home.Site.Slots[0].Id;
                     Record("responsive evidence selected site="+selectedSite+" slot="+selectedSlot);
@@ -160,79 +161,31 @@ namespace Spacewars.Presentation
         }
         private void ApplyResponsiveHud(float panelWidth)
         {
-            // Structural minimum of the existing four regions, not a gameplay or designer-tunable size.
-            // The minimap itself still uses the validated profile dimension.
-            float wideMinimum=(float)profile.MinimapCompactSize+32+380+220+24+40+32;
-            bool compact=panelWidth<wideMinimum;
-            if(compact==compactHud)return;
-            compactHud=compact;
-            compactBuildRelevant=null;
-            compactArmyRelevant=null;
-            var focused=root.focusController?.focusedElement as Button;
-            hudRow.style.flexWrap=compact?Wrap.Wrap:Wrap.NoWrap;
-            commandRegion.RemoveFromHierarchy();
-            hudRow.Insert(compact?2:3,commandRegion);
-            if(compact)buildRegion.style.width=StyleKeyword.Auto;
-            else buildRegion.style.width=220;
-            buildRegion.style.flexGrow=compact?1:0;
-            if(compact){buildRegion.style.flexBasis=0;buildRegion.style.minWidth=220;}
-            else{buildRegion.style.flexBasis=StyleKeyword.Auto;buildRegion.style.minWidth=StyleKeyword.Auto;}
-            buildActions.style.flexDirection=compact?FlexDirection.Row:FlexDirection.Column;
-            buildActions.style.flexWrap=compact?Wrap.Wrap:Wrap.NoWrap;
-            foreach(var button in buildActions.Children())
-            {
-                // Two equal action columns are a structural packing rule, not a tunable text size.
-                if(compact){button.style.width=Length.Percent(50);button.style.marginRight=0;}
-                else{button.style.width=StyleKeyword.Auto;button.style.marginRight=6;}
-            }
-            if(compact)armyRegion.style.width=Length.Percent(100);
-            else armyRegion.style.width=StyleKeyword.Auto;
-            armyRegion.style.flexGrow=compact?0:1;
-            armyRegion.style.marginLeft=compact?0:14;
-            armyRegion.style.marginTop=compact?8:0;
-            commandRegion.style.marginLeft=compact?0:12;
-            commandRegion.style.marginTop=compact?8:0;
-            commandRegion.style.width=compact?new StyleLength(Length.Percent(100)):new StyleLength(220);
-            commandRegion.style.flexDirection=compact?FlexDirection.Row:FlexDirection.Column;
-            commandRegion.style.flexWrap=compact?Wrap.Wrap:Wrap.NoWrap;
-            foreach(var label in commandRegion.Children().OfType<Label>())
-                label.style.display=compact&&label.name!="building-lifecycle-status"?DisplayStyle.None:DisplayStyle.Flex;
+            compactHud=panelWidth<1000;
+            bool local=localHumanCount>1,left=local&&localViewportIndex%2==0;
+            top.style.left=left?new StyleLength(6):new StyleLength(StyleKeyword.Auto);top.style.right=left?new StyleLength(StyleKeyword.Auto):new StyleLength(6);top.style.top=6;top.style.minHeight=26;top.style.paddingTop=top.style.paddingBottom=2;top.style.paddingLeft=top.style.paddingRight=6;
+            armyComposition.style.left=left?new StyleLength(6):new StyleLength(StyleKeyword.Auto);armyComposition.style.right=left?new StyleLength(StyleKeyword.Auto):new StyleLength(6);
+            creditsLabel.style.fontSize=hudFocusButton.style.fontSize=12;hudFocusButton.style.height=hudFocusButton.style.minHeight=24;
+            bottom.style.left=bottom.style.right=0;bottom.style.bottom=0;
+            hudRow.style.flexWrap=Wrap.NoWrap;hudRow.style.justifyContent=local?(left?Justify.FlexStart:Justify.FlexEnd):Justify.SpaceBetween;
+            armyRegion.style.flexGrow=0;armyRegion.style.flexShrink=1;armyRegion.style.flexBasis=StyleKeyword.Auto;
+            armyRegion.style.minWidth=0;armyRegion.style.width=Mathf.Max(160,Mathf.Min(local?270:340,panelWidth-(local?20:(float)profile.MinimapCompactSize+40)));
+            armyRegion.style.marginLeft=local?0:8;armyRegion.style.marginRight=0;armyRegion.style.marginTop=0;
+            armyRegion.style.paddingLeft=armyRegion.style.paddingRight=4;armyRegion.style.paddingTop=armyRegion.style.paddingBottom=3;
+            foreach(var label in armyRegion.Query<Label>().ToList())label.style.fontSize=12;
+            selectionLabel.style.fontSize=14;selectionLabel.style.marginBottom=0;noticeLabel.style.fontSize=12;noticeLabel.style.marginRight=0;
+            noticeLabel.style.alignSelf=left?Align.FlexStart:Align.FlexEnd;
+            buildRegion.style.display=commandRegion.style.display=DisplayStyle.None;
+            buildRegion.RemoveFromHierarchy();commandRegion.RemoveFromHierarchy();
             UpdateResponsiveVisibility();
-            focused?.Focus();
         }
         private void UpdateResponsiveVisibility()
         {
             if(view==null||hudRow==null)return;
-            bool buildRelevant=selectedSite!=0||cancelBuilding.style.display.value==DisplayStyle.Flex;
-            bool armyRelevant=!buildRelevant||selection.Count>0;
-            if(compactBuildRelevant==buildRelevant&&compactArmyRelevant==armyRelevant)return;
-            compactBuildRelevant=buildRelevant;
-            compactArmyRelevant=armyRelevant;
-            buildRegion.style.display=buildRelevant?DisplayStyle.Flex:DisplayStyle.None;
-            armyRegion.style.display=armyRelevant?DisplayStyle.Flex:DisplayStyle.None;
-            var focused=root.focusController?.focusedElement as Button;
-            bool moved=false;
-            if(buildRelevant)
-            {
-                if(hudRow.IndexOf(buildRegion)!=1){hudRow.Insert(1,buildRegion);moved=true;}
-                if(hudRow.IndexOf(commandRegion)!=2){hudRow.Insert(2,commandRegion);moved=true;}
-                if(hudRow.IndexOf(armyRegion)!=3){hudRow.Insert(3,armyRegion);moved=true;}
-                armyRegion.style.width=compactHud?new StyleLength(Length.Percent(100)):new StyleLength(StyleKeyword.Auto);
-                armyRegion.style.flexGrow=compactHud?0:1;
-                armyRegion.style.marginLeft=0;
-                armyRegion.style.marginTop=8;
-            }
-            else
-            {
-                if(hudRow.IndexOf(armyRegion)!=1){hudRow.Insert(1,armyRegion);moved=true;}
-                if(hudRow.IndexOf(commandRegion)!=2){hudRow.Insert(2,commandRegion);moved=true;}
-                armyRegion.style.width=StyleKeyword.Auto;
-                armyRegion.style.flexGrow=1;
-                armyRegion.style.marginLeft=12;
-                armyRegion.style.marginTop=0;
-            }
-            if(focused!=null&&((buildRegion.style.display.value==DisplayStyle.None&&buildRegion.Contains(focused))||(armyRegion.style.display.value==DisplayStyle.None&&armyRegion.Contains(focused))))root.Focus();
-            else if(moved)focused?.Focus();
+            buildRegion.style.display=commandRegion.style.display=DisplayStyle.None;
+            armyRegion.style.display=selection.Count>0||selectedSite!=0?DisplayStyle.Flex:DisplayStyle.None;
+            armyRegion.style.flexGrow=0;
+            if(armyRegion.parent!=hudRow)hudRow.Add(armyRegion);
         }
     }
 }

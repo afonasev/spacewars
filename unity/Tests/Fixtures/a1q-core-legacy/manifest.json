@@ -1,0 +1,122 @@
+{
+  "source": "unmodified known prior serializers; capture-only fixture",
+  "files": [
+    {
+      "file": "surface-pending.world",
+      "bytes": 8370,
+      "sha256": "55cf7158178403c4f44bf35f0b21ec21f883faf9b398a9724b88e03d6aba5a5c",
+      "baseline_runtime": "ed354212ec56df883a5daefd625b633ae17efbe7",
+      "capture_commit": "5cd6c001",
+      "world_version": 9,
+      "command_schema": 9
+    },
+    {
+      "file": "surface-arrived.world",
+      "bytes": 141400,
+      "sha256": "41f343866cf474a3885c5363babb0695e4e5040f06e689ce62a7c36fffebc54c",
+      "baseline_runtime": "ed354212ec56df883a5daefd625b633ae17efbe7",
+      "capture_commit": "5cd6c001",
+      "world_version": 9,
+      "command_schema": 9
+    },
+    {
+      "file": "surface-installed.world",
+      "bytes": 7642,
+      "sha256": "5545c98dc8f9d6eba83c392ea1a4a166d118dd75fcbb9987242a3a6ea4a2590b",
+      "baseline_runtime": "ed354212ec56df883a5daefd625b633ae17efbe7",
+      "capture_commit": "5cd6c001",
+      "world_version": 9,
+      "command_schema": 9
+    },
+    {
+      "file": "prea1-pending.world",
+      "bytes": 7676,
+      "sha256": "ec35d25d31065ee9e681d5dcfda36631afd316ac1b53b7c1477ae0d67156656c",
+      "baseline_runtime": "566a0a38",
+      "capture_commit": "ec63e56c",
+      "world_version": 9,
+      "command_schema": 9
+    },
+    {
+      "file": "prea1-arrived.world",
+      "bytes": 140767,
+      "sha256": "871772588b49d5747f7901557d55d8ce69c53b073119d6ba536fcc6465929ea9",
+      "baseline_runtime": "566a0a38",
+      "capture_commit": "ec63e56c",
+      "world_version": 9,
+      "command_schema": 9
+    },
+    {
+      "file": "prea1-installed.world",
+      "bytes": 7015,
+      "sha256": "0c2f17d49a0fe184153c30f127f4e27cb466a5d4f2ea98d54b13f7a351f1c935",
+      "baseline_runtime": "566a0a38",
+      "capture_commit": "ec63e56c",
+      "world_version": 9,
+      "command_schema": 9
+    },
+    {
+      "file": "group-pending.world",
+      "bytes": 7947,
+      "sha256": "5ba9dc70e01b7433995d33734df5ca54ac44759ca564559080368854d0d960c3",
+      "baseline_runtime": "a109adf7",
+      "capture_commit": "6eabef31",
+      "world_version": 9,
+      "command_schema": 9
+    },
+    {
+      "file": "group-arrived.world",
+      "bytes": 141019,
+      "sha256": "6037abe743812556fcbb89deeaf78912685b7c14c7b215a51ccea8a192c131fc",
+      "baseline_runtime": "a109adf7",
+      "capture_commit": "6eabef31",
+      "world_version": 9,
+      "command_schema": 9
+    },
+    {
+      "file": "group-installed.world",
+      "bytes": 7245,
+      "sha256": "4bc5dfeb6fb961a6bb912eeebf73fe44ca4191d9ce133d482db7ae50e80bb211",
+      "baseline_runtime": "a109adf7",
+      "capture_commit": "6eabef31",
+      "world_version": 9,
+      "command_schema": 9
+    },
+    {
+      "file": "terms-pending.world",
+      "bytes": 9726,
+      "sha256": "4a48ad9014b5245d58a338f63a254abf141dc5d67eee3753981be7b2ac3de02d",
+      "baseline_runtime": "566a0a38",
+      "capture_commit": "ff3ae28c",
+      "world_version": 9,
+      "command_schema": 9,
+      "effective_profile_revision": 2,
+      "tankWeaponDamage": 9,
+      "term_registry_count": 2
+    },
+    {
+      "file": "terms-arrived.world",
+      "bytes": 142817,
+      "sha256": "18cfeb41d0d72a0e83bfd725f312c8cebb30845365c89de88ccc744a093b6e98",
+      "baseline_runtime": "566a0a38",
+      "capture_commit": "ff3ae28c",
+      "world_version": 9,
+      "command_schema": 9,
+      "effective_profile_revision": 2,
+      "tankWeaponDamage": 9,
+      "term_registry_count": 2
+    },
+    {
+      "file": "terms-installed.world",
+      "bytes": 9065,
+      "sha256": "0d18b0b2ed558a075dc22b74db1eb65d1145a43ba9fc934da691e0eaf902622f",
+      "baseline_runtime": "566a0a38",
+      "capture_commit": "ff3ae28c",
+      "world_version": 9,
+      "command_schema": 9,
+      "effective_profile_revision": 2,
+      "tankWeaponDamage": 9,
+      "term_registry_count": 2
+    }
+  ]
+}

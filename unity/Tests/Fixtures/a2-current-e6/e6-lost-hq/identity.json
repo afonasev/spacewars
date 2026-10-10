@@ -1,0 +1,85 @@
+{
+  "Schema": "native-army-checkpoint-input-v1",
+  "CodeRevision": "cf6176119fa86e4efeb46cd1fbd541d5b1a24f91",
+  "AiStateSchema": 8,
+  "Checkpoint": "checkpoint-1200.world",
+  "CheckpointHash": "0a34bacb3655a187d1154ac9bfb2cd7b645832f0ec1b8a2fb383d3835fabbbbc",
+  "OriginalManifestHash": "86339554e2d8943519d8c1ec44a824a915b6df49923dca6c3eb6f9391f2960a3",
+  "OriginalCheckpointHash": "05ce44b670f460774d7223cb855d5e67be78fd460196e3f0daf772772e692534",
+  "Tick": 1050,
+  "RequestedHistoricalTick": 1200,
+  "Generation": 71,
+  "Seed": 19092026,
+  "MapIdentity": "economy-lost-hq-v1",
+  "Profile": "unity-owner-research-queue-u6-v1@1",
+  "AiHash": "4b4743e8dc41e0244323684a1a24d29d83e614d8ff6c40d9b535005f8b7f7bbd",
+  "RouteDeliveryPolicy": "native-fixed-before-step-v1",
+  "UnityVersion": "6000.3.23f1",
+  "Host": "Editor UnityHostRouteService",
+  "Observed": {
+    "Credits": 101,
+    "LastScoutTick": 165
+  },
+  "Opportunity": {
+    "Liquid": 101,
+    "SafetyReserve": 0,
+    "NetAvailable": 101,
+    "Unpaid": [],
+    "Reserved": [],
+    "PendingScout": false,
+    "QueuedScout": false,
+    "PriorPaidScouts": 0,
+    "RecoveryLegal": true,
+    "Factories": [
+      {
+        "Id": 12,
+        "SiteId": 3,
+        "Health": 250,
+        "Phase": "Ready",
+        "QueueCount": 0
+      }
+    ],
+    "PublicGoals": [
+      {
+        "SiteId": 2,
+        "Reachable": true,
+        "Role": "PossibleEnemyStart"
+      },
+      {
+        "SiteId": 3,
+        "Reachable": true,
+        "Role": "ExpansionOutpost"
+      }
+    ],
+    "VisibleHostiles": [
+      {
+        "Id": 6,
+        "Kind": "Tank",
+        "Health": 74,
+        "Position": {
+          "X": -24.038424436006185,
+          "Z": -5.06542795396032
+        }
+      },
+      {
+        "Id": 9,
+        "Kind": "Tank",
+        "Health": 100,
+        "Position": {
+          "X": -20.38906127112562,
+          "Z": -8.5695996355532422
+        }
+      },
+      {
+        "Id": 11,
+        "Kind": "Tank",
+        "Health": 100,
+        "Position": {
+          "X": -20.398587651606405,
+          "Z": -5.1106859903499871
+        }
+      }
+    ]
+  },
+  "Selection": "first actual state with unchanged role/affordability/history predicates in [requested-600,requested+300]"
+}

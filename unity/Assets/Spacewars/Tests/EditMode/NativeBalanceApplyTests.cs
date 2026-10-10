@@ -31,14 +31,15 @@ namespace Spacewars.Tests.EditMode
             =>Assert.AreEqual(PlayableCommandStatus.Applied,Call(d,"Apply",new PlayableCommand(1,sequence,"player-1",kind,new[]{id}),null));
         private static object Restore(object d,PlayableProfile p)
             =>Domain.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{(byte[])Call(d,"CaptureWorldBytes",7,"lab"),p,7,"lab"});
-        [Test] public void SaturatedRebindRejectsBeforeDiscardingAnyIntent()
+        [Test] public void ExpandedTransportRebindPreservesAll257IntentsAndRejectsOldAnswer()
         {
             var session=new NavigationSession(1,new NavGeometry(100,new NavObstacle[0],1),PlayableProfile.Default.Navigation);
             NavigationRequest inFlight=null;
             for(int id=1;id<=257;id++){session.Crowd.Add(id,new NavPoint(3*(id%20),3*(id/20)));Assert.True(session.Move(id,new NavPoint(50,50)));if(id==1)Assert.True(session.Requests.TryDequeue(out inFlight));}
-            Assert.False(session.CanRebind);Assert.Throws<InvalidOperationException>(()=>session.Rebind(PlayableProfile.Default.Navigation));
+            Assert.True(session.CanRebind);session.Rebind(PlayableProfile.Default.Navigation);
             Assert.AreEqual(257,session.PendingCount);for(int id=1;id<=257;id++)Assert.True(session.IsPending(id));
-            session.Answers.TryEnqueue(new NavigationAnswer(inFlight,new[]{inFlight.Goal}));session.ApplyResults();Assert.True(session.CanRebind);session.Rebind(PlayableProfile.Default.Navigation);Assert.AreEqual(256,session.PendingCount);
+            session.Answers.TryEnqueue(new NavigationAnswer(inFlight,new[]{inFlight.Goal}));session.ApplyResults();
+            Assert.AreEqual(1,session.RejectedResults);Assert.AreEqual(257,session.PendingCount);
         }
         [Test] public void CapacityRebindCountsActiveOrdersAndBlocksWaitingOrders()
         {
@@ -75,6 +76,9 @@ namespace Spacewars.Tests.EditMode
             foreach(var field in PlayableProfileMetadata.Fields){Assert.NotNull(field.FieldName,field.Path);field.Write(data,field.Read(data));}
             Assert.False(PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable).Any(f=>f.Group=="Arena"||f.Group=="Slots"||f.FieldName.Contains("Footprint")||f.FieldName.Contains("CollisionRadius")));
             PlayableProfile.Validate(data);
+            var offset=PlayableProfileMetadata.Fields.Single(f=>f.Path=="camera.offsetX");
+            offset.Write(data,-17);Assert.AreEqual(-17,PlayableProfile.Create(data).CameraOffsetX);
+            Assert.Throws<ArgumentOutOfRangeException>(()=>offset.Write(data,101));
         }
         [Test] public void LiveApplyKeepsPaidProductionAndBuildTermsAcrossSaveRestore()
         {

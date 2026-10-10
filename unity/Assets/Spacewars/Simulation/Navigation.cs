@@ -173,11 +173,36 @@ namespace Spacewars.Simulation
 
     public sealed class NavMailbox<T>
     {
-        public const int Capacity = 256; private readonly Queue<T> queue = new Queue<T>(); private readonly object gate = new object();
+        public const int Capacity = 256;
+        private readonly int capacity;
+        public NavMailbox(int capacity=Capacity)
+        { if(capacity<1||capacity>4096)throw new ArgumentOutOfRangeException(nameof(capacity));this.capacity=capacity; }
+        public int InstanceCapacity=>capacity;
+        private readonly Queue<T> queue = new Queue<T>(); private readonly object gate = new object();
+        private int transferThread;
+        private void RejectTransferReentry(){if(transferThread==System.Threading.Thread.CurrentThread.ManagedThreadId)throw new InvalidOperationException("Mailbox transfer callback cannot reenter its mailbox.");}
         public int Count { get { lock(gate) return queue.Count; } }
         // The owner must quiesce producers and consumers before a checkpoint.
-        public T[] CopyItems() { lock(gate) return queue.ToArray(); }
-        public bool TryEnqueue(T item) { lock (gate) { if (queue.Count >= Capacity) return false; queue.Enqueue(item); return true; } }
-        public bool TryDequeue(out T item) { lock (gate) { if (queue.Count == 0) { item = default(T); return false; } item = queue.Dequeue(); return true; } }
+        public T[] CopyItems() { lock(gate) { RejectTransferReentry();return queue.ToArray(); } }
+        internal bool TryPeek(out T item) { lock(gate) { RejectTransferReentry();if(queue.Count==0){item=default(T);return false;}item=queue.Peek();return true; } }
+        public bool TryEnqueue(T item) { lock (gate) { RejectTransferReentry();if (queue.Count >= capacity) return false; queue.Enqueue(item); return true; } }
+        public bool TryDequeue(out T item) { lock (gate) { RejectTransferReentry();if (queue.Count == 0) { item = default(T); return false; } item = queue.Dequeue(); return true; } }
+        // The callback acquires ownership before removal. Its caller also holds
+        // the checkpoint transport gate, so capture never observes a gap.
+        internal bool TryTransfer(Func<T,bool> accept, out T item)
+        {
+            if (accept == null) throw new ArgumentNullException(nameof(accept));
+            lock (gate) {
+                RejectTransferReentry();
+                if (queue.Count == 0) { item = default(T); return false; }
+                item = queue.Peek();
+                transferThread=System.Threading.Thread.CurrentThread.ManagedThreadId;
+                bool accepted;
+                try { accepted=accept(item); }
+                finally { transferThread=0; }
+                if (!accepted) { item = default(T); return false; }
+                queue.Dequeue(); return true;
+            }
+        }
     }
 }

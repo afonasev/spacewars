@@ -33,19 +33,20 @@ namespace Spacewars.Runtime
             u.Reload=Math.Max(0,u.Reload-dt);u.Repath=Math.Max(0,u.Repath-dt);
             bool moved=Math.Abs(u.Velocity.X)>1e-5||Math.Abs(u.Velocity.Z)>1e-5;
             u.StoppedSeconds=moved?0:u.StoppedSeconds+dt;
-            if(u.Target!=0&&!VisibleTarget(u.Owner,u.Target)){if(u.ExplicitTarget&&u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Attack)u.CurrentOrder=null;u.Target=0;u.ExplicitTarget=false;if(u.HasAttackMove&&!self.Moving&&!navigation.IsPending(u.Id))navigation.Move(u.Id,u.AttackMove);}
+            if(u.ExplicitTarget&&u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Attack&&!VisibleTarget(u.Owner,u.Target)&&TargetAlive(u.Target)){CombatStop(u.Id);return;}
+            if(u.Target!=0&&!VisibleTarget(u.Owner,u.Target)){if(u.ExplicitTarget&&u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Attack)u.CurrentOrder=null;u.Target=0;u.ExplicitTarget=false;if(u.HasAttackMove&&!self.Moving&&CanResumeCombat(u.Id))CombatMove(u.Id,u.AttackMove);}
             if(IsFollowing(u)&&!FollowCanFire(u)){ClearFollowBurst(u);u.Target=0;return;}
             // Ordinary movement keeps its spatial order. Attack-move stops for a useful visible shot.
             if(!u.ExplicitTarget)u.Target=(!self.Moving&&!navigation.IsPending(u.Id))||u.HasAttackMove?ArtilleryTarget(u,self.Position):0;
-            if(!Target(u.Target,out var target,out _)){if(u.HasAttackMove&&!self.Moving&&!navigation.IsPending(u.Id)&&Distance(self.Position,u.AttackMove)>profile.Navigation.ArrivalTolerance)navigation.Move(u.Id,u.AttackMove);return;}
+            if(!Target(u.Target,out var target,out _)){if(u.HasAttackMove&&!self.Moving&&CanResumeCombat(u.Id)&&Distance(self.Position,u.AttackMove)>profile.Navigation.ArrivalTolerance)CombatMove(u.Id,u.AttackMove);return;}
             double distance=Distance(self.Position,target);
             if(distance>PlayableUnitRules.Range(profile,u.Kind,UnitUpgraded(u)))
             {
                 if(u.ExplicitTarget&&u.Repath<=0&&!self.Moving&&!navigation.IsPending(u.Id))
-                {if(TryAttackApproach(u.Id,self.Position,target,out var approach))navigation.Move(u.Id,approach);u.Repath=profile.AttackRepathSeconds;}
+                {if(TryAttackApproach(u.Id,self.Position,target,out var approach))CombatMove(u.Id,approach);u.Repath=profile.AttackRepathSeconds;}
                 return;
             }
-            if(!self.Held&&(self.Moving||navigation.IsPending(u.Id)))navigation.Stop(u.Id,false);
+            if(!self.Held&&(self.Moving||navigation.IsPending(u.Id)))CombatStop(u.Id);
             double desired=Math.Atan2(target.Z-self.Position.Z,target.X-self.Position.X);
             u.Turret=Turn(u.Turret,desired,profile.ShkvalTurretTurnSpeed*dt);
             if(moved||u.StoppedSeconds<profile.ShkvalStopForMs/1000||u.Reload>0||Math.Abs(Angle(desired-u.Turret))>profile.ShkvalAimToleranceRad)return;
@@ -54,6 +55,7 @@ namespace Spacewars.Runtime
             var prediction=PlayableBallistics.FirstContact(flight,profile.ShkvalProjectileRadius,SolidObstacles(),profile.BallisticWallHeight,BallisticBodies(u.Owner),u.Id,terrain:TerrainHeight).Value;
             projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=u.Id,Target=u.Target,Faction=u.Owner,Kind=PlayableEntityKind.Shkval,Position=self.Position,Damage=profile.ShkvalDamage,
                 Rocket=new Rocket{Flight=flight,Predicted=prediction,Radius=profile.ShkvalProjectileRadius,BlastRadius=profile.ShkvalBlastRadius,MarkerStartRadius=profile.ShkvalMarkerStartRadius,MarkerOpacity=profile.ShkvalMarkerOpacity,BuildingHeight=profile.ShkvalBuildingCollisionHeight}});
+            Sound(PlayableSoundKind.Shot,self.Position,u.Kind,u.Owner);
             u.Reload=profile.ShkvalFireIntervalMs/1000;
         }
         private bool AdvanceRocket(Projectile p,double dt)
@@ -66,8 +68,9 @@ namespace Spacewars.Runtime
             // Snapshot every hit before mutations so a destroyed cover still shields this explosion.
             var victims=bodies.Where(b=>PlayableBallistics.BlastHits(hit.Value.Point,r.BlastRadius,b,solids,profile.BallisticWallHeight,bodies,TerrainHeight)).Select(b=>b.Id).ToArray();
             int visibleMask=0;foreach(PlayableOwner owner in Owners)if(Vision(owner).IsVisible(hit.Value.Point.Ground))visibleMask|=1<<(int)owner;
+            Sound(PlayableSoundKind.Impact,hit.Value.Point.Ground,p.Kind);
             impacts.Add(new PlayableImpactSnapshot(p.Id,p.Faction,hit.Value.Point,r.BlastRadius,Tick,visibleMask));
-            foreach(int id in victims)DamageFromProjectile(id,p.Damage,p.Owner);
+            foreach(int id in victims)DamageWithOwner(id,p.Damage,p.Owner,p.Faction);
             return true;
         }
     }

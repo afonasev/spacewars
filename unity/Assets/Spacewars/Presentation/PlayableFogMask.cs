@@ -11,7 +11,7 @@ namespace Spacewars.Presentation
         private readonly float[] current,target;
         private readonly Color32[] pixels;
         private long revision=-1;
-        private bool animating;
+        private bool animating,publicShown;
         public Texture2D Texture{get;}
         public long TargetBuilds{get;private set;}
         public long Uploads{get;private set;}
@@ -26,9 +26,15 @@ namespace Spacewars.Presentation
         }
         public void Reset()
         {
-            revision=-1;animating=false;
+            revision=-1;animating=false;publicShown=false;
             for(int i=0;i<current.Length;i++){current[i]=target[i]=(float)profile.FogUnseenOpacity;pixels[i]=new Color32(Byte(current[i]),0,0,255);}
             Upload();
+        }
+        public void ShowPublic()
+        {
+            if(publicShown)return;publicShown=true;
+            for(int i=0;i<current.Length;i++){current[i]=target[i]=0;pixels[i]=new Color32(0,255,0,255);}
+            animating=false;Upload();
         }
         private static byte Byte(float value)=>(byte)Mathf.RoundToInt(Mathf.Clamp01(value)*255);
         private void Upload(){Texture.SetPixels32(pixels);Texture.Apply(false,false);Uploads++;}
@@ -68,6 +74,6 @@ namespace Spacewars.Presentation
             }
             if(dirty)Upload();return dirty;
         }
-        public void Dispose(){if(Texture)UnityEngine.Object.Destroy(Texture);}
+        public void Dispose(){if(Texture){if(Application.isPlaying)UnityEngine.Object.Destroy(Texture);else UnityEngine.Object.DestroyImmediate(Texture);}}
     }
 }

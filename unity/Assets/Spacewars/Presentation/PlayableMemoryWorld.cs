@@ -10,7 +10,7 @@ namespace Spacewars.Presentation
         private readonly Dictionary<int,Transform> memories=new Dictionary<int,Transform>();
         public int MemoryCount=>memories.Count;
         private void ClearMemories(){foreach(var t in memories.Values)Object.Destroy(t.gameObject);memories.Clear();}
-        public void RenderMemories(PlayableSnapshot view)
+        public void RenderMemories(PlayableSnapshot view,Camera camera=null)
         {
             var retained=new HashSet<int>();
             if(view.Vision!=null)foreach(var known in view.Vision.KnownBuildings)
@@ -21,7 +21,7 @@ namespace Spacewars.Presentation
                 {
                     anchor=new GameObject("Remembered building "+known.Id).transform;anchor.SetParent(root,false);
                     var key=BuildingKey(known.Kind.ToString(),known.RefineryUpgraded);var model=Model(key,anchor,known.Owner==PlayableOwner.Player);
-                    model.localScale=Vector3.one*(float)BuildingScale(key);model.localRotation=Quaternion.Euler(0,90,0);
+                    model.localScale=Vector3.one*(float)BuildingScale(key);model.localRotation=BuildingFacing;
                     foreach(var renderer in model.GetComponentsInChildren<Renderer>())
                     {
                         for(int slot=0;slot<renderer.sharedMaterials.Length;slot++)
@@ -34,7 +34,7 @@ namespace Spacewars.Presentation
                     }
                     memories.Add(known.Id,anchor);
                 }
-                anchor.position=Point(known.Position);anchor.rotation=Quaternion.Euler(0,-(float)known.Heading*Mathf.Rad2Deg,0);
+                anchor.position=Point(known.Position);anchor.rotation=Quaternion.identity;anchor.GetChild(0).rotation=Facing(camera);
             }
             foreach(int id in memories.Keys.ToArray())if(!retained.Contains(id)){Object.Destroy(memories[id].gameObject);memories.Remove(id);}
         }

@@ -132,7 +132,11 @@ namespace Spacewars.Tests.EditMode
 
         [Test] public void ForeignOrdersAreRejectedAndEnemyProductionIsPrivate()
         {
-            Create();int f=Factory(owner:PlayableOwner.Enemy);
+            Create();
+            // This privacy/capacity fixture explicitly retains two diagnostic defenders;
+            // ordinary symmetric genesis no longer supplies the historical bonus tanks.
+            domain=NativeCombatFixture.WithTwoEnemyDefenders(profile,patrol:false);
+            int f=Factory(owner:PlayableOwner.Enemy);
             Assert.AreEqual(PlayableCommandStatus.InvalidEntity,Send(PlayableCommandKind.QueueTank,f));
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.QueueTank,f,player:"enemy-1"));
             var enemy=View(PlayableOwner.Enemy).Buildings.Single(b=>b.Id==f).PrivateState;

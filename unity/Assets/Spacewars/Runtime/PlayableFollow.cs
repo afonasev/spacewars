@@ -31,14 +31,14 @@ namespace Spacewars.Runtime
         {
             foreach(var u in units.Values){if(!IsFollowing(u)||!navigation.Crowd.TryGet(u.Id,out var self))continue;
                 var leader=FollowLeader(u,u.CurrentOrder.TargetId);
-                if(leader==null){navigation.Stop(u.Id,false);ClearFollowBurst(u);u.Target=0;u.ExplicitTarget=false;u.CurrentOrder=null;continue;}
+                if(leader==null){CombatStop(u.Id);ClearFollowBurst(u);u.Target=0;u.ExplicitTarget=false;u.CurrentOrder=null;continue;}
                 navigation.Crowd.TryGet(leader.Id,out var anchor);
-                if(Distance(self.Position,anchor.Position)<=profile.FollowDistance+profile.FollowArrivalTolerance){if(self.Moving||self.Held||navigation.IsPending(u.Id))navigation.Stop(u.Id,false);continue;}
+                if(Distance(self.Position,anchor.Position)<=profile.FollowDistance+profile.FollowArrivalTolerance){if(self.Moving||self.Held||navigation.IsPending(u.Id))CombatStop(u.Id);continue;}
                 // Retain each accepted path until it finishes. Requesting every tick
                 // would invalidate late answers and starve the asynchronous solver.
                 var goal=new NavPoint(anchor.Position.X-Math.Cos(anchor.Heading)*profile.FollowDistance,anchor.Position.Z-Math.Sin(anchor.Heading)*profile.FollowDistance);
                 bool settledSameGoal=self.Outcome==NavigationOutcome.Arrived&&Distance(goal,self.Goal)<=1e-9&&Distance(self.Position,goal)<=profile.Navigation.ArrivalTolerance;
-                if(request&&!self.Moving&&!navigation.IsPending(u.Id)&&!settledSameGoal)navigation.Move(u.Id,goal);
+                if(request&&!self.Moving&&CanResumeCombat(u.Id)&&!settledSameGoal)CombatMove(u.Id,goal);
             }
         }
         private bool FollowCanFire(Unit u)

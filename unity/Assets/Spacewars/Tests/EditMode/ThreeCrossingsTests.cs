@@ -18,14 +18,14 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void WaterHasNoSupportOrBallisticWallAndRocksBlockBoth()
         {
-            var p=Profile;var m=p.AuthoredMap;var movement=new NavGeometry(m.HalfExtent,PlayableMap.StaticObstacles(p),1);var solid=new NavGeometry(m.HalfExtent,PlayableMap.SolidObstacles(p),1);
+            var p=Profile;var m=(ThreeCrossingsMap)p.AuthoredMap;var movement=new NavGeometry(m.HalfExtent,PlayableMap.StaticObstacles(p),1);var solid=new NavGeometry(m.HalfExtent,PlayableMap.SolidObstacles(p),1);
             Assert.IsNull(m.SupportAt(new NavPoint(0,20)));Assert.IsFalse(movement.SegmentFree(new NavPoint(-15,20),new NavPoint(15,20),.72));Assert.IsTrue(solid.SegmentFree(new NavPoint(-8,20),new NavPoint(8,20),.06),"Water itself is not ballistic cover; authored bank rocks are cover.");
             Assert.IsFalse(movement.SegmentFree(new NavPoint(-40,0),new NavPoint(-20,0),.72));Assert.IsFalse(solid.SegmentFree(new NavPoint(-40,0),new NavPoint(-20,0),.06));
             foreach(var z in new[]{-m.CrossingZ,0,m.CrossingZ})Assert.IsTrue(m.SupportAt(new NavPoint(0,z)).IsBridge);
         }
         [Test] public void EveryClassCrossesThreeBridgesAndOnlyTwoPocketEntrances()
         {
-            var p=Profile;var m=p.AuthoredMap;
+            var p=Profile;var m=(ThreeCrossingsMap)p.AuthoredMap;
             foreach(double radius in new[]{p.TankCollisionRadius,p.ExplorerCollisionRadius,p.ShkvalCollisionRadius})
             {
                 foreach(double z in new[]{-m.CrossingZ,0,m.CrossingZ}){Assert.IsTrue(m.SupportsSweep(new NavPoint(-20,z),new NavPoint(20,z),radius));Assert.IsTrue(m.SupportsSweep(new NavPoint(20,z),new NavPoint(-20,z),radius));}
@@ -50,7 +50,7 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void MixedGroupsCrossReverseAndEnterBothPocketEndsWithSweptClearance()
         {
-            var p=Profile;var m=p.AuthoredMap;var geometry=FullyBuilt(p);
+            var p=Profile;var m=(ThreeCrossingsMap)p.AuthoredMap;var geometry=FullyBuilt(p);
             foreach(double z in new[]{-m.CrossingZ,0,m.CrossingZ})RunGroup(p,geometry,new NavPoint(-18,z),new NavPoint(18,z),false);
             foreach(int side in new[]{-1,1})RunGroup(p,geometry,new NavPoint(side*m.PocketX,-24),new NavPoint(side*m.PocketX,24),true);
         }

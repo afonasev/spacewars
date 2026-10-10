@@ -51,20 +51,4 @@ namespace Spacewars.Runtime
         public int[] EntityIds{get;}
     }
 
-    internal static class PlayableAiAuthorityCycle
-    {
-        internal static PlayableSnapshot Advance(PlayableDomain domain,PlayableAiOwnerLoop player,PlayableAiOwnerLoop enemy,Func<long> human,bool paused,long sequence,int seed,Func<PlayableRuntimeMetrics> metrics)
-        {
-            player?.Deliver(domain,human(),paused);enemy?.Deliver(domain,0,paused);
-            if(!paused)domain.Step(1d/30d); // Existing fixed authority tick, not a new tuning value.
-            var snapshot=domain.PlayerSnapshot(sequence,paused?RuntimeStatus.Paused:RuntimeStatus.Running,paused,metrics(),null,seed);
-            player?.Review(snapshot,human());
-            enemy?.Review(domain.PlayerSnapshot(sequence,snapshot.Status,paused,snapshot.Metrics,null,seed,PlayableOwner.Enemy),0);
-            return snapshot;
-        }
-    }
-
-    // Synchronous trusted diagnostic host. Production solvers are injected by the Unity harness.
-    // Reconstruct checkpoints by replaying genesis, not by loading these publications as world saves.
-
 }

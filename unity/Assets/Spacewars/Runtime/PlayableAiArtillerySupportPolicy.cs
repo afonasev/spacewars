@@ -16,8 +16,10 @@ namespace Spacewars.Runtime
     }
 
     // Source-aligned doctrine and support micro, used by the local owner loop and diagnostics.
-    public sealed class PlayableAiArtillerySupportPolicy
+    public sealed partial class PlayableAiArtillerySupportPolicy
     {
+        internal PlayableAiArtillerySupportPolicy Fork() => (PlayableAiArtillerySupportPolicy)MemberwiseClone();
+
         private readonly string OwnerId;
         private PlayableProfile profile;
         internal void Rebind(PlayableProfile next){profile=next;}
@@ -43,7 +45,7 @@ namespace Spacewars.Runtime
         public long PendingActionId=>pendingActionId;
         public PlayableAiAction TryPlan(PlayableAiObservation observation,PlayableAiOpeningCompositionState opening)
             =>TryPlan(observation,opening,null);
-        public PlayableAiAction TryPlan(PlayableAiObservation observation,PlayableAiOpeningCompositionState opening,PlayableAiMidgameCheckpoint strategy)
+        public PlayableAiAction TryPlan(PlayableAiObservation observation,PlayableAiOpeningCompositionState opening,PlayableAiMidgameCheckpoint strategy,bool productionOnly=false)
         {
             if(observation==null||opening==null)throw new ArgumentNullException(observation==null?nameof(observation):nameof(opening));
             if(observation.OwnerId!=OwnerId||opening.OwnerId!=OwnerId||opening.MatchSeed!=observation.Seed||opening.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity)
@@ -61,7 +63,7 @@ namespace Spacewars.Runtime
             var guns=own.Where(e=>e.Kind==PlayableEntityKind.Shkval).OrderBy(e=>e.Id).ToArray();
             if(guns.Length>0||queued.Contains(PlayableEntityKind.Shkval))fulfilled=true;
             if(earlyAdopted&&!fulfilled)earlyCount=Math.Max(earlyCount,own.Length+queued.Length);
-            foreach(var gun in guns)
+            foreach(var gun in productionOnly?Array.Empty<PlayableEntitySnapshot>():guns)
             {
                 var fact=observation.ArtillerySupport.FirstOrDefault(a=>a.UnitId==gun.Id&&a.Generation==observation.Generation&&a.Tick==observation.Tick);
                 if(fact==null)continue;
@@ -103,7 +105,7 @@ namespace Spacewars.Runtime
         }
         public void ObserveReceipt(PlayableAiTraceRecord record)
         {
-            if(record==null||record.OwnerId!=OwnerId||record.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity||record.ActionId!=pendingActionId)return;
+            if(record==null||!AiStateWire.CallbackGenerationMatches(record,pendingGeneration)||record.OwnerId!=OwnerId||record.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity||record.ActionId!=pendingActionId)return;
             if(record.Status!=PlayableAiDeliveryStatus.Scheduled&&record.Status!=PlayableAiDeliveryStatus.Accepted)
             {pendingActionId=0;pendingGeneration=0;}
         }
@@ -120,7 +122,7 @@ namespace Spacewars.Runtime
         {
             var strategy=midgame!=null&&midgame.Strategy.HasValue?PlayableAiMidgameStrategyPolicy.Name(midgame.Strategy.Value):"opening:"+OpeningName(opening.Opening);
             var large=observation.Population!=null&&observation.Population.Capacity>40;
-            var enemies=observation.Entities.Where(e=>e.Owner!=observation.Owner&&e.Health>0).ToArray();
+            var enemies=observation.Entities.Where(e=>observation.IsHostile(e.Owner)&&e.Health>0).ToArray();
             var mass=enemies.Any(e=>enemies.Count(other=>Distance(e.Position,other.Position)<=8)>=6)||
                 strategy=="mass-assault"&&observation.Entities.Count(e=>e.Owner==observation.Owner&&e.Kind!=PlayableEntityKind.Shkval&&e.Health>0)>=6;
             var next=strategy+":"+large+":"+mass;

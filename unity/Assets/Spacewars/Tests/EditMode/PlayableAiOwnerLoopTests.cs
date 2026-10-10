@@ -5,20 +5,28 @@ using System.Threading;
 using NUnit.Framework;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
+using Spacewars.Presentation;
 
 namespace Spacewars.Tests.EditMode
 {
     public sealed class PlayableAiOwnerLoopTests
     {
-        private static PlayableAiOwnerCheckpoint Enemy(PlayableRuntime runtime)=>(PlayableAiOwnerCheckpoint)typeof(PlayableRuntime)
-            .GetProperty("EnemyAiCheckpoint",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(runtime);
+        private static PlayableAiOwnerCheckpoint Enemy(PlayableRuntime runtime)
+        {
+            var legacy=(PlayableAiOwnerCheckpoint)typeof(PlayableRuntime).GetProperty("EnemyAiCheckpoint",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(runtime);
+            if(legacy!=null)return legacy;
+            // Configured runtimes expose trusted immutable diagnostics through their
+            // actual authority, rather than the absent legacy single-opponent shortcut.
+            var authority=(PlayableAuthorityTick)typeof(PlayableRuntime).GetField("authorityTick",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(runtime);
+            return authority.CaptureDiagnosticCheckpoints().SingleOrDefault(o=>o.OwnerId=="enemy-1");
+        }
 
         [Test]
         public void OrdinaryRuntimeAppliesIndependentEnemyOwnerReceiptsWithoutPublishingPrivateState()
         {
             using(var runtime=new PlayableRuntime(PlayableProfile.Default,707,19092026))
             {
-                Assert.True(Until(()=>Enemy(runtime).Records.Any(r=>r.Status==PlayableAiDeliveryStatus.Applied)));
+                Assert.True(Until(runtime,()=>Enemy(runtime).Records.Any(r=>r.Status==PlayableAiDeliveryStatus.Applied)));
                 var enemy=Enemy(runtime);var player=runtime.AiCheckpoint;
                 var applied=enemy.Records.First(r=>r.Status==PlayableAiDeliveryStatus.Applied);
                 Assert.AreEqual("enemy-1",enemy.OwnerId);
@@ -48,21 +56,21 @@ namespace Spacewars.Tests.EditMode
             var runtime=new PlayableRuntime(PlayableProfile.Default,708,19092026);
             try
             {
-                Assert.True(Until(()=>Enemy(runtime).PendingActionId!=0));
+                Assert.True(Until(runtime,()=>Enemy(runtime).PendingActionId!=0));
                 var action=Enemy(runtime).PendingActionId;
                 runtime.RequestPause(true);
-                Assert.True(Until(()=>Enemy(runtime).Records.Any(r=>r.ActionId==action&&r.Status==PlayableAiDeliveryStatus.Cancelled)));
+                Assert.True(Until(runtime,()=>Enemy(runtime).Records.Any(r=>r.ActionId==action&&r.Status==PlayableAiDeliveryStatus.Cancelled)));
                 runtime.RequestPause(false);
-                Assert.True(Until(()=>Enemy(runtime).PendingActionId!=0));
+                Assert.True(Until(runtime,()=>Enemy(runtime).PendingActionId!=0));
                 action=Enemy(runtime).PendingActionId;
-                runtime.RequestStop();Assert.True(Until(()=>runtime.IsStopped));
+                runtime.RequestStop();Assert.True(Until(runtime,()=>runtime.IsStopped));
                 Assert.True(Enemy(runtime).Records.Any(r=>r.ActionId==action&&r.Status==PlayableAiDeliveryStatus.Stopped));
                 using(var next=new PlayableRuntime(PlayableProfile.Default,709,19092026))
                 {
                     Assert.AreEqual(709,Enemy(next).Generation);
                     Assert.Zero(Enemy(next).LastCommandSequence);
                     Assert.IsEmpty(Enemy(next).Records);
-                    Assert.True(Until(()=>Enemy(next).Records.Any(r=>r.Status==PlayableAiDeliveryStatus.Applied)));
+                    Assert.True(Until(next,()=>Enemy(next).Records.Any(r=>r.Status==PlayableAiDeliveryStatus.Applied)));
                     Assert.True(Enemy(next).Records.All(r=>r.ObservationIdentity.Contains(":709:")));
                 }
             }
@@ -84,16 +92,33 @@ namespace Spacewars.Tests.EditMode
             }
         }
 
+        private static OfflineMatchConfiguration ScoutDeliveryConfiguration()
+        {
+            var p=PlayableProfile.Default;
+            var sites=TerritoryRules.Sites(p).Where(x=>x.Kind==PlayableBuildingKind.Headquarters).ToArray();
+            var starts=new[]{new OfflineStart("west",1,sites.Single(x=>x.Id==1).Position,new NavPoint(p.PlayerHeadquartersX+p.DefenderOffsetX,p.HeadquartersZ-p.DefenderOffsetZ),pin:1),
+                new OfflineStart("east",2,sites.Single(x=>x.Id==2).Position,new NavPoint(p.EnemyHeadquartersX-p.DefenderOffsetX,p.HeadquartersZ),pin:2)};
+            return new OfflineMatchConfiguration(p,PlayableAiOpeningComposition.SourceIdentity,"scout-delivery-no-neutral-sites-v1","UnityHostRouteService",19092026,
+                new[]{new OfflineParticipant("player-1",1,1,OfflineControl.Ai),new OfflineParticipant("enemy-1",2,2,OfflineControl.Ai)},starts,sites,PlayableMap.StaticObstacles(p),new double[,]{{0,100},{100,0}});
+        }
         [Test]
         public void EnemyScoutDeliveryDoesNotBlockSubsequentPolicyActions()
         {
-            using(var runtime=new PlayableRuntime(PlayableProfile.Default,712,19092026))
+            // Isolate the scout callback contract with genuine authored geography that
+            // has no safe neutral capture objective, without disabling expansion policy.
+            using(var runtime=new PlayableRuntime(ScoutDeliveryConfiguration(),712))
             {
-                Assert.True(Until(()=>Enemy(runtime).Records.Count(r=>r.Status==PlayableAiDeliveryStatus.Applied)>=3||
+                Assert.True(runtime.ParticipantView("enemy-1").PublicScoutObjectives.All(g=>g.Role==PlayablePublicScoutObjectiveRole.PossibleEnemyStart));
+                Assert.True(Until(runtime,()=>Enemy(runtime).Records.Count(r=>r.Status==PlayableAiDeliveryStatus.Applied)>=3&&
+                    Enemy(runtime).Records.Any(r=>r.Policy=="scout"&&r.Kind==PlayableCommandKind.Move&&r.Status==PlayableAiDeliveryStatus.Applied)&&
+                    Enemy(runtime).Records.Any(r=>r.Policy=="economy"&&r.Kind==PlayableCommandKind.BuildAt&&r.Status==PlayableAiDeliveryStatus.Applied)||
                     Enemy(runtime).Records.Any(r=>r.Status==PlayableAiDeliveryStatus.Rejected),10));
+                foreach(var row in Enemy(runtime).Records)TestContext.WriteLine("enemy receipt policy="+row.Policy+" kind="+row.Kind+" status="+row.Status+" due="+row.DueTick+" applied="+row.ApplicationTick+" sequence="+row.CommandSequence);
+                TestContext.WriteLine("enemy tick="+Enemy(runtime).DecisionTick+" expansion="+PlayableAiCanonical.Encode(Enemy(runtime).Expansion));
                 var rejected=Enemy(runtime).Records.FirstOrDefault(r=>r.Status==PlayableAiDeliveryStatus.Rejected);
                 Assert.IsNull(rejected,rejected==null?null:rejected.RuntimeStatus+": "+rejected.Message);
-                Assert.AreEqual(PlayableCommandKind.Move,Enemy(runtime).LastActionKind);
+                Assert.True(Enemy(runtime).Records.Any(r=>r.Policy=="scout"&&r.Kind==PlayableCommandKind.Move&&r.Status==PlayableAiDeliveryStatus.Applied));
+                Assert.True(Enemy(runtime).Records.Any(r=>r.Policy=="economy"&&r.Kind==PlayableCommandKind.BuildAt&&r.Status==PlayableAiDeliveryStatus.Applied));
             }
         }
 
@@ -102,11 +127,11 @@ namespace Spacewars.Tests.EditMode
         {
             using(var runtime=new PlayableRuntime(PlayableProfile.Default,713,19092026))
             {
-                Assert.True(Until(()=>runtime.AiCheckpoint.PendingActionId!=0&&Enemy(runtime).PendingActionId!=0));
+                Assert.True(Until(runtime,()=>runtime.AiCheckpoint.PendingActionId!=0&&Enemy(runtime).PendingActionId!=0));
                 var playerAction=runtime.AiCheckpoint.PendingActionId;
                 var enemyAction=Enemy(runtime).PendingActionId;
                 Assert.True(runtime.TrySubmit(new PlayableCommand(713,1,"player-1",PlayableCommandKind.Stop,new[]{3})).Accepted);
-                Assert.True(Until(()=>runtime.AiCheckpoint.Records.Any(r=>r.ActionId==playerAction&&r.Status==PlayableAiDeliveryStatus.Cancelled)&&
+                Assert.True(Until(runtime,()=>runtime.AiCheckpoint.Records.Any(r=>r.ActionId==playerAction&&r.Status==PlayableAiDeliveryStatus.Cancelled)&&
                     Enemy(runtime).Records.Any(r=>r.ActionId==enemyAction&&r.Status==PlayableAiDeliveryStatus.Applied)));
                 Assert.False(Enemy(runtime).Records.Any(r=>r.ActionId==enemyAction&&r.Status==PlayableAiDeliveryStatus.Cancelled));
             }
@@ -121,11 +146,16 @@ namespace Spacewars.Tests.EditMode
                 Assert.IsEmpty(runtime.DrainReceipts());
             }
         }
-        private static bool Until(Func<bool> condition,int seconds=7)
+        private static bool Until(PlayableRuntime runtime,Func<bool> condition,int seconds=7)
         {
-            var end=DateTime.UtcNow.AddSeconds(seconds);
-            while(DateTime.UtcNow<end){if(condition())return true;Thread.Sleep(20);}
-            return condition();
+            // A runtime fixture is a Unity host too: resolve routes with the same
+            // native service, never a pure solver substituted for tank NavMesh.
+            using(var routes=new UnityHostRouteService())
+            {
+                var end=DateTime.UtcNow.AddSeconds(seconds);
+                while(DateTime.UtcNow<end){routes.Service(runtime,PlayableRuntime.MaxOutstandingCommands);if(condition())return true;Thread.Sleep(20);}
+                return condition();
+            }
         }
 
         [Test]
@@ -133,7 +163,7 @@ namespace Spacewars.Tests.EditMode
         {
             using(var runtime=new PlayableRuntime(PlayableProfile.Default,701,19092026))
             {
-                Assert.True(Until(()=>runtime.AiCheckpoint.Records.Any(r=>r.Status==PlayableAiDeliveryStatus.Applied)));
+                Assert.True(Until(runtime,()=>runtime.AiCheckpoint.Records.Any(r=>r.Status==PlayableAiDeliveryStatus.Applied)));
                 var checkpoint=runtime.AiCheckpoint;
                 var applied=checkpoint.Records.First(r=>r.Status==PlayableAiDeliveryStatus.Applied);
                 Assert.AreEqual("player-1",checkpoint.OwnerId);
@@ -142,8 +172,9 @@ namespace Spacewars.Tests.EditMode
                 Assert.AreEqual(PlayableProfile.Default.ProfileId,checkpoint.ProfileId);
                 Assert.AreEqual(PlayableProfile.Default.Revision,checkpoint.ProfileRevision);
                 Assert.AreEqual(701,checkpoint.Generation);
-                Assert.AreEqual("economy",checkpoint.LastPolicy);
-                Assert.AreEqual(PlayableCommandKind.BuildAt,checkpoint.LastActionKind);
+                Assert.True(checkpoint.Records.Any(r=>r.Policy=="economy"&&r.Kind==PlayableCommandKind.BuildAt&&r.Status==PlayableAiDeliveryStatus.Applied));
+                var decision=checkpoint.Records.Where(r=>r.Status==PlayableAiDeliveryStatus.Scheduled).GroupBy(r=>r.ReceiptIdentity.DecisionOrdinal).First();
+                Assert.LessOrEqual(decision.Count(),runtime.NativeAiProfile.DifficultyValue(Spacewars.Simulation.Ai.AiDifficulty.Fighter,"actionsPerDecision"));
                 Assert.AreEqual("player-1",checkpoint.Opening.OwnerId);
                 Assert.Greater(applied.CommandSequence,0);
                 Assert.Greater(applied.ApplicationTick,0);
@@ -158,12 +189,12 @@ namespace Spacewars.Tests.EditMode
         {
             using(var runtime=new PlayableRuntime(PlayableProfile.Default,702,19092026))
             {
-                Assert.True(Until(()=>runtime.AiCheckpoint.PendingActionId!=0));
+                Assert.True(Until(runtime,()=>runtime.AiCheckpoint.PendingActionId!=0));
                 var pending=runtime.AiCheckpoint.PendingActionId;
                 Assert.True(runtime.TrySubmit(new PlayableCommand(702,1,"player-1",PlayableCommandKind.Stop,new[]{3})).Accepted);
-                Assert.True(Until(()=>runtime.AiCheckpoint.Records.Any(r=>r.ActionId==pending&&r.Status==PlayableAiDeliveryStatus.Cancelled)));
+                Assert.True(Until(runtime,()=>runtime.AiCheckpoint.Records.Any(r=>r.ActionId==pending&&r.Status==PlayableAiDeliveryStatus.Cancelled)));
                 Assert.False(runtime.AiCheckpoint.Records.Any(r=>r.ActionId==pending&&r.Status==PlayableAiDeliveryStatus.Applied));
-                Assert.True(Until(()=>runtime.DrainReceipts().Any(r=>r.Sequence==1)));
+                Assert.True(Until(runtime,()=>runtime.DrainReceipts().Any(r=>r.Sequence==1)));
             }
         }
 
@@ -173,16 +204,16 @@ namespace Spacewars.Tests.EditMode
             var runtime=new PlayableRuntime(PlayableProfile.Default,703,19092026);
             try
             {
-                Assert.True(Until(()=>runtime.AiCheckpoint.PendingActionId!=0));
+                Assert.True(Until(runtime,()=>runtime.AiCheckpoint.PendingActionId!=0));
                 var action=runtime.AiCheckpoint.PendingActionId;
                 runtime.RequestPause(true);
-                Assert.True(Until(()=>runtime.AiCheckpoint.Records.Any(r=>r.ActionId==action&&r.Status==PlayableAiDeliveryStatus.Cancelled)));
+                Assert.True(Until(runtime,()=>runtime.AiCheckpoint.Records.Any(r=>r.ActionId==action&&r.Status==PlayableAiDeliveryStatus.Cancelled)));
                 Assert.False(runtime.AiCheckpoint.Records.Any(r=>r.ActionId==action&&r.Status==PlayableAiDeliveryStatus.Applied));
                 runtime.RequestPause(false);
-                Assert.True(Until(()=>runtime.AiCheckpoint.PendingActionId!=0));
+                Assert.True(Until(runtime,()=>runtime.AiCheckpoint.PendingActionId!=0));
                 action=runtime.AiCheckpoint.PendingActionId;
                 runtime.RequestStop();
-                Assert.True(Until(()=>runtime.IsStopped));
+                Assert.True(Until(runtime,()=>runtime.IsStopped));
                 Assert.True(runtime.AiCheckpoint.Records.Any(r=>r.ActionId==action&&r.Status==PlayableAiDeliveryStatus.Stopped));
             }
             finally{runtime.Dispose();}
@@ -194,10 +225,10 @@ namespace Spacewars.Tests.EditMode
             var old=new PlayableRuntime(PlayableProfile.Default,704,19092026);
             try
             {
-                Assert.True(Until(()=>old.AiCheckpoint.PendingActionId!=0));
+                Assert.True(Until(old,()=>old.AiCheckpoint.PendingActionId!=0));
                 var oldAction=old.AiCheckpoint.PendingActionId;
                 old.RequestStop();
-                Assert.True(Until(()=>old.IsStopped));
+                Assert.True(Until(old,()=>old.IsStopped));
                 Assert.True(old.AiCheckpoint.Records.Any(r=>r.ActionId==oldAction&&r.Status==PlayableAiDeliveryStatus.Stopped));
                 using(var next=new PlayableRuntime(PlayableProfile.Default,705,19092026))
                 {
@@ -205,7 +236,7 @@ namespace Spacewars.Tests.EditMode
                     Assert.Zero(next.AiCheckpoint.LastCommandSequence);
                     Assert.Zero(next.AiCheckpoint.Records.Count);
                     Assert.AreEqual(PlayableAiOpeningComposition.SourceIdentity,next.AiCheckpoint.SourceIdentity);
-                    Assert.True(Until(()=>next.AiCheckpoint.Records.Any(r=>r.Status==PlayableAiDeliveryStatus.Applied)));
+                    Assert.True(Until(next,()=>next.AiCheckpoint.Records.Any(r=>r.Status==PlayableAiDeliveryStatus.Applied)));
                     Assert.True(next.AiCheckpoint.Records.All(r=>r.ObservationIdentity.Contains(":705:")));
                 }
             }

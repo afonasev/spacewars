@@ -1,0 +1,32 @@
+{
+  "kit": "natural-frontier-v1",
+  "created": "2026-10-07",
+  "provenance": "Original assets generated for this project with built-in imagegen. No external texture pack. Prompts requested flat diffuse seamless surface scans. Runtime shader adds lighting and map-specific details.",
+  "assets": {
+    "Earth": {
+      "source_generation": "exec-73cea153-ea77-43d8-b4f4-715cc5fda7aa.png",
+      "sha256": "a9c7335dbfea45b3f13429e82a0051f41ffbc7029fb6747f99b41000a09639fe"
+    },
+    "Rock": {
+      "source_generation": "exec-4ebbb3f4-cfa8-4826-9552-4fe22ffcb08b.png",
+      "sha256": "909377e50709dc33a90f1fc64cc9223e7acbe9c9f6a5d5082d04f6327dcbe611"
+    },
+    "Concrete": {
+      "source_generation": "exec-84a558c1-f29e-4d4b-a608-413d0879b466.png",
+      "sha256": "e78617bbed8bb0e8dcf0f44d31b4569ca1deeac9d58fe89f4e30898a728f3274"
+    },
+    "Steel": {
+      "source_generation": "exec-7ee6a701-a3de-4933-95c1-d2f2aa732639.png",
+      "sha256": "d28e9c03400a9a62f4fce044504342258e84f943381b17546070a31ad3c63a66"
+    }
+  },
+  "import": {
+    "colorSpace": "sRGB",
+    "wrap": "Repeat",
+    "mipmaps": true,
+    "filter": "Trilinear",
+    "aniso": 8,
+    "maxSize": 2048
+  },
+  "water": "Procedural world-space shader, no image texture; same fog material as terrain"
+}

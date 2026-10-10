@@ -38,7 +38,7 @@ namespace Spacewars.Tests.EditMode
             Nav.Crowd.Remove(3);Nav.Crowd.Add(3,new NavPoint(29,25));Field(2,"Position",new NavPoint(25,25));Field(2,"Health",1d);
             var after=View();CollectionAssert.AreEqual(view.Projectiles.Select(p=>p.Id+":"+p.OwnerId+":"+p.TargetId),after.Projectiles.Select(p=>p.Id+":"+p.OwnerId+":"+p.TargetId));
         }
-        [SetUp] public void Setup(){domain=Activator.CreateInstance(Type,Flags,null,new object[]{PlayableProfile.Default,1L},null);}
+        [SetUp] public void Setup(){domain=NativeCombatFixture.WithTwoEnemyDefenders(PlayableProfile.Default);}
         private PlayableCommandStatus ApplyOwner(PlayableCommand command)=> (PlayableCommandStatus)Call("Apply",command,null);
         [Test] public void EnemyOwnerObservationAndEconomyActionUseOnlyEnemyProjection()
         {
@@ -75,9 +75,9 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(PlayableCommandStatus.InvalidEntity,ApplyOwner(new PlayableCommand(1,1,"enemy-1",PlayableCommandKind.Move,new[]{playerId},target)));
             Assert.AreEqual(PlayableCommandStatus.InvalidTarget,ApplyOwner(new PlayableCommand(1,2,"enemy-1",PlayableCommandKind.Attack,new[]{own.Id},targetId:playerId)));
             Assert.AreEqual(PlayableCommandStatus.Applied,ApplyOwner(new PlayableCommand(1,3,"enemy-1",PlayableCommandKind.Move,new[]{own.Id},target)));
-            Assert.AreEqual(PlayableOwner.Enemy,View(PlayableOwner.Enemy).Entities.Single(e=>e.Id==own.Id).CurrentOrder.Owner);
+            var pending=View(PlayableOwner.Enemy).Entities.Single(e=>e.Id==own.Id);Assert.Null(pending.CurrentOrder);Assert.NotNull(pending.Queue.Pending);Assert.AreEqual(PlayableOwner.Enemy,pending.OrderStamp.Owner);
             Assert.AreEqual(PlayableCommandStatus.InvalidEntity,ApplyOwner(new PlayableCommand(1,4,"enemy-1",PlayableCommandKind.Stop,new[]{own.Id,playerId})));
-            Assert.NotNull(View(PlayableOwner.Enemy).Entities.Single(e=>e.Id==own.Id).CurrentOrder);
+            Assert.AreEqual(pending.Queue.Pending.IssuanceId,View(PlayableOwner.Enemy).Entities.Single(e=>e.Id==own.Id).Queue.Pending.IssuanceId);
             Assert.AreEqual(PlayableCommandStatus.Applied,ApplyOwner(new PlayableCommand(1,5,"enemy-1",PlayableCommandKind.Stop,new[]{own.Id})));
             Assert.IsNull(View(PlayableOwner.Enemy).Entities.Single(e=>e.Id==own.Id).CurrentOrder);
         }
@@ -130,7 +130,11 @@ namespace Spacewars.Tests.EditMode
         {
             var start=View().Entities.Single().Position;
             var geometry=(NavGeometry)Type.GetProperty("Geometry",Flags).GetValue(domain);
-            var target=Enumerable.Range(4,6).Select(n=>new NavPoint(start.X+n,start.Z)).First(p=>geometry.IsFree(p,PlayableProfile.Default.ExplorerCollisionRadius)&&View().Vision.IsVisible(p));
+            var profile=PlayableProfile.Default;var spacing=profile.Navigation;double radius=profile.ExplorerCollisionRadius;
+            double friendlyClearance=Math.Max(profile.FollowDistance+2*radius,Math.Max(spacing.ArrivalSlotSpacing,4*radius+2*spacing.ArrivalTolerance+2*spacing.LocalGridCell));
+            // Keep the midpoint barrier beyond every native free-approach goal,
+            // rather than merely between actor and the occupied semantic center.
+            var target=Enumerable.Range(4,6).Select(n=>new NavPoint(start.X+n,start.Z)).First(p=>p.X-start.X>2*(friendlyClearance+radius+spacing.ArrivalTolerance)&&geometry.IsFree(p,radius)&&View().Vision.IsVisible(p));
             int ally=Spawn(target.X,target.Z);
             int unit=View().Entities.Single(e=>e.Id!=ally).Id;
             var request=new PlayableRouteRequest(unit,PlayableRouteTargetKind.FriendlyAnchor,ally,1,0,start,PlayableProfile.Default.ExplorerCollisionRadius,target);
@@ -140,13 +144,23 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(observed.Generation,proof.Generation);Assert.AreEqual(observed.Tick,proof.Tick);
             Assert.AreEqual(start.X,proof.Origin.X);Assert.AreEqual(target.X,proof.Target.X);
             Assert.AreEqual(PlayableProfile.Default.ExplorerCollisionRadius,proof.Radius);
-            Assert.AreEqual(target.X,proof.Path.Last().X);
+            Assert.AreEqual(proof.Goal,proof.Path.Last(),"The path certifies its actual free native approach, separately from the semantic ally anchor");
+            Assert.AreNotEqual(target,proof.Goal,"A route must not end inside the allied body");
+            Assert.True(geometry.IsFree(proof.Goal,proof.Radius));Assert.True(View().Vision.IsVisible(proof.Goal));
+            var allySnapshot=View().Entities.Single(e=>e.Id==ally);
+            double separation=Math.Sqrt((proof.Goal.X-target.X)*(proof.Goal.X-target.X)+(proof.Goal.Z-target.Z)*(proof.Goal.Z-target.Z));
+            double bodies=proof.Radius+PlayableUnitRules.Radius(PlayableProfile.Default,allySnapshot.Kind);
+            Assert.GreaterOrEqual(separation,bodies,"Certified gather arrival must clear the actual allied body");
+            var navigation=PlayableProfile.Default.Navigation;
+            double approachSpacing=Math.Max(PlayableProfile.Default.FollowDistance+bodies,Math.Max(navigation.ArrivalSlotSpacing,4*proof.Radius+2*navigation.ArrivalTolerance+2*navigation.LocalGridCell));
+            Assert.AreEqual(approachSpacing,separation,navigation.ArrivalTolerance,"Generic scout anchors use existing native free-approach spacing; Army Ready remains a separate strict combat-unit predicate");
             Assert.IsEmpty(RouteView(new PlayableRouteRequest(unit,PlayableRouteTargetKind.FriendlyAnchor,ally,1,0,start,proof.Radius+1,target)).RouteProofs,"A changed footprint invalidates admission.");
             Assert.IsEmpty(RouteView(new PlayableRouteRequest(unit,PlayableRouteTargetKind.FriendlyAnchor,ally,2,0,start,proof.Radius,target)).RouteProofs,"A foreign generation cannot refresh evidence.");
             Assert.IsEmpty(RouteView(new PlayableRouteRequest(unit,PlayableRouteTargetKind.FriendlyAnchor,ally,1,0,start,proof.Radius,new NavPoint(target.X+1,target.Z))).RouteProofs,"The semantic target point must still match.");
             Assert.IsEmpty(PlayableAiObservation.From(RouteView(new PlayableRouteRequest(unit,PlayableRouteTargetKind.VisibleEnemy,3,1,0,start,proof.Radius,new NavPoint(0,0)))).RouteProofs,"A hidden guessed enemy id is not a target.");
             var barrier=new NavObstacle((start.X+target.X)/2-.1,-geometry.HalfExtent,(start.X+target.X)/2+.1,geometry.HalfExtent);
             var blocked=new NavGeometry(geometry.HalfExtent,new[]{barrier},geometry.Revision+1);
+            Assert.True(blocked.IsFree(start,proof.Radius));Assert.True(blocked.IsFree(target,PlayableUnitRules.Radius(profile,allySnapshot.Kind)),"Both actual bodies remain free while all native approach goals are across the barrier");
             Type.GetProperty("Geometry",Flags).SetValue(domain,blocked);Nav.ChangeGeometry(blocked);
             Assert.IsEmpty(PlayableAiObservation.From(RouteView(request)).RouteProofs,"The real navigation geometry blocks this leg.");
         }
@@ -194,9 +208,10 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void InitialPlayerViewHasNoHiddenEnemiesOrDynamicNavigationObstacles()
         {
+            domain=Activator.CreateInstance(Type,Flags,null,new object[]{PlayableProfile.Default,1L},null);
             var player=View();var enemy=View(PlayableOwner.Enemy);
             Assert.AreEqual(1,player.Entities.Count);Assert.AreEqual(PlayableEntityKind.Explorer,player.Entities[0].Kind);Assert.AreEqual(PlayableOwner.Player,player.Entities[0].Owner);Assert.AreEqual(1,player.Buildings.Count);Assert.AreEqual(PlayableOwner.Player,player.Buildings[0].Owner);
-            Assert.AreEqual(3,enemy.Entities.Count);Assert.AreEqual(1,enemy.Buildings.Count);Assert.AreNotEqual(player.Vision.Team,enemy.Vision.Team);
+            Assert.AreEqual(1,enemy.Entities.Count);Assert.AreEqual(1,enemy.Buildings.Count);Assert.AreNotEqual(player.Vision.Team,enemy.Vision.Team);
             Assert.False(player.DiscoveredSites.Any(s=>s.Id==2));Assert.False(player.Sites.Any(s=>s.Site.Id==2));
             var full=(NavGeometry)Type.GetProperty("Geometry",Flags).GetValue(domain);Assert.Greater(full.Obstacles.Count,player.Geometry.Obstacles.Count);
         }

@@ -31,8 +31,10 @@ namespace Spacewars.Runtime
 
     // Called by an owner loop or a diagnostic controller with owner-safe observations and terminal receipts.
     // The policy never inspects PlayableDomain.
-    public sealed class PlayableAiMissionDefensePolicy
+    public sealed partial class PlayableAiMissionDefensePolicy
     {
+        internal PlayableAiMissionDefensePolicy Fork() { var copy=(PlayableAiMissionDefensePolicy)MemberwiseClone();copy.mission=mission?.Copy();copy.pendingAdded=pendingAdded.ToArray();return copy; }
+
         private readonly string OwnerId;
         private const double EmergencyRadius=30; // ai/release.json tactics.emergencyRadius
         private const double EmergencyThreatRatio=.75; // ai/release.json midgame.emergencyThreatRatio
@@ -53,6 +55,7 @@ namespace Spacewars.Runtime
             if(firstActionId<1)throw new ArgumentOutOfRangeException(nameof(firstActionId));nextActionId=firstActionId;
         }
         public PlayableAiCombatMission Mission=>mission?.Copy();
+        internal bool IsDefenseCandidate=>pendingDefense;
         public bool HasPendingAction=>pendingActionId!=0;
         public long PendingActionId=>pendingActionId;
         public long PreemptedActionId=>preemptedActionId;
@@ -63,7 +66,7 @@ namespace Spacewars.Runtime
             mission=snapshot?.Copy();pendingActionId=0;pendingGeneration=0;pendingAdded=Array.Empty<int>();pendingDefense=false;preemptedActionId=0;
             previousDistance=Double.PositiveInfinity;
         }
-        public PlayableAiAction TryPlan(PlayableAiObservation observation,PlayableAiOpeningCompositionState opening)
+        public PlayableAiAction TryPlan(PlayableAiObservation observation,PlayableAiOpeningCompositionState opening,bool defenseOnly=false)
         {
             if(observation==null||opening==null)throw new ArgumentNullException(observation==null?nameof(observation):nameof(opening));
             if(observation.OwnerId!=OwnerId||opening.OwnerId!=OwnerId||opening.MatchSeed!=observation.Seed||opening.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity)
@@ -84,7 +87,7 @@ namespace Spacewars.Runtime
                 if(pendingActionId!=0){preemptedActionId=pendingActionId;ClearPending();}
                 pendingDefense=true;return Action(observation,PlayableCommandKind.Attack,defenders,targetId:enemy.Id);
             }
-            if(pendingActionId!=0||mission?.Completed==true)return null;
+            if(defenseOnly||pendingActionId!=0||mission?.Completed==true)return null;
             if(mission==null)
             {
                 var wave=Wave(opening.Opening);
@@ -111,7 +114,7 @@ namespace Spacewars.Runtime
         }
         public void ObserveReceipt(PlayableAiTraceRecord record)
         {
-            if(record==null||record.OwnerId!=OwnerId||record.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity||pendingActionId==0||record.ActionId!=pendingActionId||record.Status==PlayableAiDeliveryStatus.Scheduled||record.Status==PlayableAiDeliveryStatus.Accepted)return;
+            if(record==null||!AiStateWire.CallbackGenerationMatches(record,pendingGeneration)||record.OwnerId!=OwnerId||record.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity||pendingActionId==0||record.ActionId!=pendingActionId||record.Status==PlayableAiDeliveryStatus.Scheduled||record.Status==PlayableAiDeliveryStatus.Accepted)return;
             if(record.Status==PlayableAiDeliveryStatus.Applied&&mission!=null&&!mission.Completed&&mission.Generation==pendingGeneration&&!pendingDefense)
             {
                 mission=mission.With(reinforcement:pendingAdded.Length>0?record.ApplicationTick:null,deployed:true,ids:mission.AssignedIds.Concat(pendingAdded));
@@ -135,7 +138,7 @@ namespace Spacewars.Runtime
         }
         private PlayableAiAction MissionAction(PlayableAiObservation observation,int[] ids)
         {
-            var stillVisible=mission.VisibleTarget&&(observation.Entities.Any(x=>x.Owner!=observation.Owner&&x.Id==mission.TargetId)||observation.Buildings.Any(x=>x.Owner!=observation.Owner&&x.Id==mission.TargetId));
+            var stillVisible=mission.VisibleTarget&&(observation.Entities.Any(x=>observation.IsHostile(x.Owner)&&x.Id==mission.TargetId)||observation.Buildings.Any(x=>observation.IsHostile(x.Owner)&&x.Id==mission.TargetId));
             return stillVisible?Action(observation,PlayableCommandKind.Attack,ids,targetId:mission.TargetId)
                 :Action(observation,PlayableCommandKind.AttackMove,ids,target:mission.Target);
         }
@@ -150,13 +153,13 @@ namespace Spacewars.Runtime
         {
             var unit=VisibleEnemies(observation).OrderBy(x=>x.Health).ThenBy(x=>x.Id).FirstOrDefault();
             if(unit!=null)return new TargetChoice{TargetId=unit.Id,Point=unit.Position,Visible=true};
-            var building=observation.Buildings.Where(x=>x.Owner!=observation.Owner&&x.Health>0).OrderBy(x=>x.Id).FirstOrDefault();
+            var building=observation.Buildings.Where(x=>observation.IsHostile(x.Owner)&&x.Health>0).OrderBy(x=>x.Id).FirstOrDefault();
             if(building!=null)return new TargetChoice{TargetId=building.Id,Point=building.Position,Visible=true};
             var publicStart=observation.PublicScoutObjectives.Where(x=>x.Reachable&&x.Role==PlayablePublicScoutObjectiveRole.PossibleEnemyStart).OrderBy(x=>x.SiteId).FirstOrDefault();
             return publicStart==null?null:new TargetChoice{PublicSiteId=publicStart.SiteId,Point=publicStart.Approach,Visible=false};
         }
         private static int Wave(PlayableAiOpening opening)=>opening==PlayableAiOpening.BlindRush?2:opening==PlayableAiOpening.ExplorerAllIn?4:opening==PlayableAiOpening.DoubleMineExplorerRush?5:0;
-        private static IEnumerable<PlayableEntitySnapshot> VisibleEnemies(PlayableAiObservation observation)=>observation.Entities.Where(x=>x.Owner!=observation.Owner&&x.Health>0);
+        private static IEnumerable<PlayableEntitySnapshot> VisibleEnemies(PlayableAiObservation observation)=>observation.Entities.Where(x=>observation.IsHostile(x.Owner)&&x.Health>0);
         private static IEnumerable<PlayableEntitySnapshot> OwnFighters(PlayableAiObservation observation)=>observation.Entities.Where(x=>x.Owner==observation.Owner&&x.Kind!=PlayableEntityKind.Shkval&&x.Health>0);
         private double Force(IEnumerable<PlayableEntitySnapshot> units)=>units.Sum(x=>(x.Kind==PlayableEntityKind.Explorer?.55:1)*Math.Min(1,x.Health/(double)(x.Kind==PlayableEntityKind.Explorer?nativeProfile.ExplorerHealth:x.Kind==PlayableEntityKind.Shkval?nativeProfile.ShkvalHealth:nativeProfile.TankHealth)));
         private static double Distance(NavPoint a,NavPoint b){var dx=a.X-b.X;var dz=a.Z-b.Z;return Math.Sqrt(dx*dx+dz*dz);}

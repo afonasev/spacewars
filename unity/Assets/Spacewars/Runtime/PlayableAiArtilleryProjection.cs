@@ -9,12 +9,12 @@ namespace Spacewars.Runtime
     {
         // Frozen ai/release.json artillery fields. Projection is generated from the current owner view.
         private PlayableArtillerySupportSnapshot[] ProjectArtillery(PlayableOwner owner,PlayableVision vision,
-            IReadOnlyList<PlayableEntitySnapshot> entities,IReadOnlyList<PlayableBuildingSnapshot> projectedBuildings)
+            IReadOnlyList<PlayableEntitySnapshot> entities,IReadOnlyList<PlayableBuildingSnapshot> projectedBuildings,AiArmyRegistryState armyState=null)
         {
             if(Tick%45!=0)return Array.Empty<PlayableArtillerySupportSnapshot>();
             var guns=entities.Where(e=>e.Owner==owner&&e.Kind==PlayableEntityKind.Shkval&&e.Health>0).OrderBy(e=>e.Id).ToArray();
             if(guns.Length==0)return Array.Empty<PlayableArtillerySupportSnapshot>();
-            var cover=entities.Where(e=>e.Owner==owner&&e.Kind!=PlayableEntityKind.Shkval&&e.Health>0).ToArray();
+            var allCover=entities.Where(e=>e.Owner==owner&&e.Kind!=PlayableEntityKind.Shkval&&e.Health>0).ToArray();
             var enemies=entities.Where(e=>Hostile(e.Owner,owner)&&e.Health>0).Select(e=>e.Position)
                 .Concat(projectedBuildings.Where(b=>Hostile(b.Owner,owner)&&b.Health>0).Select(b=>b.Position)).ToArray();
             var home=projectedBuildings.FirstOrDefault(b=>b.Owner==owner&&b.Kind==PlayableBuildingKind.Headquarters&&b.Health>0);
@@ -25,6 +25,7 @@ namespace Spacewars.Runtime
             var solids=PlayableMap.StaticObstacles(profile);
             double distance(NavPoint a,NavPoint b)=>Distance(a,b);
             double nearest(NavPoint p)=>enemies.Length==0?Double.PositiveInfinity:enemies.Min(e=>distance(p,e));
+            PlayableEntitySnapshot[] cover=allCover;
             bool supported(NavPoint p)=>cover.Any(friend=>distance(p,friend.Position)<=12&&
                 (enemies.Length==0||nearest(friend.Position)<nearest(p)));
             bool useful(NavPoint p,int gunId)=>PlayableBallistics.BestTarget(p,owner,PlayableUnitRules.Range(profile,PlayableEntityKind.Shkval,units.TryGetValue(gunId,out var actor)&&UnitUpgraded(actor)),
@@ -34,6 +35,12 @@ namespace Spacewars.Runtime
             var result=new List<PlayableArtillerySupportSnapshot>();
             foreach(var gun in guns)
             {
+                if(armyState!=null)
+                {
+                    var army=armyState.Armies.FirstOrDefault(a=>a.Major&&a.Phase!=AiArmyPhase.Disbanded&&a.Members.Contains(gun.Id));
+                    if(army==null)continue;
+                    cover=allCover.Where(u=>army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)).ToArray();
+                }
                 var currentSupported=supported(gun.Position);var currentUseful=useful(gun.Position,gun.Id);
                 var threatened=nearest(gun.Position)<8;
                 if(!threatened&&currentSupported&&currentUseful)

@@ -30,7 +30,7 @@ namespace Spacewars.Tests.EditMode
         {
             var p=View();var e=View(PlayableOwner.Enemy);Assert.AreEqual(1,p.Entities.Count);Assert.AreEqual(PlayableEntityKind.Explorer,p.Entities.Single().Kind);Assert.AreEqual(profile.ExplorerHealth,p.Entities.Single().Health);
             Assert.AreEqual(profile.ExplorerPopulationCost,p.Population.Living);Assert.Zero(p.Population.Reserved);Assert.AreEqual(profile.StartingCredits,p.Credits);
-            Assert.AreEqual(1,e.Entities.Count(u=>u.Kind==PlayableEntityKind.Explorer));Assert.AreEqual(2,e.Entities.Count(u=>u.Kind==PlayableEntityKind.Tank));Assert.AreEqual(3,e.Entities.Count);
+            Assert.AreEqual(1,e.Entities.Count(u=>u.Kind==PlayableEntityKind.Explorer));Assert.Zero(e.Entities.Count(u=>u.Kind==PlayableEntityKind.Tank));Assert.AreEqual(1,e.Entities.Count);
         }
         [Test] public void MixedQueueFreezesCostsAndCancelsOnlyAddressedOrder()
         {

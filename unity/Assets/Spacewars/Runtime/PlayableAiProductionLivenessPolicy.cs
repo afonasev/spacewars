@@ -5,8 +5,10 @@ using Spacewars.Simulation;
 namespace Spacewars.Runtime
 {
     // Diagnostic U6 policy: one owner, one idle Factory, and no domain access.
-    public sealed class PlayableAiProductionLivenessPolicy
+    public sealed partial class PlayableAiProductionLivenessPolicy
     {
+        internal PlayableAiProductionLivenessPolicy Fork() => (PlayableAiProductionLivenessPolicy)MemberwiseClone();
+
 
         private PlayableProfile profile;
         internal void Rebind(PlayableProfile next){profile=next;}
@@ -41,9 +43,16 @@ namespace Spacewars.Runtime
             return new PlayableAiAction(pendingActionId,observation.OwnerId,observation.ProfileId,observation.ProfileRevision,observation.Generation,observation.SnapshotSequence,PlayableCommandKind.QueueTank,new[]{factory.Id},unitKind:PlayableEntityKind.Tank,seed:observation.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
         }
 
+        internal PlayableAiAction Admit(PlayableAiObservation observation,PlayableAiAction candidate)
+        {
+            if(HasPendingObligation||(candidate.Kind!=PlayableCommandKind.QueueTank&&candidate.Kind!=PlayableCommandKind.QueueExplorer))throw new InvalidOperationException("Invalid production commit.");
+            pendingGeneration=observation.Generation;pendingActionId=nextActionId++;
+            return new PlayableAiAction(pendingActionId,candidate.PlayerId,candidate.ProfileId,candidate.ProfileRevision,candidate.Generation,candidate.SnapshotSequence,candidate.Kind,candidate.CopyEntityIds(),unitKind:candidate.UnitKind,seed:candidate.Seed,sourceIdentity:candidate.SourceIdentity);
+        }
+
         public void ObserveReceipt(PlayableAiTraceRecord record)
         {
-            if(record==null||record.OwnerId!=ownerId||record.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity||!HasPendingObligation||record.ActionId!=pendingActionId)return;
+            if(record==null||!AiStateWire.CallbackGenerationMatches(record,pendingGeneration)||record.OwnerId!=ownerId||record.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity||!HasPendingObligation||record.ActionId!=pendingActionId)return;
             if(record.Status==PlayableAiDeliveryStatus.Applied||record.Status==PlayableAiDeliveryStatus.Rejected||record.Status==PlayableAiDeliveryStatus.Stale||record.Status==PlayableAiDeliveryStatus.Cancelled||record.Status==PlayableAiDeliveryStatus.Stopped||record.Status==PlayableAiDeliveryStatus.InvalidAction||record.Status==PlayableAiDeliveryStatus.InvalidOwner)ClearPending();
         }
 

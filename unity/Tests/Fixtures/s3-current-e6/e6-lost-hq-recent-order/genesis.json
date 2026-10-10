@@ -1,0 +1,194 @@
+{
+  "SourceIdentity": "native-a3-e6-hq-guard-v1",
+  "MapIdentity": "a3-derived-e6-lost-hq-recent-order-hq-guard-v1",
+  "Seed": 19092026,
+  "Roster": [
+    {
+      "Id": "west-owner",
+      "LogicalPlayer": 1,
+      "Team": 1,
+      "Control": 1
+    },
+    {
+      "Id": "east-owner",
+      "LogicalPlayer": 2,
+      "Team": 2,
+      "Control": 0
+    }
+  ],
+  "Starts": [
+    {
+      "Id": "west",
+      "SiteId": 1,
+      "Position": {
+        "X": -24.0,
+        "Z": 0.0
+      },
+      "ExplorerAnchor": {
+        "X": -24.0,
+        "Z": 7.0
+      },
+      "Heading": 0.0,
+      "PinnedLogicalPlayer": 1
+    },
+    {
+      "Id": "east",
+      "SiteId": 2,
+      "Position": {
+        "X": 24.0,
+        "Z": 24.0
+      },
+      "ExplorerAnchor": {
+        "X": 18.0,
+        "Z": 24.0
+      },
+      "Heading": 0.0,
+      "PinnedLogicalPlayer": 2
+    }
+  ],
+  "Sites": [
+    {
+      "Id": 1,
+      "Kind": 0,
+      "Position": {
+        "X": -24.0,
+        "Z": 0.0
+      },
+      "Slots": []
+    },
+    {
+      "Id": 2,
+      "Kind": 0,
+      "Position": {
+        "X": 24.0,
+        "Z": 24.0
+      },
+      "Slots": []
+    },
+    {
+      "Id": 3,
+      "Kind": 3,
+      "Position": {
+        "X": -7.0,
+        "Z": 0.0
+      },
+      "Slots": [
+        {
+          "Id": 1,
+          "Position": {
+            "X": -0.5,
+            "Z": 0.0
+          },
+          "Heading": 0.0
+        },
+        {
+          "Id": 2,
+          "Position": {
+            "X": -10.25,
+            "Z": 5.6291651245988517
+          },
+          "Heading": 2.0943951023931953
+        },
+        {
+          "Id": 3,
+          "Position": {
+            "X": -10.250000000000004,
+            "Z": -5.629165124598849
+          },
+          "Heading": 4.1887902047863905
+        }
+      ]
+    }
+  ],
+  "Obstacles": [],
+  "ScenarioUnits": [
+    {
+      "LogicalPlayer": 2,
+      "Kind": 0,
+      "Position": {
+        "X": -28.0,
+        "Z": -12.0
+      },
+      "Heading": 0.0,
+      "Upgraded": false
+    },
+    {
+      "LogicalPlayer": 2,
+      "Kind": 0,
+      "Position": {
+        "X": -24.0,
+        "Z": -12.0
+      },
+      "Heading": 0.0,
+      "Upgraded": false
+    },
+    {
+      "LogicalPlayer": 2,
+      "Kind": 0,
+      "Position": {
+        "X": -20.0,
+        "Z": -12.0
+      },
+      "Heading": 0.0,
+      "Upgraded": false
+    },
+    {
+      "LogicalPlayer": 2,
+      "Kind": 0,
+      "Position": {
+        "X": -28.0,
+        "Z": -16.0
+      },
+      "Heading": 0.0,
+      "Upgraded": false
+    },
+    {
+      "LogicalPlayer": 2,
+      "Kind": 0,
+      "Position": {
+        "X": -24.0,
+        "Z": -16.0
+      },
+      "Heading": 0.0,
+      "Upgraded": false
+    },
+    {
+      "LogicalPlayer": 2,
+      "Kind": 0,
+      "Position": {
+        "X": -20.0,
+        "Z": -16.0
+      },
+      "Heading": 0.0,
+      "Upgraded": false
+    },
+    {
+      "LogicalPlayer": 2,
+      "Kind": 0,
+      "Position": {
+        "X": 18.0,
+        "Z": 18.0
+      },
+      "Heading": 0.0,
+      "Upgraded": false
+    }
+  ],
+  "ScenarioBuildings": [
+    {
+      "LogicalPlayer": 1,
+      "Kind": 3,
+      "SiteId": 3,
+      "SlotId": 0,
+      "Position": {
+        "X": -7.0,
+        "Z": 0.0
+      },
+      "Heading": 0.0
+    }
+  ],
+  "Profile": "unity-owner-research-queue-u6-v1@1",
+  "GameplayHash": "e17fd1f8ce57da56cfac3dfb4f2bd09c58c7842761bfafb3c0c2e6a54d2bebd8",
+  "AiHash": "4b4743e8dc41e0244323684a1a24d29d83e614d8ff6c40d9b535005f8b7f7bbd",
+  "MapHash": "9935c031a6886277f18c81e8efe26c3721c69a6b8e52619ba036e9f978547bd3",
+  "GeometryHash": "2ef2e7d3f2e3f032f94816bcabbc96a92c1ded2233528412517d771c2bea90f3"
+}

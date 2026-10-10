@@ -20,7 +20,7 @@ namespace Spacewars.Tests.EditMode
 
         [Test] public void AttackApproachBehindWallHasLineOfFireToTarget()
         {
-            var domain=NewDomain();var profile=PlayableProfile.Default;
+            var domain=NativeCombatFixture.WithTwoEnemyDefenders(PlayableProfile.Default);var profile=PlayableProfile.Default;
             var method=DomainType.GetMethod("TryAttackApproach",BindingFlags.Instance|BindingFlags.NonPublic);
             var target=new NavPoint(-8,-9);object[] args={3,new NavPoint(6,-6),target,default(NavPoint)};
             Assert.IsTrue((bool)method.Invoke(domain,args));var approach=(NavPoint)args[3];
@@ -95,7 +95,7 @@ namespace Spacewars.Tests.EditMode
 
         [Test] public void ShellUsesFixedStraightSweepAfterTurretHasAimed()
         {
-            var domain=NewDomain();
+            var domain=NativeCombatFixture.WithTwoEnemyDefenders(PlayableProfile.Default);
             DomainType.GetMethod("SpawnPlayer",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(domain,new object[]{new NavPoint(10,-4),new NavPoint(10,-4)});
             Assert.AreEqual(PlayableCommandStatus.Applied,Apply(domain,new PlayableCommand(1,1,"player-1",PlayableCommandKind.Attack,new[]{7},new NavPoint(17,-4),targetId:3)));
             StepMethod.Invoke(domain,new object[]{1d/30d}); var first=Snapshot(domain).Projectiles.Single(p=>p.OwnerId==7);

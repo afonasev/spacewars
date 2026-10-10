@@ -25,13 +25,14 @@ namespace Spacewars.Runtime
             message=UpgradeBlocked(b);if(message!=null)return PlayableCommandStatus.Rejected;
             AddCredits(owner,-profile.RefineryUpgradeCost);
             b.Upgrade=new RefineryUpgrade{TermsRevision=profile.Revision,PaidCost=profile.RefineryUpgradeCost,Duration=profile.RefineryUpgradeSeconds};
+            Sound(PlayableSoundKind.UpgradeStarted,b.Position,PlayableEntityKind.Tank,owner,true);
             message="Улучшение завода начато";return PlayableCommandStatus.Applied;
         }
         private PlayableCommandStatus CancelRefineryUpgrade(int id,PlayableOwner owner,out string message)
         {
             message="Нет активного улучшения";
             if(!buildings.TryGetValue(id,out var b)||b.Owner!=owner||b.Sale!=null||b.Upgrade==null||b.Upgrade.Complete)return PlayableCommandStatus.InvalidEntity;
-            AddCredits(owner,b.Upgrade.PaidCost);b.Upgrade=null;
+            AddCredits(owner,b.Upgrade.PaidCost);b.Upgrade=null;Sound(PlayableSoundKind.UpgradeCancelled,b.Position,PlayableEntityKind.Tank,owner,true);
             message="Улучшение отменено: полный возврат";return PlayableCommandStatus.Applied;
         }
         private void AdvanceRefineryUpgrades(double dt)
@@ -40,7 +41,7 @@ namespace Spacewars.Runtime
             {
                 var u=b.Upgrade;if(eliminated.Contains(b.Owner)||u==null||u.Complete||b.Sale!=null||!b.Ready)continue;
                 u.Elapsed=Math.Min(u.Duration,u.Elapsed+dt);
-                if(u.Elapsed+1e-9>=u.Duration){u.Elapsed=u.Duration;u.Complete=true;}
+                if(u.Elapsed+1e-9>=u.Duration){u.Elapsed=u.Duration;u.Complete=true;Sound(PlayableSoundKind.UpgradeComplete,b.Position,PlayableEntityKind.Tank,b.Owner,true);}
             }
         }
         private PlayableRefineryUpgradeSnapshot UpgradeSnapshot(Building b)

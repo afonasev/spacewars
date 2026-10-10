@@ -1,0 +1,57 @@
+{
+  "baseline_runtime": "b02d6a46e299e33b2454fdce319c7ade0d511034",
+  "capture_commit": "4405e0f7",
+  "capture_source_sha256": "64318392e46e25ebfd322e4fabdcd6796b76b00d54f1589ce7915e154d9fe6b4",
+  "generation": 1,
+  "seed": 19092026,
+  "world_version": 9,
+  "command_schema": 9,
+  "files": [
+    {
+      "file": "crossings-arrived.world",
+      "sha256": "b954fef48a2f4a6703f083c5a6de97ca82b2c340952105f1b58b3ed3cdb295e5",
+      "bytes": 229637
+    },
+    {
+      "file": "crossings-installed.world",
+      "sha256": "4530eb0c0d82062c4a6f857124317dcfd7fab32f5c59e41d0512f103b7852f5f",
+      "bytes": 95799
+    },
+    {
+      "file": "crossings-pending.world",
+      "sha256": "e09ffb305713c5da3ca8efcd5742af7837c08356c3c14dd7ddcce1900959af74",
+      "bytes": 124793
+    },
+    {
+      "file": "flat-arrived.world",
+      "sha256": "80e745be29d4c1a65adf35cd18249fe8f35772624b1ba3707441f7a789ef599a",
+      "bytes": 141164
+    },
+    {
+      "file": "flat-installed.world",
+      "sha256": "fff3bd8270e918c31a632cad9c85c76ea815f0f15ebc762dfa4e32015604bc7c",
+      "bytes": 7406
+    },
+    {
+      "file": "flat-pending.world",
+      "sha256": "66aa794f9bea0658a1083cd017314fa7fab8711162dd2de6e85829b8cf9fc108",
+      "bytes": 8108
+    },
+    {
+      "file": "foundry-arrived.world",
+      "sha256": "426697870aa2218542cd9ea83b90da6526d18fa16c00f14b4a039549164482b2",
+      "bytes": 190205
+    },
+    {
+      "file": "foundry-installed.world",
+      "sha256": "c887534f8e61fcea6d469d10b4fbbc77ea7ee77133e6d46995e9628d32f68c69",
+      "bytes": 187421
+    },
+    {
+      "file": "foundry-pending.world",
+      "sha256": "12ac4088aea0257ba067c9d8b9ebea4c78e2ea4336e24112c65057acbd672e8a",
+      "bytes": 194011
+    }
+  ],
+  "scope": "Independent old-runtime v1 optional extension fixtures; no layer guessed or receipt invented on authored restore."
+}

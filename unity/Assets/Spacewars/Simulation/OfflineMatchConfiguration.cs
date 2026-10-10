@@ -24,8 +24,8 @@ namespace Spacewars.Simulation
         public int LogicalPlayer{get;} public PlayableBuildingKind Kind{get;} public int SiteId{get;} public int SlotId{get;} public NavPoint Position{get;} public double Heading{get;}
         public OfflineScenarioBuilding(int logicalPlayer,PlayableBuildingKind kind,int site,int slot,NavPoint position,double heading=0){LogicalPlayer=logicalPlayer;Kind=kind;SiteId=site;SlotId=slot;Position=position;Heading=heading;}
     }
-    // First native binding supports source-validated flat authored fixtures only.
-    // Terrain/surface loaders are a separate delivery; no implicit Three Crossings clone.
+    // Flat SOURCE fixtures retain their explicit flat identity; native authored terrain
+    // opts in with matching sites, solids, support geometry and map identity.
     public sealed class OfflineMatchConfiguration
     {
         public string SourceIdentity{get;} public string MapIdentity{get;} public string RouteProvenance{get;} public int Seed{get;}
@@ -34,12 +34,17 @@ namespace Spacewars.Simulation
         private readonly double[,] routeCosts;
         public OfflineMatchConfiguration(PlayableProfile profile,string source,string map,string routeProvenance,int seed,OfflineParticipant[] roster,OfflineStart[] starts,TerritorySite[] sites,NavObstacle[] obstacles,double[,] costs,string[] spectators=null,OfflineScenarioUnit[] scenario=null,string terrain="flat-ground-v1",OfflineScenarioBuilding[] scenarioBuildings=null)
         {
-            if(profile==null||profile.AuthoredMap!=null||terrain!="flat-ground-v1"||string.IsNullOrWhiteSpace(source)||string.IsNullOrWhiteSpace(map)||string.IsNullOrWhiteSpace(routeProvenance))throw new ArgumentException("Unsupported source/map/terrain binding.");
+            if(profile==null||(profile.AuthoredMap==null?terrain!="flat-ground-v1":terrain!=profile.AuthoredMap.Id)||string.IsNullOrWhiteSpace(source)||string.IsNullOrWhiteSpace(map)||string.IsNullOrWhiteSpace(routeProvenance))throw new ArgumentException("Unsupported source/map/terrain binding.");
             if(roster==null||starts==null||sites==null||obstacles==null||costs==null)throw new ArgumentException("Missing authored binding.");
             if(roster.Any(x=>x==null||string.IsNullOrWhiteSpace(x.Id)||x.LogicalPlayer<1||x.LogicalPlayer>starts.Length||x.Team<1||x.Team>8||!Enum.IsDefined(typeof(OfflineControl),x.Control))||roster.Count(x=>x.Control==OfflineControl.Human)>4)throw new ArgumentException("Invalid offline roster.");
             spectators=spectators??Array.Empty<string>();scenario=scenario??Array.Empty<OfflineScenarioUnit>();scenarioBuildings=scenarioBuildings??Array.Empty<OfflineScenarioBuilding>();
             if(spectators.Any(string.IsNullOrWhiteSpace)||spectators.Distinct().Count()!=spectators.Length||spectators.Intersect(roster.Select(x=>x.Id)).Any())throw new ArgumentException("Invalid spectator roster.");
             if(starts.Any(x=>x==null||string.IsNullOrWhiteSpace(x.Id))||starts.Length>8||starts.Select(x=>x.Id).Distinct().Count()!=starts.Length||starts.Select(x=>x.SiteId).Distinct().Count()!=starts.Length||sites.Select(x=>x.Id).Distinct().Count()!=sites.Length||costs.GetLength(0)!=starts.Length||costs.GetLength(1)!=starts.Length)throw new ArgumentException("Invalid authored starts/sites/routes.");
+            if(profile.AuthoredMap!=null)
+            {
+                TerritoryRules.ValidateArena(profile);var expected=profile.AuthoredMap.Sites(profile);
+                if(sites.Length!=expected.Length||!sites.Zip(expected,SameSite).All(equal=>equal)||!obstacles.SequenceEqual(profile.AuthoredMap.MovementBlockers))throw new ArgumentException("Authored terrain/site binding mismatch.");
+            }
             var geometry=new NavGeometry(profile.ArenaHalfExtent,obstacles,1);var envelopes=new List<Tuple<NavPoint,double,int,bool>>();
             foreach(var site in sites){if(site==null||site.Id<1||(site.Kind!=PlayableBuildingKind.Headquarters&&site.Kind!=PlayableBuildingKind.Outpost&&site.Kind!=PlayableBuildingKind.Mine)||!Finite(site.Position.X)||!Finite(site.Position.Z)||site.Slots.Select(x=>x.Id).Distinct().Count()!=site.Slots.Count||site.Slots.Select((x,i)=>x.Id!=i+1||!Finite(x.Position.X)||!Finite(x.Position.Z)||!Finite(x.Heading)).Any(x=>x))throw new ArgumentException("Null site.");envelopes.Add(Tuple.Create(site.Position,TerritoryRules.Radius(profile,site.Kind),site.Id,true));foreach(var slot in site.Slots)envelopes.Add(Tuple.Create(slot.Position,Math.Max(profile.ScienceFootprintRadius,Math.Max(profile.FactoryFootprintRadius,profile.RefineryFootprintRadius)),site.Id,false));}
             for(int i=0;i<envelopes.Count;i++){var e=envelopes[i];if(!geometry.IsFree(e.Item1,e.Item2*Math.Sqrt(2)+profile.ExplorerCollisionRadius))throw new ArgumentException("Unsupported site envelope.");for(int j=0;j<i;j++)if(!(e.Item3==envelopes[j].Item3&&(e.Item4||envelopes[j].Item4))&&Distance(e.Item1,envelopes[j].Item1)<e.Item2+envelopes[j].Item2)throw new ArgumentException("Overlapping authored envelopes.");}
@@ -64,6 +69,7 @@ namespace Spacewars.Simulation
             for(int i=0;i<placements.Length;i++){for(int j=0;j<i;j++)if(Distance(placements[i].Item1,placements[j].Item1)<placements[i].Item2+placements[j].Item2)throw new ArgumentException("Overlapping scenario units.");foreach(var start in starts)if(Distance(placements[i].Item1,start.ExplorerAnchor)<placements[i].Item2+profile.ExplorerCollisionRadius)throw new ArgumentException("Scenario unit overlaps automatic Explorer.");}
 
         }
+        private static bool SameSite(TerritorySite a,TerritorySite b)=>a!=null&&a.Id==b.Id&&a.Kind==b.Kind&&a.Position.Equals(b.Position)&&a.Slots.Count==b.Slots.Count&&a.Slots.Zip(b.Slots,(x,y)=>x.Id==y.Id&&x.Position.Equals(y.Position)&&x.Heading==y.Heading).All(equal=>equal);
         private static bool Finite(double n)=>!double.IsNaN(n)&&!double.IsInfinity(n);
         private static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
         public PlayableProfile Profile{get;}

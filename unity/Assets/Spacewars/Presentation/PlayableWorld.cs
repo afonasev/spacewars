@@ -18,9 +18,13 @@ namespace Spacewars.Presentation
         }
         private readonly Material material;
         public PlayableFogMask Fog{get;}
+        public System.Func<PlayableOwner?,Color> OwnerPaint {get;set;}
         private PlayableProfile profile;
         public void Rebind(PlayableProfile next){profile=next;foreach(var id in new List<int>(actors.Keys))Remove(id);}
         private readonly Transform root;
+        private int presentationLayer;
+        public void SetPresentationLayer(int layer){presentationLayer=layer;Layer(root.gameObject);}
+        private void Layer(GameObject value){foreach(var part in value.GetComponentsInChildren<Transform>(true))part.gameObject.layer=presentationLayer;}
         private readonly Dictionary<int, Actor> actors = new Dictionary<int, Actor>();
         public IReadOnlyDictionary<int, Actor> Actors => actors;
         private static readonly Color Ally = new Color(.19f,.72f,.77f), Enemy = new Color(.93f,.34f,.23f), Dark = new Color(.09f,.13f,.16f);
@@ -32,7 +36,8 @@ namespace Spacewars.Presentation
             if(!shader)throw new System.InvalidOperationException("Missing territory fog shader");
             material=new Material(shader);Fog=new PlayableFogMask(profile);
             material.SetColor("_FogColor",new Color((float)profile.FogTintR,(float)profile.FogTintG,(float)profile.FogTintB));material.SetTexture("_FogMask",Fog.Texture);material.SetVector("_FogBounds",new Vector4((float)extent,(float)extent,0,0));
-            if(profile.AuthoredMap!=null){CreateThreeCrossings(profile.AuthoredMap);return;}
+            if(profile.AuthoredMap is FoundryMap foundry){CreateFoundry(foundry);return;}
+            if(profile.AuthoredMap is ThreeCrossingsMap crossings){CreateThreeCrossings(crossings);return;}
             Part("Basalt arena", root, new Vector3(0,-.24f,0),new Vector3((float)extent*2,.4f,(float)extent*2),new Color(.20f,.25f,.25f));
             for (int i=-(int)extent;i<extent;i+=4)
             {
@@ -93,9 +98,24 @@ namespace Spacewars.Presentation
             // Authored heights from src/game/manifest.ts preserve web normalization.
             double scale=BuildingScale(key);
             model.localScale=Vector3.one*(float)scale;
-            // Existing model front is +Z. The pad's domain exit direction is +X.
-            model.localRotation=Quaternion.Euler(0,90,0);a.Turbine=model.GetComponentsInChildren<Transform>(true).FirstOrDefault(t=>t.name=="turbineYaw");
+            // Authored model front is +Z; presentation facing follows the starting camera, independent of domain exits.
+            model.localRotation=BuildingFacing;a.Turbine=model.GetComponentsInChildren<Transform>(true).FirstOrDefault(t=>t.name=="turbineYaw");
             return a;
+        }
+        public void FaceBuilding(Actor actor,Camera camera=null)=>actor.Hull.rotation=Facing(camera);
+        private Quaternion Facing(Camera camera)
+        {
+            var bearing=camera?Vector3.ProjectOnPlane(-camera.transform.forward,Vector3.up).normalized:Vector3.zero;
+            return bearing!=Vector3.zero?Quaternion.LookRotation(bearing,Vector3.up):BuildingFacing;
+        }
+        private Quaternion BuildingFacing
+        {
+            get
+            {
+                var towardCamera=new Vector3((float)profile.CameraOffsetX,0,(float)profile.CameraOffsetZ);
+                // A directly overhead camera has no horizontal bearing; retain a stable south-facing front.
+                return Quaternion.LookRotation(towardCamera==Vector3.zero?Vector3.back:towardCamera,Vector3.up);
+            }
         }
         private static string BuildingKey(string kind,bool upgraded)=>kind=="ScientificCenter"?"scientificCenter":kind=="Refinery"&&upgraded?"refineryUpgraded":kind.ToLowerInvariant();
         public void UpdateRefineryModel(Actor actor,PlayableBuildingSnapshot building,long tick)
@@ -106,7 +126,7 @@ namespace Spacewars.Presentation
                 Object.Destroy(actor.Hull.gameObject);
                 string key=BuildingKey(building.Kind.ToString(),building.RefineryUpgraded);
                 actor.Hull=Model(key,actor.Root,building.Owner==PlayableOwner.Player);
-                actor.Hull.localScale=Vector3.one*(float)BuildingScale(key);actor.Hull.localRotation=Quaternion.Euler(0,90,0);
+                actor.Hull.localScale=Vector3.one*(float)BuildingScale(key);actor.Hull.localRotation=BuildingFacing;
                 actor.RefineryUpgraded=building.RefineryUpgraded;actor.PresentationPaint=null;
                 actor.Turbine=actor.Hull.GetComponentsInChildren<Transform>(true).FirstOrDefault(t=>t.name=="turbineYaw");
             }
@@ -132,7 +152,7 @@ namespace Spacewars.Presentation
         {
             var prefab=Resources.Load<GameObject>("StyleA/"+key);
             if(!prefab)throw new System.InvalidOperationException("Missing approved Style A model: "+key);
-            var model=Object.Instantiate(prefab,parent,false);var owner=friendly?Ally:Enemy;
+            var model=Object.Instantiate(prefab,parent,false);Layer(model);var owner=friendly?Ally:Enemy;
             foreach(var renderer in model.GetComponentsInChildren<Renderer>(true))
             {
                 var materials=renderer.sharedMaterials;
@@ -170,15 +190,16 @@ namespace Spacewars.Presentation
             actor.Health.localPosition=new Vector3((width-2f)*.5f,.01f,-.01f);
             actor.Health.gameObject.SetActive(width>0);
         }
-        public void Remove(int id){if(actors.TryGetValue(id,out var a)){Object.Destroy(a.Health.parent.gameObject);Object.Destroy(a.Root.gameObject);actors.Remove(id);}}
-        public void Clear(){Fog.Reset();ClearMemories();ClearPads();foreach(var a in actors.Values){Object.Destroy(a.Health.parent.gameObject);Object.Destroy(a.Root.gameObject);}actors.Clear();}
-        public void Dispose(){Clear();Fog.Dispose();surfaceMaterials?.Dispose();foreach(var mesh in terrainMeshes)Object.Destroy(mesh);terrainMeshes.Clear();Object.Destroy(material);if(root)Object.Destroy(root.gameObject);}
+        public void Remove(int id){if(actors.TryGetValue(id,out var a)){ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);actors.Remove(id);}}
+        public void Clear(){Fog.Reset();ClearMemories();ClearPads();foreach(var a in actors.Values){ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);}actors.Clear();}
+        public void Dispose(){Clear();Fog.Dispose();surfaceMaterials?.Dispose();if(foundryRoadMask)ReleaseWorldObject(foundryRoadMask);if(foundryLavaHeat)ReleaseWorldObject(foundryLavaHeat);foreach(var mesh in terrainMeshes)ReleaseWorldObject(mesh);terrainMeshes.Clear();ReleaseWorldObject(material);if(root)ReleaseWorldObject(root.gameObject);}
         public GameObject Part(string name,Transform parent,Vector3 position,Vector3 scale,Color color,PrimitiveType shape=PrimitiveType.Cube)
         {
-            var g=GameObject.CreatePrimitive(shape);g.name=name;g.transform.SetParent(parent,false);g.transform.localPosition=position;g.transform.localScale=scale;
-            Object.Destroy(g.GetComponent<Collider>());g.GetComponent<Renderer>().sharedMaterial=material;
+            var g=GameObject.CreatePrimitive(shape);g.name=name;g.layer=presentationLayer;g.transform.SetParent(parent,false);g.transform.localPosition=position;g.transform.localScale=scale;
+            ReleaseWorldObject(g.GetComponent<Collider>());g.GetComponent<Renderer>().sharedMaterial=material;
             var properties=new MaterialPropertyBlock();properties.SetColor("_BaseColor",color);g.GetComponent<Renderer>().SetPropertyBlock(properties);return g;
         }
+        private static void ReleaseWorldObject(Object value){if(Application.isPlaying)Object.Destroy(value);else Object.DestroyImmediate(value);}
         public Vector3 Point(NavPoint p)=>new Vector3((float)p.X,(float)(profile.AuthoredMap?.SurfaceHeight(p)??0),(float)p.Z);
     }
 }
