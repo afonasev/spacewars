@@ -38,6 +38,30 @@ namespace Spacewars.Tests.EditMode
             Assert.False(State.PendingRally.HasValue);return (PlayableCommandReceipt[])Call("DrainRallyReceipts");
         }
         private void Accept(NavPoint target){Assert.AreEqual(PlayableCommandStatus.Accepted,Rally(target));Assert.AreEqual(PlayableCommandStatus.Applied,Resolve().Last().Status);Assert.True(State.HasRally);Assert.AreEqual(target,State.Rally);}
+        [TestCase(PlayableBuildingKind.Headquarters)]
+        [TestCase(PlayableBuildingKind.Outpost)]
+        [TestCase(PlayableBuildingKind.Factory)]
+        public void EveryProducerRoleKeepsCompleteFootprintProofAndProductionRestriction(PlayableBuildingKind kind)
+        {
+            Field("Kind",kind);var point=new NavPoint(-8,10);Assert.AreEqual(PlayableCommandStatus.Accepted,Rally(point));
+            var radii=new[]{p.TankCollisionRadius,p.ExplorerCollisionRadius,p.ShkvalCollisionRadius};
+            foreach(var radius in radii){var request=Next();Assert.AreEqual(radius,request.Profile.Radius);Assert.False(State.HasRally);Answer(request);}
+            Assert.IsTrue(State.HasRally);Assert.AreEqual(point,State.Rally);
+            if(kind!=PlayableBuildingKind.Factory)Assert.AreEqual(PlayableCommandStatus.InvalidEntity,(PlayableCommandStatus)Call("Apply",new PlayableCommand(1,++sequence,"player-1",PlayableCommandKind.QueueTank,new[]{factory}),null),"Rally eligibility must not broaden production");
+        }
+        [Test] public void HeadquartersPendingAndAcceptedRallySurviveExactWorldRestore()
+        {
+            domain=Activator.CreateInstance(Domain,F,null,new object[]{p,1L,false},null);
+            factory=View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.Headquarters&&b.Owner==PlayableOwner.Player).Id;
+            Assert.AreEqual(PlayableCommandStatus.Accepted,Rally(new NavPoint(-15,7)));
+            byte[] pending=(byte[])Call("CaptureWorldBytes",7,"rally-control-test");
+            domain=Domain.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{pending,p,7,"rally-control-test"});
+            CollectionAssert.AreEqual(pending,(byte[])Call("CaptureWorldBytes",7,"rally-control-test"));Assert.IsTrue(State.PendingRally.HasValue);
+            Resolve();Assert.IsTrue(State.HasRally);Assert.AreEqual(new NavPoint(-15,7),State.Rally);
+            byte[] accepted=(byte[])Call("CaptureWorldBytes",7,"rally-control-test");
+            domain=Domain.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{accepted,p,7,"rally-control-test"});
+            CollectionAssert.AreEqual(accepted,(byte[])Call("CaptureWorldBytes",7,"rally-control-test"));Assert.IsTrue(State.HasRally);Assert.AreEqual(new NavPoint(-15,7),State.Rally);
+        }
         [Test] public void BackgroundAdmissionNeedsAllThreeTypedFullFootprints()
         {
             var target=new NavPoint(10,10);Assert.AreEqual(PlayableCommandStatus.Accepted,Rally(target));Assert.False(State.HasRally);

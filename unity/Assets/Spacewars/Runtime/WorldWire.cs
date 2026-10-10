@@ -672,7 +672,7 @@ namespace Spacewars.Runtime
             Array(w,m.MovementBlockers.ToArray(),x=>Write(w,x));
             Array(w,m.Solids.ToArray(),x=>Write(w,x));
             Array(w,crossings.Water.ToArray(),x=>Write(w,x));
-            }else if(m is FoundryMap foundry){Number(w,foundry.Scale);Number(w,foundry.UpperHeight);Number(w,m.DirectFireHeight);Array(w,m.MovementBlockers.ToArray(),x=>Write(w,x));Array(w,m.Solids.ToArray(),x=>Write(w,x));}else throw new ArgumentException("Unsupported native terrain binding.");
+            }else if(m is FoundryMap foundry){Number(w,foundry.Scale);Number(w,foundry.UpperHeight);Number(w,m.DirectFireHeight);Array(w,m.MovementBlockers.ToArray(),x=>Write(w,x));Array(w,m.Solids.ToArray(),x=>Write(w,x));}else if(m is AiTestMap){Number(w,m.DirectFireHeight);Array(w,m.MovementBlockers.ToArray(),x=>Write(w,x));Array(w,m.Solids.ToArray(),x=>Write(w,x));}else throw new ArgumentException("Unsupported native terrain binding.");
             w.Write(m.Supports.Count);
             foreach(var s in m.Supports){String(w,s.Id);
             Write(w,s.Bounds);
@@ -681,7 +681,7 @@ namespace Spacewars.Runtime
             Write(w,s.Gradient);
             Write(w,s.Origin);
             }}if(!legacyQueue){w.Write(p.UnitOrderQueueLimit);Number(w,p.CameraEdgePanSpeed);Number(w,p.CameraEdgePanZonePixels);}
-            if(!legacyQueue&&!legacyMarch)Number(w,p.GroupMarchMaximumStretch);});
+            if(!legacyQueue&&!legacyMarch){Number(w,p.GroupMarchMaximumStretch);Number(w,p.IncomeMarkerFontPixels);Number(w,p.IncomeMarkerRisePixels);Number(w,p.IncomeMarkerDurationSeconds);Number(w,p.RallyFlagHeight);}});
 
     }
 }

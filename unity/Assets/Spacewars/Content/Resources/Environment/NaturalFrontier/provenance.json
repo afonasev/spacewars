@@ -28,5 +28,14 @@
     "aniso": 8,
     "maxSize": 2048
   },
-  "water": "Procedural world-space shader, no image texture; same fog material as terrain"
+  "water": "Procedural world-space shader, no image texture; same fog material as terrain",
+  "siblingVariants": {
+    "created": "2026-10-10",
+    "generator": "built-in imagegen",
+    "manifest": "docs/varied-crisp-map-surfaces/generation.json",
+    "countPerFamily": 3,
+    "actualSourceSize": 1254,
+    "normalization": "linear luminance ratios in EnvironmentArt and FoundrySurfaceProfile",
+    "import": "ToNearest POT 1024 for compressed GPU storage; high quality compression, Repeat, Trilinear, mipmaps, aniso 8"
+  }
 }

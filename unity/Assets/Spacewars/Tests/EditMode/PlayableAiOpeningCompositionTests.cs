@@ -13,9 +13,9 @@ namespace Spacewars.Tests.EditMode
     {
         private static bool Until(Func<bool> predicate)=>SpinWait.SpinUntil(predicate,8000);
 
-        [Test] public void NativeDescriptorRetainsTheSupportedOpenings()
+        [Test] public void NativeDescriptorUsesFiveExecutableOpenings()
         {
-            CollectionAssert.AreEqual(new[]{PlayableAiOpening.Safe,PlayableAiOpening.GreedySafe,PlayableAiOpening.GreedyMine,PlayableAiOpening.BlindRush,PlayableAiOpening.ExplorerAllIn,PlayableAiOpening.DoubleMineExplorerRush},PlayableAiOpeningComposition.Supported);
+            CollectionAssert.AreEqual(new[]{PlayableAiOpening.Safe,PlayableAiOpening.GreedySafe,PlayableAiOpening.GreedyMine,PlayableAiOpening.BlindRush,PlayableAiOpening.ExplorerAllIn},PlayableAiOpeningComposition.Supported);
             Assert.AreEqual(PlayableAiOpeningComposition.ProfileBinding(AiProfile.Initial),PlayableAiOpeningComposition.SourceProfileIdentity);
             Assert.AreEqual("native-strategic-ai:opening-v1",PlayableAiOpeningComposition.SourceIdentity);
             Assert.Throws<ArgumentException>(()=>PlayableAiOpeningComposition.Initialize(1,"player-1","foreign@1"));
@@ -30,7 +30,7 @@ namespace Spacewars.Tests.EditMode
             Assert.False(typeof(PlayableAiOpeningCompositionState).GetProperties().Any(x=>x.Name.Contains("Enemy")||x.Name.Contains("Vision")||x.Name.Contains("Geometry")||x.Name.Contains("Action")));
         }
 
-        [Test] public void DeterministicSelectorCanRepresentEveryAuditedSourceOpening()
+        [Test] public void DeterministicSelectorCanRepresentEveryNativeOpening()
         {
             var selected=new HashSet<PlayableAiOpening>();
             for(var seed=0;seed<10000&&selected.Count<PlayableAiOpeningComposition.Supported.Count;seed++)selected.Add(PlayableAiOpeningComposition.Initialize(seed,"player-1").Opening);

@@ -14,6 +14,8 @@ namespace Spacewars.Runtime
     }
     internal sealed partial class PlayableDomain
     {
+        internal int DiagnosticUnitCount=>units.Count;
+        internal int DiagnosticBuildingCount=>buildings.Count;
         internal bool DiagnosticFactoryExitUsable(int id,PlayableEntityKind kind)=>buildings.TryGetValue(id,out var b)&&b.Kind==PlayableBuildingKind.Factory&&PlayableUnitRules.Supported(kind)&&TryFactoryExit(b,kind,out _);
     }
 }

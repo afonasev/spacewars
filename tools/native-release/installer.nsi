@@ -7,6 +7,8 @@ Unicode true
 Name "${APPNAME} ${VERSION}"
 !define MUI_ICON "${PAYLOAD}/Spacewars.ico"
 !define MUI_UNICON "${PAYLOAD}/Spacewars.ico"
+Icon "${PAYLOAD}/Spacewars.ico"
+UninstallIcon "${PAYLOAD}/Spacewars.ico"
 OutFile "${OUTFILE}"
 InstallDir "$PROGRAMFILES64\${APPNAME}"
 InstallDirRegKey HKLM "Software\${APPNAME}" "InstallDir"

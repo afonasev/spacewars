@@ -14,10 +14,16 @@ namespace Spacewars.Runtime
 
         public NavigationAdmission Admission => session.Admission;
         public long CorridorRetainedBytes=>session.CorridorRetainedBytes;
-        // Keeps scheduler growth and authority corridor installation under one
-        // retention gate for the complete host work quantum.
+        internal int QueuedRequestCount=>session.Requests.Count;
+        internal event Action Changed {add{session.HostChanged+=value;}remove{session.HostChanged-=value;}}
+        public void SignalHost()=>session.SignalHost();
+        // Short atomic transport commits only; computation must run outside this gate.
         public void RunHostStep(Action step)=>session.RunHostStep(step);
         public void SetHostRetainedBytes(long bytes)=>session.SetHostRetainedBytes(bytes);
+        internal double TransportWaitMilliseconds=>session.TransportWaitMilliseconds;
+        internal double TransportHoldMilliseconds=>session.TransportHoldMilliseconds;
+        internal long BeginHostAllocation()=>session.BeginHostAllocation();
+        internal void EndHostAllocation(long bytes)=>session.EndHostAllocation(bytes);
         public bool TryTransfer(LayeredNavigationScheduler scheduler,
             Func<NavigationRequest, NavigationAdmission, NavScheduledRequest> prepare, out NavigationRequest request)
             => session.TryTransferRouteToScheduler(scheduler,(candidate,admission)=>{

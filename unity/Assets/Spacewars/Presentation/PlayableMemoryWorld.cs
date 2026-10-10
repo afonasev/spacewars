@@ -34,7 +34,7 @@ namespace Spacewars.Presentation
                     }
                     memories.Add(known.Id,anchor);
                 }
-                anchor.position=Point(known.Position);anchor.rotation=Quaternion.identity;anchor.GetChild(0).rotation=Facing(camera);
+                anchor.position=Point(known.Position)+Vector3.up*ApronArt.apronHeight;anchor.rotation=Quaternion.identity;anchor.GetChild(0).rotation=Facing(camera);
             }
             foreach(int id in memories.Keys.ToArray())if(!retained.Contains(id)){Object.Destroy(memories[id].gameObject);memories.Remove(id);}
         }

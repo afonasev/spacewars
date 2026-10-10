@@ -9,12 +9,19 @@ namespace Spacewars.Presentation
     [Serializable] public sealed class EnvironmentArtProfile
     {
         public string id="natural-frontier-v1";
-        public int revision=5;
+        public int revision=9;
+        [SurfaceSetting("Construction aprons","Building margin","Optional margin beyond the built-in lower foundation platform; visual only.","m",0,1.5f,.05f)] public float apronMargin=0;
+        [SurfaceSetting("Construction aprons","Marking width","Width of perimeter dashes and corner brackets.","m",.03f,.2f,.01f)] public float apronMarkWidth=.07f;
+        [SurfaceSetting("Construction aprons","Concrete value","Neutral apron concrete brightness before scene lighting.","ratio",.2f,.8f,.01f)] public float apronConcreteValue=.43f;
+        [SurfaceSetting("Construction aprons","Surface height","Flush technical apron elevation above terrain; no collision.","m",.02f,.15f,.01f)] public float apronHeight=.04f;
+        [SurfaceSetting("Textures","Relief slope limit","Maximum micro-normal slope; prevents dark derivative spikes while retaining fine relief.","ratio",.05f,.8f,.05f)] public float reliefSlopeLimit=.35f;
         [SurfaceSetting("Textures","Earth tile","World-space size of one earth texture tile.","m",1,20,.25f)] public float earthTile=7;
         [SurfaceSetting("Textures","Rock tile","World-space size of one cliff texture tile.","m",1,20,.25f)] public float rockTile=6;
         [SurfaceSetting("Textures","Concrete tile","World-space size of one concrete texture tile.","m",1,20,.25f)] public float concreteTile=5;
         [SurfaceSetting("Textures","Steel tile","World-space size of one brushed steel texture tile.","m",1,20,.25f)] public float steelTile=4;
         [SurfaceSetting("Textures","Detail strength","Blend between base art and photographed-style texture detail.","ratio",0,1,.05f)] public float textureStrength=.85f;
+        [SurfaceSetting("Textures","Variant patch scale","Extent of irregular sibling texture regions; independent of detail tile size.","m",4,50,1)] public float variantPatchScale=18;
+        [SurfaceSetting("Textures","Variant transition","Noise-space width of soft sibling transitions; lower retains more single-image detail.","ratio",.02f,.3f,.01f)] public float variantBlendWidth=.08f;
         [SurfaceSetting("Textures","Relief","Small surface normal variation; does not displace geometry.","ratio",0,1,.05f)] public float relief=.3f;
         [SurfaceSetting("Landscape","Moss","Muted moss on upward facing rock surfaces.","ratio",0,1,.05f)] public float moss=.3f;
         [SurfaceSetting("Landscape","Wet bank width","Darker earth along the river edge.","m",.1f,4,.1f)] public float wetBankWidth=1.2f;
@@ -76,17 +83,28 @@ namespace Spacewars.Presentation
 
     public static class EnvironmentArt
     {
+        // Measured linear source luminance is asset calibration data, not an art control.
+        public static void BindFamily(Material material,string role,string path,Vector3 means)
+        {
+            var suffixes=new[]{"","-b","-c"};
+            for(int i=0;i<3;i++)
+            {
+                var texture=Resources.Load<Texture2D>(path+suffixes[i]);
+                if(!texture)throw new InvalidOperationException("Missing environment texture: "+path+suffixes[i]);
+                material.SetTexture("_"+role+"Tex"+(i==0?"":i==1?"B":"C"),texture);
+            }
+            material.SetVector("_"+role+"VariantGain",new Vector4(1,means.x/means.y,means.x/means.z,means.x));
+        }
         // R8 distance encoding covers eight world meters; fixed data contract, not an art setting.
         public const float ShoreDistanceRange=8;
         public static void Apply(Material material,EnvironmentArtProfile profile)
         {
             profile.Validate();
-            foreach(var role in new[]{"Earth","Rock","Concrete","Steel"})
-            {
-                var texture=Resources.Load<Texture2D>("Environment/NaturalFrontier/"+role);
-                if(!texture)throw new InvalidOperationException("Missing environment texture: "+role);
-                material.SetTexture("_"+role+"Tex",texture);
-            }
+            BindFamily(material,"Earth","Environment/NaturalFrontier/Earth",new Vector3(.13535270f,.15587468f,.14469715f));
+            BindFamily(material,"Rock","Environment/NaturalFrontier/Rock",new Vector3(.13677501f,.13289979f,.14225178f));
+            BindFamily(material,"Concrete","Environment/NaturalFrontier/Concrete",new Vector3(.38497328f,.37142344f,.37949659f));
+            BindFamily(material,"Steel","Environment/NaturalFrontier/Steel",new Vector3(.13237418f,.12266814f,.12128175f));
+            material.SetVector("_TextureVariants",new Vector4(profile.variantPatchScale,profile.variantBlendWidth,0,0));
             material.SetVector("_Weathering",new Vector4(profile.dustReach,profile.dustStrength,profile.dustWind*Mathf.Deg2Rad,profile.wearStrength));
             material.SetFloat("_ContactShade",profile.contactShade);
             material.SetVector("_Geology",new Vector4(profile.geologyScale,profile.rustCoverage,profile.strataSpacing,profile.strataContrast));
@@ -94,6 +112,7 @@ namespace Spacewars.Presentation
             material.SetColor("_RustTint",Color.HSVToRGB(.055f,.72f,profile.rustValue));
             material.SetVector("_NaturalBlend",new Vector4(profile.naturalBlendWidth,profile.blendVariation,profile.blendPatchSize,0));
             material.SetVector("_ArtTiles",new Vector4(profile.earthTile,profile.rockTile,profile.concreteTile,profile.steelTile));
+            material.SetFloat("_ArtReliefLimit",profile.reliefSlopeLimit);
             material.SetVector("_ArtDetail",new Vector4(profile.textureStrength,profile.relief,profile.moss,profile.wetBankWidth));
             material.SetColor("_WaterDeep",Color.HSVToRGB(profile.waterHue,profile.waterSaturation,profile.waterBrightness));
             material.SetColor("_WaterShallow",Color.HSVToRGB(profile.waterHue,.65f*profile.waterSaturation,profile.shallowBrightness));

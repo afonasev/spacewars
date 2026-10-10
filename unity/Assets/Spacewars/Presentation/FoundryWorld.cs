@@ -15,7 +15,9 @@ namespace Spacewars.Presentation
                 var obj=new GameObject("Connected layered basalt / bank");obj.transform.SetParent(root,false);
                 var mesh=FoundryTerrainMesh.Rock(rock,settings,map.Lava,map.SurfaceHeight);terrainMeshes.Add(mesh);obj.AddComponent<MeshFilter>().sharedMesh=mesh;
                 var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=material;
-                var block=new MaterialPropertyBlock();block.SetColor("_BaseColor",new Color(settings.basaltValue*.92f,settings.basaltValue*.95f,settings.basaltValue));block.SetFloat("_SurfaceRole",10);renderer.SetPropertyBlock(block);
+                var block=new MaterialPropertyBlock();block.SetColor("_BaseColor",new Color(settings.basaltValue*.92f,settings.basaltValue*.95f,settings.basaltValue));block.SetFloat("_SurfaceRole",10);
+                if(System.Linq.Enumerable.Any(map.Lava,c=>System.Linq.Enumerable.All(c.Footprint.Vertices,rock.Contains)))block.SetVector("_FoundryLavaRim",new Vector4((float)rock.Top-settings.lavaDepth,(float)rock.Top,1,0));
+                renderer.SetPropertyBlock(block);
             }
             foreach(var rock in System.Linq.Enumerable.Skip(map.Solids,map.Solids.Count-4))
             {
@@ -26,7 +28,10 @@ namespace Spacewars.Presentation
                 MapPrism("Foundry grey industrial annex",annex,rock.Top-settings.crownRelief,rock.Top+settings.industrialHeight*.6f,new Color(.37f,.39f,.40f),null,12);
             }
             foreach(var lava in map.Lava)
-                MapPrism("Lava river / fissure",lava,0,map.UpperHeight+(lava.MinX>90*map.Scale?10:7)+.06,FoundryLava,null,11);
+            {
+                float level=FoundryFissureMesh.Level(map,lava,settings);
+                MapPrism("Lava river / fissure",lava,level-.04f,level,FoundryLava,null,11); // Thin presentation fluid below the exposed rim.
+            }
             var sites=map.Sites(profile);
             // A single mask excludes complete pads before paving: no texture boundary bisects a site.
             double Envelope(TerritorySite site)=>site.Slots.Count==0?TerritoryRules.Radius(profile,site.Kind)+1:profile.SlotRingRadius+System.Math.Max(profile.ScienceFootprintRadius,System.Math.Max(profile.FactoryFootprintRadius,profile.RefineryFootprintRadius))+1;
@@ -43,8 +48,12 @@ namespace Spacewars.Presentation
                 double rockDistance=double.MaxValue;foreach(var rock in map.Solids)rockDistance=System.Math.Min(rockDistance,System.Math.Sqrt(rock.Footprint.DistanceSquared(q)));
                 float foot=1-Mathf.SmoothStep(0,1,(float)rockDistance/(settings.rockBlend*irregular));
                 pixels[z*resolution+x]=new Color(amount,foot,0,1);
-                double lavaDistance=0;foreach(var lava in map.Lava)if(lava.Contains(q))lavaDistance=System.Math.Max(lavaDistance,System.Math.Sqrt(lava.BoundaryDistanceSquared(q)));
-                lavaPixels[z*resolution+x]=new Color(Mathf.SmoothStep(0,1,(float)lavaDistance/settings.lavaCrustWidth),0,0,1);
+                double lavaDistance=0,glowDistance=double.MaxValue;foreach(var lava in map.Lava)
+                {
+                    if(lava.Contains(q))lavaDistance=System.Math.Max(lavaDistance,System.Math.Sqrt(lava.BoundaryDistanceSquared(q)));
+                    glowDistance=System.Math.Min(glowDistance,System.Math.Sqrt(lava.Footprint.DistanceSquared(q)));
+                }
+                lavaPixels[z*resolution+x]=new Color(Mathf.SmoothStep(0,1,(float)lavaDistance/settings.lavaCrustWidth),1-Mathf.SmoothStep(0,1,(float)glowDistance/settings.lavaCrustWidth),0,1);
             }
             foundryRoadMask.SetPixels(pixels);foundryRoadMask.Apply();material.SetTexture("_RoadMask",foundryRoadMask);material.SetColor("_RoadTint",FoundryRoad);
             foundryLavaHeat=new Texture2D(resolution,resolution,TextureFormat.RGBA32,false,true){name="Foundry molten center / cooled rim",wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};foundryLavaHeat.SetPixels(lavaPixels);foundryLavaHeat.Apply();material.SetTexture("_FoundryLavaHeat",foundryLavaHeat);

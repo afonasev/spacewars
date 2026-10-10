@@ -20,6 +20,14 @@ class QaContractTests(unittest.TestCase):
         self.assertFalse(result['full_gameplay_gate'])
         self.assertEqual(result['suites'], [['PlayMode', ['PlayableUiShellTests']]])
 
+    def test_full_requires_prior_human_confirmation_before_launch(self):
+        with patch('sys.argv', ['check_qa.py', '--scope', 'full']), \
+             patch.object(check_qa.subprocess, 'Popen') as launch:
+            with self.assertRaises(SystemExit) as error:
+                check_qa.run()
+            self.assertEqual(2, error.exception.code)
+            launch.assert_not_called()
+
     def document(self):
         root = ET.Element('test-run', result='Passed', total='18', passed='18', failed='0', skipped='0', duration='2.5')
         for method, count in UI_METHODS.items():
@@ -143,6 +151,9 @@ class QaContractTests(unittest.TestCase):
             self.assertEqual('Passed', result['result']); self.assertFalse(result['full_gameplay_gate'])
             self.assertEqual('exclusive', result['host_mode']); self.assertEqual(21, result['checks'][0]['passed'])
             self.assertIn('host_admission_seconds', result['checks'][0])
+            check = result['checks'][0]
+            self.assertAlmostEqual(check['wall_seconds'] - check['host_admission_seconds'],
+                                   check['editor_wall_seconds'])
 
     def test_runner_rejects_successful_exit_without_xml_and_failed_launcher(self):
         # Exercise real subprocess/evidence plumbing, without launching Unity.

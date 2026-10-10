@@ -79,6 +79,8 @@ namespace Spacewars.Runtime
         public PlayableCommandReceipt Apply(PlayableCommand command){var status=domain.Apply(command,out var message);return new PlayableCommandReceipt(command?.Sequence??0,Tick,status,message,0,command?.PlayerId);}
         public void Step(double seconds){if(seconds<=0||double.IsNaN(seconds)||double.IsInfinity(seconds))throw new ArgumentOutOfRangeException(nameof(seconds));domain.Step(seconds);}
         public PlayableSnapshot View(string id)=>domain.PlayerSnapshot(Tick,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,Configuration.Seed,domain.OwnerFor(id));
+        public PlayableSpectatorFrame SpectatorView(string id)
+        {if(!Configuration.Spectators.Contains(id))throw new ArgumentException("Not a registered spectator.");return domain.SpectatorSnapshot(Tick,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,Configuration.Seed);}
         public byte[] CaptureBytes()=>domain.CaptureWorldBytes(Configuration.Seed,Configuration.SourceIdentity);
         public static OfflineParticipantAuthority Restore(byte[] bytes,OfflineMatchConfiguration config)=>new OfflineParticipantAuthority(config,PlayableDomain.RestoreConfiguredWorldBytes(bytes,config.Profile,config.Seed,config.SourceIdentity,config));
         internal PlayableDomain Domain=>domain;

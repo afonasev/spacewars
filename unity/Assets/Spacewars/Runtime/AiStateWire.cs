@@ -10,7 +10,7 @@ namespace Spacewars.Runtime
     // Private authority wire, explicit schema. Never included in an owner snapshot.
     internal static class AiStateWire
     {
-        internal const int Version=11;
+        internal const int Version=12;
         internal static bool CallbackGenerationMatches(PlayableAiTraceRecord record,long generation)
         {
             if(record.ReceiptIdentity!=null)return record.ReceiptIdentity.Generation==generation;
@@ -305,7 +305,7 @@ namespace Spacewars.Runtime
             ObservationDelayTicks=AiProfile.SecondsToTicks(next.DifficultyValue(nativeConfig.Difficulty,"reactionSeconds"),30);
             actionLimit=(int)next.DifficultyValue(nativeConfig.Difficulty,"actionsPerDecision");
             repeatTicks=AiProfile.SecondsToTicks(next.Value("decision.repeatOrderSeconds"),30);arbiter.Rebind(next);
-            armies.Rebind(next,nativeConfig.Difficulty);armyPlanner.ReconcileRegistry(armies,authorityTick);defense.ReconcileRegistry(armies);demand.Rebind(next,authorityTick);expansion.Rebind(authorityTick,next);
+            armies.Rebind(next,nativeConfig.Difficulty);scoutPlanner.ReconcileBudget(armies,ScoutBudget);armyPlanner.ReconcileRegistry(armies,authorityTick);defense.ReconcileRegistry(armies);demand.Rebind(next,authorityTick);expansion.Rebind(authorityTick,next);
             budget.RebindLifetime(AiProfile.SecondsToTicks(next.Value("economy.reservationExpirySeconds"),30));launches.RebindHorizon(budget);infrastructure.Rebind(profile,budget,authorityTick);launches.ReconcileFunding(budget,profile,authorityTick);expansion.ReconcileFunding(budget,profile,authorityTick,pendingItems.Select(x=>x.Intent));
             Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);
         }
@@ -316,7 +316,7 @@ namespace Spacewars.Runtime
             w.Write(lastDecisionTick);w.Write(lastScoutTick);w.Write(lastScoutOrderTick);w.Write(lastCommandSequence);w.Write(ordinal);w.Write(authorityTick);
             String(w,lastPolicy);w.Write(lastActionKind.HasValue);if(lastActionKind.HasValue)w.Write((int)lastActionKind.Value);
             economy.WriteState(w);production.WriteState(w);research.WriteState(w);scout.WriteState(w);mission.WriteState(w);midgame.WriteState(w);artillery.WriteState(w);arbiter.WriteState(w);
-            AiBudgetStateWire.Write(w,budget);demand.WriteState(w);launches.WriteState(w);expansion.WriteState(w);infrastructure.WriteState(w);armies.WriteState(w);armyPlanner.WriteState(w);defense.WriteState(w);knowledge.WriteState(w);
+            AiBudgetStateWire.Write(w,budget);demand.WriteState(w);launches.WriteState(w);expansion.WriteState(w);infrastructure.WriteState(w);armies.WriteState(w);armyPlanner.WriteState(w);defense.WriteState(w);knowledge.WriteState(w);openingExecutor.WriteState(w);
             WorldWire.Array(w,records.ToArray(),rec=>AiStateWire.Write(w,rec));
             WorldWire.Array(w,pendingItems.ToArray(),p=>{
                 String(w,p.ObservationIdentity);w.Write(p.ObservationTick);w.Write(p.SnapshotSequence);AiStateWire.Write(w,p.Action);
@@ -336,7 +336,7 @@ namespace Spacewars.Runtime
             o.lastPolicy=String(r);o.lastActionKind=Boolean(r)?(PlayableCommandKind?)EnumValue<PlayableCommandKind>(r):null;
             AiStateWire.Require(o.lastDecisionTick>=0&&o.lastDecisionTick<=tick&&o.lastScoutTick>=-1&&o.lastScoutTick<=tick&&o.lastScoutOrderTick>=-1&&o.lastScoutOrderTick<=tick&&o.lastCommandSequence>=0&&o.ordinal>=0&&o.authorityTick>=0&&o.authorityTick<=tick,"owner clocks/ordinals");
             o.economy.ReadState(r);o.production.ReadState(r);o.research.ReadState(r);o.scout.ReadState(r);o.mission.ReadState(r);o.midgame.ReadState(r);o.artillery.ReadState(r);o.arbiter.ReadState(r,tick);
-            o.budget=AiBudgetStateWire.Read(r,tick);o.demand=AiProductionDemand.ReadState(r,tick,ai);o.launches=AiFactoryLaunchCommitments.ReadState(r,tick);o.expansion.ReadState(r,tick,generation);o.infrastructure.ReadState(r,tick,generation);o.armies=AiArmyRegistry.ReadState(r,ai,difficulty,tick,o.OwnerId,generation);o.armyPlanner.ReadState(r,tick,o.armies);o.defense.ReadState(r,tick,o.armies);o.knowledge=AiKnowledgeTracker.ReadState(r,o.OwnerId,generation,tick,ai);var budgetState=o.budget.Capture();
+            o.budget=AiBudgetStateWire.Read(r,tick);o.demand=AiProductionDemand.ReadState(r,tick,ai);o.launches=AiFactoryLaunchCommitments.ReadState(r,tick);o.expansion.ReadState(r,tick,generation);o.infrastructure.ReadState(r,tick,generation);o.armies=AiArmyRegistry.ReadState(r,ai,difficulty,tick,o.OwnerId,generation);o.armyPlanner.ReadState(r,tick,o.armies);o.defense.ReadState(r,tick,o.armies);o.knowledge=AiKnowledgeTracker.ReadState(r,o.OwnerId,generation,tick,ai);o.openingExecutor.ReadState(r,tick);var budgetState=o.budget.Capture();
             AiStateWire.Require(o.budget.OwnerId==o.OwnerId&&o.budget.Generation==generation&&budgetState.AdmittedDecision<=o.ordinal&&
                 budgetState.ReservationLifetimeTicks==AiProfile.SecondsToTicks(ai.Value("economy.reservationExpirySeconds"),30),"budget owner binding/allocator/profile horizon");
             o.records.AddRange(WorldWire.Array(r,()=>AiStateWire.ReadPlayableAiTraceRecord(r)));

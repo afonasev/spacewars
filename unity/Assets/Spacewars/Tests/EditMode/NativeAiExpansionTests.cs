@@ -207,10 +207,15 @@ namespace Spacewars.Tests.EditMode
                     foreach(bool paused in new[]{false,true})
                     {
                         var first=(PlayableSnapshot)Call(Get(a,"domain"),"PlayerSnapshot",a.Tick,paused?RuntimeStatus.Paused:RuntimeStatus.Running,paused,new PlayableRuntimeMetrics(0,0,0,0,0),null,c.Seed,PlayableOwner.Player);
-                        var requests=AiExpansionPlanner.RouteRequests(PlayableAiObservation.From(first),c.Profile);
+                        var requests=AiExpansionPlanner.RouteRequests(PlayableAiObservation.From(first),c.Profile).Concat(AiScoutPlanner.RouteRequests(first.Entities,first.PublicScoutObjectives,first.Owner,first.Generation,first.Tick,c.Profile)).GroupBy(r=>new {r.UnitId,r.Kind,r.TargetId}).Select(g=>g.First()).ToArray();
                         var legacy=(PlayableSnapshot)Call(Get(a,"domain"),"PlayerSnapshotWithRoutes",a.Tick,first.Status,paused,first.Metrics,null,c.Seed,PlayableOwner.Player,requests);
                         var one=(PlayableSnapshot)Call(Get(a,"domain"),"PlayerSnapshotForAi",a.Tick,first.Status,paused,first.Metrics,null,c.Seed,PlayableOwner.Player,true);
-                        Assert.AreEqual(PlayableAiCanonical.Encode(legacy),PlayableAiCanonical.Encode(one),"all public fields and real route proofs");
+                        // AI snapshots intentionally omit presentation sound events. Preserve
+                        // exact comparison of every gameplay/public field and check audio separately.
+                        Assert.AreEqual(PlayableAiCanonical.Encode(first.Sounds),PlayableAiCanonical.Encode(legacy.Sounds));Assert.IsEmpty(one.Sounds);
+                        legacy=new PlayableSnapshot(legacy.ProfileId,legacy.ProfileRevision,legacy.Generation,legacy.Seed,legacy.Sequence,legacy.Tick,legacy.Status,legacy.Paused,legacy.Outcome,legacy.Credits,legacy.Geometry,legacy.Entities.ToArray(),legacy.Buildings.ToArray(),legacy.Projectiles.ToArray(),legacy.Metrics,legacy.Failure,
+                            sites:legacy.Sites.ToArray(),incomePerSecond:legacy.IncomePerSecond,vision:legacy.Vision,discoveredSites:legacy.DiscoveredSites.ToArray(),population:legacy.Population,impacts:legacy.Impacts.ToArray(),researchAvailability:legacy.ResearchAvailability.ToArray(),ownerResearch:legacy.OwnerResearch.ToArray(),publicScoutObjectives:legacy.PublicScoutObjectives.ToArray(),ownCenterDamage:legacy.OwnCenterDamage.ToArray(),routeProofs:legacy.RouteProofs.ToArray(),artillerySupport:legacy.ArtillerySupport.ToArray(),owner:legacy.Owner,exactCredits:legacy.ExactCredits,ownerId:legacy.OwnerId,team:legacy.Team,participants:legacy.Participants.ToArray(),activeProfile:legacy.ActiveProfile,homeSiteId:legacy.HomeSiteId,ownerEliminated:legacy.OwnerEliminated,settledIncome:legacy.SettledIncome,intelEnvelopes:legacy.IntelEnvelopes.ToArray());
+                        Assert.AreEqual(PlayableAiCanonical.Encode(legacy),PlayableAiCanonical.Encode(one),"all AI public fields and real route proofs");
                         var lo=PlayableAiObservation.From(legacy);var ro=PlayableAiObservation.From(one);Assert.AreEqual(PlayableAiCanonical.Encode(lo),PlayableAiCanonical.Encode(ro));
                         var lp=(AiExpansionPlanner)typeof(AiExpansionPlanner).GetMethod("Fork",F).Invoke(Planner(a),null);
                         var rp=(AiExpansionPlanner)typeof(AiExpansionPlanner).GetMethod("Fork",F).Invoke(Planner(a),null);

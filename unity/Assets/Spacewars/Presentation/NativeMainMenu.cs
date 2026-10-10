@@ -65,6 +65,8 @@ namespace Spacewars.Presentation
             NativeSettingsView.Open(HostRoot??GetComponent<UIDocument>().rootVisualElement,Navigation,()=>RestoreFocus(card.Q<Button>("main-settings")),LocalControls);
         }
         private void Update(){if(ownsNavigation)Navigation?.Tick();}
+        private void LateUpdate(){if(ownsNavigation)UnityEngine.Cursor.visible=!Application.isFocused||Navigation?.UsingGamepad!=true;}
+        private void OnDisable(){if(ownsNavigation)UnityEngine.Cursor.visible=true;}
         private IEnumerator Request(string path,string method,Action<UpdateState> done)
         {
             using(var r=new UnityWebRequest(endpoint+path,method)){r.downloadHandler=new DownloadHandlerBuffer();r.timeout=15;r.SetRequestHeader("Authorization","Bearer "+token);yield return r.SendWebRequest();if(r.result!=UnityWebRequest.Result.Success){stateLabel.text="Не удалось связаться с обновлением. Установленная игра доступна.";done?.Invoke(null);yield break;}var s=JsonUtility.FromJson<UpdateState>(r.downloadHandler.text);done?.Invoke(s);}

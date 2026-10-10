@@ -74,7 +74,7 @@ namespace Spacewars.Tests.PlayMode
                 Assert.Greater(mask.GetPixelBilinear((float)(-19.0/128+.5),.5f).r,.9f);
                 Assert.Less(mask.GetPixelBilinear(.5f,.65f).r,.01f);
                 Assert.AreEqual("three-crossings-materials-v1@4",world.SurfaceRevision);
-                Assert.AreEqual("natural-frontier-v1@5",world.EnvironmentRevision);
+                Assert.AreEqual("natural-frontier-v1@7",world.EnvironmentRevision);
             }}finally{UnityEngine.Object.DestroyImmediate(root);}
         }
         [Test] public void ExpandedRoadPaintStopsAtSolidsAndFillsBridgeContacts()

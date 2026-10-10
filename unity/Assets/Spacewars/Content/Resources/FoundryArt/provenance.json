@@ -3,5 +3,14 @@
   "date": "2026-10-09",
   "scope": "chosen C geology with A layered basalt",
   "Basalt": "single seamless flat orthographic albedo, grey fractured large volcanic planes, irregular horizontal layers, muted rust; no glow, props, vegetation or fabric",
-  "SlagAsh": "single seamless flat orthographic albedo, compacted rust-brown cooled slag with grey charcoal ash patches; no loose stones, vegetation, props or lava"
+  "SlagAsh": "single seamless flat orthographic albedo, compacted rust-brown cooled slag with grey charcoal ash patches; no loose stones, vegetation, props or lava",
+  "siblingVariants": {
+    "created": "2026-10-10",
+    "generator": "built-in imagegen",
+    "manifest": "docs/varied-crisp-map-surfaces/generation.json",
+    "countPerFamily": 3,
+    "actualSourceSize": 1254,
+    "normalization": "linear luminance ratios in EnvironmentArt and FoundrySurfaceProfile",
+    "import": "ToNearest POT 1024 for compressed GPU storage; high quality compression, Repeat, Trilinear, mipmaps, aniso 8"
+  }
 }

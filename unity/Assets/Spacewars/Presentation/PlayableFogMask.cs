@@ -11,6 +11,7 @@ namespace Spacewars.Presentation
         private readonly float[] current,target;
         private readonly Color32[] pixels;
         private long revision=-1;
+        private int team=int.MinValue;
         private bool animating,publicShown;
         public Texture2D Texture{get;}
         public long TargetBuilds{get;private set;}
@@ -26,7 +27,7 @@ namespace Spacewars.Presentation
         }
         public void Reset()
         {
-            revision=-1;animating=false;publicShown=false;
+            revision=-1;team=int.MinValue;animating=false;publicShown=false;
             for(int i=0;i<current.Length;i++){current[i]=target[i]=(float)profile.FogUnseenOpacity;pixels[i]=new Color32(Byte(current[i]),0,0,255);}
             Upload();
         }
@@ -42,9 +43,9 @@ namespace Spacewars.Presentation
         {
             if(view==null)return false;
             bool dirty=false;
-            if(revision!=view.FogRevision)
+            if(revision!=view.FogRevision||team!=view.Team)
             {
-                revision=view.FogRevision;TargetBuilds++;animating=true;
+                team=view.Team;revision=view.FogRevision;TargetBuilds++;animating=true;
                 int size=PlayableVision.RasterResolution;
                 for(int y=0;y<size;y++)for(int x=0;x<size;x++)
                 {

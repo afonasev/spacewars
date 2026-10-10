@@ -49,7 +49,7 @@ namespace Spacewars.Tests.PlayMode
                 camera.rect=new Rect(0,0,1,1);camera.aspect=1;samples++;
             }Assert.AreEqual(20,samples);}finally{UnityEngine.Object.DestroyImmediate(obj);}
         }
-        [Test] public void FullModesAndStableSectorGesturesMatchSourceReplay()
+        [Test] public void NativeModesRetainStableSectorsWithUpdatedBCommand()
         {
             var root=new DirectoryInfo(Directory.GetCurrentDirectory());const string path="unity/Tests/Fixtures/native-two-seat-gamepad-parity/source-full-gestures.tsv";
             while(root!=null&&!File.Exists(Path.Combine(root.FullName,path)))root=root.Parent;Assert.NotNull(root);
@@ -58,12 +58,12 @@ namespace Spacewars.Tests.PlayMode
                 var r=line.Split('|');if(r[6].Length>0)gesture.SetMode(r[6]);double Number(string v)=>double.Parse(v,CultureInfo.InvariantCulture);
                 var sector=new OfflinePadSector(r[7],r[8]=="1",r[9].Length>0?r[9]:null);
                 var intents=gesture.StepDetailed(Number(r[1]),int.Parse(r[2]),r[4]=="1",r[5]=="1",profile,r[3]=="1",sector);
-                Assert.AreEqual(r[10],gesture.Mode,line);Assert.AreEqual(r[11]=="1",gesture.Blocked,line);Assert.AreEqual(r[12]=="1",gesture.Added,line);Assert.AreEqual(r[13]=="1",gesture.AttackPreview,line);Assert.AreEqual(Number(r[14]),gesture.SelectionHeldMs,1e-8,line);Assert.AreEqual(r[15]=="1",gesture.ScreenPreview,line);Assert.AreEqual(Number(r[16]),gesture.Progress,1e-8,line);
-                string actual=string.Join(";",intents.Select(i=>i.Kind+","+(i.Id??"")+","+((i.Kind=="selectCircle"||i.Kind=="selectMapCircle")?i.HeldMs:0).ToString(CultureInfo.InvariantCulture)));Assert.AreEqual(r[17],actual,line);samples++;
+                Assert.AreEqual(r[10],gesture.Mode,line);Assert.AreEqual(r[11]=="1",gesture.Blocked,line);Assert.AreEqual(r[12]=="1",gesture.Added,line);Assert.IsFalse(gesture.AttackPreview,"Retained replay has no Y; B no longer previews attack: "+line);Assert.AreEqual(Number(r[14]),gesture.SelectionHeldMs,1e-8,line);Assert.AreEqual(r[15]=="1",gesture.ScreenPreview,line);Assert.AreEqual(Number(r[16]),gesture.Progress,1e-8,line);
+                string actual=string.Join(";",intents.Select(i=>i.Kind+","+(i.Id??"")+","+((i.Kind=="selectCircle"||i.Kind=="selectMapCircle")?i.HeldMs:0).ToString(CultureInfo.InvariantCulture)));Assert.AreEqual(r[17].Replace("attackMove,,0","context,,0"),actual,line);samples++;
             }Assert.AreEqual(1400,samples);
             foreach(var line in File.ReadAllLines(Path.Combine(root.FullName,"unity/Tests/Fixtures/native-two-seat-gamepad-parity/source-ring-sectors.tsv")).Skip(1)){var r=line.Split('|');double Number(string v)=>double.Parse(v,CultureInfo.InvariantCulture);var index=OfflinePadGestures.RingSector(Number(r[0]),Number(r[1]),int.Parse(r[2]),Number(r[3]));Assert.AreEqual(r[4],index.HasValue?index.Value.ToString():"",line);}
         }
-        [Test] public void ExplicitRbRtLbBuildingRallyAndMapContractsMatchActualSource()
+        [Test] public void NativeRbRtLbBuildingRallyAndMapContractsRetainCurrentDecisions()
         {
             var root=new DirectoryInfo(Directory.GetCurrentDirectory());const string path="unity/Tests/Fixtures/native-two-seat-gamepad-parity/source-gesture-contracts.tsv";
             while(root!=null&&!File.Exists(Path.Combine(root.FullName,path)))root=root.Parent;Assert.NotNull(root);
@@ -73,7 +73,7 @@ namespace Spacewars.Tests.PlayMode
                 var sector=r[4].Length==0?null:new OfflinePadSector(r[4],r[5]=="1",r[6].Length>0?r[6]:null);
                 var intents=gesture.StepDetailed(Number(r[1]),int.Parse(r[2]),true,true,profile,true,sector);
                 Assert.AreEqual(r[7],gesture.Mode,line);Assert.AreEqual(r[8]=="1",gesture.Blocked,line);Assert.AreEqual(r[9]=="1",gesture.Added,line);Assert.AreEqual(Number(r[10]),gesture.Progress,1e-8,line);
-                string actual=string.Join(";",intents.Select(i=>i.Kind+","+(i.Id??"")+","+((i.Kind=="selectCircle"||i.Kind=="selectMapCircle")?i.HeldMs:0).ToString(CultureInfo.InvariantCulture)));Assert.AreEqual(r[11],actual,line);samples++;
+                string actual=string.Join(";",intents.Select(i=>i.Kind+","+(i.Id??"")+","+((i.Kind=="selectCircle"||i.Kind=="selectMapCircle")?i.HeldMs:0).ToString(CultureInfo.InvariantCulture)));Assert.AreEqual(r[0]=="rally-cancel"&&r[2]=="2"?"cancelRally,,0":r[11],actual,line);samples++;
             }Assert.AreEqual(92,samples);
         }
         [Test] public void OwnerGroupsNormalizeAndEnableExactlyLikeActualSource()

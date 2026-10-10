@@ -33,6 +33,7 @@ namespace Spacewars.Simulation
         public string OwnerId{get;} public int MatchSeed{get;} public string ProfileIdentity{get;} public string SourceIdentity{get;} public uint PersonalitySeed{get;}
         public PlayableAiOpening Opening{get;} public PlayableAiOpening InitialOpening{get;} public PlayableAiOpeningPhase Phase{get;} public PlayableAiCompositionIntent Intent{get;}
         public IReadOnlyList<string> Commitments=>Array.AsReadOnly(commitments);
+        public PlayableAiOpeningCompositionState WithPhase(PlayableAiOpeningPhase phase)=>new PlayableAiOpeningCompositionState(OwnerId,MatchSeed,ProfileIdentity,SourceIdentity,PersonalitySeed,Opening,phase,Intent,commitments);
         public PlayableAiOpeningCompositionState Restore()=>new PlayableAiOpeningCompositionState(OwnerId,MatchSeed,ProfileIdentity,SourceIdentity,PersonalitySeed,Opening,Phase,new PlayableAiCompositionIntent(Intent.Explorer,Intent.Tank,Intent.ExplorerShare),commitments);
         public bool SemanticallyEquals(PlayableAiOpeningCompositionState other)=>other!=null&&OwnerId==other.OwnerId&&MatchSeed==other.MatchSeed&&ProfileIdentity==other.ProfileIdentity&&SourceIdentity==other.SourceIdentity&&PersonalitySeed==other.PersonalitySeed&&Opening==other.Opening&&InitialOpening==other.InitialOpening&&Phase==other.Phase&&Intent.SemanticallyEquals(other.Intent)&&commitments.SequenceEqual(other.commitments);
     }
@@ -53,25 +54,18 @@ namespace Spacewars.Simulation
             var hash=key.Substring(colon+1);if(hash.Length!=64||hash.Any(c=>!(c>='0'&&c<='9'||c>='a'&&c<='f')))return false;
             return state.PersonalitySeed==AiRandom.Key(state.MatchSeed,state.OwnerId,key,"personality",0);
         }
-        private static readonly PlayableAiOpening[] Ordered={PlayableAiOpening.Safe,PlayableAiOpening.GreedySafe,PlayableAiOpening.GreedyMine,PlayableAiOpening.BlindRush,PlayableAiOpening.ExplorerAllIn,PlayableAiOpening.DoubleMineExplorerRush};
-        private static readonly string[][] Commitments={new[]{"factory","refinery"},new[]{"refinery","refinery","factory"},new[]{"refinery","capture-mine"},new[]{"factory","first-tank","committed-attack"},new[]{"factory","mass-explorer-production","first-wave","streaming-reinforcement"},new[]{"factory","capture-two-local-mines","build-two-mines","mass-explorer-production","early-attack"}};
-        private static readonly double[] BaseWeights={.49,.22,.12,.16,.06,.12};
-        public static IReadOnlyList<PlayableAiOpening> Supported=>Array.AsReadOnly(Ordered);
-        public static PlayableAiOpeningCompositionState Initialize(int matchSeed,string ownerId,string sourceProfileIdentity=null,AiProfile aiProfile=null)
+        public static IReadOnlyList<PlayableAiOpening> Supported=>Array.AsReadOnly(AiOpeningCatalog.All.Select(d=>d.Opening).ToArray());
+        public static PlayableAiOpeningCompositionState Initialize(int matchSeed,string ownerId,string sourceProfileIdentity=null,AiProfile aiProfile=null,PlayableAiOpening? forcedOpening=null)
         {
             if(String.IsNullOrEmpty(ownerId))throw new ArgumentException("Owner identity is required.",nameof(ownerId));
-            var binding=ProfileBinding(aiProfile??AiProfile.Initial);
+            var ai=aiProfile??AiProfile.Initial;var binding=ProfileBinding(ai);
             if(sourceProfileIdentity!=null&&sourceProfileIdentity!=binding)throw new ArgumentException("Native AI profile identity mismatch.",nameof(sourceProfileIdentity));
             var personalitySeed=AiRandom.Key(matchSeed,ownerId,binding,"personality",0);
-            var aggression=.15+(.95-.15)*Random(personalitySeed,"trait:aggression");
-            var greed=.15+(.95-.15)*Random(personalitySeed,"trait:greed");
-            var caution=.15+(.95-.15)*Random(personalitySeed,"trait:caution");
-            var remoteExpansion=.05+(.65-.05)*Random(personalitySeed,"trait:remoteExpansion");
-            var allIn=.05+(.65-.05)*Random(personalitySeed,"trait:allIn");
-            var weights=new[]{BaseWeights[0]*(.5+caution),BaseWeights[1]*(.5+greed+caution*.25),BaseWeights[2]*(.5+greed+remoteExpansion),BaseWeights[3]*(.5+aggression+allIn*.5),BaseWeights[4]*(.35+aggression+allIn),BaseWeights[5]*(.45+aggression*.65+greed*.8)};
-            var pick=Random(personalitySeed,"opening")*weights.Sum();var cursor=0d;var selected=0;
-            for(var i=0;i<Ordered.Length;i++){cursor+=weights[i];if(pick<=cursor){selected=i;break;}}
-            return new PlayableAiOpeningCompositionState(ownerId,matchSeed,binding,SourceIdentity,personalitySeed,Ordered[selected],PlayableAiOpeningPhase.Active,new PlayableAiCompositionIntent(1,1,.5),Commitments[selected]);
+            var weights=AiOpeningCatalog.All.Select(d=>ai.Value(d.WeightPath)*(.5+Random(personalitySeed,"trait:"+d.Id))).ToArray();
+            var pick=Random(personalitySeed,"opening")*weights.Sum();var cursor=0d;var selected=weights.Length-1;
+            for(var i=0;i<weights.Length;i++){cursor+=weights[i];if(pick<cursor){selected=i;break;}}
+            var definition=forcedOpening.HasValue?AiOpeningCatalog.For(forcedOpening.Value):AiOpeningCatalog.All[selected];
+            return new PlayableAiOpeningCompositionState(ownerId,matchSeed,binding,SourceIdentity,personalitySeed,forcedOpening??definition.Opening,PlayableAiOpeningPhase.Active,new PlayableAiCompositionIntent(1,1,.5),definition.Milestones.Select(m=>m.Id));
         }
         private static uint Hash(string text)
         {

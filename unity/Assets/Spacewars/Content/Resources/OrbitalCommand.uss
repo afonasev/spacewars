@@ -49,6 +49,8 @@
 #settings-scroll .unity-base-field__label { width: 220px; min-width: 220px; max-width: 220px; flex-grow: 0; flex-shrink: 0; margin-left: 0; margin-right: 12px; }
 #settings-scroll .unity-base-field__input { margin-left: 0; margin-right: 0; }
 #settings-scroll .unity-toggle > .unity-base-field__input { background-color: transparent; border-width: 0; padding: 0; }
+#settings-scroll .unity-toggle__checkmark { width: 24px; height: 24px; min-width: 24px; min-height: 24px; flex-shrink: 0; border-width: 2px; border-radius: 3px; border-color: rgb(135,163,179); background-color: rgb(18,32,41); -unity-background-image-tint-color: white; }
+#settings-scroll .unity-toggle:checked .unity-toggle__checkmark { background-color: rgb(24,91,108); border-color: rgb(69,217,240); }
 #settings-scroll .unity-toggle:focus .unity-toggle__checkmark { border-color: white; }
 #settings-scroll .settings-value { margin-left: 232px; }
 
@@ -60,3 +62,10 @@
 .orbital-loading-stack .orbital-logo { font-size: 44px; margin-bottom: 18px; -unity-text-align: middle-center; }
 .orbital-loading-status { color: rgb(245,250,253); font-size: 18px; -unity-font-style: bold; background-color: rgba(4,10,15,0.82); padding: 7px 14px; border-radius: 2px; margin: 0 0 24px 0; -unity-text-align: middle-center; white-space: normal; }
 .orbital-loading-line { width: 180px; height: 2px; }
+
+/* The settings scrollbar is isolated from label and control columns. */
+.orbital-root .settings-scroll .unity-scroller { visibility: visible; }
+.settings-scroll .unity-scroller--vertical { width: 10px; min-width: 10px; max-width: 10px; margin-left: 8px; margin-right: 0; }
+.settings-scroll .unity-scroller--vertical .unity-slider { width: 10px; min-width: 0; max-width: 10px; margin: 0; padding: 0; }
+.settings-scroll .unity-scroller--vertical .unity-base-field__input { width: 10px; min-width: 0; max-width: 10px; }
+.settings-scroll .unity-scroller--vertical .unity-base-slider__dragger { width: 6px; min-width: 6px; border-radius: 3px; }

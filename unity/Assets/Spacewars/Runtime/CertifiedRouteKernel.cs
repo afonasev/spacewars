@@ -1,14 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Spacewars.Runtime;
+using System.Diagnostics;
 using Spacewars.Simulation;
 
-namespace Spacewars.Presentation
+namespace Spacewars.Runtime
 {
     // One bounded host adapter for ordinary and headless entrypoints. Epochs are
     // solver allotments under the existing frozen gameplay barrier, not ticks.
-    internal sealed class CertifiedRouteHost
+    public sealed class CertifiedRouteKernel
     {
         private sealed class ProviderEntry
         {
@@ -38,47 +38,81 @@ namespace Spacewars.Presentation
         private readonly Queue<string> completionQueue = new Queue<string>();
         private long epoch;
         private NavigationRoutePort currentPort;
+        private long reservedCorridorBytes;
+        private bool allocating;
+        internal Action BeforePrepare;
+        internal Func<bool> Continue;
+        public long ProgressSequence {get;private set;}
+        public bool HasWork => registered.Count!=0 || (currentPort?.QueuedRequestCount??0)!=0;
         private const int WorkAllotment = 16384;
         private const int WorkUnitsPerRequestBudget = 1024;
         private static readonly NavEpochQuota Quota = new NavEpochQuota(WorkAllotment, WorkAllotment,
             WorkAllotment, WorkAllotment * 3, 256);
         private static readonly NavGraphCompileLimits Limits = new NavGraphCompileLimits(1048576, 300000, 1200000);
-        internal NavSchedulerCounters Counters => scheduler.Counters;
-        internal long SolverEpoch => epoch;
-        internal string LastProjectionFailure { get; private set; }
-        internal long RetainedBytes => scheduler.Counters.RetainedBytes+ExternalBytes();
-        internal long PeakRetainedBytes => peakRetainedBytes;
-        private long ExternalBytes()=>providerBytes-scheduler.ProviderRetainedBytes+
-            heldProjectionBytes+hostAnswerBytes+128L*registered.Count+
-            (currentPort?.CorridorRetainedBytes??0);
+        public NavSchedulerCounters Counters => scheduler.Counters;
+        public long SolverEpoch => epoch;
+        public string LastProjectionFailure { get; private set; }
+        private long OwnedRetainedBytes=>scheduler.Counters.RetainedBytes+OwnedExternalBytes();
+        private long ReservedRetainedBytes=>scheduler.Counters.RetainedBytes+ExternalBytes();
+        public long RetainedBytes => OwnedRetainedBytes+(currentPort?.CorridorRetainedBytes??0);
+        public double TransportWaitMilliseconds=>currentPort?.TransportWaitMilliseconds??0;
+        public double TransportHoldMilliseconds=>currentPort?.TransportHoldMilliseconds??0;
+        public double PreparationElapsedMilliseconds {get;private set;}
+        public double ProviderElapsedMilliseconds {get;private set;}
+        public double SolveElapsedMilliseconds {get;private set;}
+        public double ProjectionElapsedMilliseconds {get;private set;}
+        private enum Phase {Preparation,Provider,Solve,Projection}
+        private readonly struct Timing : IDisposable
+        {
+            private readonly CertifiedRouteKernel owner;private readonly Phase phase;private readonly long at;
+            internal Timing(CertifiedRouteKernel owner,Phase phase){this.owner=owner;this.phase=phase;at=Stopwatch.GetTimestamp();}
+            public void Dispose(){double ms=(Stopwatch.GetTimestamp()-at)*1000d/Stopwatch.Frequency;
+                switch(phase){case Phase.Preparation:owner.PreparationElapsedMilliseconds+=ms;break;
+                    case Phase.Provider:owner.ProviderElapsedMilliseconds+=ms;break;
+                    case Phase.Solve:owner.SolveElapsedMilliseconds+=ms;break;
+                    case Phase.Projection:owner.ProjectionElapsedMilliseconds+=ms;break;}}
+        }
+        private Timing Measure(Phase phase)=>new Timing(this,phase);
+        public long PeakRetainedBytes => peakRetainedBytes;
+        private long OwnedExternalBytes()=>providerBytes-scheduler.ProviderRetainedBytes+
+            heldProjectionBytes+hostAnswerBytes+128L*registered.Count;
+        private long ExternalBytes()=>OwnedExternalBytes()+Math.Max(reservedCorridorBytes,currentPort?.CorridorRetainedBytes??0);
         private void UpdateReservation(long nextRegistration=0)
         {scheduler.ReserveExternalBytes(ExternalBytes()+nextRegistration);
             peakRetainedBytes=Math.Max(peakRetainedBytes,RetainedBytes);
-            currentPort?.SetHostRetainedBytes(RetainedBytes-currentPort.CorridorRetainedBytes);}
-        internal void Clear()
+            if(!allocating)currentPort?.SetHostRetainedBytes(OwnedRetainedBytes);}
+        public void Clear()
         {
             var oldPort=currentPort;
             if(oldPort==null){ClearOwned();return;}
-            oldPort.RunHostStep(()=>{ClearOwned();oldPort.SetHostRetainedBytes(0);});
+            ClearOwned();oldPort.SetHostRetainedBytes(0);
         }
         // Scheduler ClearWorld retains epoch and quota history across authority ports.
         private void ClearOwned()
         {scheduler.ClearWorld();registered.Clear();providers.Clear();providerBytes=heldProjectionBytes=hostAnswerBytes=peakRetainedBytes=0;scanQueue.Clear();projectionQueue.Clear();completionQueue.Clear();currentPort=null;}
 
-        internal void Service(PlayableRouteBinding binding, int budget)
+        public void Pump(PlayableRouteBinding binding, int budget)
         {
             var port = binding.RoutePort;
             if(port == null)throw new ArgumentException("Missing route authority facade.");
             if(!ReferenceEquals(currentPort, port)) {
                 Clear();currentPort=port;
             }
-            port.RunHostStep(()=>ServiceLocked(port,budget));
+            // Commit queued answers before reserving solver growth. No provider/solve/
+            // projection operation executes under the authority gate.
+            port.RunHostStep(()=>{UpdateReservation();Flush(port,budget);});
+            reservedCorridorBytes=port.BeginHostAllocation();allocating=true;
+            try {ServiceOwned(port,budget);}
+            finally {
+                try{port.EndHostAllocation(OwnedRetainedBytes);}
+                finally{allocating=false;reservedCorridorBytes=0;}
+            }
+            if(Continue?.Invoke()!=false)port.RunHostStep(()=>{UpdateReservation();Flush(port,budget);});
         }
 
-        private void ServiceLocked(NavigationRoutePort port,int budget)
+        private void ServiceOwned(NavigationRoutePort port,int budget)
         {
             UpdateReservation();
-            Flush(port,budget);
             var admission=port.Admission;
             if(admission==null)return;
             // Old accepted inputs are kept until their answer can enter the
@@ -91,11 +125,10 @@ namespace Spacewars.Presentation
                 scheduler.Cancel(key);
                 SetCompletion(key,row,new NavigationAnswer(row.Request,Array.Empty<NavPoint>(),NavSolveStatus.Stale));
             }
-            Flush(port,budget);
-            for(int i=0;i<budget && registered.Count<LayeredNavigationScheduler.MaxQueue;i++) {
-                if(RetainedBytes+128>LayeredNavigationScheduler.MaxRetainedBytes)break;
+            for(int i=0;i<budget && Continue?.Invoke()!=false && registered.Count<LayeredNavigationScheduler.MaxQueue;i++) {
+                if(ReservedRetainedBytes+128>LayeredNavigationScheduler.MaxRetainedBytes)break;
                 UpdateReservation(128);
-                if(port.TryDropStale(out _))continue;
+                if(port.TryDropStale(out _)){ProgressSequence++;continue;}
                 NavScheduledRequest prepared=null;
                 NavigationRequest preparedInput=null;
                 bool oversized=false;
@@ -110,7 +143,7 @@ namespace Spacewars.Presentation
                     var key=prepared.Subscription.StableKey;
                     registered.Add(key,new Registered{Request=transferredRequest,Scheduled=prepared,
                         SurfaceProviderId=admission.SurfaceProviderId});
-                    RetainProvider(transferredRequest,prepared.Provider);scanQueue.Enqueue(key);UpdateReservation();
+                    ProgressSequence++;RetainProvider(transferredRequest,prepared.Provider);scanQueue.Enqueue(key);UpdateReservation();
                 }catch{if(preparedInput!=null)DropUnusedProvider(preparedInput,prepared?.Provider);
                     UpdateReservation();throw;}
             }
@@ -121,14 +154,18 @@ namespace Spacewars.Presentation
                 var latest=port.Admission;
                 return latest!=null&&registered.TryGetValue(id.StableKey,out var row)&&latest.Contains(row.Request);
             }
-            int consumed=scheduler.Advance(epoch,Quota,Current,workLimit);
+            int consumed;
+            using(Measure(Phase.Solve)){consumed=scheduler.Advance(epoch,Quota,Current,workLimit);
             if(consumed==0&&scheduler.NeedsNextEpoch) {
                 epoch++;
-                scheduler.Advance(epoch,Quota,Current,workLimit);
+                consumed=scheduler.Advance(epoch,Quota,Current,workLimit);
             }
+            }
+            if(consumed>0)ProgressSequence++;
             for(int i=0;i<budget&&scheduler.ReadyCount>0;i++) {
-                if(RetainedBytes+scheduler.ReadyHeadProjectionReserve>LayeredNavigationScheduler.MaxRetainedBytes)break;
+                if(ReservedRetainedBytes+scheduler.ReadyHeadProjectionReserve>LayeredNavigationScheduler.MaxRetainedBytes)break;
                 if(!scheduler.TryTake(_=>true,out var completed))continue;
+                ProgressSequence++; // Removing even a stale ready item releases capacity.
                 if(!registered.TryGetValue(completed.Identity.StableKey,out var row))continue;
                 if(!port.Admission.Contains(row.Request))
                     SetCompletion(completed.Identity.StableKey,row,new NavigationAnswer(row.Request,Array.Empty<NavPoint>(),NavSolveStatus.Stale));
@@ -138,13 +175,12 @@ namespace Spacewars.Presentation
                     projectionQueue.Enqueue(completed.Identity.StableKey);UpdateReservation();}
             }
             Project(budget*16);
-            Flush(port,budget);
         }
 
         private void SetCompletion(string key,Registered row,NavigationAnswer answer)
         {long released=row.Solved==null?0:1024L+288L*row.Solved.Route.Legs.Count;
             long prior=row.Completion==null?0:AnswerBytes(row.Completion);
-            if(answer.Corridor!=null&&RetainedBytes-released-prior+AnswerBytes(answer)>
+            if(answer.Corridor!=null&&ReservedRetainedBytes-released-prior+AnswerBytes(answer)>
                 LayeredNavigationScheduler.MaxRetainedBytes)
                 answer=new NavigationAnswer(row.Request,Array.Empty<NavPoint>(),NavSolveStatus.CapacityExceeded);
             if(row.Completion==null)completionQueue.Enqueue(key);
@@ -164,7 +200,7 @@ namespace Spacewars.Presentation
                 if(!registered.TryGetValue(key,out var row)){completionQueue.Dequeue();continue;}
                 if(!port.TryComplete(row.Completion))break; // answer mailbox backpressure
                 completionQueue.Dequeue();registered.Remove(key);
-                hostAnswerBytes-=AnswerBytes(row.Completion);UpdateReservation();
+                hostAnswerBytes-=AnswerBytes(row.Completion);ProgressSequence++;UpdateReservation();
             }
         }
 
@@ -180,10 +216,15 @@ namespace Spacewars.Presentation
             (provider==null||ReferenceEquals(entry.Provider,provider))){providers.Remove(key);providerBytes-=entry.Provider.EstimatedRetainedBytes;}}
 
         private NavScheduledRequest Prepare(NavigationAdmission admission,NavigationRequest request,out bool oversized)
+        {using(Measure(Phase.Preparation))return PrepareCore(admission,request,out oversized);}
+        private NavScheduledRequest PrepareCore(NavigationAdmission admission,NavigationRequest request,out bool oversized)
         {
             oversized=false;
+            BeforePrepare?.Invoke();
+            if(Continue?.Invoke()==false)return null;
             if(!admission.Contains(request))throw new InvalidOperationException("Unpublished route input.");
-            var provider=Provider(admission,request,out oversized);
+            ILayeredNavigationProvider provider;
+            using(Measure(Phase.Provider))provider=Provider(admission,request,out oversized);
             if(provider==null)return null; // bounded backpressure, original FIFO head stays queued
             var identity=request.MemberIdentity;
             NavigationAdmissionGroup group=null;
@@ -246,8 +287,11 @@ namespace Spacewars.Presentation
         }
 
         private void Project(int work)
+        {using(Measure(Phase.Projection))ProjectCore(work);}
+        private void ProjectCore(int work)
         {
-            for(int used=0;used<work&&projectionQueue.Count>0;used++) {
+            for(int used=0;used<work&&Continue?.Invoke()!=false&&projectionQueue.Count>0;used++) {
+                ProgressSequence++;
                 var key=projectionQueue.Peek();
                 if(!registered.TryGetValue(key,out var row)||row.Completion!=null||row.Solved==null){projectionQueue.Dequeue();continue;}
                 var request=row.Scheduled;var route=row.Solved.Route;

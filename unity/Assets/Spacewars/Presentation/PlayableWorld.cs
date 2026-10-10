@@ -14,13 +14,16 @@ namespace Spacewars.Presentation
             public Transform Root, Hull, Turret, Turbine, Launcher;
             public bool RefineryUpgraded,UnitUpgraded;public Color? PresentationPaint;
             public GameObject Selection;
+            public bool UnitSelection;
             public Transform Health;
         }
         private readonly Material material;
+        private Material selectionMaterial;
+        private Mesh selectionQuad;
         public PlayableFogMask Fog{get;}
         public System.Func<PlayableOwner?,Color> OwnerPaint {get;set;}
         private PlayableProfile profile;
-        public void Rebind(PlayableProfile next){profile=next;foreach(var id in new List<int>(actors.Keys))Remove(id);}
+        public void Rebind(PlayableProfile next){ClearPads();ClearRallyFlags();profile=next;foreach(var id in new List<int>(actors.Keys))Remove(id);ReleaseWorldObject(selectionMaterial);selectionMaterial=null;ReleaseWorldObject(selectionQuad);selectionQuad=null;}
         private readonly Transform root;
         private int presentationLayer;
         public void SetPresentationLayer(int layer){presentationLayer=layer;Layer(root.gameObject);}
@@ -38,6 +41,15 @@ namespace Spacewars.Presentation
             material.SetColor("_FogColor",new Color((float)profile.FogTintR,(float)profile.FogTintG,(float)profile.FogTintB));material.SetTexture("_FogMask",Fog.Texture);material.SetVector("_FogBounds",new Vector4((float)extent,(float)extent,0,0));
             if(profile.AuthoredMap is FoundryMap foundry){CreateFoundry(foundry);return;}
             if(profile.AuthoredMap is ThreeCrossingsMap crossings){CreateThreeCrossings(crossings);return;}
+            if(profile.AuthoredMap is AiTestMap)
+            {
+                var texture=Resources.Load<Texture2D>("Environment/NaturalFrontier/Earth");
+                if(!texture)throw new System.InvalidOperationException("Missing AI test ground texture");
+                material.SetTexture("_EarthTex",texture);
+                var ground=Part("AI test open ground",root,new Vector3(0,-.2f,0),new Vector3((float)extent*2,.4f,(float)extent*2),Color.white);
+                var properties=new MaterialPropertyBlock();properties.SetColor("_BaseColor",Color.white);properties.SetFloat("_SurfaceRole",-1);ground.GetComponent<Renderer>().SetPropertyBlock(properties);
+                return;
+            }
             Part("Basalt arena", root, new Vector3(0,-.24f,0),new Vector3((float)extent*2,.4f,(float)extent*2),new Color(.20f,.25f,.25f));
             for (int i=-(int)extent;i<extent;i+=4)
             {
@@ -69,7 +81,7 @@ namespace Spacewars.Presentation
         }
         public Actor Tank(int id,bool friendly,PlayableEntityKind kind=PlayableEntityKind.Tank)
         {
-            var a=Base(id,friendly);
+            var a=Base(id,friendly,true,kind);
             a.Hull=Model(kind==PlayableEntityKind.Shkval?"shkval":kind==PlayableEntityKind.Explorer?"explorer":"tank",a.Root,friendly);
             // Manifest geometry radius, not a tuning value; model radius/scale are profile-owned.
             a.Hull.localScale=Vector3.one*(float)(kind==PlayableEntityKind.Shkval?profile.ShkvalModelRadius*profile.ShkvalModelScale/2.05:kind==PlayableEntityKind.Explorer?profile.ExplorerModelRadius*profile.ExplorerModelScale/1.0773:profile.TankModelRadius*profile.TankModelScale/1.585);
@@ -102,7 +114,11 @@ namespace Spacewars.Presentation
             model.localRotation=BuildingFacing;a.Turbine=model.GetComponentsInChildren<Transform>(true).FirstOrDefault(t=>t.name=="turbineYaw");
             return a;
         }
-        public void FaceBuilding(Actor actor,Camera camera=null)=>actor.Hull.rotation=Facing(camera);
+        public void FaceBuilding(Actor actor,Camera camera=null)
+        {
+            actor.Hull.rotation=Facing(camera);
+            var p=actor.Root.position;actor.Root.position=Point(new NavPoint(p.x,p.z))+Vector3.up*ApronArt.apronHeight;
+        }
         private Quaternion Facing(Camera camera)
         {
             var bearing=camera?Vector3.ProjectOnPlane(-camera.transform.forward,Vector3.up).normalized:Vector3.zero;
@@ -141,7 +157,7 @@ namespace Spacewars.Presentation
         public static void PaintOwner(Actor actor,Color owner)
         {
             if(actor.PresentationPaint.HasValue&&actor.PresentationPaint.Value==owner)return;actor.PresentationPaint=owner;
-            foreach(var target in new[]{actor.Health.gameObject,actor.Selection}){var renderer=target.GetComponent<Renderer>();var block=new MaterialPropertyBlock();renderer.GetPropertyBlock(block);block.SetColor("_BaseColor",owner);renderer.SetPropertyBlock(block);}
+            foreach(var target in actor.UnitSelection?new[]{actor.Health.gameObject}:new[]{actor.Health.gameObject,actor.Selection}){var renderer=target.GetComponent<Renderer>();var block=new MaterialPropertyBlock();renderer.GetPropertyBlock(block);block.SetColor("_BaseColor",owner);renderer.SetPropertyBlock(block);}
             foreach(var renderer in actor.Hull.GetComponentsInChildren<Renderer>(true))for(int slot=0;slot<renderer.sharedMaterials.Length;slot++)
             {
                 var role=renderer.sharedMaterials[slot].name;if(!role.EndsWith("team-primary")&&!role.EndsWith("team-emissive"))continue;
@@ -168,21 +184,49 @@ namespace Spacewars.Presentation
             }
             return model.transform;
         }
-        private Actor Base(int id,bool friendly)
+        private GameObject UnitRing(Transform parent,PlayableEntityKind kind)
+        {
+            if(!selectionMaterial)
+            {
+                var shader=Resources.Load<Shader>("UnitSelectionRing");
+                if(!shader)throw new System.InvalidOperationException("Missing unit selection ring shader");
+                selectionMaterial=new Material(shader);
+                selectionMaterial.SetTexture("_FogMask",Fog.Texture);
+                selectionMaterial.SetVector("_FogBounds",new Vector4((float)profile.ArenaHalfExtent,(float)profile.ArenaHalfExtent,0,0));
+                // Four vertices suffice: the shader draws an analytic, antialiased circle.
+                selectionQuad=new Mesh{name="Selection ring quad"};
+                selectionQuad.vertices=new[]{new Vector3(-1,0,-1),new Vector3(-1,0,1),new Vector3(1,0,1),new Vector3(1,0,-1)};
+                selectionQuad.uv=new[]{new Vector2(0,0),new Vector2(0,1),new Vector2(1,1),new Vector2(1,0)};
+                selectionQuad.triangles=new[]{0,1,2,0,2,3};selectionQuad.RecalculateBounds();
+            }
+            double modelRadius=kind==PlayableEntityKind.Explorer?profile.ExplorerModelRadius*profile.ExplorerModelScale:
+                kind==PlayableEntityKind.Shkval?profile.ShkvalModelRadius*profile.ShkvalModelScale:profile.TankModelRadius*profile.TankModelScale;
+            float radius=(float)(modelRadius+profile.SelectionRingPadding+profile.SelectionRingWidth);
+            var g=new GameObject("Selection");g.layer=presentationLayer;g.transform.SetParent(parent,false);
+            g.transform.localPosition=Vector3.up*(float)profile.SelectionRingLift;
+            g.transform.localScale=new Vector3(radius,1,radius);
+            g.AddComponent<MeshFilter>().sharedMesh=selectionQuad;
+            var renderer=g.AddComponent<MeshRenderer>();renderer.sharedMaterial=selectionMaterial;
+            renderer.shadowCastingMode=UnityEngine.Rendering.ShadowCastingMode.Off;renderer.receiveShadows=false;
+            var block=new MaterialPropertyBlock();block.SetFloat("_RingWidth",(float)profile.SelectionRingWidth/radius);renderer.SetPropertyBlock(block);
+            return g;
+        }
+        private Actor Base(int id,bool friendly,bool unit=false,PlayableEntityKind kind=PlayableEntityKind.Tank)
         {
             var a=new Actor();a.Root=new GameObject("Entity "+id).transform;a.Root.SetParent(root,false);
-            a.Selection=Part("Selection",a.Root,new Vector3(0,.07f,0),new Vector3(2.4f,.035f,2.4f),friendly?Ally:Enemy,PrimitiveType.Cylinder);a.Selection.SetActive(false);
+            a.UnitSelection=unit;
+            a.Selection=unit?UnitRing(a.Root,kind):Part("Selection",a.Root,new Vector3(0,.07f,0),new Vector3(2.4f,.035f,2.4f),friendly?Ally:Enemy,PrimitiveType.Cylinder);a.Selection.SetActive(false);
             var healthRoot=new GameObject("Health").transform;healthRoot.SetParent(root,false);healthRoot.localPosition=new Vector3(0,3.8f,0);
             Part("Health background",healthRoot,Vector3.zero,new Vector3(2,.13f,.17f),Dark);
             a.Health=Part("Health fill",healthRoot,new Vector3(0,.01f,-.01f),new Vector3(2,.15f,.18f),friendly?Ally:Enemy).transform;
             actors[id]=a;return a;
         }
-        public static void UpdateHealth(Actor actor,Camera camera,float ratio)
+        public static void UpdateHealth(Actor actor,Camera camera,float ratio,bool? selected=null)
         {
             // Preserve existing visual dimensions. Camera basis and left anchoring are
             // presentation invariants; never inherit model heading/construction scale.
             var healthRoot=actor.Health.parent;
-            healthRoot.gameObject.SetActive(NativeUserSettings.AlwaysHealth||ratio<.999f||actor.Selection.activeSelf);
+            healthRoot.gameObject.SetActive(NativeUserSettings.AlwaysHealth||ratio<.999f||(selected??actor.Selection.activeSelf));
             healthRoot.position=actor.Root.position+Vector3.up*3.8f;
             healthRoot.rotation=camera.transform.rotation;
             float width=2f*Mathf.Clamp01(ratio);
@@ -190,9 +234,9 @@ namespace Spacewars.Presentation
             actor.Health.localPosition=new Vector3((width-2f)*.5f,.01f,-.01f);
             actor.Health.gameObject.SetActive(width>0);
         }
-        public void Remove(int id){if(actors.TryGetValue(id,out var a)){ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);actors.Remove(id);}}
-        public void Clear(){Fog.Reset();ClearMemories();ClearPads();foreach(var a in actors.Values){ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);}actors.Clear();}
-        public void Dispose(){Clear();Fog.Dispose();surfaceMaterials?.Dispose();if(foundryRoadMask)ReleaseWorldObject(foundryRoadMask);if(foundryLavaHeat)ReleaseWorldObject(foundryLavaHeat);foreach(var mesh in terrainMeshes)ReleaseWorldObject(mesh);terrainMeshes.Clear();ReleaseWorldObject(material);if(root)ReleaseWorldObject(root.gameObject);}
+        public void Remove(int id){RemoveRallyFlag(id);if(actors.TryGetValue(id,out var a)){ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);actors.Remove(id);}}
+        public void Clear(){ClearRallyFlags();Fog.Reset();ClearMemories();ClearPads();foreach(var a in actors.Values){ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);}actors.Clear();}
+        public void Dispose(){Clear();Fog.Dispose();surfaceMaterials?.Dispose();if(foundryRoadMask)ReleaseWorldObject(foundryRoadMask);if(foundryLavaHeat)ReleaseWorldObject(foundryLavaHeat);foreach(var mesh in terrainMeshes)ReleaseWorldObject(mesh);terrainMeshes.Clear();if(apronMaterial)ReleaseWorldObject(apronMaterial);ReleaseWorldObject(selectionMaterial);ReleaseWorldObject(selectionQuad);ReleaseWorldObject(material);if(root)ReleaseWorldObject(root.gameObject);}
         public GameObject Part(string name,Transform parent,Vector3 position,Vector3 scale,Color color,PrimitiveType shape=PrimitiveType.Cube)
         {
             var g=GameObject.CreatePrimitive(shape);g.name=name;g.layer=presentationLayer;g.transform.SetParent(parent,false);g.transform.localPosition=position;g.transform.localScale=scale;

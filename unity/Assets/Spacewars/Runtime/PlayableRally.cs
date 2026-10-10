@@ -24,10 +24,13 @@ namespace Spacewars.Runtime
         private readonly List<PlayableCommandReceipt> rallyReceipts=new List<PlayableCommandReceipt>();
         private bool rallyPaused;
         private NavPoint? PendingRally(int id)=>rallyWork.TryGetValue(id,out var work)?(NavPoint?)work.Target:null;
+        private Building RallyProducer(int id,PlayableOwner owner)
+            =>buildings.TryGetValue(id,out var b)&&b.Owner==owner&&b.Ready&&b.Sale==null&&
+              (b.Kind==PlayableBuildingKind.Factory||TerritoryRules.Center(b.Kind))?b:null;
         private PlayableCommandStatus Rally(int id,NavPoint target,PlayableOwner issuer,long sequence,out string message)
         {
-            message="Select a ready live owned factory.";
-            if(Producer(id,issuer)==null||Producer(id,issuer).Health<=0)return PlayableCommandStatus.InvalidEntity;
+            message="Select a ready live owned producer.";
+            if(RallyProducer(id,issuer)==null||RallyProducer(id,issuer).Health<=0)return PlayableCommandStatus.InvalidEntity;
             if(rallyWork.TryGetValue(id,out var old))FinishRally(id,old,PlayableCommandStatus.Cancelled,"Superseded rally request.");
             rallyWork[id]=new RallyWork{Intent=new PlayableRallyIntentState{Generation=navigation.Generation,Sequence=sequence,Building=id,Owner=issuer,TargetX=target.X,TargetZ=target.Z}};
             // Complete route admission is external to the combat authority tick. The
@@ -38,7 +41,7 @@ namespace Spacewars.Runtime
             Generation=w.Intent.Generation,Sequence=w.Intent.Sequence,Building=w.Intent.Building,Owner=w.Intent.Owner,TargetX=w.Intent.TargetX,TargetZ=w.Intent.TargetZ}).ToArray();
         internal void RestoreRallyIntents(PlayableRallyIntentState[] intents)
         {
-            if(intents==null||rallyWork.Count!=0||intents.Any(i=>i==null||i.Generation!=navigation.Generation||i.Sequence<1||Producer(i.Building,i.Owner)==null)||intents.Select(i=>i.Building).Distinct().Count()!=intents.Length)
+            if(intents==null||rallyWork.Count!=0||intents.Any(i=>i==null||i.Generation!=navigation.Generation||i.Sequence<1||RallyProducer(i.Building,i.Owner)==null)||intents.Select(i=>i.Building).Distinct().Count()!=intents.Length)
                 throw new ArgumentException("Invalid rally intents.");
             foreach(var i in intents)rallyWork[i.Building]=new RallyWork{Intent=new PlayableRallyIntentState{Generation=i.Generation,Sequence=i.Sequence,Building=i.Building,Owner=i.Owner,TargetX=i.TargetX,TargetZ=i.TargetZ}};
         }
@@ -71,7 +74,7 @@ namespace Spacewars.Runtime
             while(navigation.TryProbeAnswer(out var answer))answers[answer.Request]=answer;
             foreach(var row in rallyWork.OrderBy(r=>r.Key).ToArray())
             {
-                int id=row.Key;var work=row.Value;var b=Producer(id,work.Intent.Owner);
+                int id=row.Key;var work=row.Value;var b=RallyProducer(id,work.Intent.Owner);
                 if(b==null||b.Health<=0||Outcome!=PlayableMatchOutcome.Playing||work.Intent.Generation!=navigation.Generation){FinishRally(id,work,PlayableCommandStatus.Cancelled,"Producer no longer live/ready/owned.");continue;}
                 if(!ReferenceEquals(work.Geometry,Geometry)){
                     navigation.CancelProbe(id);work.Geometry=Geometry;work.Request=null;work.Kind=0;work.Candidate=0;
@@ -88,7 +91,11 @@ namespace Spacewars.Runtime
                 if(work.Kind==RallyKinds.Length){b.Rally=work.Target;b.HasRally=true;FinishRally(id,work,PlayableCommandStatus.Applied,"Rally updated.");continue;}
                 var kind=RallyKinds[work.Kind];double radius=PlayableUnitRules.Radius(profile,kind);
                 if(!Geometry.IsFree(work.Target,radius)){FinishRally(id,work,PlayableCommandStatus.InvalidTarget,"Invalid rally footprint.");continue;}
-                var exits=FactoryExitCandidates(b,kind);
+                // Prefer an existing clear connector, preserving original tie order.
+                // Every footprint still needs a complete certified route proof;
+                // the production spawn exit policy is unchanged.
+                var exits=FactoryExitCandidates(b,kind).Select((point,index)=>new{point,index})
+                    .OrderBy(row=>Geometry.SegmentFree(row.point,work.Target,radius)?0:1).ThenBy(row=>row.index).Select(row=>row.point).ToArray();
                 // Bodies/HOLD are temporary occupancy, never topology obstacles.
                 while(work.Candidate<exits.Length&&!Geometry.IsFree(exits[work.Candidate],radius))work.Candidate++;
                 if(work.Candidate==exits.Length){FinishRally(id,work,PlayableCommandStatus.InvalidTarget,"Unreachable rally point.");continue;}

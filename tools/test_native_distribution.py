@@ -1,4 +1,5 @@
 import hashlib,importlib.util,json,pathlib,tempfile,unittest
+from unittest.mock import patch
 SOURCE=pathlib.Path(__file__).parent/'native-release/package.py'
 spec=importlib.util.spec_from_file_location('native_package',SOURCE);package=importlib.util.module_from_spec(spec);spec.loader.exec_module(package)
 class NativeBuildIdentityTests(unittest.TestCase):
@@ -20,4 +21,12 @@ class NativeBuildIdentityTests(unittest.TestCase):
  def test_dirty_build_cannot_be_published_as_release(self):
   self.record['dirty']=True;self.write()
   with self.assertRaises(ValueError):self.validate()
+class VolumeIconTests(unittest.TestCase):
+ def test_icon_is_copied_and_custom_icon_flag_set_on_volume_root(self):
+  with tempfile.TemporaryDirectory() as temp:
+   root=pathlib.Path(temp);volume=root/'volume';volume.mkdir();icon=root/'source.icns';icon.write_bytes(b'icns fixture')
+   with patch.object(package,'run') as command:
+    package.prepare_volume_icon(volume,icon)
+   self.assertEqual((volume/'.VolumeIcon.icns').read_bytes(),icon.read_bytes())
+   command.assert_called_once_with(['SetFile','-a','C',volume])
 if __name__=='__main__':unittest.main()

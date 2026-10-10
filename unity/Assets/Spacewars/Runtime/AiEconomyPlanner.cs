@@ -25,13 +25,16 @@ namespace Spacewars.Runtime
     }
     public sealed class AiEconomyPlanner
     {
+        private readonly AiRosterCatalog catalog;
+        public AiEconomyPlanner(AiRosterCatalog catalog=null){this.catalog=catalog??AiRosterCatalog.Initial;}
         private static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
-        public AiEconomyPlan Plan(PlayableAiObservation o,PlayableProfile profile,AiProductionDemand demand=null,AiProfile ai=null,long? available=null,bool recoveryExplorerDemand=false)
+        public AiEconomyPlan Plan(PlayableAiObservation o,PlayableProfile profile,AiProductionDemand demand=null,AiProfile ai=null,long? available=null,bool recoveryExplorerDemand=false,PlayableEntityKind productionKind=PlayableEntityKind.Tank)
         {
             if(o==null||profile==null)throw new ArgumentNullException();
             var candidates=new List<AiEconomyCandidate>();
-            var capacity=demand?.Assess(o,profile,ai,available??o.Credits);
-            void Add(string policy,PlayableAiAction action,string reason=null,int priority=0)=>candidates.Add(new AiEconomyCandidate(policy,action,AiEconomyAdmission.Reject(o,profile,action,true)??reason,priority));
+            var production=catalog.For(productionKind);
+            var capacity=demand?.Assess(o,profile,ai,available??o.Credits,catalog,productionKind);
+            void Add(string policy,PlayableAiAction action,string reason=null,int priority=0)=>candidates.Add(new AiEconomyCandidate(policy,action,AiEconomyAdmission.Reject(o,profile,action,true,catalog)??reason,priority));
             PlayableAiAction Build(int site,int slot,int parent,PlayableBuildingKind kind)=>new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.BuildAt,siteId:site,slotId:slot,parentId:parent,buildingKind:kind,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
             var home=o.Sites.Where(s=>s.Owner==o.Owner&&s.Ready&&(s.Site.Kind==PlayableBuildingKind.Headquarters||s.Site.Kind==PlayableBuildingKind.Outpost)&&o.Buildings.Any(b=>b.Id==s.CenterId&&b.Owner==o.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true))
                 .OrderBy(s=>s.Site.Id==o.HomeSiteId?0:1).ThenBy(s=>s.Site.Id).FirstOrDefault();
@@ -55,8 +58,8 @@ namespace Spacewars.Runtime
                     foreach(var slot in site.Site.Slots.OrderBy(s=>s.Id))
                         Add("economy",Build(site.Site.Id,slot.Id,site.CenterId,PlayableBuildingKind.Factory),capacity.ScalingReason);
             // Preserve current composition pending S4, fill idle lines before scaling.
-            foreach(var factory in o.Buildings.Where(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.Factory).OrderBy(b=>b.Id))
-                Add("production",new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.QueueTank,new[]{factory.Id},unitKind:PlayableEntityKind.Tank,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity),priority:demand!=null&&demand.IdleTicks(factory.Id,o.Tick)>=AiProfile.SecondsToTicks(ai.Value("economy.idleLineDeadlineSeconds"),30)?1:0);
+            foreach(var factory in AiEconomyAdmission.Producers(o,production))
+                Add("production",new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,production.productionCommand,new[]{factory.Id},unitKind:production.kind,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity),priority:demand!=null&&demand.IdleTicks(factory.Id,o.Tick)>=AiProfile.SecondsToTicks(ai.Value("economy.idleLineDeadlineSeconds"),30)?1:0);
             // Preserve normal Tank composition. This bounded affordable alternative restores
             // a missing existing scout role, never buys extra Explorers to drain a bank.
             if(recoveryExplorerDemand&&!o.Entities.Any(e=>e.Owner==o.Owner&&e.Kind==PlayableEntityKind.Explorer&&e.Health>0)&&
@@ -120,7 +123,9 @@ namespace Spacewars.Runtime
     public static class AiEconomyAdmission
     {
         internal static string IntentId(string policy,PlayableAiAction a)=>policy+":"+a.Kind+":"+string.Join(",",a.EntityIds.OrderBy(x=>x))+":"+a.SiteId+":"+a.SlotId+":"+a.TargetId+":"+a.Target.X+":"+a.Target.Z+":"+a.BuildingKind+":"+a.UnitKind+":"+a.ResearchKind;
-        public static string Reject(PlayableAiObservation o,PlayableProfile profile,PlayableAiAction a,bool idleProducer=false)
+        internal static IEnumerable<PlayableBuildingSnapshot> Producers(PlayableAiObservation o,AiRosterDescriptorData descriptor)=>
+            o.Buildings.Where(b=>b.Owner==o.Owner&&b.Kind==descriptor.producer).OrderBy(b=>b.Id);
+        public static string Reject(PlayableAiObservation o,PlayableProfile profile,PlayableAiAction a,bool idleProducer=false,AiRosterCatalog catalog=null)
         {
             if(a.PlayerId!=o.OwnerId||a.Generation!=o.Generation||a.ProfileId!=profile.ProfileId||a.ProfileRevision!=profile.Revision||o.ProfileId!=profile.ProfileId||o.ProfileRevision!=profile.Revision)return "owner/generation/profile mismatch";
             if(a.Kind==PlayableCommandKind.BuildAt)
@@ -145,14 +150,18 @@ namespace Spacewars.Runtime
             }
             if(a.Kind==PlayableCommandKind.QueueTank||a.Kind==PlayableCommandKind.QueueExplorer||a.Kind==PlayableCommandKind.QueueShkval)
             {
-                var kind=a.Kind==PlayableCommandKind.QueueExplorer?PlayableEntityKind.Explorer:a.Kind==PlayableCommandKind.QueueShkval?PlayableEntityKind.Shkval:a.UnitKind;
+                catalog=catalog??AiRosterCatalog.Initial;
+                var descriptor=catalog.Production(a.Kind);
+                if(descriptor==null||!string.IsNullOrWhiteSpace(descriptor.exclusionReason))return "unsupported production descriptor";
+                var kind=descriptor.kind;
+                if(descriptor.unlockDependencies.Any(r=>!o.OwnerResearch.Any(q=>q.Kind==r&&q.Complete)))return "production unlock prerequisite";
                 if(!PlayableUnitRules.Supported(kind)||a.EntityIds.Count!=1)return "unsupported production";
                 var producer=o.Buildings.FirstOrDefault(b=>b.Id==a.EntityIds[0]&&b.Owner==o.Owner);
-                if(producer==null||producer.Kind!=PlayableBuildingKind.Factory||producer.Health<=0||producer.Phase!=ConstructionPhase.Ready||producer.PrivateState==null||producer.PrivateState.Lifecycle?.Selling==true)return "ready live producer prerequisite";
+                if(producer==null||producer.Kind!=descriptor.producer||producer.Health<=0||producer.Phase!=ConstructionPhase.Ready||producer.PrivateState==null||producer.PrivateState.Lifecycle?.Selling==true)return "ready live producer prerequisite";
                 if(producer.PrivateState.QueueCount>=PlayableDomain.MaximumProductionOrders)return "producer queue full";
                 if(idleProducer&&producer.PrivateState.QueueCount>0)return producer.PrivateState.Orders.Any(q=>q.Active&&q.Remaining<=0)?"producer exit blocked":"producer queue busy";
-                if(o.Population==null||o.Population.Capacity-o.Population.Living-o.Population.Reserved<PlayableUnitRules.Population(profile,kind))return "population capacity";
-                return o.Credits<PlayableUnitRules.Cost(profile,kind)?"insufficient credits":null;
+                if(o.Population==null||o.Population.Capacity-o.Population.Living-o.Population.Reserved<catalog.PopulationCost(kind,profile))return "population capacity";
+                return o.Credits<catalog.CreditCost(kind,profile)?"insufficient credits":null;
             }
             if(a.Kind==PlayableCommandKind.StartBuildingRepair||a.Kind==PlayableCommandKind.SellBuilding)
             {

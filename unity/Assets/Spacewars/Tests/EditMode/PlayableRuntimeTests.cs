@@ -81,7 +81,10 @@ namespace Spacewars.Tests.EditMode
                 Assert.AreEqual(tank,request.Entity,"Hold the actual moved Tank route, not an earlier unrelated request.");
                 Assert.IsTrue(Until(()=>runtime.Latest.Sequence>movePublication&&runtime.Latest.Metrics.NavigationPending>0),"Observe the held barrier publication after pre-barrier command admission.");
                 var before=runtime.Latest;
-                Assert.IsTrue(Until(()=>runtime.Latest.Sequence>=before.Sequence+3),"Authority must publish while the route answer is held.");
+                // Repeated identical polls reuse payloads. Meaningful same-tick actions
+                // still publish while the route answer is held.
+                for(int i=0;i<3;i++){long prior=runtime.Latest.Sequence;runtime.RecordHumanAction("player-1");Assert.IsTrue(Until(()=>runtime.Latest.Sequence>prior));}
+                Assert.IsTrue(Until(()=>runtime.Latest.Sequence>=before.Sequence+3),"Authority must publish same-tick action changes while the route answer is held.");
                 Assert.AreEqual(before.Tick,runtime.Latest.Tick,"The fixed route barrier freezes gameplay tick.");
                 Assert.AreEqual(before.Credits,runtime.Latest.Credits,"Income clocks cannot advance at a route barrier.");
                 Assert.AreEqual(before.Entities.First(e=>e.Id==tank).Position,runtime.Latest.Entities.First(e=>e.Id==tank).Position,"Movement clocks cannot advance without the answer.");

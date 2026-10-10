@@ -77,7 +77,9 @@ public sealed class NativeDisplaySettingsTests
         {
             var controls=new NativeLocalControlSettings();var page=NativeSettingsView.Open(root,navigation,()=>{},controls);
             yield return null;yield return null;
-            Assert.AreEqual(ScrollerVisibility.Hidden,page.Q<ScrollView>("settings-scroll").verticalScrollerVisibility);
+            Assert.AreEqual(ScrollerVisibility.Auto,page.Q<ScrollView>("settings-scroll").verticalScrollerVisibility);
+            Assert.Greater(page.Q<ScrollView>("settings-scroll").verticalScroller.worldBound.width,0);
+            Assert.LessOrEqual(page.Q<ScrollView>("settings-scroll").verticalScroller.worldBound.width,10.5f);
             AssertColumns(page);
             var edge=page.Q<Slider>("settings-camera-edge");edge.value=edge.highValue;
             var arrows=page.Q<Slider>("settings-camera-arrows");arrows.value=arrows.lowValue;

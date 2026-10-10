@@ -141,6 +141,8 @@ def run():
                         help='UI only: complete battle, production, science or building lifecycle HUD fixture (repeatable)')
     parser.add_argument('--exclusive', action='store_true',
                         help='Exclusive unity-run admission for performance measurements or UI/focus QA')
+    parser.add_argument('--confirm-full-run', action='store_true',
+                        help='Record prior explicit human approval for full tests, including production')
     parser.add_argument('--plan', action='store_true')
     args = parser.parse_args()
     try:
@@ -154,6 +156,9 @@ def run():
               'host_mode': 'exclusive' if args.exclusive else 'shared'}
     if args.plan:
         print(json.dumps(record, indent=2)); return 0
+    if args.scope == 'full' and not args.confirm_full_run:
+        parser.error('Full tests require prior explicit human approval and --confirm-full-run')
+    record['full_run_confirmed'] = args.confirm_full_run
     destination = ROOT / '.local/qa'
     destination.mkdir(parents=True, exist_ok=True)
     evidence = Path(tempfile.mkdtemp(prefix=args.scope + '-', dir=destination))
@@ -190,7 +195,10 @@ def run():
             if exit_code: raise ValueError(f'{platform} launcher exit {exit_code}')
             check.update(validate_results(xml, fixtures, args.scope == 'ui'))
             # This includes Editor startup/import/shutdown; it is not pure startup.
-            check['non_test_wall_seconds'] = check['wall_seconds'] - check['test_duration_seconds']
+            admission = check.get('host_admission_seconds')
+            check['editor_wall_seconds'] = None if admission is None else check['wall_seconds'] - admission
+            check['non_test_wall_seconds'] = (None if admission is None else
+                                               check['editor_wall_seconds'] - check['test_duration_seconds'])
         record['result'] = 'Passed'
     except (OSError, ValueError, ET.ParseError) as error:
         record['error'] = str(error)

@@ -11,6 +11,7 @@ namespace Spacewars.Runtime
         {
             int seed=setup.ResolveSeed();
             var roster=setup.Participants.Select((p,i)=>new OfflineParticipant(i==0?"player-1":"foundry-"+(i+1),i+1,p.Team,p.Human?OfflineControl.Human:OfflineControl.Ai)).ToArray();
+            if(profile.AuthoredMap is AiTestMap testMap)return testMap.Configuration(profile,seed,roster);
             if(profile.AuthoredMap is FoundryMap foundry)
             {
                 var authored=foundry.Configuration(profile,seed);

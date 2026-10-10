@@ -31,6 +31,13 @@ namespace Spacewars.Tests.EditMode
             =>Assert.AreEqual(PlayableCommandStatus.Applied,Call(d,"Apply",new PlayableCommand(1,sequence,"player-1",kind,new[]{id}),null));
         private static object Restore(object d,PlayableProfile p)
             =>Domain.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{(byte[])Call(d,"CaptureWorldBytes",7,"lab"),p,7,"lab"});
+        [Test]public void WebImpactRadiusIsPresentationMetadataWithHardBounds()
+        {
+            var data=PlayableProfile.Default.CopyData();Assert.That(PlayableProfile.Create(data).ImpactEffectRadius,Is.EqualTo(.22));
+            data.impactEffectRadius=.5;Assert.That(PlayableProfile.Create(data).ImpactEffectRadius,Is.EqualTo(.5));
+            data.impactEffectRadius=.01;Assert.Throws<ArgumentException>(()=>PlayableProfile.Create(data));
+            data.impactEffectRadius=1.01;Assert.Throws<ArgumentException>(()=>PlayableProfile.Create(data));
+        }
         [Test] public void ExpandedTransportRebindPreservesAll257IntentsAndRejectsOldAnswer()
         {
             var session=new NavigationSession(1,new NavGeometry(100,new NavObstacle[0],1),PlayableProfile.Default.Navigation);

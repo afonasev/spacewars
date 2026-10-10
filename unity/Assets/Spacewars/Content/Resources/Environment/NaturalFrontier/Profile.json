@@ -1,6 +1,6 @@
 {
   "id": "natural-frontier-v1",
-  "revision": 5,
+  "revision": 9,
   "earthTile": 7,
   "rockTile": 6,
   "concreteTile": 5,
@@ -42,5 +42,12 @@
   "contactShade": 0.24,
   "screeClusterSpacing": 12,
   "dustPatchLength": 6,
-  "dustCoverage": 0.45
+  "dustCoverage": 0.45,
+  "variantPatchScale": 18,
+  "variantBlendWidth": 0.08,
+  "reliefSlopeLimit": 0.35,
+  "apronMargin": 0,
+  "apronMarkWidth": 0.07,
+  "apronConcreteValue": 0.43,
+  "apronHeight": 0.04
 }

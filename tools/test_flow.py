@@ -203,6 +203,28 @@ class Lifecycle(unittest.TestCase):
         self.f.evidence('example','merge',{'repo':str(repo),'commit':sha,'main_ref':'main'})
         with self.assertRaises(subprocess.CalledProcessError):self.f.transition('example','merged','worker')
         git('checkout','main');git('merge','--ff-only','feature');self.f.transition('example','merged','worker')
+    def test_source_only_merge_finalizes_without_faking_deploy_or_acceptance(self):
+        self.test_merge_real_ancestry()
+        invalid=[None,{'deployment_deferred':True},
+                 {'deployment_deferred':False,'source':'user policy','reason':'source-only'},
+                 {'deployment_deferred':True,'source':'','reason':'source-only'}]
+        for evidence in invalid:
+            with self.subTest(evidence=evidence):
+                if evidence is not None:self.f.evidence('example','source_only_delivery',evidence)
+                with self.assertRaises(ValueError):self.f.transition('example','finalizing','worker')
+                self.assertEqual(self.f.get('example')[1]['stage'],'merged')
+        self.f.evidence('example','source_only_delivery',{'deployment_deferred':True,
+            'source':'explicit source-only user policy','reason':'Build and deploy require separate commands'})
+        self.f.transition('example','finalizing','worker')
+        with self.assertRaises(ValueError):self.f.finalize('example','worker')
+        self.finalization_evidence();self.f.finalize('example','worker')
+        d=self.f.get('example')[1]
+        self.assertEqual((d['stage'],d['owner']),('awaiting-acceptance',None))
+        self.assertNotIn('release',d['evidence']);self.assertNotIn('smoke',d['evidence'])
+        self.assertEqual(self.f.acceptance_status(d),'pending')
+        with self.assertRaises(ValueError):self.f.transition('example','accepted')
+        self.f.accept('example','Reviewed source','user review',d['evidence']['commit'],'Source slice')
+        self.f.finalize('example');self.assertEqual(self.f.get('example')[1]['stage'],'accepted')
     def test_lease_ownership(self):
         self.f.lease('acquire','integration','a')
         with self.assertRaises(ValueError):self.f.lease('acquire','integration','b')

@@ -5,6 +5,7 @@ using Spacewars.Simulation;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UIElements;
+using Cursor = UnityEngine.Cursor;
 
 namespace Spacewars.Presentation
 {
@@ -19,18 +20,32 @@ namespace Spacewars.Presentation
         private int padGroupSlots,padBasePage,padOriginalHq,padRememberedBuilding;
         private NavPoint padCursorGround;
         private bool padCursorInitialized;
-        private bool WorldPadOwnsToolkit=>input?.WorldInputEnabled==true&&SeatPad!=null&&(SeatPad.leftStick.ReadValue().magnitude>battleInputProfile.deadzone||SeatPad.dpad.ReadValue().sqrMagnitude>0||SeatPad.buttonSouth.isPressed||SeatPad.buttonSouth.wasReleasedThisFrame||SeatPad.buttonEast.isPressed||SeatPad.buttonEast.wasReleasedThisFrame);
+        private bool systemCursorHidden;
+        private bool PadControlsCursor=>battleController&&SeatPad?.added==true&&input?.WorldInputEnabled==true;
+        private void SetSystemCursorHidden(bool hidden)
+        {
+            if(localCoordinator!=null)return;
+            systemCursorHidden=hidden;Cursor.visible=!hidden;
+        }
+        private void SyncSystemCursor()
+        {
+            if(localCoordinator!=null)return;
+            // One coordinator policy serves match, split seats, menus and focus restoration.
+            SetSystemCursorHidden(localInputFocused&&!MouseCursorVisible);
+        }
+        private void OnDisable()=>SetSystemCursorHidden(false);
+        private bool WorldPadOwnsToolkit=>input?.WorldInputEnabled==true&&SeatPad!=null&&(SeatPad.leftStick.ReadValue().magnitude>battleInputProfile.deadzone||SeatPad.dpad.ReadValue().sqrMagnitude>0||SeatPad.buttonSouth.isPressed||SeatPad.buttonSouth.wasReleasedThisFrame||SeatPad.buttonEast.isPressed||SeatPad.buttonEast.wasReleasedThisFrame||SeatPad.buttonNorth.isPressed||SeatPad.buttonNorth.wasReleasedThisFrame);
         private bool PadAuxiliaryWheel=>battleGestures.Mode=="groupWheel"||battleGestures.Mode=="groupAssign"||battleGestures.Mode=="baseWheel";
         private void EnsureOrdinaryPadUi()
         {
             if(battleCursorVisual!=null)return;
             padWhiteArrow=AngularCommandCursor.Create(false);padRedArrow=AngularCommandCursor.Create(true);
-            battleCursorVisual=new VisualElement{name="gamepad-angular-cursor",pickingMode=PickingMode.Ignore};battleCursorVisual.style.position=Position.Absolute;battleCursorVisual.style.width=battleCursorVisual.style.height=AngularCommandCursor.Size;root.Add(battleCursorVisual);
+            battleCursorVisual=new VisualElement{name="gamepad-angular-cursor",pickingMode=PickingMode.Ignore};battleCursorVisual.style.position=Position.Absolute;battleCursorVisual.style.width=battleCursorVisual.style.height=AngularCommandCursor.Size;root.Add(battleCursorVisual);var queuePreview=new Label("+"){name="pad-queue-preview",pickingMode=PickingMode.Ignore};queuePreview.style.position=Position.Absolute;queuePreview.style.left=AngularCommandCursor.Size-4;queuePreview.style.top=-8;queuePreview.style.fontSize=20;queuePreview.style.color=OrbitalTheme.Cyan;queuePreview.style.display=DisplayStyle.None;battleCursorVisual.Add(queuePreview);
             padAreaPreview=new VisualElement{name="gamepad-selection-preview",pickingMode=PickingMode.Ignore};padAreaPreview.style.position=Position.Absolute;padAreaPreview.style.borderTopWidth=padAreaPreview.style.borderBottomWidth=padAreaPreview.style.borderLeftWidth=padAreaPreview.style.borderRightWidth=1;padAreaPreview.style.borderTopColor=padAreaPreview.style.borderBottomColor=padAreaPreview.style.borderLeftColor=padAreaPreview.style.borderRightColor=Color.white;padAreaPreview.style.backgroundColor=new Color(1,1,1,.045f);padAreaPreview.style.display=DisplayStyle.None;root.Add(padAreaPreview);
             padAuxiliaryRing=new OrbitalBattleRing{name="gamepad-group-base-ring"};root.Add(padAuxiliaryRing);
         }
         private void HideOrdinaryPadUi()
-        {if(battleCursorVisual!=null)battleCursorVisual.style.display=DisplayStyle.None;if(padAreaPreview!=null)padAreaPreview.style.display=DisplayStyle.None;if(padAuxiliaryRing!=null)padAuxiliaryRing.style.display=DisplayStyle.None;}
+        {if(battleCursorVisual!=null)battleCursorVisual.style.display=DisplayStyle.None;if(padAreaPreview!=null)padAreaPreview.style.display=DisplayStyle.None;if(padAuxiliaryRing!=null)padAuxiliaryRing.style.display=DisplayStyle.None;world?.RenderRallyPreview(null,view?.Owner??PlayableOwner.Player);}
         private OfflinePadSelectable[] OrdinaryPadUnits()=>view.Entities.Where(e=>e.Health>0).Select(e=>new OfflinePadSelectable(e.Id,(int)e.Kind,e.Owner==view.Owner,e.Position.X,e.Position.Z,PlayableUnitRules.Radius(profile,e.Kind),OfflinePadSelection.InViewport(cameraView,world.Point(e.Position)))).ToArray();
         private OfflinePadBase[] OrdinaryBases()=>view.Buildings.Where(b=>b.Owner==view.Owner&&b.Phase==ConstructionPhase.Ready&&TerritoryRules.Center(b.Kind)).Select(b=>new OfflinePadBase(b.Id,b.Position.X,b.Position.Z,b.Id==padOriginalHq)).ToArray();
         private int OrdinaryPadHit()
@@ -87,24 +102,27 @@ namespace Spacewars.Presentation
         private void PollOrdinaryPad()
         {
             var pad=SeatPad;
+            if(SeatUsesKeyboard&&input?.AssignedMouse?.delta.ReadValue().sqrMagnitude>0)battleController=false;
             if(pad!=previousSeatPad){bool lost=previousSeatPad!=null&&!previousSeatPad.added;battleGestures.Cancel();previousSeatPad=pad;if(lost&&!paused){(localCoordinator??this).PauseFrom(this,true);notice="Геймпад отключён. Подключите устройство и продолжите матч.";}}
             if(pad==null||!pad.added||paused||!localInputFocused||input?.WorldInputEnabled!=true){battleGestures.Cancel();HideOrdinaryPadUi();return;}
             EnsureOrdinaryPadUi();if(!padCursorInitialized){padCursorGround=Ground(SeatScreenCenter);battleCursor=SeatScreenCenter;padCursorInitialized=true;padOriginalHq=view.Buildings.FirstOrDefault(b=>b.Owner==view.Owner&&b.Kind==PlayableBuildingKind.Headquarters)?.Id??0;}
             if(padRememberedBuilding!=0&&!view.Buildings.Any(b=>b.Id==padRememberedBuilding&&b.Owner==view.Owner)){padRememberedBuilding=0;battleGestures.Cancel();}
-            int mask=(pad.buttonSouth.isPressed?1:0)|(pad.buttonEast.isPressed?2:0)|(pad.buttonWest.isPressed?4:0)|(pad.selectButton.isPressed?8:0)|(pad.startButton.isPressed?16:0)|(pad.rightShoulder.isPressed?32:0)|(pad.leftShoulder.isPressed?64:0)|(pad.rightTrigger.isPressed?128:0);
-            var ls=pad.leftStick.ReadValue();var rs=pad.rightStick.ReadValue();bool activity=ls.magnitude>battleInputProfile.deadzone||rs.magnitude>battleInputProfile.deadzone||mask!=0;
-            if(activity)battleController=true;else if(SeatUsesKeyboard&&Mouse.current?.delta.ReadValue().sqrMagnitude>0)battleController=false;
+            int mask=(pad.buttonSouth.isPressed?1:0)|(pad.buttonEast.isPressed?2:0)|(pad.buttonWest.isPressed?4:0)|(pad.selectButton.isPressed?8:0)|(pad.startButton.isPressed?16:0)|(pad.rightShoulder.isPressed?32:0)|(pad.leftShoulder.isPressed?64:0)|(pad.rightTrigger.isPressed?128:0)|(pad.buttonNorth.isPressed?256:0);
+            var ls=pad.leftStick.ReadValue();var rs=pad.rightStick.ReadValue();bool activity=ls.magnitude>battleInputProfile.deadzone||rs.magnitude>battleInputProfile.deadzone||pad.dpad.ReadValue().sqrMagnitude>0||pad.leftStickButton.isPressed||mask!=0;
+            var mouse=input.AssignedMouse??Mouse.current;
+            bool mouseActivity=mouse?.added==true&&(mouse.delta.ReadValue().sqrMagnitude>0||mouse.scroll.ReadValue().sqrMagnitude>0||mouse.leftButton.wasPressedThisFrame||mouse.rightButton.wasPressedThisFrame||mouse.middleButton.wasPressedThisFrame);
+            if(activity)battleController=true;else if(SeatUsesKeyboard&&mouseActivity)battleController=false;
             if(battleGestures.Blocked&&(ls.magnitude>battleInputProfile.deadzone||rs.magnitude>battleInputProfile.deadzone)){HideOrdinaryPadUi();return;}
             if(!PadAuxiliaryWheel)
             {
-                string mode=mapOpen?"tacticalMap":battleRally?"rallyTarget":battleRing.style.display.value==DisplayStyle.Flex?"buildingWheel":"world";
+                string mode=battleRally?(mapOpen?"rallyMap":"rallyTarget"):mapOpen?"tacticalMap":battleRing.style.display.value==DisplayStyle.Flex?"buildingWheel":"world";
                 if(battleGestures.Mode!=mode)battleGestures.SetMode(mode);
             }
             float Axis(float value)=>Mathf.Abs(value)<=battleInputProfile.deadzone?0:Mathf.Sign(value)*(Mathf.Abs(value)-battleInputProfile.deadzone)/(1-battleInputProfile.deadzone);
             if(!battleGestures.Blocked&&!PadAuxiliaryWheel&&battleGestures.Mode!="buildingWheel")
             {
                 float dt=Time.unscaledDeltaTime;var right=Vector3.ProjectOnPlane(cameraView.transform.right,Vector3.up).normalized;var forward=Vector3.ProjectOnPlane(cameraView.transform.forward,Vector3.up).normalized;
-                var delta=mapOpen?new Vector3(Axis(rs.x),0,-Axis(rs.y)):(right*Axis(rs.x)+forward*Axis(rs.y));delta*=LocalControlSettings.CursorSpeed*dt;
+                var delta=mapOpen?new Vector3(Axis(ls.x),0,-Axis(ls.y)):(right*Axis(rs.x)+forward*Axis(rs.y));delta*=LocalControlSettings.CursorSpeed*dt;
                 padCursorGround=new NavPoint(Math.Clamp(padCursorGround.X+delta.x,-profile.ArenaHalfExtent,profile.ArenaHalfExtent),Math.Clamp(padCursorGround.Z+delta.z,-profile.ArenaHalfExtent,profile.ArenaHalfExtent));
                 if(!mapOpen)
                 {
@@ -121,6 +139,7 @@ namespace Spacewars.Presentation
                 if(intent.Kind=="pause"){if(localCoordinator!=null)localCoordinator.PauseFrom(this,true);else PauseFrom(this,true);break;}
                 if(OrdinaryPadMenuIntent(intent,actions))continue;
                 if(intent.Kind=="activate"||intent.Kind=="repeat"||intent.Kind=="sell"){ExecuteBattleAction(intent.Id,intent.Kind!="activate",true);if(battleRally)battleGestures.SetMode("rallyTarget");continue;}
+                if(intent.Kind=="cancelRally"){CancelRallyPlacement(true);continue;}
                 if(intent.Kind=="deselect"){padRememberedBuilding=0;CloseBattleContext();continue;}
                 if(intent.Kind=="select")
                 {
@@ -128,13 +147,13 @@ namespace Spacewars.Presentation
                     else SetPadSelection(ordinaryPadSelection.Tap(Time.unscaledTimeAsDouble*1000,hit,OrdinaryPadUnits(),battleInputProfile.doubleTapMs));runtime.RecordHumanAction(LocalOwnerId);
                 }
                 else if(intent.Kind=="selectCircle"||intent.Kind=="selectScreen"||intent.Kind=="selectMapCircle"){double radius=intent.Kind=="selectScreen"?double.PositiveInfinity:(intent.HeldMs-battleInputProfile.holdMs)/1000*battleInputProfile.selectionGrowth;SetPadSelection(OfflinePadSelection.Area(OrdinaryPadUnits(),padCursorGround.X,padCursorGround.Z,radius,intent.Kind=="selectMapCircle"));runtime.RecordHumanAction(LocalOwnerId);}
-                else if(intent.Kind=="cameraJump"){if(padRememberedBuilding!=0){Submit(PlayableCommandKind.SetRally,new[]{padRememberedBuilding},padCursorGround);SetPadSelection(new[]{padRememberedBuilding});battleGestures.SetMode("buildingWheel");}else FocusPadPoint(padCursorGround);}
+                else if(intent.Kind=="cameraJump")FocusPadPoint(padCursorGround);
                 else if(intent.Kind=="context"&&mapOpen&&padRememberedBuilding!=0){SetPadSelection(new[]{padRememberedBuilding});battleGestures.SetMode("buildingWheel");}
-                else if(intent.Kind=="context"||intent.Kind=="attackMove"){if(mapOpen)Submit(intent.Kind=="attackMove"?PlayableCommandKind.AttackMove:PlayableCommandKind.Move,null,padCursorGround);else Order(battleCursor,intent.Kind=="attackMove",false);}
+                else if(intent.Kind=="context"||intent.Kind=="attackMove"){if(mapOpen||intent.Kind=="attackMove")Submit(intent.Kind=="attackMove"?PlayableCommandKind.AttackMove:PlayableCommandKind.Move,null,padCursorGround,mode:intent.Append?PlayableOrderMode.Append:PlayableOrderMode.Replace);else Order(battleCursor,false,intent.Append);}
                 else if(intent.Kind=="hold"||intent.Kind=="stop")Submit(intent.Kind=="hold"?PlayableCommandKind.Hold:PlayableCommandKind.Stop);
-                else if(intent.Kind=="rally"){Submit(PlayableCommandKind.SetRally,new[]{padRememberedBuilding!=0?padRememberedBuilding:battleAnchor},padCursorGround);battleRally=false;}
+                else if(intent.Kind=="rally")CompleteRallyPlacement(padCursorGround,true);
             }
-            if(!PadAuxiliaryWheel){mapOpen=battleGestures.Map;tacticalOverlay.style.display=mapOpen?DisplayStyle.Flex:DisplayStyle.None;}
+            if(!PadAuxiliaryWheel){mapOpen=battleGestures.Map;tacticalOverlay.style.display=mapOpen?DisplayStyle.Flex:DisplayStyle.None;SyncTacticalMapHud();}
             actions=OrdinaryPadActions(out pages);sector=OfflinePadGestures.RingSector(ls.x,-ls.y,actions.Length,battleInputProfile.radialDeadzone);
             if(PadAuxiliaryWheel)
             {
@@ -143,7 +162,10 @@ namespace Spacewars.Presentation
             Vector2 point;
             if(mapOpen){var uv=new PlayableMapTransform(profile.ArenaHalfExtent,profile.ArenaHalfExtent).Project(padCursorGround);point=tacticalMap.worldBound.position+new Vector2((float)uv.X*tacticalMap.worldBound.width,(float)uv.Z*tacticalMap.worldBound.height)-root.worldBound.position;}
             else point=PanelPoint(battleCursor);
-            battleCursorVisual.style.backgroundImage=battleGestures.AttackPreview||!mapOpen&&HostileAt(battleCursor)?padRedArrow:padWhiteArrow;battleCursorVisual.style.left=point.x-AngularCommandCursor.Hotspot.x;battleCursorVisual.style.top=point.y-AngularCommandCursor.Hotspot.y;battleCursorVisual.style.display=battleController&&!PadAuxiliaryWheel&&battleGestures.Mode!="buildingWheel"?DisplayStyle.Flex:DisplayStyle.None;battleCursorVisual.BringToFront();
+            UpdateRallyPreview();
+            battleCursorVisual.Q<Label>("pad-queue-preview").style.display=battleGestures.QueuePreview?DisplayStyle.Flex:DisplayStyle.None;
+            battleCursorVisual.style.backgroundImage=battleRally?Resources.Load<Texture2D>("OrbitalIcons/rally"):battleGestures.AttackPreview||!mapOpen&&HostileAt(battleCursor)?padRedArrow:padWhiteArrow;
+            battleCursorVisual.style.unityBackgroundImageTintColor=battleRally?LobbyPaint(view.Owner):Color.white;var hotspot=battleRally?new Vector2(AngularCommandCursor.Size/2,AngularCommandCursor.Size):AngularCommandCursor.Hotspot;battleCursorVisual.style.left=point.x-hotspot.x;battleCursorVisual.style.top=point.y-hotspot.y;battleCursorVisual.style.display=battleController&&!PadAuxiliaryWheel&&battleGestures.Mode!="buildingWheel"&&(!battleRally||mapOpen)?DisplayStyle.Flex:DisplayStyle.None;battleCursorVisual.BringToFront();
             if(battleGestures.SelectionHeldMs>0&&!PadAuxiliaryWheel)
             {
                 float radius=(float)((battleGestures.SelectionHeldMs-battleInputProfile.holdMs)/1000*battleInputProfile.selectionGrowth);float pixels=mapOpen?radius*tacticalMap.worldBound.width/(2*(float)profile.ArenaHalfExtent):radius*cameraView.pixelRect.height/(2*cameraView.orthographicSize)/(localCoordinator??this).GetComponent<UIDocument>().panelSettings.scale;

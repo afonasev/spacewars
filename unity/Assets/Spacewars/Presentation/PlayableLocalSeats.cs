@@ -50,7 +50,7 @@ namespace Spacewars.Presentation
         private void UpdateSharedLocalMap(OfflinePresentationFrame frame)
         {
             if(sharedLocalMap==null||frame==null)return;
-            sharedMapFrame.style.display=paused||ResultsVisible||inLobby?DisplayStyle.None:DisplayStyle.Flex;
+            sharedMapFrame.style.display=paused||ResultsVisible||inLobby||localPresentations.Any(seat=>seat.mapOpen)?DisplayStyle.None:DisplayStyle.Flex;
             sharedMapTerrain.UpdateUnion(localPresentations.Select(seat=>seat.world.Fog).ToArray());
             var markers=OfflineMapProjection.Shared(frame,localPresentations.Select(seat=>seat.LocalOwnerId).ToArray()).Select(m=>new PlayableMapMark(m.Id,m.Position,Enum.TryParse<PlayableBuildingKind>(m.Kind,out var kind)?kind:default(PlayableBuildingKind),m.State,m.Owner)).ToArray();
             sharedLocalMap.SetPublic(markers,profile.ArenaHalfExtent);sharedLocalMap.SetOrderMarkers(Array.Empty<PlayableQueueMarker>());
@@ -146,7 +146,7 @@ namespace Spacewars.Presentation
             {
                 seat.RefreshLocalKeyboardBinding();seat.view=frame.Views[seat.LocalOwnerId];seat.paused=paused;seat.restarting=restarting;seat.quitting=quitting;
                 seat.input.WorldInputEnabled=seat.SeatReady&&!paused&&!preparing&&!returningToLobby&&!restarting&&!quitting&&seat.view.Outcome==PlayableMatchOutcome.Playing&&!ResultsVisible;
-                seat.RebindPresentation();seat.Render();seat.UpdateHud();seat.UpdateMaps();seat.UpdateLifecycleMarkers();seat.PollBattleController();seat.UpdateKeyboardPresentation();seat.UpdateOrderMarkers(receipts.Where(r=>r.OwnerId==seat.LocalOwnerId).ToArray());
+                seat.RebindPresentation();seat.Render();seat.UpdateHud();seat.UpdateMaps();seat.UpdateLifecycleMarkers();seat.UpdateIncomeMarkers();seat.PollBattleController();seat.UpdateKeyboardPresentation();seat.UpdateOrderMarkers(receipts.Where(r=>r.OwnerId==seat.LocalOwnerId).ToArray());
             }
             UpdateSharedLocalMap(frame);
         }

@@ -27,6 +27,11 @@ namespace Spacewars.Simulation
         {
             if(Participants != null)return;
             Participants=new List<NativeLobbyParticipant>();
+            if(AiTestMap)
+            {
+                for(int i=0;i<Spacewars.Simulation.AiTestMap.Capacity;i++)Participants.Add(new NativeLobbyParticipant{Name="ИИ "+(i+1),Team=i+1,Color=i,Difficulty=Difficulty});
+                return;
+            }
             if(HumanPresent)Participants.Add(new NativeLobbyParticipant{Name=HumanName,Human=true,Team=Foundry?1:HumanTeam,Color=Foundry?0:HumanColor});
             if(Foundry)for(int i=1;i<6;i++)Participants.Add(new NativeLobbyParticipant{Name="ИИ "+i,Team=i<3?1:2,Color=i,Difficulty=Difficulty});
             else if(AiPresent)Participants.Add(new NativeLobbyParticipant{Name=MatchAiName,Team=AiTeam,Color=AiColor,Difficulty=Difficulty});
@@ -42,6 +47,7 @@ namespace Spacewars.Simulation
             return null;
         }
         public bool Foundry;
+        public bool AiTestMap;
         public string HumanName = "Игрок 1";
         public string AiName = "ИИ";
         public int HumanTeam = 1, AiTeam = 2;

@@ -1,6 +1,6 @@
 {
   "id": "foundry-warm-slag-basalt-v1",
-  "revision": 4,
+  "revision": 7,
   "depositScale": 13,
   "grainScale": 0.3,
   "depositContrast": 0.28,
@@ -33,5 +33,13 @@
   "padSandValue": 0.55,
   "padCenterRadius": 3.5,
   "padCenterValue": 0.35,
-  "padCenterFeather": 0.25
+  "padCenterFeather": 0.25,
+  "variantPatchScale": 22,
+  "variantBlendWidth": 0.08,
+  "concreteDetailContrast": 2,
+  "reliefSlopeLimit": 0.35,
+  "lavaDepth": 3.5,
+  "lavaGlow": 1.2,
+  "lavaCrustScale": 1.5,
+  "lavaFlowSpeed": 0.18
 }

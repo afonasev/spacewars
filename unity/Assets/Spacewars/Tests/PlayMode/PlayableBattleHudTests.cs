@@ -50,6 +50,15 @@ public sealed class PlayableBattleHudTests
         Assert.AreEqual("4 / 100",button.text);Assert.AreEqual(1,Get<VisualElement>("selectionRoster").childCount);
         Get<VisualElement>("root").Focus();Assert.AreEqual(DisplayStyle.None,Get<VisualElement>("armyComposition").style.display.value);
     }
+    [Test] public void TacticalCompositionStaysVisibleWithoutHoverThenRestoresPopover()
+    {
+        Set("view",Snapshot(new[]{new PlayableEntitySnapshot(1,PlayableOwner.Player,PlayableEntityKind.Tank,default,100,false,0,0,0),new PlayableEntitySnapshot(2,PlayableOwner.Enemy,PlayableEntityKind.Explorer,default,100,false,0,0,0)}));
+        var layerOrder=Get<VisualElement>("root").Children().ToArray();
+        Call("ToggleMap");Call("ShowArmyComposition",false);Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>("armyComposition").style.display.value);
+        var counts=Get<Label[]>("armyCounts");CollectionAssert.AreEqual(new[]{"0","1","0"},counts.Select(label=>label.text));Assert.True(counts.All(label=>label.style.display.value==DisplayStyle.Flex));
+        Call("CloseMap");CollectionAssert.AreEqual(layerOrder,Get<VisualElement>("root").Children().ToArray(),"Closing restores the ordinary HUD/modal layer order.");Assert.AreEqual(DisplayStyle.None,Get<VisualElement>("armyComposition").style.display.value);Assert.AreEqual(DisplayStyle.None,counts[0].style.display.value);
+        Get<Button>("hudFocusButton").Focus();Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>("armyComposition").style.display.value);Get<VisualElement>("root").Focus();Assert.AreEqual(DisplayStyle.None,Get<VisualElement>("armyComposition").style.display.value);
+    }
     [Test] public void RingKeepsRepeatWhenPurchaseUnavailableAndBlocksStaleAction()
     {
         var lifecycle=new PlayableBuildingLifecycleSnapshot(false,0,false,false,0,0,null,null,1,300,false);

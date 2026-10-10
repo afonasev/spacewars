@@ -38,6 +38,7 @@ namespace Spacewars.Presentation
             root.RegisterCallback<NavigationCancelEvent>(BlockCancel,TrickleDown.TrickleDown);
             root.RegisterCallback<PointerDownEvent>(PointerDown,TrickleDown.TrickleDown);
         }
+        public void UseGamepad(){UsingGamepad=true;UpdateHints();}
         public void SetScope(VisualElement element,Action onBack=null,VisualElement preferred=null,Label hintLabel=null)
         {
             scope=element;back=onBack;hints=hintLabel;armed=false;held=Vector2.zero;
@@ -48,6 +49,7 @@ namespace Spacewars.Presentation
         {
             if(scope==null||!(Focused?.Invoke()??Application.isFocused))return;
             TickGamepad(gamepad(),Time.unscaledTime);
+            if(keyboardAllowed?.Invoke()!=false&&Mouse.current?.delta.ReadValue().sqrMagnitude>0){UsingGamepad=false;UpdateHints();}
         }
         private void TickGamepad(Gamepad pad,float now)
         {
@@ -56,8 +58,8 @@ namespace Spacewars.Presentation
             Vector2 axis=pad.dpad.ReadValue();if(axis.sqrMagnitude<.1f)axis=pad.leftStick.ReadValue();
             axis=axis.magnitude<.55f?Vector2.zero:Mathf.Abs(axis.x)>Mathf.Abs(axis.y)?new Vector2(Mathf.Sign(axis.x),0):new Vector2(0,Mathf.Sign(axis.y));
             bool confirm=pad.buttonSouth.isPressed,cancel=pad.buttonEast.isPressed||pad.startButton.isPressed;
+            if(axis!=Vector2.zero||pad.buttonSouth.wasPressedThisFrame||pad.buttonEast.wasPressedThisFrame||pad.startButton.wasPressedThisFrame){UseGamepad();}
             if(!armed){if(axis==Vector2.zero&&!confirm&&!cancel)armed=true;return;}
-            if(axis!=Vector2.zero||pad.buttonSouth.wasPressedThisFrame||pad.buttonEast.wasPressedThisFrame||pad.startButton.wasPressedThisFrame){UsingGamepad=true;UpdateHints();}
             if(axis!=Vector2.zero&&(axis!=held||now>=repeatAt))
             {Move(axis);repeatAt=now+(axis!=held?.35f:.10f);}
             held=axis;

@@ -63,6 +63,17 @@ namespace Spacewars.Editor
             }
             AssetDatabase.SaveAssets();Debug.Log("ENVIRONMENT_MATERIAL_EXPORT_PASS");
         }
+        // Refresh bindings only: texture iteration must not regenerate unrelated meshes/prefabs.
+        public static void RefreshMaterialBindings()
+        {
+            var profile=EnvironmentArtProfile.Load();
+            foreach(var guid in AssetDatabase.FindAssets("t:Material",new[]{"Assets/Spacewars/Content/Environment/NaturalFrontier/Materials"}))
+            {
+                var material=AssetDatabase.LoadAssetAtPath<Material>(AssetDatabase.GUIDToAssetPath(guid));
+                EnvironmentArt.Apply(material,profile);EditorUtility.SetDirty(material);
+            }
+            AssetDatabase.SaveAssets();
+        }
         public static void BuildCandidate(){Export();PlayableProject.Build();}
     }
 }

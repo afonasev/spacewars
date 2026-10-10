@@ -181,10 +181,10 @@ namespace Spacewars.Tests.EditMode
             type.GetMethod("Rebind",BindingFlags.Instance|BindingFlags.NonPublic,null,new[]{typeof(AiProfile)},null).Invoke(loop,new object[]{next});Assert.False(d.Active);Assert.Zero(d.PendingId);Assert.AreEqual(first,r.ArmyFor(1));Assert.AreEqual(second,r.ArmyFor(7));
             Assert.DoesNotThrow(()=>RestoreLoop(loop,LoopBytes(loop),60,next));
         }
-        [TestCase(6)][TestCase(7)][TestCase(8)][TestCase(9)][TestCase(10)] public void DefenseRecovery_PrivateSchemaRejectsHistoricalVersionsWithoutMutation(int schema)
+        [TestCase(6)][TestCase(7)][TestCase(8)][TestCase(9)][TestCase(10)][TestCase(11)] public void DefenseRecovery_PrivateSchemaRejectsHistoricalVersionsWithoutMutation(int schema)
         {
             var c=DefenseConfig();var a=new PlayableAuthorityTick(c,71);var original=a.CaptureBytes();var state=PlayableWorldState.Decode(original);
-            Assert.AreEqual(11,BitConverter.ToInt32(state.AiAuthority,4));Buffer.BlockCopy(BitConverter.GetBytes(schema),0,state.AiAuthority,4,4);
+            Assert.AreEqual(12,BitConverter.ToInt32(state.AiAuthority,4));Buffer.BlockCopy(BitConverter.GetBytes(schema),0,state.AiAuthority,4,4);
             Assert.Throws<ArgumentException>(()=>PlayableAuthorityTick.RestoreBytes(state.Encode(),c));CollectionAssert.AreEqual(original,a.CaptureBytes());a.Stop();
         }
         [Test] public void DefenseRecovery_ProgressClockUsesObservedMovementAndDamageNotReceipts()

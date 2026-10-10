@@ -26,10 +26,10 @@ namespace Spacewars.Input
     }
     public readonly struct OfflinePadIntent
     {
-        public readonly string Kind,Id;public readonly double HeldMs;
-        public OfflinePadIntent(string kind,string id=null,double heldMs=0){Kind=kind;Id=id;HeldMs=heldMs;}
+        public readonly string Kind,Id;public readonly double HeldMs;public readonly bool Append;
+        public OfflinePadIntent(string kind,string id=null,double heldMs=0,bool append=false){Kind=kind;Id=id;HeldMs=heldMs;Append=append;}
     }
-    // Port of source gamepadGestures: per-seat, explicit time, no authority/UI access.
+    // Per-seat gestures with explicit time and no authority/UI access.
     public sealed class OfflinePadGestures
     {
         private sealed class Gesture{public double Since;public string Mode;public bool Ground,Consumed,Add,DoubleTap;public OfflinePadSector Sector;public double? SectorSince;}
@@ -37,38 +37,41 @@ namespace Spacewars.Input
         private int previous;private double? rbTapAt;
         public string Mode{get;private set;}="world";
         public bool Blocked{get;private set;}=true;
-        public bool Map=>Mode=="tacticalMap";
+        public bool Map=>Mode=="tacticalMap"||Mode=="rallyMap";
         public bool Added{get;private set;}
         public string AddedSectorId=>Added&&gestures.TryGetValue(128,out var rt)?rt.Sector?.Id:null;
         public bool AttackPreview{get;private set;}
+        public bool QueuePreview{get;private set;}
         public bool ScreenPreview{get;private set;}
         public double SelectionHeldMs{get;private set;}
         public double LastHeldMs{get;private set;}
         public double Progress{get;private set;}
-        public void SetMode(string mode){Mode=mode;Blocked=true;gestures.Clear();Added=false;rbTapAt=null;}
+        public void SetMode(string mode){Mode=mode;Blocked=true;gestures.Clear();Added=false;rbTapAt=null;AttackPreview=false;QueuePreview=false;}
         public void Cancel(){SetMode("world");SelectionHeldMs=0;AttackPreview=false;ScreenPreview=false;Progress=0;}
         public IReadOnlyList<string> Step(double now,int mask,bool connected,bool focused,NativeLocalInputProfile profile,bool ground=true)
         {var result=StepDetailed(now,mask,connected,focused,profile,ground);var kinds=new List<string>();foreach(var intent in result)kinds.Add(intent.Kind);return kinds;}
         public IReadOnlyList<OfflinePadIntent> StepDetailed(double now,int mask,bool connected,bool focused,NativeLocalInputProfile profile,bool ground=true,OfflinePadSector sector=null)
         {
-            int prior=previous;previous=mask;AttackPreview=false;ScreenPreview=false;SelectionHeldMs=0;Progress=0;
+            int prior=previous;previous=mask;QueuePreview=false;AttackPreview=false;ScreenPreview=false;SelectionHeldMs=0;Progress=0;
             var intents=new List<OfflinePadIntent>();bool pressed(int bit)=>(mask&bit)!=0&&(prior&bit)==0;
-            void add(string kind,string id=null,double held=0)=>intents.Add(new OfflinePadIntent(kind,id,held));
+            void add(string kind,string id=null,double held=0,bool append=false)=>intents.Add(new OfflinePadIntent(kind,id,held,append));
             bool WorldOrMap()=>Mode=="world"||Mode=="tacticalMap";
             if(!connected||!focused){Cancel();return intents;}
             if(Blocked){if(mask==0)Blocked=false;return intents;}
             if((mask&~32)!=0){rbTapAt=null;if(gestures.TryGetValue(32,out var second)&&second.DoubleTap&&!second.Consumed)gestures.Remove(32);}
             if(pressed(16)){add("pause");SetMode("world");return intents;}
-            if(pressed(8)&&(WorldOrMap()||Mode=="rallyTarget")){SetMode(Mode=="world"||Mode=="rallyTarget"?"tacticalMap":"world");return intents;}
-            if(pressed(2)&&!WorldOrMap()){if(Mode=="buildingWheel")add("deselect");SetMode(Mode=="rallyTarget"?"buildingWheel":"world");return intents;}
+            if(pressed(8)&&(WorldOrMap()||Mode=="rallyTarget"||Mode=="rallyMap"))
+            {SetMode(Mode=="rallyTarget"?"rallyMap":Mode=="rallyMap"?"rallyTarget":Mode=="world"?"tacticalMap":"world");return intents;}
+            if(pressed(2)&&!WorldOrMap())
+            {bool rally=Mode=="rallyTarget"||Mode=="rallyMap";if(rally)add("cancelRally");else if(Mode=="buildingWheel")add("deselect");SetMode(rally?"buildingWheel":"world");return intents;}
             if(rbTapAt.HasValue&&now-rbTapAt.Value>profile.doubleTapMs){rbTapAt=null;if(WorldOrMap())add("cycleGroup");}
-            foreach(int bit in new[]{128,32,64,1,2,4})
+            foreach(int bit in new[]{128,32,64,1,2,256,4})
             {
                 if(pressed(bit))
                 {
                     if((bit==32||bit==64||bit==128||bit==4)&&!WorldOrMap())continue;
-                    if(bit==1&&!(WorldOrMap()||Mode=="buildingWheel"||Mode=="rallyTarget"))continue;
-                    if(bit==2&&!WorldOrMap())continue;
+                    if(bit==1&&!(WorldOrMap()||Mode=="buildingWheel"||Mode=="rallyTarget"||Mode=="rallyMap"))continue;
+                    if((bit==2||bit==256)&&!WorldOrMap())continue;
                     var started=new Gesture{Since=now,Mode=Mode,Ground=ground,Sector=sector?.Copy()};gestures[bit]=started;
                     if(bit==32){started.DoubleTap=rbTapAt.HasValue;rbTapAt=null;}
                     if(bit==128){Mode="groupAssign";gestures.Clear();gestures[128]=started;}
@@ -104,18 +107,18 @@ namespace Spacewars.Input
                     continue;
                 }
                 if(gesture.Consumed||gesture.Mode!=Mode)continue;
-                if(bit==2)add(longer&&gesture.Ground?"attackMove":"context");
+                if(bit==2||bit==256)add(bit==256?"attackMove":"context",held:held,append:longer);
                 if(bit==4)add(longer?"hold":"stop");
                 if(bit==1)
                 {
                     if(Mode=="world")add(held>=profile.selectAllHoldMs?"selectScreen":longer?"selectCircle":"select",held:held);
                     if(Mode=="tacticalMap"){if(longer)add("selectMapCircle",held:held);else{add("cameraJump");SetMode("world");}}
-                    if(Mode=="rallyTarget"){add("rally");SetMode("buildingWheel");}
+                    if(Mode=="rallyTarget"||Mode=="rallyMap"){add("rally");SetMode("buildingWheel");}
                     if(Mode=="buildingWheel"&&sector!=null&&sector.Enabled&&gesture.Sector!=null&&gesture.Sector.Enabled&&sector.Id==gesture.Sector.Id){if(longer&&gesture.Sector.Hold!=null)add(gesture.Sector.Hold,gesture.Sector.Id);else if(gesture.Sector.Hold!="sell")add("activate",gesture.Sector.Id);}
                 }
             }
             bool wheel=Mode=="buildingWheel"||Mode=="groupWheel"||Mode=="groupAssign"||Mode=="baseWheel";
-            if(!wheel){if(gestures.TryGetValue(1,out var a)&&(a.Mode=="world"||a.Mode=="tacticalMap")&&now-a.Since>=profile.holdMs){SelectionHeldMs=Math.Max(0,now-a.Since);ScreenPreview=a.Mode=="world"&&SelectionHeldMs>=profile.selectAllHoldMs;}if(gestures.TryGetValue(2,out var b))AttackPreview=b.Ground&&now-b.Since>=profile.holdMs;}
+            if(!wheel){if(gestures.TryGetValue(1,out var a)&&(a.Mode=="world"||a.Mode=="tacticalMap")&&now-a.Since>=profile.holdMs){SelectionHeldMs=Math.Max(0,now-a.Since);ScreenPreview=a.Mode=="world"&&SelectionHeldMs>=profile.selectAllHoldMs;}AttackPreview=gestures.ContainsKey(256);QueuePreview=(gestures.TryGetValue(2,out var b)&&now-b.Since>=profile.holdMs)||(gestures.TryGetValue(256,out var y)&&now-y.Since>=profile.holdMs);}
             return intents;
         }
         public static int? RingSector(double x,double y,int count,double deadzone)

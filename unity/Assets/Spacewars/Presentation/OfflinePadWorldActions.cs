@@ -67,7 +67,7 @@ namespace Spacewars.Presentation
                 string detail=sale?"Продать здание":"Продажа запрещена: здание находится в бою";if(TerritoryRules.Center(b.Kind))detail+=" · Продажа удалит все зависимые здания. Последний центр: поражение игрока";
                 actions.Add(new OfflinePadAction(id+":sale","Продать здание",sale,detail,"sell"){Price=lifecycle?.Refund,HoldCommand=sale?Command(PlayableCommandKind.SellBuilding,id):null});
             }
-            if(b.Kind==PlayableBuildingKind.Factory)actions.Add(new OfflinePadAction("rally","Точка сбора",true,"A — перейти к размещению; затем A — поставить, B — отменить"));
+            if(b.Kind==PlayableBuildingKind.Factory||TerritoryRules.Center(b.Kind))actions.Add(new OfflinePadAction("rally","Точка сбора",true,"A — флажок · Tab/Select — карта · A — поставить и вернуться · B — отменить"));
             return actions.ToArray();
         }
         public static OfflinePadAction[] Build(PlayableSnapshot view,PlayableProfile profile,int siteId,int slotId)

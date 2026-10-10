@@ -9,6 +9,7 @@ namespace Spacewars.Presentation
     {
         private readonly Dictionary<int,GameObject> impactMarkers=new Dictionary<int,GameObject>(),impactEffects=new Dictionary<int,GameObject>();
         private Material artilleryTransparent;
+        private readonly WebProjectileVisuals projectileVisuals=new WebProjectileVisuals();
         private Material TransparentArtillery
         {
             get
@@ -38,21 +39,22 @@ namespace Spacewars.Presentation
                 if(p.Marker!=null)
                 {
                     markerIds.Add(p.Id);
-                    if(!impactMarkers.TryGetValue(p.Id,out var marker)){marker=EffectPart("Predicted impact "+p.Id,transform,Vector3.zero,Vector3.one,ShotColor(p.Faction,(float)p.Marker.Opacity),PrimitiveType.Cylinder,true);impactMarkers.Add(p.Id,marker);}
-                    marker.transform.position=world.Point(p.Marker.Position)+Vector3.up*.025f;
-                    marker.transform.localScale=new Vector3((float)p.Marker.Radius*2,.012f,(float)p.Marker.Radius*2);
+                    if(!impactMarkers.TryGetValue(p.Id,out var marker)){marker=projectileVisuals.GroundCircle(transform,ShotColor(p.Faction,(float)p.Marker.Opacity));impactMarkers.Add(p.Id,marker);}
+                    marker.transform.position=world.Point(p.Marker.Position)+Vector3.up*.015f;
+                    var slope=profile.AuthoredMap?.SurfaceGradient(p.Marker.Position)??default(NavPoint);
+                    marker.transform.rotation=Quaternion.FromToRotation(Vector3.up,new Vector3(-(float)slope.X,1,-(float)slope.Z).normalized);
+                    marker.transform.localScale=Vector3.one*(float)p.Marker.Radius;
                 }
                 if(!p.Visible)continue;live.Add(p.Id);
                 if(!shells.TryGetValue(p.Id,out var shell))
                 {
                     if(p.Kind==PlayableEntityKind.Shkval)
                     {
-                        shell=new GameObject("Rocket "+p.Id);shell.transform.SetParent(transform,false);
-                        EffectPart("Missile body",shell.transform,Vector3.zero,new Vector3((float)profile.ShkvalProjectileLength,(float)profile.ShkvalProjectileRadius*2,(float)profile.ShkvalProjectileRadius*2),ShotColor(p.Faction),PrimitiveType.Cube);
-                        EffectPart("Rear exhaust",shell.transform,Vector3.zero,Vector3.one,new Color(1,.38f,.03f,(float)profile.ShkvalExhaustOpacity),PrimitiveType.Sphere,true);
-                        EffectPart("Hot exhaust core",shell.transform,Vector3.zero,Vector3.one,new Color(1,.96f,.65f,(float)profile.ShkvalExhaustOpacity),PrimitiveType.Sphere,true);
+                        shell=projectileVisuals.Rocket(transform,(float)profile.ShkvalProjectileRadius,(float)profile.ShkvalProjectileLength,ShotColor(p.Faction));
                     }
-                    else shell=world.Part(p.Kind==PlayableEntityKind.Explorer?"Tracer":"Shell",transform,Vector3.zero,p.Kind==PlayableEntityKind.Explorer?new Vector3((float)profile.ExplorerTracerLength,(float)profile.ExplorerTracerThickness,(float)profile.ExplorerTracerThickness):new Vector3(.22f,.22f,.22f),new Color(1,.83f,.27f),p.Kind==PlayableEntityKind.Explorer?PrimitiveType.Cube:PrimitiveType.Sphere);
+                    else if(p.Kind==PlayableEntityKind.Tank&&profile.TankProjectileType=="kinetic-shell")shell=projectileVisuals.Tank(transform);
+                    else if(p.Kind==PlayableEntityKind.Explorer)shell=projectileVisuals.Tracer(transform,(float)profile.ExplorerTracerLength,(float)profile.ExplorerTracerThickness);
+                    else shell=world.Part("Energy orb",transform,Vector3.zero,Vector3.one*.36f,new Color(.498f,.965f,1),PrimitiveType.Sphere);
                     shells[p.Id]=shell;
                 }
                 shell.transform.position=new Vector3((float)p.Position.X,(float)p.Height,(float)p.Position.Z);
@@ -60,15 +62,18 @@ namespace Spacewars.Presentation
                 if(p.Kind==PlayableEntityKind.Shkval)
                 {
                     float boost=1+(float)(profile.ShkvalExhaustStartBoost-1)*Mathf.Clamp01(1-(float)(p.Age/profile.ShkvalExhaustStartupSec));
-                    for(int i=1;i<=2;i++){var tail=shell.transform.GetChild(i);float ratio=i==2?(float)profile.WeaponMuzzleCoreRatio:1;float length=(float)profile.ShkvalExhaustLength*boost*ratio;tail.localPosition=new Vector3(-(float)profile.ShkvalProjectileLength/2-length/2,0,0);tail.localScale=new Vector3(length,(float)profile.ShkvalExhaustRadius*2*boost*ratio,(float)profile.ShkvalExhaustRadius*2*boost*ratio);}
+                    projectileVisuals.Exhaust(shell,(float)profile.ShkvalExhaustLength*boost,(float)profile.ShkvalExhaustRadius*boost,(float)profile.WeaponMuzzleCoreRatio,(float)profile.ShkvalExhaustOpacity);
                 }
             }
             foreach(var id in shells.Keys.Where(id=>!live.Contains(id)).ToArray()){Destroy(shells[id]);shells.Remove(id);}
             foreach(var id in impactMarkers.Keys.Where(id=>!markerIds.Contains(id)).ToArray()){Destroy(impactMarkers[id]);impactMarkers.Remove(id);}
             var effects=new HashSet<int>();foreach(var p in view.Impacts)
             {
-                effects.Add(p.Id);if(!impactEffects.TryGetValue(p.Id,out var effect)){effect=EffectPart("Artillery blast "+p.Id,transform,Vector3.zero,Vector3.one,new Color(1,.6f,.1f,(float)profile.ShkvalExhaustOpacity),PrimitiveType.Sphere,true);impactEffects.Add(p.Id,effect);}
-                effect.transform.position=new Vector3((float)p.Point.X,(float)p.Point.Y,(float)p.Point.Z);float age=(float)((view.Tick-p.Tick)/30d/profile.ImpactEffectSec);effect.transform.localScale=Vector3.one*(float)p.Radius*2;
+                effects.Add(p.Id);if(!impactEffects.TryGetValue(p.Id,out var effect)){effect=projectileVisuals.ImpactFlash(transform);impactEffects.Add(p.Id,effect);}
+                effect.transform.position=new Vector3((float)p.Point.X,(float)p.Point.Y,(float)p.Point.Z);
+                float age=Mathf.Clamp01((float)((view.Tick-p.Tick)/30d/profile.ImpactEffectSec));
+                effect.transform.localScale=Vector3.one*(float)profile.ImpactEffectRadius*2*Mathf.Max(Mathf.Epsilon,age);
+                WebProjectileVisuals.Opacity(effect,1-age);
             }
             foreach(var id in impactEffects.Keys.Where(id=>!effects.Contains(id)).ToArray()){Destroy(impactEffects[id]);impactEffects.Remove(id);}
         }

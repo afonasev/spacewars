@@ -48,9 +48,9 @@ namespace Spacewars.Presentation
         }
         private void UpdatePrecisionContext(PlayableBuildingSnapshot building)
         {
-            bool visible=building!=null||selection.Count>0||selectedSite!=0;
+            bool visible=building!=null||selection.Count>0||selectedSite!=0||spectatorMode&&inspectionEntityId!=0;
             armyRegion.style.display=visible?DisplayStyle.Flex:DisplayStyle.None;
-            var ownSelected=view.Entities.Where(e=>selection.Contains(e.Id)&&e.Owner==view.Owner).ToArray();
+            var ownSelected=view.Entities.Where(e=>spectatorMode?e.Id==inspectionEntityId:selection.Contains(e.Id)&&e.Owner==view.Owner).ToArray();
             var entity=ownSelected.FirstOrDefault(e=>e.Id==primarySelection)??ownSelected.FirstOrDefault();
             contextStats.style.display=building==null&&entity!=null?DisplayStyle.Flex:DisplayStyle.None;
             contextStats.text=entity==null?"":"Скорость "+PlayableUnitRules.Speed(profile,entity.Kind,entity.Upgraded).ToString("0.#")+" · Обзор "+PlayableUnitRules.Vision(profile,entity.Kind).ToString("0.#")+" · Дальность "+PlayableUnitRules.Range(profile,entity.Kind,entity.Upgraded).ToString("0.#")+(ownSelected.Length>1?" · Выбрано "+ownSelected.Length:"")+(entity.Held?" · HOLD":"");

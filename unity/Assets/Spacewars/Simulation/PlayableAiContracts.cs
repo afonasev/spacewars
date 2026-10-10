@@ -15,6 +15,7 @@ namespace Spacewars.Simulation
         private readonly TerritorySiteSnapshot[] sites;
         private readonly PlayableImpactSnapshot[] impacts;
         private readonly PlayableResearchAvailabilitySnapshot[] researchAvailability;
+        private readonly PlayableResearchOrderSnapshot[] ownerResearch;
         private readonly PlayablePublicScoutObjective[] publicScoutObjectives;
         private readonly PlayableCenterDamageSnapshot[] ownCenterDamage;
         private readonly PlayableRouteProof[] routeProofs;
@@ -24,7 +25,7 @@ namespace Spacewars.Simulation
             Intel=new Spacewars.Simulation.Ai.AiIntelDelta(snapshot.Tick,snapshot.IntelEnvelopes,snapshot.Vision);Vision=snapshot.Vision;SchemaVersion=snapshot.Participants.Count>0?ParticipantSchemaVersion:CurrentSchemaVersion;HomeSiteId=snapshot.HomeSiteId;OwnerId=snapshot.OwnerId;Team=snapshot.Team;Participants=snapshot.Participants;Owner=snapshot.Owner;ProfileId=snapshot.ProfileId; ProfileRevision=snapshot.ProfileRevision; Generation=snapshot.Generation; Seed=snapshot.Seed;
             var owner=Owner;
             SnapshotSequence=snapshot.Sequence; Tick=snapshot.Tick; Credits=snapshot.Credits; SettledIncome=snapshot.SettledIncome; IncomePerSecond=snapshot.IncomePerSecond;
-            Population=snapshot.Population; entities=snapshot.Entities.Select(x=>new PlayableEntitySnapshot(x.Id,x.Owner,x.Kind,x.Position,x.Health,x.Moving,x.TargetId,x.HullHeading,x.TurretHeading,
+            Population=snapshot.Population;ownerResearch=snapshot.OwnerResearch.ToArray(); entities=snapshot.Entities.Select(x=>new PlayableEntitySnapshot(x.Id,x.Owner,x.Kind,x.Position,x.Health,x.Moving,x.TargetId,x.HullHeading,x.TurretHeading,
                 x.Owner==owner&&x.CurrentOrder?.Owner==owner&&x.CurrentOrder.UnitId==x.Id&&x.CurrentOrder.Generation==snapshot.Generation&&x.CurrentOrder.IssuedTick<=snapshot.Tick?x.CurrentOrder:null,
                 completion:x.Owner==owner&&x.Completion?.Order.Owner==owner&&x.Completion.Order.Generation==snapshot.Generation?x.Completion:null,location:x.Owner==owner?x.Location:null,upgraded:x.Upgraded,held:x.Owner==owner&&x.Held,navigationOutcome:x.Owner==owner?x.NavigationOutcome:NavigationOutcome.Idle,orderStamp:x.Owner==owner?x.OrderStamp:null,queue:x.Owner==owner?x.Queue:null)).ToArray(); buildings=snapshot.Buildings.ToArray();
             ownCenterDamage=snapshot.OwnCenterDamage.Where(x=>x.Owner==owner&&x.Generation==snapshot.Generation&&x.Tick<=snapshot.Tick&&x.Damage>0&&snapshot.Buildings.Any(b=>b.Id==x.CenterId&&b.Owner==owner&&b.Health>0&&b.Phase!=ConstructionPhase.Pending&&(b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost))&&entities.Any(e=>e.Id==x.AttackerId&&snapshot.IsHostile(e.Owner)&&e.Health>0)).Select(x=>x.Copy()).ToArray();
@@ -54,6 +55,7 @@ namespace Spacewars.Simulation
         public long SnapshotSequence{get;} public long Tick{get;} public int Credits{get;} public double IncomePerSecond{get;} public double SettledIncome{get;}
         public PlayablePopulationSnapshot Population{get;}
         public IReadOnlyList<PlayableResearchAvailabilitySnapshot> ResearchAvailability=>Array.AsReadOnly(researchAvailability);
+        public IReadOnlyList<PlayableResearchOrderSnapshot> OwnerResearch=>Array.AsReadOnly(ownerResearch);
         public IReadOnlyList<PlayablePublicScoutObjective> PublicScoutObjectives=>Array.AsReadOnly(publicScoutObjectives);
         public IReadOnlyList<PlayableEntitySnapshot> Entities=>Array.AsReadOnly(entities);
         public IReadOnlyList<PlayableBuildingSnapshot> Buildings=>Array.AsReadOnly(buildings);

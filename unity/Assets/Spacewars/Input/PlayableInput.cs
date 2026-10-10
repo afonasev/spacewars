@@ -192,6 +192,7 @@ namespace Spacewars.Input
             if(edge.Down&&(map>0||overUi))lastClickTime=double.NegativeInfinity;
             if (!edge.Left)
             {
+                if(!CommandInputEnabled){ResetMode();return;}
                 if (!edge.Down) return;
                 lastClickTime=double.NegativeInfinity;
                 if (map > 0)

@@ -67,6 +67,7 @@ namespace Spacewars.Runtime
                 Array(w,rallyReceipts.ToArray(),x=>WorldWire.Write(w,x));
                 foreach(var layout in new[]{units.CaptureLayout(),buildings.CaptureLayout(),centerDamage.CaptureLayout(),rallyWork.CaptureLayout()})Array(w,layout,i=>w.Write(i));
                 WriteMatchHistory(w);WriteSpatialCompletionExtension(w);WriteTacticalQueueExtension(w);
+                w.Write(0x494E4331);Array(w,incomeEvents.ToArray(),e=>{w.Write(e.Tick);w.Write(e.BuildingId);w.Write((int)e.Owner);w.Write((int)e.Kind);Number(w,e.Position.X);Number(w,e.Position.Z);Number(w,e.Amount);});
             });
             return new PlayableWorldState{Seed=seed,Generation=navigation.Generation,Tick=Tick,SourceIdentity=sourceIdentity,Binding=WorldWire.Binding(profile),Participants=offline==null?System.Array.Empty<byte>():OfflineConfigurationWire.Binding(offline,profile),Domain=domain,Navigation=Pack(w=>WorldWire.Write(w,nav)),Vision=visions.Values.Select(v=>Pack(w=>WorldWire.Write(w,v.CaptureState()))).ToArray()};
         }
@@ -107,12 +108,19 @@ namespace Spacewars.Runtime
                 var restoredRequests=d.navigation.RestoreWorldState(nav);
                 for(int i=0;i<count;i++){
                     var intent=ReadPlayableRallyIntentState(r);int kind=r.ReadInt32(),exit=r.ReadInt32();bool hasGeometry=Boolean(r);long request=r.ReadInt64();
-                    if(intent==null||intent.Generation!=state.Generation||intent.Sequence<1||d.Producer(intent.Building,intent.Owner)==null||kind<0||kind>=RallyKinds.Length||exit<0||exit>d.FactoryExitCandidates(d.buildings[intent.Building],RallyKinds[kind]).Length||d.rallyWork.ContainsKey(intent.Building))throw new ArgumentException("Invalid rally progress.");
+                    if(intent==null||intent.Generation!=state.Generation||intent.Sequence<1||d.RallyProducer(intent.Building,intent.Owner)==null||kind<0||kind>=RallyKinds.Length||exit<0||exit>d.FactoryExitCandidates(d.buildings[intent.Building],RallyKinds[kind]).Length||d.rallyWork.ContainsKey(intent.Building))throw new ArgumentException("Invalid rally progress.");
                     NavigationRequest bound=null;if(request!=0){bound=restoredRequests.SingleOrDefault(x=>x.Request==request&&x.Session==state.Generation);if(bound==null||bound.Entity!=-intent.Building||bound.Order!=intent.Sequence||!hasGeometry)throw new ArgumentException("Invalid rally request binding.");}
                     d.rallyWork.Add(intent.Building,new RallyWork{Intent=intent,Kind=kind,Candidate=exit,Geometry=hasGeometry?geometry:null,Request=bound});
                 }
                 d.rallyReceipts.AddRange(Array(r,()=>ReadPlayableCommandReceipt(r)));
-                d.units.RestoreLayout(Array(r,()=>r.ReadInt32()));d.buildings.RestoreLayout(Array(r,()=>r.ReadInt32()));d.centerDamage.RestoreLayout(Array(r,()=>r.ReadInt32()));d.rallyWork.RestoreLayout(Array(r,()=>r.ReadInt32()));d.ReadMatchHistory(r);d.ReadSpatialCompletionExtension(r);d.ReadTacticalQueueExtension(r,legacyQueue);return d;
+                d.units.RestoreLayout(Array(r,()=>r.ReadInt32()));d.buildings.RestoreLayout(Array(r,()=>r.ReadInt32()));d.centerDamage.RestoreLayout(Array(r,()=>r.ReadInt32()));d.rallyWork.RestoreLayout(Array(r,()=>r.ReadInt32()));d.ReadMatchHistory(r);d.ReadSpatialCompletionExtension(r);d.ReadTacticalQueueExtension(r,legacyQueue);
+                if(r.BaseStream.Position<r.BaseStream.Length)
+                {
+                    if(r.ReadInt32()!=0x494E4331)throw new ArgumentException("Invalid income presentation extension.");
+                    d.incomeEvents.AddRange(Array(r,()=>new PlayableIncomeEvent(r.ReadInt64(),r.ReadInt32(),EnumValue<PlayableOwner>(r),EnumValue<PlayableBuildingKind>(r),new NavPoint(Number(r),Number(r)),Number(r))));
+                    foreach(var e in d.incomeEvents)if(e.Tick<0||e.Tick>d.Tick||e.BuildingId<=0||!d.HasOwner(e.Owner)||e.Amount<=0)throw new ArgumentException("Invalid income event.");
+                }
+                return d;
             });
             foreach(var section in state.Vision){var v=Unpack(section,ReadPlayableVisionState);if(v==null||!candidate.Owners.Any(x=>candidate.TeamOf(x)==v.Team)||candidate.visions.ContainsKey(v.Team))throw new ArgumentException("Invalid world vision binding.");var next=new PlayableVision(v.Team,profile.ArenaHalfExtent,profile.ArenaHalfExtent,profile.VisionCellSize,profile.FogEdgeFeather);next.RestoreState(v);candidate.visions.Add(v.Team,next);}
             foreach(var v in candidate.visions.Values.Select(x=>x.CaptureState()))foreach(var known in v.KnownBuildings)if(!candidate.HasOwner(known.Owner)||known.Team!=candidate.TeamOf(known.Owner)||known.Team==v.Team||known.Id>=candidate.nextId)throw new ArgumentException("Invalid remembered building binding.");

@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 
 STAGES = {'draft','ready','implementing','verified','merged','deployed','published','finalizing','awaiting-acceptance','rework-required','accepted','archived','cancelled'}
-EDGES = {'draft':{'ready'},'ready':{'implementing'},'implementing':{'verified'},'verified':{'merged','published'},'merged':{'deployed'},'deployed':{'finalizing'},'published':{'finalizing'},'finalizing':{'awaiting-acceptance','accepted','rework-required'},'awaiting-acceptance':{'accepted','rework-required'},'rework-required':{'implementing'},'accepted':{'archived','rework-required'}}
+EDGES = {'draft':{'ready'},'ready':{'implementing'},'implementing':{'verified'},'verified':{'merged','published'},'merged':{'deployed','finalizing'},'deployed':{'finalizing'},'published':{'finalizing'},'finalizing':{'awaiting-acceptance','accepted','rework-required'},'awaiting-acceptance':{'accepted','rework-required'},'rework-required':{'implementing'},'accepted':{'archived','rework-required'}}
 
 def now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -239,6 +239,11 @@ class Flow:
         if target=='verified' and d['kind']=='software' and not d['evidence'].get('commit'): raise ValueError('Missing implementation commit')
         if target in {'merged','deployed'} and d['kind']!='software': raise ValueError('Non-software uses publication')
         if target=='published' and d['kind']=='software': raise ValueError('Software requires merge/deploy')
+        if target=='finalizing' and old=='merged':
+            source_only=d['evidence'].get('source_only_delivery',{})
+            if not isinstance(source_only,dict) or source_only.get('deployment_deferred') is not True or any(
+                not isinstance(source_only.get(k),str) or not source_only[k].strip() for k in ['source','reason']):
+                raise ValueError('Source-only finalization requires explicit deployment deferral source and reason')
         if target=='merged':
             e=d['evidence']['merge']
             subprocess.run(['git','-C',e['repo'],'merge-base','--is-ancestor',e['commit'],e['main_ref']],check=True,capture_output=True)

@@ -40,6 +40,7 @@ namespace Spacewars.Simulation
             string name=field.FieldName??"";
             if(field.Group=="Arena"||field.Group=="Slots"||field.Group=="Minimap"||field.Group=="Fog presentation"||field.Group=="Camera"||field.Group=="Navigation"||field.Group=="Rendering"||field.Group=="Input"||field.Group=="Presentation")return false;
             if(name.StartsWith("minimap")||name.StartsWith("fog")||name=="visionCellSize"||name=="startingCredits"||name=="matchScoreEarnedCreditsDivisor"||name=="ballisticWallHeight"||name=="factoryExitDistance"||name=="defaultRallyDistance"||name=="evacuationClearance"||name=="shkvalBuildingCollisionHeight"||name=="shkvalProjectileRadius")return false;
+            if(name=="shkvalMarkerStartRadius"||name=="shkvalMarkerOpacity")return true;
             if(name.Contains("Marker")||name.Contains("Tracer")||name.Contains("Muzzle")||name=="shkvalArcHeight"||name=="shkvalLaunchHeight")return false;
             if(name.Contains("CollisionRadius")||name.Contains("FootprintRadius")||name.Contains("ModelRadius")||name.Contains("ModelScale")||name.Contains("ModelHeight"))return false;
             return true;

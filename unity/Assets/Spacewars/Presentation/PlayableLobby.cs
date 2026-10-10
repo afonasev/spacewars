@@ -13,6 +13,9 @@ namespace Spacewars.Presentation
 {
     public sealed partial class PlayableBootstrap
     {
+        private const string CrossingsLobbyName="Переправа",FoundryLobbyName="Огненный разлом",AiTestLobbyName="ИИ-полигон · 8";
+        private const string CrossingsLobbyDescription="Холодная река рассекает каменное плато, оставляя лишь три пути на другой берег. Среди скал и высоких уступов каждый проход становится рубежом, который нельзя отдать.";
+        private const string FoundryLobbyDescription="Над остывшими промышленными площадками дрожит жар лавовой реки. Между шахтами и укреплёнными высотами тишина держится лишь до первых выстрелов.";
         private NativeLobbyConfiguration lobbySetup = new NativeLobbyConfiguration(), matchSetup;
         private VisualElement menuScreen, lobbyScreen, lobbyColumns, rosterPanel, mapPanel, mapInfo, loadingScreen;
         private Label lobbyStatus, humanReady, aiReady;
@@ -95,16 +98,16 @@ namespace Spacewars.Presentation
             mapPanel=LobbyPanel();mapPanel.style.flexGrow=1;mapPanel.style.minWidth=250;mapPanel.style.flexBasis=0;lobbyColumns.Add(mapPanel);
             mapInfo=new VisualElement();mapPanel.Add(mapInfo);
             mapInfo.Add(LobbyText("КАРТА МАТЧА",12,Muted));
-            var maps=new DropdownField("Карта",new List<string>{"Three Crossings","Чёрная плавильня"},0){name="lobby-map-choice"};StyleLobbyField(maps);mapInfo.Add(maps);
-            maps.RegisterValueChangedCallback(evt=>SelectLobbyMap(evt.newValue=="Чёрная плавильня"));
-            var capacity=LobbyText("2 игровых места · многоуровневая карта",14);capacity.name="lobby-map-capacity";mapInfo.Add(capacity);
+            var maps=new DropdownField("Карта",new List<string>{CrossingsLobbyName,FoundryLobbyName,AiTestLobbyName},0){name="lobby-map-choice"};StyleLobbyField(maps);mapInfo.Add(maps);
+            maps.RegisterValueChangedCallback(evt=>SelectLobbyMap(evt.newValue==FoundryLobbyName,evt.newValue==AiTestLobbyName));
+            var capacity=LobbyText("2 игровых места",14);capacity.name="lobby-map-capacity";mapInfo.Add(capacity);
             lobbyTerrain=new PlayableMapTerrain(profile);lobbyTerrain.ShowPublicTerrain();
             lobbyPreview=new PlayableMapSurface(profile,lobbyTerrain.Texture){OwnerPaint=LobbyPaint};
             lobbyPreview.style.flexGrow=1;lobbyPreview.style.minHeight=130;lobbyPreview.style.maxHeight=360;
             lobbyPreview.style.marginTop=14;lobbyPreview.style.marginBottom=14;mapPanel.Add(lobbyPreview);
             // Public authored landmarks, no simulation entities, fog or camera frame.
             lobbySetup.InitializeParticipants();RefreshLobbyPreview();
-            var description=LobbyText("Три переправы, поднятые платформы и рампы. Захватывайте территории и уничтожьте центры противника.",14,Muted);description.name="lobby-map-description";mapPanel.Add(description);
+            var description=LobbyText(CrossingsLobbyDescription,14,Muted);description.name="lobby-map-description";mapPanel.Add(description);
             var footer=new VisualElement();footer.style.flexDirection=FlexDirection.Row;footer.style.alignItems=Align.Center;lobbyScreen.Add(footer);
             lobbyStatus=LobbyText("",14,Amber);lobbyStatus.name="lobby-validation";lobbyStatus.style.flexGrow=1;lobbyStatus.style.flexShrink=1;footer.Add(lobbyStatus);
             launchButton=LobbyAction("Начать матч  ·  Start",LaunchLobbyMatch);launchButton.name="lobby-launch";launchButton.style.width=330;launchButton.Insert(0,new NativeControllerGlyph("A"));
@@ -118,17 +121,17 @@ namespace Spacewars.Presentation
         }
         private PlayableProfile ComposeLobbyProfile(PlayableProfile balance)
         {
-            IPlayableTerrain map=lobbySetup.Foundry?new FoundryMap(JsonUtility.FromJson<FoundryProfileData>(Resources.Load<TextAsset>("FoundryProfile").text)):(IPlayableTerrain)new ThreeCrossingsMap(JsonUtility.FromJson<ThreeCrossingsProfileData>(Resources.Load<TextAsset>("ThreeCrossingsProfile").text));
+            IPlayableTerrain map=lobbySetup.AiTestMap?new AiTestMap():lobbySetup.Foundry?new FoundryMap(JsonUtility.FromJson<FoundryProfileData>(Resources.Load<TextAsset>("FoundryProfile").text)):(IPlayableTerrain)new ThreeCrossingsMap(JsonUtility.FromJson<ThreeCrossingsProfileData>(Resources.Load<TextAsset>("ThreeCrossingsProfile").text));
             return PlayableProfile.Create(balance.CopyData(),map,balance.DisplayName);
         }
-        private void SelectLobbyMap(bool foundry)
+        private void SelectLobbyMap(bool foundry,bool aiTest=false)
         {
             bool defaults=!lobbyRosterEdited;
-            lobbySetup.Foundry=foundry;if(defaults){lobbySetup.Participants=null;lobbySetup.InitializeParticipants();}
+            lobbySetup.Foundry=foundry;lobbySetup.AiTestMap=aiTest;if(defaults){lobbySetup.Participants=null;lobbySetup.InitializeParticipants();}
             EnsureBalanceStore();profile=ComposeLobbyProfile(balanceStore.Selected);
             lobbyTerrain?.Dispose();lobbyTerrain=new PlayableMapTerrain(profile);lobbyTerrain.ShowPublicTerrain();lobbyPreview.Rebind(profile,lobbyTerrain.Texture);
-            mapInfo.Q<Label>("lobby-map-capacity").text=foundry?"6 игровых мест · многоуровневая карта":"2 игровых места · многоуровневая карта";
-            mapPanel.Q<Label>("lobby-map-description").text=foundry?"Общий фронт, поднятые шахтные линии, четыре форпоста и река лавы.":"Три переправы, поднятые платформы и рампы. Захватывайте территории и уничтожьте центры противника.";
+            mapInfo.Q<Label>("lobby-map-capacity").text=aiTest?"8 игровых мест":foundry?"6 игровых мест":"2 игровых места";
+            mapPanel.Q<Label>("lobby-map-description").text=aiTest?"Открытый полигон для проверки ИИ: восемь стартов, шахты и точки расширения. Без стен и перепадов высоты.":foundry?FoundryLobbyDescription:CrossingsLobbyDescription;
             RebuildRoster();RefreshLobbyPreview();RefreshLobbyValidation();
         }
         private void RecreateMapPresentation()
@@ -305,8 +308,8 @@ namespace Spacewars.Presentation
                 nativeMainMenu.HostRoot=root;nativeMainMenu.LocalControls=LocalControlSettings;nativeMainMenu.Navigation=menuNavigation;nativeMainMenu.Play=ShowLobby;nativeMainMenu.Laboratory=OpenLaboratory;
             }
         }
-        private void ShowLobby(){inLobby=true;lobbyPadArmed=false;matchSetup=null;menuScreen.style.display=DisplayStyle.None;lobbyScreen.style.display=DisplayStyle.Flex;SetMatchUi(false);RefreshLobbyValidation();RefreshLobbyPreview();if(menuNavigation!=null)menuNavigation.Start=StartLobbyMatchFromGamepad;menuNavigation?.SetScope(lobbyScreen,ShowMainMenu,launchButton);}
-        private void SetMatchUi(bool visible){top.style.display=bottom.style.display=visible?DisplayStyle.Flex:DisplayStyle.None;modal.style.display=DisplayStyle.None;input.WorldInputEnabled=visible;input.CommandInputEnabled=visible&&matchSetup?.Spectator!=true;}
+        private void ShowLobby(){inLobby=true;lobbyPadArmed=false;matchSetup=null;ResetSpectatorPresentation();menuScreen.style.display=DisplayStyle.None;lobbyScreen.style.display=DisplayStyle.Flex;SetMatchUi(false);RefreshLobbyValidation();RefreshLobbyPreview();if(menuNavigation!=null)menuNavigation.Start=StartLobbyMatchFromGamepad;menuNavigation?.SetScope(lobbyScreen,ShowMainMenu,launchButton);}
+        private void SetMatchUi(bool visible){top.style.display=bottom.style.display=visible?DisplayStyle.Flex:DisplayStyle.None;modal.style.display=DisplayStyle.None;if(!visible){if(spectatorPanel!=null)spectatorPanel.style.display=DisplayStyle.None;if(spectatorTooltip!=null)spectatorTooltip.style.display=DisplayStyle.None;}input.WorldInputEnabled=visible;input.CommandInputEnabled=visible&&matchSetup?.Spectator!=true;}
         private void LaunchLobbyMatch()
         {
             RefreshLobbyValidation();if(!launchButton.enabledSelf||preparing)return;
@@ -318,7 +321,7 @@ namespace Spacewars.Presentation
             yield return null; // Present actual preparation state before creating authority.
             if(!TryPrepareLobbySession())yield break;
             while(runtime.Latest==null)yield return null;
-            view=matchSetup.Participants!=null&&!matchSetup.Spectator?runtime.ParticipantView(LocalOwnerId):runtime.Latest;ServiceRoutes();Render();UpdateHud();UpdateMaps();
+            ReadPresentationFrame();ServiceRoutes();Render();UpdateHud();UpdateMaps();
             yield return null; // First prepared frame; also progresses in autonomous batch Editor QA.
             inLobby=false;preparing=false;menuNavigation?.SetScope(null);loadingScreen.style.display=DisplayStyle.None;SetMatchUi(true);Pause(false);
             Record("lobby launch "+matchSetup.MatchHumanName+" team="+matchSetup.HumanTeam+" vs "+matchSetup.MatchAiName+" team="+matchSetup.AiTeam);

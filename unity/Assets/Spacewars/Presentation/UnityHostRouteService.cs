@@ -17,12 +17,17 @@ namespace Spacewars.Presentation
         private double smallRadius;
         private NavigationRequest deferredRequest;
         private NavigationAnswer deferredAnswer;
-        private readonly CertifiedRouteHost certified = new CertifiedRouteHost();
-        public NavSchedulerCounters CertifiedCounters => certified.Counters;
-        public long SolverEpoch => certified.SolverEpoch;
-        public long CertifiedRetainedBytes => certified.RetainedBytes;
-        public long CertifiedPeakRetainedBytes => certified.PeakRetainedBytes;
-        public string LastProjectionFailure => certified.LastProjectionFailure;
+        private readonly CertifiedRouteLane lane;
+        public UnityHostRouteService(CertifiedRouteLane lane=null){this.lane=lane??new CertifiedRouteLane();}
+        private CertifiedRouteWorker worker;
+        private NavigationRoutePort workerPort;
+        private readonly CertifiedRouteKernel certified = new CertifiedRouteKernel();
+        public CertifiedRoutePublication CertifiedPublication=>worker?.Publication;
+        public NavSchedulerCounters CertifiedCounters => worker?.Publication.Counters??certified.Counters;
+        public long SolverEpoch => worker?.Publication.Epoch??certified.SolverEpoch;
+        public long CertifiedRetainedBytes => worker?.Publication.RetainedBytes??certified.RetainedBytes;
+        public long CertifiedPeakRetainedBytes => worker?.Publication.PeakRetainedBytes??certified.PeakRetainedBytes;
+        public string LastProjectionFailure => worker?.Publication.ProjectionFailure??certified.LastProjectionFailure;
         public int NavMeshRequests {get;private set;}
         public int FlowRequests {get;private set;}
         public int NavMeshBuilds {get;private set;}
@@ -39,7 +44,17 @@ namespace Spacewars.Presentation
         }
         private void CheckThread(){if(Thread.CurrentThread.ManagedThreadId!=thread)throw new InvalidOperationException("Unity routes require their owning main thread.");}
         public void Service(PlayableRuntime runtime,int budget)
-            {var binding=runtime.NavigationBinding;ServiceHost(binding,runtime.Requests,runtime.Answers,runtime.Generation,budget);}
+            {
+                CheckThread();if(budget<1)throw new ArgumentOutOfRangeException(nameof(budget));
+                if(runtime.IsStopRequested)return;
+                var binding=runtime.NavigationBinding;
+                if(binding.RoutePort!=null&&(binding.Admission?.AuthoredTerrain!=null||binding.Admission?.SurfaceProviderId==NavLocation.FlatSurface)){
+                    if(!ReferenceEquals(workerPort,binding.RoutePort)){
+                        worker?.Dispose();workerPort=binding.RoutePort;
+                        worker=new CertifiedRouteWorker(binding,budget,()=>runtime.IsStopRequested,runtime.ReportRouteFailure,lane);
+                    }else worker.SetBudget(budget);
+                }else ServiceHost(binding,runtime.Requests,runtime.Answers,runtime.Generation,budget);
+            }
         public void Service(PlayableAuthorityTick authority,int budget)
             {var binding=authority.NavigationBinding;ServiceHost(binding,authority.Requests,authority.Answers,authority.Generation,budget);}
         public void Service(PlayableRouteBinding binding,int budget)
@@ -47,7 +62,7 @@ namespace Spacewars.Presentation
             CheckThread();if(binding==null||binding.RoutePort==null||budget<1)throw new ArgumentException("Invalid certified route binding.");
             if(binding.Admission?.AuthoredTerrain==null&&binding.Admission?.SurfaceProviderId!=NavLocation.FlatSurface)
                 throw new NotSupportedException("No certified provider for this terrain.");
-            certified.Service(binding,budget);
+            certified.Pump(binding,budget);
         }
         private void ServiceHost(PlayableRouteBinding binding,NavMailbox<NavigationRequest> requests,
             NavMailbox<NavigationAnswer> answers,long generation,int budget)
@@ -102,6 +117,6 @@ namespace Spacewars.Presentation
                 if(!answers.TryEnqueue(answer)){deferredAnswer=answer;return;}
             }
         }
-        public void Dispose(){CheckThread();certified.Clear();router?.Dispose();router=null;smallRouter=null;routedGeometry=null;routedProfile=null;deferredRequest=null;deferredAnswer=null;}
+        public void Dispose(){CheckThread();worker?.Dispose();worker=null;workerPort=null;certified.Clear();router?.Dispose();router=null;smallRouter=null;routedGeometry=null;routedProfile=null;deferredRequest=null;deferredAnswer=null;}
     }
 }

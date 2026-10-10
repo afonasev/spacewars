@@ -13,7 +13,7 @@ namespace Spacewars.Tests.EditMode
     public sealed partial class NativeAiInitiativeTests
     {
         private static readonly PlayableProfile P=PlayableProfile.Default;
-        private static PlayableAiOpeningCompositionState Opening(PlayableAiOpening kind=PlayableAiOpening.Safe)=>Enumerable.Range(1,10000).Select(i=>PlayableAiOpeningComposition.Initialize(i,"player-1",aiProfile:AiProfile.Initial)).First(o=>o.Opening==kind);
+        private static PlayableAiOpeningCompositionState Opening(PlayableAiOpening kind=PlayableAiOpening.Safe)=>kind==PlayableAiOpening.DoubleMineExplorerRush?PlayableAiOpeningComposition.Initialize(1,"player-1",forcedOpening:kind):Enumerable.Range(1,10000).Select(i=>PlayableAiOpeningComposition.Initialize(i,"player-1",aiProfile:AiProfile.Initial)).First(o=>o.Opening==kind);
         private static PlayableAiObservation Observation(long tick=10,int target=101,double x=0,int health=100,bool proof=true,bool commitments=true,PlayableTacticalOrderKind? order=null,int count=3,int orderTarget=0,bool visiblePoint=true,PlayableAiOpening openingKind=PlayableAiOpening.Safe,int explorers=0,int mines=0)
         {
             var opening=Opening(openingKind);var point=new NavPoint(8,0);
@@ -136,6 +136,7 @@ namespace Spacewars.Tests.EditMode
             {
                 for(int i=0;i<180;i++)Step(a,host);
                 var check=a.CaptureDiagnosticCheckpoints().Single();
+                if(blocked)TestContext.WriteLine("O3_BLOCKED_DIAGNOSTIC "+Newtonsoft.Json.JsonConvert.SerializeObject(new{Tick=a.Tick,Mission=planner.Capture(),AppliedArmy=check.Records.Where(r=>r.Policy==AiArmyPlanner.Policy&&r.Status==PlayableAiDeliveryStatus.Applied).ToArray()}));
                 if(blocked){Assert.False(planner.Active);Assert.False(check.Records.Any(x=>x.Policy==AiArmyPlanner.Policy&&x.Status==PlayableAiDeliveryStatus.Applied));}
                 else{Assert.True(check.Records.Any(x=>x.Policy==AiArmyPlanner.Policy&&x.Status==PlayableAiDeliveryStatus.Applied));Assert.True(a.ParticipantView("west-owner").Entities.Any(u=>u.Owner==v.Owner&&u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Attack&&u.CurrentOrder.TargetId==target.Id));Assert.Greater(planner.Capture().ProgressTick,planner.Capture().StartedTick);}
                 a.Stop();

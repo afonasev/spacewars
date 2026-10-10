@@ -20,6 +20,8 @@ namespace Spacewars.Runtime
             LastPolicy=lastPolicy;LastActionKind=lastActionKind;Opening=opening?.Restore();Mission=mission?.Copy();Strategy=strategy;Artillery=artillery;
             this.records=records.ToArray();EconomyDecision=economyDecision;
         }
+        public AiOpeningExecutionState OpeningExecution{get;private set;}
+        internal PlayableAiOwnerCheckpoint BindOpeningExecution(AiOpeningExecutionState state){OpeningExecution=state;return this;}
         public AiKnowledgeState Knowledge{get;private set;}
         internal PlayableAiOwnerCheckpoint BindKnowledge(AiKnowledgeState state){Knowledge=state;return this;}
         public AiArmyMissionState ArmyMission{get;private set;}
@@ -49,7 +51,6 @@ namespace Spacewars.Runtime
         internal string OwnerId{get;}
         private long DecisionIntervalTicks;
         private long ObservationDelayTicks;
-        private const long RescoutTicks=35*30; // frozen release:8 economy.techRescoutSec
         private sealed class Pending
         {
             public PlayableAiObservation Observation;
@@ -65,8 +66,10 @@ namespace Spacewars.Runtime
         internal void Rebind(PlayableProfile next){if(WorldWire.Binding(profile).SequenceEqual(WorldWire.Binding(next)))return;while(pending!=null)Cancel(PlayableAiDeliveryStatus.Cancelled,"Balance revision changed.");profile=next;armyPlanner.Rebind(next);budget.RepriceReservations(e=>launches.IsStartup(e)?launches.Reprice(e,next):infrastructure.IsConversion(e)?infrastructure.Reprice(e,next):BudgetCost(e.Action),BudgetTerms);infrastructure.Rebind(next,budget,authorityTick);launches.ReconcileFunding(budget,next,authorityTick);expansion.ReconcileFunding(budget,next,authorityTick,pendingItems.Select(x=>x.Intent));production.Rebind(next);mission.Rebind(next);midgame.Rebind(next);artillery.Rebind(next);Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);}
         private AiKnowledgeTracker knowledge;
         private AiProfile nativeProfile;
+        private readonly AiRosterCatalog roster=AiRosterCatalog.Initial;
         private AiOwnerConfig nativeConfig;
         private readonly PlayableAiOpeningCompositionState opening;
+        private readonly AiOpeningExecutor openingExecutor;
         private PlayableAiEconomicLivenessPolicy economy;
         internal AiEconomyPlan EconomyPlan{get;private set;}
         private AiEconomyDecision economyDecision;
@@ -74,6 +77,8 @@ namespace Spacewars.Runtime
         private PlayableAiResearchLivenessPolicy research;
         private readonly PlayableAiResearchReadinessTracker readiness=new PlayableAiResearchReadinessTracker();
         private PlayableAiScoutLivenessPolicy scout;
+        private readonly AiScoutPlanner scoutPlanner=new AiScoutPlanner();
+        private int ScoutBudget=>scoutPlanner.Budget(nativeProfile,nativeConfig.Difficulty,nativeConfig.PersonalitySeed,openingExecutor.ScoutPlan);
         private PlayableAiMissionDefensePolicy mission;
         private readonly PlayableAiMidgameStrategyPolicy midgame;
         private PlayableAiArtillerySupportPolicy artillery;
@@ -117,7 +122,7 @@ namespace Spacewars.Runtime
             this.profile=profile??throw new ArgumentNullException(nameof(profile));
             this.opening=opening??throw new ArgumentNullException(nameof(opening));
             if(!PlayableAiOpeningComposition.HasNativeBinding(opening)||!restoring&&opening.ProfileIdentity!=PlayableAiOpeningComposition.ProfileBinding(nativeProfile))throw new ArgumentException("Owner/native opening profile/RNG mismatch.",nameof(opening));
-            OwnerId=opening.OwnerId;knowledge=new AiKnowledgeTracker(OwnerId,generation);
+            OwnerId=opening.OwnerId;openingExecutor=new AiOpeningExecutor(opening,generation);knowledge=new AiKnowledgeTracker(OwnerId,generation);
             nativeConfig=new AiOwnerConfig(OwnerId,aiDifficulty,opening.MatchSeed,nativeProfile);
             arbiter=new AiDecisionArbiter(nativeProfile);actionLimit=(int)nativeProfile.DifficultyValue(aiDifficulty,"actionsPerDecision");
             repeatTicks=AiProfile.SecondsToTicks(nativeProfile.Value("decision.repeatOrderSeconds"),30);
@@ -127,7 +132,7 @@ namespace Spacewars.Runtime
             armyPlanner=new AiArmyPlanner(OwnerId,generation);armyPlanner.Rebind(profile);defense=new AiDefensePlanner(OwnerId,generation);
             expansion=new AiExpansionPlanner(OwnerId);infrastructure=new AiInfrastructurePlanner(OwnerId);
             economy=new PlayableAiEconomicLivenessPolicy(ownerId:OwnerId);research=new PlayableAiResearchLivenessPolicy(ownerId:OwnerId);scout=new PlayableAiScoutLivenessPolicy(ownerId:OwnerId);
-            production=new PlayableAiProductionLivenessPolicy(profile:profile,ownerId:OwnerId);
+            production=new PlayableAiProductionLivenessPolicy(profile:profile,ownerId:OwnerId,catalog:roster);
             Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);
         }
         internal long Generation{get;}
@@ -212,6 +217,9 @@ namespace Spacewars.Runtime
             if(newCoverage.Any(id=>current.PublicScoutObjectives.Any(p=>p.SiteId==id)))lastScoutTick=current.Tick;
             GuardDefense(current);
             armies.Observe(current);
+            scoutPlanner.Observe(current,knowledge.Capture(),armies,nativeProfile,ScoutBudget);
+            foreach(var item in pendingItems.Where(x=>x.Scout&&x.Action.EntityIds.Any(id=>armies.ArmyFor(id)==0)).ToArray())
+            {pendingItems.Remove(item);Finish(item,0,0,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Scout assignment released.");}
             armyPlanner.Observe(current,armies,nativeProfile,records);
             bool newEmergency=defense.Observe(current,armies,profile);
             if(armyPlanner.Active)AiTacticalExecutor.Observe(current,armies,armyPlanner.Capture().ArmyId,profile,
@@ -231,6 +239,7 @@ namespace Spacewars.Runtime
             infrastructure.Observe(current,profile,budget);
             foreach(var item in pendingItems.Where(x=>x.PolicyName=="infrastructure"&&(x.Action.Kind==PlayableCommandKind.SellBuilding||x.Action.Kind==PlayableCommandKind.BuildAt)&&!infrastructure.ClaimsSlot(x.Action.SiteId,x.Action.SlotId)).ToArray())
             {pendingItems.Remove(item);Finish(item,0,0,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Rejected,"Conversion released.");}
+            openingExecutor.Observe(current,knowledge.Capture(),armyPlanner.Deployment(current,armies),nativeProfile);
             demand.Observe(current,nativeProfile);
             bool threatened=AiDefensePlanner.Threats(current,profile).Length>0;
             var earlyDefense=newEmergency?defense.Propose(current,profile,nativeProfile,armies):null;
@@ -261,12 +270,13 @@ namespace Spacewars.Runtime
             Propose(AiDefensePlanner.Policy,da,()=>{defense.Commit(observation,da,armies);armyPlanner.ReconcileRegistry(armies,authorityTick,"defense preempted offensive ownership");},defense.ObserveReceipt,2);
             if(!threatened)
             {
-                var armyAction=armyPlanner.ProposeWithRecords(observation,opening,profile,nativeProfile,armies,records);
+                var armyAction=armyPlanner.Active||openingExecutor.AllowsPressure?armyPlanner.ProposeWithRecords(observation,opening.WithPhase(openingExecutor.Capture().Phase),profile,nativeProfile,armies,records):null;
                 Propose(AiArmyPlanner.Policy,armyAction,()=>armyPlanner.Commit(observation,armyAction,armies),armyPlanner.ObserveReceipt);
                 var a=artillery.Fork();Propose("artillery",a.TryPlan(observation,opening,strategy,productionOnly:true),()=>artillery=a,a.ObserveReceipt);
             }
-            EconomyPlan=new AiEconomyPlanner().Plan(observation,profile,demand,nativeProfile,budget.Available,recoveryExplorerDemand:opening.Intent.Explorer>0);
-            var ex=expansion.Fork();if(!threatened)Propose("expansion",ex.TryPlan(observation,profile,nativeProfile),()=>expansion=ex,ex.ObserveReceipt,1);
+            EconomyPlan=new AiEconomyPlanner(roster).Plan(observation,profile,demand,nativeProfile,budget.Available,recoveryExplorerDemand:opening.Intent.Explorer>0);
+            EconomyPlan=new AiEconomyPlan(openingExecutor.MacroRequests(observation,profile,nativeProfile,EconomyPlan.Candidates),EconomyPlan.ExpansionSiteIds,EconomyPlan.ExpansionReason,EconomyPlan.Capacity);
+            var ex=expansion.Fork();if(!threatened&&openingExecutor.AllowsExpansion)Propose("expansion",ex.TryPlan(observation,profile,nativeProfile),()=>expansion=ex,ex.ObserveReceipt,1);
             foreach(var candidate in infrastructure.Plan(observation,profile,nativeProfile,EconomyPlan.Capacity).Where(c=>c.Legal&&(c.Action.Kind!=PlayableCommandKind.SellBuilding||!launches.ContainsProducer(c.Action.EntityIds.Single()))))
             {if(!Available("infrastructure"))break;var ip=infrastructure.Fork();Propose("infrastructure",ip.Admit(observation,candidate.Action,budget),()=>infrastructure=ip,ip.ObserveReceipt,candidate.Priority);}
             foreach(var candidate in EconomyPlan.Candidates.Where(c=>c.Legal&&Available(c.Policy)&&!expansion.ClaimsSite(c.Action.SiteId)&&!infrastructure.ClaimsSlot(c.Action.SiteId,c.Action.SlotId)))
@@ -276,8 +286,9 @@ namespace Spacewars.Runtime
                 else
                 {var pr=production.Fork();Propose("production",pr.Admit(observation,candidate.Action),()=>production=pr,pr.ObserveReceipt,launches.ReservationFor(candidate.Action)!=null?1:candidate.Priority);}
             }
-            if(lastScoutOrderTick<0||snapshot.Tick-lastScoutOrderTick>=RescoutTicks)
-            {var sc=scout.Fork();Propose("scout",sc.TryPlan(observation),()=>scout=sc,sc.ObserveReceipt);}
+            var sc=scout.Fork();
+            var scoutAction=sc.Admit(observation,scoutPlanner.Plan(observation,knowledge.Capture(),armies,profile,nativeProfile,ScoutBudget));
+            Propose("scout",scoutAction,()=>{scoutPlanner.Commit(observation,scoutAction,armies);scout=sc;},sc.ObserveReceipt);
             var ri=new PlayableAiResearchStrategicIntent(Generation,lastScoutTick,false,opening.Intent.Tank);
             var re=research.Fork();Propose("research",re.TryPlan(observation,readiness.Observe(observation,ri)),()=>research=re,re.ObserveReceipt);
 
@@ -331,7 +342,7 @@ namespace Spacewars.Runtime
         {
             if(action.Kind==PlayableCommandKind.BuildAt)return TerritoryRules.Cost(profile,action.BuildingKind);
             if(action.Kind==PlayableCommandKind.QueueTank||action.Kind==PlayableCommandKind.QueueExplorer||action.Kind==PlayableCommandKind.QueueShkval)
-                return PlayableUnitRules.Cost(profile,action.Kind==PlayableCommandKind.QueueExplorer?PlayableEntityKind.Explorer:action.Kind==PlayableCommandKind.QueueShkval?PlayableEntityKind.Shkval:action.UnitKind);
+                return (int)roster.CreditCost(roster.Production(action.Kind).kind,profile);
             if(action.Kind==PlayableCommandKind.QueueResearch)return (int)Math.Ceiling(action.ResearchKind==PlayableResearchKind.TankChassis?profile.TankChassisCost:action.ResearchKind==PlayableResearchKind.ExplorerAssaultGuns?profile.ExplorerAssaultCost:profile.ShkvalGuidanceCost);
             return 0;
         }
@@ -342,7 +353,7 @@ namespace Spacewars.Runtime
                 (action.ParentId==0||observation.Buildings.Any(x=>x.Id==action.ParentId&&x.Owner==observation.Owner&&x.Health>0)));
         private AiIntent Proposal(string policyName,PlayableAiAction action,PlayableAiObservation o,int priority)
         {
-            if(AiEconomyAdmission.Reject(o,profile,action)!=null)return null;
+            if(AiEconomyAdmission.Reject(o,profile,action,catalog:roster)!=null)return null;
             int cost=0,pop=0;var claims=action.EntityIds.Select(id=>"recipient:"+id).ToList();
             // Wire v2 has one pending callback per policy. Alternative candidates compete
             // for that policy as well as their physical recipients/slots.
@@ -352,8 +363,8 @@ namespace Spacewars.Runtime
             bool queue=action.Kind==PlayableCommandKind.QueueTank||action.Kind==PlayableCommandKind.QueueShkval||action.Kind==PlayableCommandKind.QueueExplorer;
             if(queue)
             {
-                var kind=action.Kind==PlayableCommandKind.QueueShkval?PlayableEntityKind.Shkval:action.Kind==PlayableCommandKind.QueueExplorer?PlayableEntityKind.Explorer:action.UnitKind;
-                cost=PlayableUnitRules.Cost(profile,kind);pop=PlayableUnitRules.Population(profile,kind);
+                var kind=roster.Production(action.Kind).kind;
+                cost=(int)roster.CreditCost(kind,profile);pop=roster.PopulationCost(kind,profile);
             }
             if(action.Kind==PlayableCommandKind.StartBuildingRepair)
                 claims.Add("repair:"+action.EntityIds.Single());
@@ -407,7 +418,7 @@ namespace Spacewars.Runtime
             arbiter.Terminal(item.Intent,authorityTick,status);
             budget.Reconcile(item.Intent.Id,item.Identity,status,gameplayPaid);
             launches.Terminal(item.Intent,item.Identity,status,gameplayPaid,budget,profile);
-            item.Receipt(new PlayableAiTraceRecord(record.ObservationIdentity,item.LocalActionId,record.DueTick,sequence,applicationTick,status,runtimeStatus,message,OwnerId,item.Action.SourceIdentity,item.Identity,item.PolicyName,item.Action.Kind));if(item.PolicyName=="expansion")expansion.TerminalFunding(item.Intent,status,budget,profile);expansion.ReconcileFunding(budget,profile,authorityTick,pendingItems.Select(x=>x.Intent));Record(record);
+            var terminalReceipt=new PlayableAiTraceRecord(record.ObservationIdentity,item.LocalActionId,record.DueTick,sequence,applicationTick,status,runtimeStatus,message,OwnerId,item.Action.SourceIdentity,item.Identity,item.PolicyName,item.Action.Kind);item.Receipt(terminalReceipt);openingExecutor.ObserveReceipt(item.Action,terminalReceipt);if(item.PolicyName=="expansion")expansion.TerminalFunding(item.Intent,status,budget,profile);expansion.ReconcileFunding(budget,profile,authorityTick,pendingItems.Select(x=>x.Intent));Record(record);
 #if DEVELOPMENT_BUILD
             Console.WriteLine("[Spacewars owner AI] owner="+OwnerId+" source="+PlayableAiOpeningComposition.SourceIdentity+" profile="+profile.ProfileId+"@"+profile.Revision+
                 " seed="+opening.MatchSeed+" policy="+item.PolicyName+" kind="+item.Action.Kind+" status="+status+" generation="+Generation+
@@ -422,6 +433,6 @@ namespace Spacewars.Runtime
         private void Record(PlayableAiTraceRecord record)
         {records.Add(record);if(records.Count>128)records.RemoveAt(0);Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);}
         private PlayableAiOwnerCheckpoint Capture()=>new PlayableAiOwnerCheckpoint(OwnerId,PlayableAiOpeningComposition.SourceIdentity,profile.ProfileId,profile.Revision,opening.MatchSeed,Generation,lastDecisionTick,lastScoutTick,
-            pending?.Action.ActionId??0,pending?.DueTick??0,lastCommandSequence,lastPolicy,lastActionKind,opening,mission.Mission,midgame.Capture(),artillery.Capture(),records,economyDecision,lastScoutOrderTick).BindExpansion(expansion.Capture()).BindInfrastructure(infrastructure.Capture()).BindArmies(armies.Capture()).BindArmyMission(armyPlanner.Capture()).BindKnowledge(knowledge.Capture());
+            pending?.Action.ActionId??0,pending?.DueTick??0,lastCommandSequence,lastPolicy,lastActionKind,opening,mission.Mission,midgame.Capture(),artillery.Capture(),records,economyDecision,lastScoutOrderTick).BindExpansion(expansion.Capture()).BindInfrastructure(infrastructure.Capture()).BindArmies(armies.Capture()).BindArmyMission(armyPlanner.Capture()).BindKnowledge(knowledge.Capture()).BindOpeningExecution(openingExecutor.Capture());
     }
 }

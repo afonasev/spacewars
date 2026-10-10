@@ -27,11 +27,31 @@ Material:
         m_Texture: {fileID: 2800000, guid: f70eb49afddb4d7f9974bf8fb8567be8, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _ConcreteTexB:
+        m_Texture: {fileID: 2800000, guid: a7ae72f68bca4b8dbbb25c3bbb191df0, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _ConcreteTexC:
+        m_Texture: {fileID: 2800000, guid: d841d588f96141efb53347487c0b2606, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _EarthTex:
         m_Texture: {fileID: 2800000, guid: d4adb02049c749e9bfed9b880c995c5f, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _EarthTexB:
+        m_Texture: {fileID: 2800000, guid: 4f1330d1aa2e4fb0b355831f47c88284, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EarthTexC:
+        m_Texture: {fileID: 2800000, guid: f5eba81ca51b45c1872c1a583e7b6617, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _FogMask:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _FoundryLavaHeat:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
@@ -47,6 +67,14 @@ Material:
         m_Texture: {fileID: 2800000, guid: 46fa39c0fe544f71a53e67b90b8edb7b, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _RockTexB:
+        m_Texture: {fileID: 2800000, guid: 8701cd415ce0482f9248d53d960fa60c, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _RockTexC:
+        m_Texture: {fileID: 2800000, guid: 5c8c12588a8e4eb1b6d9fce0e668b4a9, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _ShoreMask:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
@@ -55,14 +83,25 @@ Material:
         m_Texture: {fileID: 2800000, guid: 9fd6bbec9f644c89839783566639e06c, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _SteelTexB:
+        m_Texture: {fileID: 2800000, guid: ea669e55472a419887bf15c5d15dfcd1, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SteelTexC:
+        m_Texture: {fileID: 2800000, guid: 71883ac92c9e4ab88965f4697a4a24a8, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _WeatheringMask:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
+    - _ArtReliefLimit: 0.35
     - _ContactShade: 0.24
     - _Dressing: 2
+    - _FoundryCenterValue: 0.28
+    - _FoundryPadCenter: 0
     - _SurfaceRole: 3
     m_Colors:
     - _ArtDetail: {r: 0.85, g: 0.3, b: 0, a: 1.2}
@@ -70,17 +109,27 @@ Material:
     - _BasaltTint: {r: 0.22680001, g: 0.24148801, b: 0.27, a: 1}
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _Concrete: {r: 0.69, g: 4, b: 0.045, a: 0.22}
+    - _ConcreteVariantGain: {r: 1, g: 1.0364808, b: 1.0144315, a: 0.3849733}
+    - _EarthVariantGain: {r: 1, g: 0.86834306, b: 0.9354207, a: 0.1353527}
     - _FogBounds: {r: 32, g: 32, b: 0, a: 0}
     - _FogColor: {r: 0, g: 0, b: 0, a: 1}
+    - _FoundryGrain: {r: 13, g: 0.3, b: 0.18, a: 0.12}
+    - _FoundryPadBounds: {r: 0, g: 0, b: 1, a: 0}
+    - _FoundryPadFinish: {r: 2.25, g: 3, b: 3.5, a: 0.25}
+    - _FoundrySandTint: {r: 0.54999995, g: 0.473, b: 0.36299998, a: 1}
+    - _FoundryVariation: {r: 0.8, g: 13, b: 0, a: 0}
     - _Geology: {r: 52, g: 0.52, b: 0.85, a: 0.32}
     - _GroundTint: {r: 0.45, g: 0.45999992, b: 0.38999996, a: 1}
     - _Metal: {r: 0.41, g: 2, b: 2.5, a: 0.32}
     - _NaturalBlend: {r: 2.4, g: 0.45, b: 2.5, a: 0}
     - _RoadTint: {r: 0.6, g: 0.52, b: 0.39999998, a: 1}
+    - _RockVariantGain: {r: 1, g: 1.029159, b: 0.9614996, a: 0.13677502}
     - _RustTint: {r: 0.57, g: 0.29503196, b: 0.15959997, a: 1}
     - _ShoreSettings: {r: 2.8, g: 0.35, b: 8, a: 0}
+    - _SteelVariantGain: {r: 1, g: 1.0791245, b: 1.09146, a: 0.13237418}
     - _SurfaceExtras: {r: 0.09, g: 1, b: 0.28, a: 48}
     - _SurfaceNoise: {r: 11, g: 0.38, b: 0.24, a: 0.16}
+    - _TextureVariants: {r: 18, g: 0.08, b: 0, a: 0}
     - _WaterDeep: {r: 0.095199995, g: 0.34, b: 0.32531202, a: 1}
     - _WaterMotion: {r: 3.5, g: 0.35, b: 0.15, a: 0.25}
     - _WaterShallow: {r: 0.33516, g: 0.63, b: 0.61230963, a: 1}

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Spacewars.Simulation;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -75,19 +76,22 @@ namespace Spacewars.Presentation
         private IReadOnlyList<PlayableMapMark> marks;
         private HashSet<int> selected;
         private NavPoint[] footprint;
+        private PlayableBuildingSnapshot[] rallyBuildings=Array.Empty<PlayableBuildingSnapshot>();
+        public int RallyFlagCount=>rallyBuildings.Length;
         private PlayableMapTransform transform;
         public PlayableMapSurface(PlayableProfile profile,Texture2D terrain)
         {
             this.profile=profile;this.terrain=terrain;pickingMode=PickingMode.Ignore;style.overflow=Overflow.Hidden;
             generateVisualContent+=Draw;orderMarkers=new PlayableOrderMarkerLayer(location=>Point(location.Position),true);Add(orderMarkers);
         }
-        public void Rebind(PlayableProfile next,Texture2D texture){profile=next;terrain=texture;marks=null;footprint=null;MarkDirtyRepaint();}
+        public void Rebind(PlayableProfile next,Texture2D texture){profile=next;terrain=texture;marks=null;footprint=null;rallyBuildings=Array.Empty<PlayableBuildingSnapshot>();MarkDirtyRepaint();}
         public void Set(PlayableSnapshot view,HashSet<int> selection,NavPoint[] camera)
         {
-            transform=new PlayableMapTransform(view.Vision.HalfWidth,view.Vision.HalfDepth);marks=PlayableMapView.Marks(view);selected=selection;footprint=camera;MarkDirtyRepaint();
+            transform=new PlayableMapTransform(view.Vision.HalfWidth,view.Vision.HalfDepth);marks=PlayableMapView.Marks(view);selected=selection;footprint=camera;
+            rallyBuildings=view.Buildings.Where(b=>selection.Contains(b.Id)&&b.Owner==view.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.HasRally==true&&b.PrivateState.Lifecycle?.Selling!=true).ToArray();MarkDirtyRepaint();
         }
         public void SetPublic(IReadOnlyList<PlayableMapMark> publicMarks,double extent)
-        {transform=new PlayableMapTransform(extent,extent);marks=publicMarks;selected=new HashSet<int>();footprint=null;MarkDirtyRepaint();}
+        {transform=new PlayableMapTransform(extent,extent);marks=publicMarks;selected=new HashSet<int>();footprint=null;rallyBuildings=Array.Empty<PlayableBuildingSnapshot>();MarkDirtyRepaint();}
         public NavPoint Ground(Vector2 local)=>transform.Ground(new NavPoint(local.x/contentRect.width,local.y/contentRect.height));
         private Vector2 Point(NavPoint world){var uv=transform.Project(world);return new Vector2((float)uv.X*contentRect.width,(float)uv.Z*contentRect.height);}
         public Func<PlayableOwner?,Color> OwnerPaint;
@@ -120,6 +124,13 @@ namespace Spacewars.Presentation
                 if(m.State==MapMarkState.Construction){painter.BeginPath();painter.MoveTo(p+new Vector2(-radius,radius));painter.LineTo(p+new Vector2(radius,-radius));painter.Stroke();}
                 if(m.Kind==PlayableBuildingKind.Mine&&!unit){painter.BeginPath();painter.MoveTo(p+new Vector2(-radius,0));painter.LineTo(p+new Vector2(radius,0));painter.MoveTo(p+new Vector2(0,-radius));painter.LineTo(p+new Vector2(0,radius));painter.Stroke();}
                 if(m.Start>0)ctx.DrawText(m.Start.ToString(),p-new Vector2(radius/2,radius),radius*1.6f,Color.white,null);
+            }
+            foreach(var building in rallyBuildings)
+            {
+                var at=Point(building.Rally);float size=Mathf.Clamp((float)profile.MinimapLandmarkSize*w/720f,6,12);
+                painter.strokeColor=Owner(building.Owner);painter.fillColor=Owner(building.Owner);painter.lineWidth=1.5f;
+                painter.BeginPath();painter.MoveTo(at);painter.LineTo(at+new Vector2(0,-size*2));painter.Stroke();
+                painter.BeginPath();painter.MoveTo(at+new Vector2(0,-size*2));painter.LineTo(at+new Vector2(size,-size*1.5f));painter.LineTo(at+new Vector2(0,-size));painter.ClosePath();painter.Fill();
             }
             if(footprint!=null){painter.BeginPath();painter.strokeColor=Color.white;painter.lineWidth=(float)profile.MinimapCameraStroke;for(int i=0;i<footprint.Length;i++){if(i==0)painter.MoveTo(new Vector2(Mathf.Clamp(Point(footprint[i]).x,0,w),Mathf.Clamp(Point(footprint[i]).y,0,h)));else painter.LineTo(new Vector2(Mathf.Clamp(Point(footprint[i]).x,0,w),Mathf.Clamp(Point(footprint[i]).y,0,h)));}painter.ClosePath();painter.Stroke();}
         }

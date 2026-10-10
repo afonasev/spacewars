@@ -183,7 +183,7 @@ namespace Spacewars.Presentation
         {
             if(view==null||hudRow==null)return;
             buildRegion.style.display=commandRegion.style.display=DisplayStyle.None;
-            armyRegion.style.display=selection.Count>0||selectedSite!=0?DisplayStyle.Flex:DisplayStyle.None;
+            armyRegion.style.display=selection.Count>0||selectedSite!=0||spectatorMode&&inspectionEntityId!=0?DisplayStyle.Flex:DisplayStyle.None;
             armyRegion.style.flexGrow=0;
             if(armyRegion.parent!=hudRow)hudRow.Add(armyRegion);
         }

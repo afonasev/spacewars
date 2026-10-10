@@ -80,6 +80,60 @@ namespace Spacewars.Tests.EditMode
             foreach(var field in parameters){Assert.IsTrue(field.Path.StartsWith("visual.foundry."));Assert.Greater(field.Step,0);Assert.That(field.Read(),Is.InRange(field.Minimum,field.Maximum));}
             p.edgeErosion=float.NaN;Assert.Throws<ArgumentException>(()=>p.Validate());
         }
+        [Test] public void MoltenChannelsHaveOpenCapsAndRecessedInwardWalls()
+        {
+            var map=new FoundryMap(new FoundryProfileData());var settings=FoundrySurfaceProfile.Load();
+            foreach(var channel in map.Lava)
+            {
+                var ridge=FoundryFissureMesh.RidgeFor(map,channel);var mesh=FoundryTerrainMesh.Rock(ridge,settings,map.Lava);
+                try
+                {
+                    var v=mesh.vertices;var t=mesh.triangles;int walls=0,caps=0;
+                    for(int i=0;i<t.Length;i+=3)
+                    {
+                        var a=v[t[i]];var b=v[t[i+1]];var c=v[t[i+2]];var normal=Vector3.Cross(b-a,c-a);
+                        var center=(a+b+c)/3;var q=new NavPoint(center.x,center.z);
+                        if(normal.y>1e-5f&&center.y>FoundryFissureMesh.Level(map,channel,settings)){caps++;Assert.IsFalse(channel.Contains(q)&&channel.BoundaryDistanceSquared(q)>1e-7,"Stone cap covers molten channel: "+a+" / "+b+" / "+c+" normal="+normal+" channelX="+channel.MinX);}
+                        if(center.y>FoundryFissureMesh.Level(map,channel,settings)&&Mathf.Abs(normal.y)<1e-5f&&Mathf.Max(a.y,Mathf.Max(b.y,c.y))-Mathf.Min(a.y,Mathf.Min(b.y,c.y))>.1f&&channel.BoundaryDistanceSquared(q)<1e-7)
+                        {
+                            walls++;var inward=center+normal.normalized*.01f;
+                            Assert.IsTrue(channel.Contains(new NavPoint(inward.x,inward.z)),"Wall faces into the fissure");
+                            Assert.GreaterOrEqual(center.y,FoundryFissureMesh.Level(map,channel,settings)-.006f);
+                        }
+                    }
+                    Assert.Greater(caps,100);Assert.Greater(walls,40);
+                    Assert.AreEqual((float)ridge.Top-settings.lavaDepth,FoundryFissureMesh.Level(map,channel,settings),1e-5f);
+                }
+                finally{UnityEngine.Object.DestroyImmediate(mesh);}
+            }
+        }
+        [Test] public void RaisedDeckRockFeetSealTheirPerimeterAndKeepSupportedShoulders()
+        {
+            var map=new FoundryMap(new FoundryProfileData());var settings=FoundrySurfaceProfile.Load();
+            foreach(int side in new[]{0,1})
+            {
+                var shape=map.Solids[side];float edge=(float)(side==0?shape.MinX:shape.MaxX);
+                var mesh=FoundryTerrainMesh.Rock(shape,settings,map.Lava,map.SurfaceHeight);
+                try
+                {
+                    var vertices=mesh.vertices;var triangles=mesh.triangles;
+                    Assert.Greater(vertices.Count(v=>Mathf.Abs(v.x-edge)<1e-5f&&Mathf.Abs(v.z)<24&&v.y>=map.UpperHeight-1e-4f),30,"Foot must reach the authored deck perimeter");
+                    int checkedShoulders=0;
+                    for(int i=0;i<triangles.Length;i+=3)
+                    {
+                        var a=vertices[triangles[i]];var b=vertices[triangles[i+1]];var c=vertices[triangles[i+2]];
+                        if(Vector3.Cross(b-a,c-a).normalized.y<.55f)continue;
+                        foreach(var v in new[]{a,b,c})
+                        {
+                            if(Mathf.Abs(v.z)>=24||Mathf.Abs(v.x-edge)>=settings.shoulderWidth)continue;
+                            checkedShoulders++;Assert.GreaterOrEqual(v.y,(float)map.UpperHeight-1e-4f,"Shoulder cannot sink behind the adjoining deck");
+                        }
+                    }
+                    Assert.Greater(checkedShoulders,30);
+                }
+                finally{UnityEngine.Object.DestroyImmediate(mesh);}
+            }
+        }
         [Test] public void RealFoundryWorldHasNoPresentationCollidersOrMissingTextures()
         {
             var parent=new GameObject("Foundry art contract");

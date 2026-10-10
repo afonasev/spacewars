@@ -126,7 +126,7 @@ namespace Spacewars.Tests.EditMode
             // own economic envelope remains freshly observed without suppressing orders.
             long bound=proof.LastScoutOrderTick+35*30+AiProfile.SecondsToTicks(AiProfile.Initial.DifficultyValue(AiDifficulty.Fighter,"decisionSeconds"),30)+AiProfile.SecondsToTicks(AiProfile.Initial.DifficultyValue(AiDifficulty.Fighter,"reactionSeconds"),30);
             while(twin.Tick<=bound&&twin.CaptureDiagnosticCheckpoints().Single().LastScoutOrderTick==proof.LastScoutOrderTick)Step(twin);
-            var next=twin.CaptureDiagnosticCheckpoints().Single();Assert.Greater(next.LastScoutOrderTick,proof.LastScoutOrderTick);Assert.GreaterOrEqual(next.LastScoutOrderTick-proof.LastScoutOrderTick,35*30);Assert.False(next.Knowledge.Areas.Any(area=>area.AreaId==2));
+            var next=twin.CaptureDiagnosticCheckpoints().Single();Assert.Greater(next.LastScoutOrderTick,proof.LastScoutOrderTick);Assert.GreaterOrEqual(next.LastScoutOrderTick-proof.LastScoutOrderTick,AiProfile.SecondsToTicks(AiProfile.Initial.Value("armies.stallSeconds"),30));Assert.False(next.Knowledge.Areas.Any(area=>area.AreaId==2));
             var domain=a.GetType().GetField("domain",F).GetValue(a);var unitRegistry=domain.GetType().GetField("units",F).GetValue(domain);var units=((System.Collections.IEnumerable)unitRegistry.GetType().GetProperty("Values").GetValue(unitRegistry)).Cast<object>();
             var scout=units.Single(u=>(PlayableOwner)u.GetType().GetField("Owner").GetValue(u)==PlayableOwner.Player&&(PlayableEntityKind)u.GetType().GetField("Kind").GetValue(u)==PlayableEntityKind.Explorer);scout.GetType().GetField("Health").SetValue(scout,0);Step(a);
             var afterDeath=a.CaptureDiagnosticCheckpoints().Single();Assert.AreEqual(proof.LastScoutOrderTick,afterDeath.LastScoutOrderTick);Assert.False(a.ParticipantView(proof.OwnerId).Entities.Any(e=>e.Owner==PlayableOwner.Player&&e.Kind==PlayableEntityKind.Explorer&&e.Health>0));Assert.False(afterDeath.Knowledge.Areas.Any(area=>area.AreaId==2));a.Stop();twin.Stop();
@@ -192,6 +192,81 @@ namespace Spacewars.Tests.EditMode
             Review(la,a);Review(lb,b);CollectionAssert.AreEqual(Bytes((AiKnowledgeTracker)loopType.GetField("knowledge",F).GetValue(la)),Bytes((AiKnowledgeTracker)loopType.GetField("knowledge",F).GetValue(lb)));
             byte[] LoopBytes(object loop){using(var stream=new MemoryStream()){using(var w=new BinaryWriter(stream,System.Text.Encoding.UTF8,true))loopType.GetMethod("WriteState",F).Invoke(loop,new object[]{w});return stream.ToArray();}}
             CollectionAssert.AreEqual(LoopBytes(la),LoopBytes(lb));Assert.Greater(((PlayableAiOwnerCheckpoint)loopType.GetProperty("Checkpoint",F).GetValue(la)).PendingActionId,0);
+        }
+        private static PlayableAiObservation ScoutView(long tick=30,int scouts=3,bool seeBase=false,int[] covered=null,double detour=0,bool routes=true)
+        {
+            var targets=new[]{new PlayablePublicScoutObjective(12,new NavPoint(15,0),PlayablePublicScoutObjectiveRole.ExpansionIncome,true),new PlayablePublicScoutObjective(13,new NavPoint(0,15),PlayablePublicScoutObjectiveRole.PossibleEnemyStart,true)};
+            var units=Enumerable.Range(1,scouts).Select(id=>new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Explorer,new NavPoint(0,0),100,false,0,0,0)).ToArray();
+            var vision=new PlayableVision(0,32,32,1,1);vision.Refresh(seeBase?new[]{new VisionSource(new NavPoint(15,0),8)}:Array.Empty<VisionSource>(),Array.Empty<KnownBuilding>());
+            var proofs=routes?(from u in units from t in targets select new PlayableRouteProof(u.Id,u.Owner,71,tick,1,u.Position,PlayableProfile.Default.ExplorerCollisionRadius,PlayableRouteTargetKind.PublicObjective,t.SiteId,t.Approach,t.Approach,t.SiteId==12&&detour>0?new[]{new NavPoint(detour,0),t.Approach}:new[]{t.Approach})).ToArray():Array.Empty<PlayableRouteProof>();
+            return PlayableAiObservation.From(new PlayableSnapshot("p",1,71,7,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,0,new NavGeometry(32,Array.Empty<NavObstacle>(),1),units,seeBase?new[]{Building()}:Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:vision.Snapshot(),publicScoutObjectives:targets,routeProofs:proofs,intelEnvelopes:new[]{Area,new AiIntelEnvelope(13,new[]{new VisionSource(new NavPoint(0,15),4)})}));
+        }
+        private static AiKnowledgeState ScoutKnowledge(PlayableAiObservation o,params AiVisitedArea[] areas)=>new AiKnowledgeState(o.OwnerId,o.Generation,o.Tick,Array.Empty<AiKnownContact>(),areas);
+        [Test] public void HiddenBase_PublicEconomicQueueRevisitsAndRequiresActualContact()
+        {
+            var planner=new AiScoutPlanner();var r=new AiArmyRegistry("player-1",71,AiProfile.Initial,AiDifficulty.Fighter);var o=ScoutView();
+            var k=ScoutKnowledge(o,new AiVisitedArea(13,30,true,false));var action=planner.Plan(o,k,r,PlayableProfile.Default,AiProfile.Initial,2);
+            Assert.AreEqual(12,action.SiteId);Assert.False(planner.BaseSearchSuccess(k));planner.Commit(o,action,r);
+            Assert.AreEqual(AiArmyRole.Scout,r.Capture().Armies.Single().Role);Assert.False(planner.BaseSearchSuccess(k));
+            var tracker=Tracker();tracker.Observe(ScoutView(31,seeBase:true),AiProfile.Initial);Assert.True(planner.BaseSearchSuccess(tracker.Capture()));
+            planner.Observe(ScoutView(31,seeBase:true),tracker.Capture(),r,AiProfile.Initial,2);Assert.Zero(r.ArmyFor(1));
+            var later=ScoutView(31+AiProfile.SecondsToTicks(AiProfile.Initial.Value("scouting.revisitSeconds"),30));tracker.Observe(later,AiProfile.Initial);
+            Assert.True(tracker.Capture().Areas.Single().RevisitDue);
+            var known=tracker.Capture();known=new AiKnowledgeState(known.OwnerId,known.Generation,known.ObservationTick,known.Contacts,known.Areas.Concat(new[]{new AiVisitedArea(13,later.Tick,true,false)}));
+            Assert.AreEqual(12,planner.Plan(later,known,r,PlayableProfile.Default,AiProfile.Initial,2).SiteId);
+        }
+        [Test] public void HiddenBase_TravelUsesNativePathAndRiskUsesOnlyKnownContacts()
+        {
+            var planner=new AiScoutPlanner();var r=new AiArmyRegistry("player-1",71,AiProfile.Initial,AiDifficulty.Fighter);var o=ScoutView();var k=ScoutKnowledge(o);
+            Assert.AreEqual(12,planner.Plan(o,k,r,PlayableProfile.Default,AiProfile.Initial,2).SiteId);
+            o=ScoutView(detour:1000);Assert.AreEqual(13,planner.Plan(o,ScoutKnowledge(o),r,PlayableProfile.Default,AiProfile.Initial,2).SiteId);
+            o=ScoutView();k=new AiKnowledgeState(o.OwnerId,71,o.Tick,new[]{new AiKnownContact(91,PlayableOwner.Enemy,true,(int)PlayableBuildingKind.Factory,new NavPoint(15,0),100,0,1,false)},Array.Empty<AiVisitedArea>());
+            Assert.AreEqual(13,planner.Plan(o,k,r,PlayableProfile.Default,AiProfile.Initial,2).SiteId);
+            o=ScoutView(routes:false);Assert.Null(planner.Plan(o,ScoutKnowledge(o),r,PlayableProfile.Default,AiProfile.Initial,2));
+        }
+        [Test] public void ScoutBudget_DifficultyPersonalityAndBlindRushAreBounded()
+        {
+            var p=new AiScoutPlanner();foreach(AiDifficulty d in Enum.GetValues(typeof(AiDifficulty)))
+            {
+                int cap=(int)AiProfile.Initial.DifficultyValue(d,"scoutAssignments");
+                Assert.AreEqual(cap,p.Budget(AiProfile.Initial,d,uint.MaxValue,AiScoutPlan.ScoutLed));
+                Assert.AreEqual(1,p.Budget(AiProfile.Initial,d,0,AiScoutPlan.Standard));
+                Assert.AreEqual(cap,p.Budget(AiProfile.Initial,d,uint.MaxValue,AiScoutPlan.Standard));
+                Assert.Less(p.Budget(AiProfile.Initial,d,0,AiScoutPlan.BlindRush),cap);
+            }
+            var o=ScoutView();var r=new AiArmyRegistry("player-1",71,AiProfile.Initial,AiDifficulty.Fighter);var k=ScoutKnowledge(o);
+            Assert.Null(p.Plan(o,k,r,PlayableProfile.Default,AiProfile.Initial,0));var first=p.Plan(o,k,r,PlayableProfile.Default,AiProfile.Initial,1);p.Commit(o,first,r);
+            var second=p.Plan(o,k,r,PlayableProfile.Default,AiProfile.Initial,1);Assert.True(second==null||second.EntityIds.SequenceEqual(first.EntityIds));
+            p.Observe(o,k,r,AiProfile.Initial,0);Assert.Zero(r.ArmyFor(first.EntityIds.Single()));
+        }
+        [Test] public void ScoutBudget_NoRaidBypassAndAssignmentsRoundtrip()
+        {
+            var p=new AiScoutPlanner();var o=ScoutView();var r=new AiArmyRegistry("player-1",71,AiProfile.Initial,AiDifficulty.Fighter);var k=ScoutKnowledge(o);var action=p.Plan(o,k,r,PlayableProfile.Default,AiProfile.Initial,2);p.Commit(o,action,r);
+            var raid=new AiIntent("raid","scout",new PlayableAiAction(2,o.OwnerId,o.ProfileId,o.ProfileRevision,71,o.SnapshotSequence,PlayableCommandKind.Attack,action.EntityIds.ToArray(),targetId:91),100,0,0,Array.Empty<string>());
+            StringAssert.Contains("requires major army",r.Reject(raid));var restored=AiArmyRegistry.Restore(r.Capture(),AiProfile.Initial,AiDifficulty.Fighter,o.Tick);
+            Assert.AreEqual(r.ArmyFor(1),restored.ArmyFor(1));Assert.AreEqual(r.Capture().Armies.Single().Objective,restored.Capture().Armies.Single().Objective);
+            var stalled=ScoutView(o.Tick+AiProfile.SecondsToTicks(AiProfile.Initial.Value("armies.stallSeconds"),30));p.Observe(stalled,ScoutKnowledge(stalled),restored,AiProfile.Initial,2);Assert.Zero(restored.ArmyFor(1));Assert.IsEmpty(k.Areas);
+        }
+        [Test] public void HiddenBase_ActualNativeTravelFindsHiddenEconomicExpansion()
+        {
+            var c=(OfflineMatchConfiguration)typeof(NativeAiExpansionTests).GetMethod("Config",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{PlayableBuildingKind.Mine,true});
+            var type=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.PlayableDomain",true);var d=Activator.CreateInstance(type,F,null,new object[]{c.Profile,71L,c},null);
+            PlayableSnapshot View(bool routes)=> (PlayableSnapshot)type.GetMethod(routes?"PlayerSnapshotForAi":"PlayerSnapshot",F).Invoke(d,routes?new object[]{1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,c.Seed,PlayableOwner.Player,true}:new object[]{1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,c.Seed,PlayableOwner.Player});
+            var first=View(true);Assert.False(first.Vision.IsVisible(c.Sites.Single(s=>s.Id==4).Position));Assert.False(first.Buildings.Any(b=>b.SiteId==4));
+            var o=PlayableAiObservation.From(first);var k=new AiKnowledgeTracker(o.OwnerId,71);k.Observe(o,AiProfile.Initial);
+            var supplied=k.Capture();supplied=new AiKnowledgeState(o.OwnerId,71,o.Tick,supplied.Contacts,o.PublicScoutObjectives.Where(t=>t.SiteId!=4).Select(t=>new AiVisitedArea(t.SiteId,o.Tick,true,false)));
+            var planner=new AiScoutPlanner();var registry=new AiArmyRegistry(o.OwnerId,71,AiProfile.Initial,AiDifficulty.Fighter);
+            var action=planner.Plan(o,supplied,registry,c.Profile,AiProfile.Initial,2);Assert.NotNull(action,"Hidden public economic destination must have an observed-geometry route");Assert.AreEqual(4,action.SiteId);Assert.False(planner.BaseSearchSuccess(k.Capture()));planner.Commit(o,action,registry);
+            object[] apply={new PlayableCommand(71,1,o.OwnerId,PlayableCommandKind.Move,action.EntityIds.ToArray(),target:action.Target),null};var status=(PlayableCommandStatus)type.GetMethod("Apply",F).Invoke(d,apply);Assert.That(status,Is.EqualTo(PlayableCommandStatus.Accepted).Or.EqualTo(PlayableCommandStatus.Applied));Assert.False(planner.BaseSearchSuccess(k.Capture()));
+            var nav=(NavigationSession)type.GetProperty("Navigation",F).GetValue(d);
+            int steps=0;while(steps++<1000&&!planner.BaseSearchSuccess(k.Capture()))
+            {
+                while(nav.Requests.TryDequeue(out var request))Assert.True(nav.Answers.TryEnqueue(new NavigationAnswer(request,new SharedFlowRouter(request.Geometry,request.Profile).FindPath(request.Start,request.Goal))));
+                typeof(NavigationSession).GetMethod("PrepareDeliveryBarrier",F).Invoke(nav,null);Assert.True((bool)typeof(NavigationSession).GetProperty("DeliveryBarrierReady",F).GetValue(nav));
+                type.GetMethod("Step",F).Invoke(d,new object[]{1d/30});k.Observe(PlayableAiObservation.From(View(false)),AiProfile.Initial);
+            }
+            Assert.True(planner.BaseSearchSuccess(k.Capture()),"Actual native scout failed to discover economic base");Assert.True(k.Capture().Contacts.Any(x=>x.Building&&x.Kind==(int)PlayableBuildingKind.Outpost&&x.Visible));
+            Assert.Greater(steps,1);Assert.False(k.Capture().Contacts.Any(x=>x.Kind==(int)PlayableBuildingKind.Headquarters));
         }
         [Test] public void ForeignAndStaleObservationRejectedWithoutMutation()
         {

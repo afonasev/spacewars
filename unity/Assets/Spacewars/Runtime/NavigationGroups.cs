@@ -82,7 +82,7 @@ namespace Spacewars.Runtime
                 terrain?.SurfaceSemanticsVersion??1,navigationGeometry,profile,
                 groups.Values.OrderBy(g=>g.GroupId).Select(g=>new NavigationAdmissionGroup(g,
                     id=>pending.TryGetValue(id,out var request)?request:null)).ToArray(),requests);
-            admission=snapshot;
+            admission=snapshot;SignalHost();
         }
         public IReadOnlyList<GroupOrderState> GroupOrders=>groups.Values.OrderBy(g=>g.GroupId).Select(g=>g.Copy()).ToArray();
         internal bool HasGroupMember(int entity)=>memberGroups.ContainsKey(entity);
@@ -205,7 +205,7 @@ namespace Spacewars.Runtime
         // Called at the post-movement visibility phase; never changes targeting/fire/movement intent.
         internal void SetFormationContact(int entity,bool visibleContact,long tick)
         {
-            lock(transportGate){
+            using(EnterTransport()){
                 var member=Member(entity);if(member==null)return;
                 if(member.FormationReleased!=visibleContact){
                     var group=groups[memberGroups[entity]];

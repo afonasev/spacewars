@@ -171,7 +171,7 @@ namespace Spacewars.Tests.EditMode
                 new PlayableBuildingSnapshot(8,PlayableOwner.Enemy,PlayableBuildingKind.Factory,new NavPoint(2,0),250,1,0,0,default(NavPoint),includePrivateState:false),
                 new PlayableBuildingSnapshot(4,PlayableOwner.Player,PlayableBuildingKind.Factory,new NavPoint(0,0),250,1,0,0,default(NavPoint)),
                 new PlayableBuildingSnapshot(6,PlayableOwner.Player,PlayableBuildingKind.Factory,new NavPoint(1,0),250,1,0,0,default(NavPoint))};
-            var observation=PlayableAiObservation.From(new PlayableSnapshot(profile.ProfileId,profile.Revision,61,18,4,9,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,9999,null,Array.Empty<PlayableEntitySnapshot>(),buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
+            var observation=PlayableAiObservation.From(new PlayableSnapshot(profile.ProfileId,profile.Revision,61,18,4,9,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,9999,null,Array.Empty<PlayableEntitySnapshot>(),buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(0,0,profile.ArmyCapacity)));
             var policy=new PlayableAiProductionLivenessPolicy();var action=policy.TryPlan(observation);
             Assert.NotNull(action);Assert.AreEqual(PlayableCommandKind.QueueTank,action.Kind);CollectionAssert.AreEqual(new[]{4},action.EntityIds);Assert.AreEqual(PlayableEntityKind.Tank,action.UnitKind);Assert.IsNull(policy.TryPlan(observation));
         }
@@ -182,7 +182,7 @@ namespace Spacewars.Tests.EditMode
             var factory=new PlayableBuildingSnapshot(4,PlayableOwner.Player,PlayableBuildingKind.Factory,new NavPoint(0,0),250,1,0,0,default(NavPoint));
             PlayableAiObservation Observe(int credits)=>PlayableAiObservation.From(new PlayableSnapshot(profile.ProfileId,profile.Revision,61,18,4,9,
                 RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,credits,null,Array.Empty<PlayableEntitySnapshot>(),new[]{factory},
-                Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
+                Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(0,0,profile.ArmyCapacity)));
             var policy=new PlayableAiProductionLivenessPolicy(profile:profile);
             Assert.IsNull(policy.TryPlan(Observe(profile.TankCreditCost-1)));
             Assert.False(policy.HasPendingObligation);
@@ -194,7 +194,7 @@ namespace Spacewars.Tests.EditMode
             var profile=PlayableProfile.Default;var order=new[]{new PlayableProductionOrderSnapshot(1,PlayableEntityKind.Tank,150,3,15,15,false)};var buildings=new[]{
                 new PlayableBuildingSnapshot(1,PlayableOwner.Player,PlayableBuildingKind.Factory,new NavPoint(0,0),250,1,1,0,default(NavPoint),orders:order),
                 new PlayableBuildingSnapshot(2,PlayableOwner.Enemy,PlayableBuildingKind.Factory,new NavPoint(1,0),250,1,0,0,default(NavPoint),includePrivateState:false)};
-            var observation=PlayableAiObservation.From(new PlayableSnapshot(profile.ProfileId,profile.Revision,62,19,4,9,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,9999,null,Array.Empty<PlayableEntitySnapshot>(),buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
+            var observation=PlayableAiObservation.From(new PlayableSnapshot(profile.ProfileId,profile.Revision,62,19,4,9,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,9999,null,Array.Empty<PlayableEntitySnapshot>(),buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(0,0,profile.ArmyCapacity)));
             Assert.IsNull(new PlayableAiProductionLivenessPolicy().TryPlan(observation));
         }
 
@@ -215,10 +215,10 @@ namespace Spacewars.Tests.EditMode
         [Test] public void ProductionPolicyRetriesOnlyAfterTerminalNonAppliedReceiptAndGenerationChange()
         {
             var profile=PlayableProfile.Default;var factory=new PlayableBuildingSnapshot(1,PlayableOwner.Player,PlayableBuildingKind.Factory,default(NavPoint),250,1,0,0,default(NavPoint));
-            var firstObservation=PlayableAiObservation.From(new PlayableSnapshot(profile.ProfileId,profile.Revision,64,21,1,2,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,9999,null,Array.Empty<PlayableEntitySnapshot>(),new[]{factory},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
+            var firstObservation=PlayableAiObservation.From(new PlayableSnapshot(profile.ProfileId,profile.Revision,64,21,1,2,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,9999,null,Array.Empty<PlayableEntitySnapshot>(),new[]{factory},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(0,0,profile.ArmyCapacity)));
             var policy=new PlayableAiProductionLivenessPolicy();var first=policy.TryPlan(firstObservation);policy.ObserveReceipt(new PlayableAiTraceRecord(firstObservation.Identity,first.ActionId,0,0,0,PlayableAiDeliveryStatus.Rejected,PlayableCommandStatus.Rejected,"paused",sourceIdentity:PlayableAiOpeningComposition.SourceIdentity));
             Assert.False(policy.HasPendingObligation);var retry=policy.TryPlan(firstObservation);Assert.NotNull(retry);Assert.AreNotEqual(first.ActionId,retry.ActionId);
-            var freshObservation=PlayableAiObservation.From(new PlayableSnapshot(profile.ProfileId,profile.Revision,65,21,2,3,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,9999,null,Array.Empty<PlayableEntitySnapshot>(),new[]{factory},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
+            var freshObservation=PlayableAiObservation.From(new PlayableSnapshot(profile.ProfileId,profile.Revision,65,21,2,3,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,9999,null,Array.Empty<PlayableEntitySnapshot>(),new[]{factory},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(0,0,profile.ArmyCapacity)));
             var fresh=policy.TryPlan(freshObservation);Assert.NotNull(fresh);Assert.AreNotEqual(retry.ActionId,fresh.ActionId);Assert.True(policy.HasPendingObligation);
             policy.ObserveReceipt(new PlayableAiTraceRecord(firstObservation.Identity,retry.ActionId,0,0,0,PlayableAiDeliveryStatus.Stopped,PlayableCommandStatus.Stopped,"obsolete",sourceIdentity:PlayableAiOpeningComposition.SourceIdentity));Assert.True(policy.HasPendingObligation);
             policy.ObserveReceipt(new PlayableAiTraceRecord(freshObservation.Identity,fresh.ActionId,0,0,1,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"applied",sourceIdentity:PlayableAiOpeningComposition.SourceIdentity));Assert.False(policy.HasPendingObligation);
@@ -227,7 +227,7 @@ namespace Spacewars.Tests.EditMode
         [Test] public void ProductionPolicyClearsEachTerminalNonAppliedDelivery()
         {
             var profile=PlayableProfile.Default;var factory=new PlayableBuildingSnapshot(1,PlayableOwner.Player,PlayableBuildingKind.Factory,default(NavPoint),250,1,0,0,default(NavPoint));
-            var observation=PlayableAiObservation.From(new PlayableSnapshot(profile.ProfileId,profile.Revision,66,22,1,2,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,9999,null,Array.Empty<PlayableEntitySnapshot>(),new[]{factory},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
+            var observation=PlayableAiObservation.From(new PlayableSnapshot(profile.ProfileId,profile.Revision,66,22,1,2,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,9999,null,Array.Empty<PlayableEntitySnapshot>(),new[]{factory},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(0,0,profile.ArmyCapacity)));
             foreach(var status in new[]{PlayableAiDeliveryStatus.Rejected,PlayableAiDeliveryStatus.Stale,PlayableAiDeliveryStatus.Cancelled,PlayableAiDeliveryStatus.Stopped,PlayableAiDeliveryStatus.InvalidAction,PlayableAiDeliveryStatus.InvalidOwner})
             {
                 var policy=new PlayableAiProductionLivenessPolicy();var action=policy.TryPlan(observation);policy.ObserveReceipt(new PlayableAiTraceRecord(observation.Identity,action.ActionId,0,0,0,status,null,status==PlayableAiDeliveryStatus.Rejected?"paused":"terminal",sourceIdentity:PlayableAiOpeningComposition.SourceIdentity));Assert.False(policy.HasPendingObligation,status.ToString());Assert.NotNull(policy.TryPlan(observation),status.ToString());

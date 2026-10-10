@@ -258,14 +258,28 @@ namespace Spacewars.Tests.EditMode
             var c=RichEconomyConfig();var a=new PlayableAuthorityTick(c,71);int original=PrepareLine(a,c,true);var d=Get(a,"domain");
             object Call(string name,params object[] args)=>d.GetType().GetMethod(name,F).Invoke(d,args);
             for(int i=0;i<360;i++)Step(a);
-            // Staged fixture funds this ordinary infrastructure purchase independently;
-            // the gameplay catalog price is still charged and no income sample is fabricated.
-            Call("AddCredits",PlayableOwner.Player,(double)c.Profile.ScienceCreditCost);
-            var site=EconomyView(a,c).Sites.Single(x=>x.Site.Id==9);
-            Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,(long)Call("AllocateAiSequence"),c.Roster[0].Id,PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:9,slotId:2,parentId:site.CenterId,buildingKind:PlayableBuildingKind.ScientificCenter)).Status);
             var extra=AwaitAdditionalFactory(a,c,original);Assert.AreNotEqual(ConstructionPhase.Ready,extra.Phase);
             var owner=EconomyOwner(a,c);var ledger=Budget(owner);var hold=ledger.Capture().Reserved.Single(x=>x.Purpose=="factory-startup");
             int launch=checked((int)AiProfile.Initial.Value("economy.factoryLaunchCycles")*c.Profile.TankCreditCost);Assert.AreEqual(launch,hold.Amount);
+            // Prepare the competing research only after the real startup hold exists:
+            // an earlier ready center lets research complete before the budget conflict.
+            // The same independent infrastructure funding and ordinary build cost apply.
+            Call("AddCredits",PlayableOwner.Player,(double)c.Profile.ScienceCreditCost);
+            var site=EconomyView(a,c).Sites.Single(x=>x.Site.Id==9);
+            Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,(long)Call("AllocateAiSequence"),c.Roster[0].Id,PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:9,slotId:2,parentId:site.CenterId,buildingKind:PlayableBuildingKind.ScientificCenter)).Status);
+            Call("AdvanceFoundations");
+            var science=EconomyView(a,c).Buildings.Single(b=>b.Owner==PlayableOwner.Player&&b.Kind==PlayableBuildingKind.ScientificCenter);
+            // Authored setup stages only this center's elapsed construction. The next
+            // ordinary domain tick completes it; the new factory retains its full lifecycle.
+            var center=((IDictionary)Get(d,"buildings"))[science.Id];
+            center.GetType().GetField("Build").SetValue(center,(double)c.Profile.ScienceBuildSeconds);
+            center.GetType().GetField("Health").SetValue(center,(double)TerritoryRules.Health(c.Profile,PlayableBuildingKind.ScientificCenter));
+            // Stage an already paid old-line cycle near completion through the real
+            // production code; the competing new line is still constructing and cannot run.
+            var oldOrder=EconomyView(a,c).Buildings.Single(b=>b.Id==original).PrivateState.Orders.Single();
+            Call("AdvanceProduction",Math.Max(0,oldOrder.Remaining-2));
+            Assert.AreNotEqual(ConstructionPhase.Ready,EconomyView(a,c).Buildings.Single(b=>b.Id==extra.Id).Phase);
+            Assert.False(EconomyView(a,c).OwnerResearch.Any(r=>r.Kind==PlayableResearchKind.TankChassis));
             double bank=(double)Call("Balance",PlayableOwner.Player);Call("AddCredits",PlayableOwner.Player,launch+c.Profile.TankCreditCost-bank);
             long oldPaid=ledger.PaidTotal;bool oldLinePaid=false,researchBlocked=false;
             int elapsed=0;
@@ -275,6 +289,7 @@ namespace Spacewars.Tests.EditMode
                 oldLinePaid|=ledger.PaidTotal>oldPaid&&ledger.Capture().Paid.Any(e=>e.CreatedTick>hold.CreatedTick&&e.Action.EntityIds.Contains(original)&&e.Action.Kind==PlayableCommandKind.QueueTank);
                 var rejects=(System.Collections.Generic.IReadOnlyDictionary<string,string>)Get(Get(owner,"arbiter"),"rejections");researchBlocked|=rejects.Any(x=>x.Key.StartsWith("research:QueueResearch:")&&x.Value=="ledger budget unavailable");
             }
+            TestContext.WriteLine("O3_HELD_RESEARCH "+Newtonsoft.Json.JsonConvert.SerializeObject(new{Tick=a.Tick,OldLinePaid=oldLinePaid,ResearchBlocked=researchBlocked,Hold=ledger.Capture().Reserved.Single(x=>x.Id==hold.Id).Amount,Research=EconomyView(a,c).ResearchAvailability,Rejects=Get(Get(owner,"arbiter"),"rejections")}));
             Assert.True(oldLinePaid,"useful old-line orders may spend outside the held startup amount");Assert.True(researchBlocked,"ordinary eligible research must encounter the real held-fund budget blocker");
             Journal(a);var before=a.CaptureBytes();var restored=PlayableAuthorityTick.RestoreBytes(before,c);
             for(int i=0;i<20;i++){Step(a);Step(restored);CollectionAssert.AreEqual(a.CaptureBytes(),restored.CaptureBytes());}

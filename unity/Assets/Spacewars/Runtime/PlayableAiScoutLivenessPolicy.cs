@@ -36,6 +36,15 @@ namespace Spacewars.Runtime
             return new PlayableAiAction(pendingActionId,observation.OwnerId,observation.ProfileId,observation.ProfileRevision,observation.Generation,observation.SnapshotSequence,PlayableCommandKind.Move,new[]{explorer.Id},target.Approach,seed:observation.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
         }
 
+        // Preserve the existing allocator/receipt wire while native selection lives in O2.
+        internal PlayableAiAction Admit(PlayableAiObservation o,PlayableAiAction choice)
+        {
+            if(choice==null||HasPendingObligation)return null;
+            if(o.OwnerId!=ownerId)throw new ArgumentException("Scout owner");
+            pendingActionId=nextActionId++;pendingGeneration=o.Generation;
+            return new PlayableAiAction(pendingActionId,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,choice.Kind,choice.EntityIds.ToArray(),choice.Target,siteId:choice.SiteId,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+        }
+
         public void ObserveReceipt(PlayableAiTraceRecord record)
         {
             if(record==null||!AiStateWire.CallbackGenerationMatches(record,pendingGeneration)||record.OwnerId!=ownerId||record.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity||!HasPendingObligation||record.ActionId!=pendingActionId)return;

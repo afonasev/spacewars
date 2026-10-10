@@ -198,8 +198,7 @@ namespace Spacewars.Runtime
             {
                 // Safe has actual minimum economic commitments; after completion the name
                 // of the opening imposes no permanent ban on pressure.
-                if(opening.Opening==PlayableAiOpening.Safe&&!Ready(o,PlayableBuildingKind.Factory,1)||
-                    opening.Opening==PlayableAiOpening.Safe&&!Ready(o,PlayableBuildingKind.Refinery,1))return null;
+                if(opening.Phase==PlayableAiOpeningPhase.Active&&opening.Opening==PlayableAiOpening.Safe&&(!Ready(o,PlayableBuildingKind.Factory,1)||!Ready(o,PlayableBuildingKind.Refinery,1)))return null;
                 if(registry.Capture().Armies.Count(a=>a.Major&&a.Phase!=AiArmyPhase.Disbanded)>=registry.MajorCap)return null;
                 var free=Fighters(o).Where(u=>registry.ArmyFor(u.Id)==0).ToArray();
                 if(free.Length<profile.Value("armies.minimumUnits")||!Viable(free,gameplay,profile))return null;

@@ -69,6 +69,7 @@ namespace Spacewars.Presentation
         public static Mesh Rock(NavObstacle shape,FoundrySurfaceProfile settings,System.Collections.Generic.IReadOnlyList<NavObstacle> lava=null,Func<NavPoint,double> supportHeight=null)
         {
             var polygon=shape.Footprint;var vertices=new List<Vector3>();var triangles=new List<int>();
+            var channels=(lava??Array.Empty<NavObstacle>()).Where(c=>c.Footprint.Vertices.All(shape.Contains)).ToArray();
             // Axis-aligned authored solids are tessellated into bounded quads, avoiding
             // long ear-clipped slivers and a different height interpolation on adjoining caps.
             double[] Grid(IEnumerable<double> source)
@@ -90,7 +91,22 @@ namespace Spacewars.Presentation
                 // The complete footprint meets a visible low basalt foot, while
                 // variable shoulder widths make the high ridge meander inside it.
                 float width=settings.shoulderWidth*(.4f+.6f*fracture);
-                float foot=(float)(supportHeight?.Invoke(p)??shape.Bottom)+settings.footHeight;
+                double support=supportHeight?.Invoke(p)??shape.Bottom;
+                if(supportHeight!=null&&boundary<settings.shoulderWidth)
+                {
+                    // A blocked interior has no support entry. Carry the adjacent
+                    // deck through its shoulder instead of falling to map zero.
+                    double nearest=double.MaxValue;var contact=p;
+                    for(int edge=0;edge<polygon.Vertices.Count;edge++)
+                    {
+                        var a=polygon.Vertices[edge];var b=polygon.Vertices[(edge+1)%polygon.Vertices.Count];
+                        double dx=b.X-a.X,dz=b.Z-a.Z,t=Math.Max(0,Math.Min(1,((p.X-a.X)*dx+(p.Z-a.Z)*dz)/(dx*dx+dz*dz)));
+                        var q=new NavPoint(a.X+dx*t,a.Z+dz*t);double distance=(p.X-q.X)*(p.X-q.X)+(p.Z-q.Z)*(p.Z-q.Z);
+                        if(distance<nearest){nearest=distance;contact=q;}
+                    }
+                    support=Math.Max(support,supportHeight(contact));
+                }
+                float foot=(float)support+settings.footHeight;
                 foot=Mathf.Min(foot,(float)shape.Top-settings.crownRelief);
                 h=Mathf.Lerp(foot,h,Mathf.SmoothStep(0,1,boundary/width));
                 var position=new Vector2((float)p.X,(float)p.Z);var inset=Vector2.zero;
@@ -136,24 +152,54 @@ namespace Spacewars.Presentation
             {
                 if(!polygon.Contains(new NavPoint((xs[x]+xs[x+1])/2,(zs[z]+zs[z+1])/2)))continue;
                 var a=Top(new NavPoint(xs[x],zs[z]));var b=Top(new NavPoint(xs[x+1],zs[z]));var c=Top(new NavPoint(xs[x+1],zs[z+1]));var d=Top(new NavPoint(xs[x],zs[z+1]));
-                Tri(a,c,b);Tri(a,d,c);
+                void Cap(Vector3 u,Vector3 v,Vector3 w)
+                {
+                    foreach(var clipped in FoundryFissureMesh.Exclude(u,v,w,channels))
+                    {
+                        for(int i=0;i<3;i++)if(channels.Any(channel=>channel.BoundaryDistanceSquared(new NavPoint(clipped[i].x,clipped[i].z))<1e-9))clipped[i].y=(float)shape.Top;
+                        Tri(clipped[0],clipped[1],clipped[2]);
+                    }
+                }
+                Cap(a,c,b);Cap(a,d,c);
+            }
+            foreach(var channel in channels)
+            {
+                var ring=channel.Footprint.Vertices;
+                for(int edge=0;edge<ring.Count;edge++)
+                {
+                    var a=ring[edge];var b=ring[(edge+1)%ring.Count];
+                    int steps=Mathf.Max(1,Mathf.CeilToInt(Vector2.Distance(new Vector2((float)a.X,(float)a.Z),new Vector2((float)b.X,(float)b.Z))/1.5f));
+                    // Fixed tessellation and tiny overlap avoid open raster cracks below the fluid.
+                    float floor=(float)shape.Top-settings.lavaDepth-.005f;
+                    for(int j=0;j<steps;j++)for(int layer=0;layer<4;layer++)
+                    {
+                        Vector3 P(float along,float level)=>new Vector3((float)(a.X+(b.X-a.X)*along),Mathf.Lerp(floor,(float)shape.Top,level),(float)(a.Z+(b.Z-a.Z)*along));
+                        float u=(float)j/steps,v=(float)(j+1)/steps,lo=layer/4f,hi=(layer+1)/4f;
+                        Tri(P(u,lo),P(v,lo),P(v,hi));Tri(P(u,lo),P(v,hi),P(u,hi));
+                    }
+                }
             }
             for(int i=0;i<polygon.Vertices.Count;i++)
             {
                 var a=polygon.Vertices[i];var b=polygon.Vertices[(i+1)%polygon.Vertices.Count];
                 var knots=a.X==b.X?zs.Where(z=>z>=Math.Min(a.Z,b.Z)&&z<=Math.Max(a.Z,b.Z)).Select(z=>new NavPoint(a.X,z)).ToArray():xs.Where(x=>x>=Math.Min(a.X,b.X)&&x<=Math.Max(a.X,b.X)).Select(x=>new NavPoint(x,a.Z)).ToArray();
+                // Include exact channel outlets in the exterior edge tessellation.
+                knots=knots.Concat(channels.SelectMany(channel=>channel.Footprint.Vertices).Where(q=>a.X==b.X?Math.Abs(q.X-a.X)<1e-8&&q.Z>=Math.Min(a.Z,b.Z)&&q.Z<=Math.Max(a.Z,b.Z):Math.Abs(q.Z-a.Z)<1e-8&&q.X>=Math.Min(a.X,b.X)&&q.X<=Math.Max(a.X,b.X))).Distinct().OrderBy(q=>a.X==b.X?q.Z:q.X).ToArray();
                 if(a.X>b.X||a.Z>b.Z)Array.Reverse(knots);
                 var inward=new Vector3((float)(a.Z-b.Z),0,(float)(b.X-a.X)).normalized;
                 int layers=Mathf.Max(4,Mathf.CeilToInt((float)(shape.Top-shape.Bottom)/settings.strataSpacing));
                 for(int j=0;j<knots.Length-1;j++)
                 {
+                    bool outlet=channels.Any(channel=>channel.Contains(new NavPoint((knots[j].X+knots[j+1].X)/2,(knots[j].Z+knots[j+1].Z)/2)));
                     Vector3 Wall(NavPoint q,float level)
                     {
-                        var crown=Top(q);var floor=new Vector3((float)q.X,(float)shape.Bottom,(float)q.Z);var p=Vector3.Lerp(floor,crown,level);
+                        var crown=Top(q);if(outlet)crown.y=(float)shape.Top-settings.lavaDepth-.005f;// Join the adjacent deck at its actual elevation, then slope up
+                        // to the irregular inset foot instead of exposing a deep trench.
+                        var floor=new Vector3((float)q.X,Mathf.Min(crown.y,(float)(supportHeight?.Invoke(q)??shape.Bottom)),(float)q.Z);var p=Vector3.Lerp(floor,crown,level);
                         float strata=.5f+.5f*Mathf.Sin((p.y/settings.strataSpacing+Mathf.PerlinNoise(p.x/settings.crownScale,p.z/settings.crownScale))*6.283185f);
                         var cut=p+inward*(settings.edgeErosion*.25f*Mathf.Sin(level*Mathf.PI)*strata);
                         // Corners remain at the authored edge, so the neighboring side joins exactly.
-                        if(!q.Equals(a)&&!q.Equals(b)&&polygon.Contains(new NavPoint(cut.x,cut.z))){p.x=cut.x;p.z=cut.z;}return p;
+                        if(!outlet&&!q.Equals(a)&&!q.Equals(b)&&polygon.Contains(new NavPoint(cut.x,cut.z))){p.x=cut.x;p.z=cut.z;}return p;
                     }
                     for(int k=0;k<layers;k++)
                     {float lo=(float)k/layers,hi=(float)(k+1)/layers;Tri(Wall(knots[j],lo),Wall(knots[j],hi),Wall(knots[j+1],hi));Tri(Wall(knots[j],lo),Wall(knots[j+1],hi),Wall(knots[j+1],lo));}

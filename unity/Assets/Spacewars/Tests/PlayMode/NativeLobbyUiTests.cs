@@ -22,11 +22,45 @@ public sealed class NativeLobbyUiTests
     {
         host=new GameObject("Lobby test");app=host.AddComponent<PlayableBootstrap>();app.enabled=false;
         typeof(PlayableBootstrap).GetField("profile",Flags).SetValue(app,PlayableProfile.ThreeCrossingsDefault);
-        Call("CreateWorld");Call("CreateHud");
+        Call("CreateWorld");Call("CreateHud");Call("CreateSpectatorHud");
         typeof(PlayableBootstrap).GetField("input",Flags).SetValue(app,host.AddComponent<Spacewars.Input.PlayableInput>());
         Call("CreateLobby");
     }
     [TearDown] public void Teardown(){foreach(var camera in UnityEngine.Object.FindObjectsByType<Camera>(FindObjectsSortMode.None))UnityEngine.Object.DestroyImmediate(camera.gameObject);foreach(var light in UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None))UnityEngine.Object.DestroyImmediate(light.gameObject);UnityEngine.Object.DestroyImmediate(host);}
+    [UnityTest] public IEnumerator MapAtmosphereMatchesTerrainAndFitsBelowPreview()
+    {
+        Call("ShowLobby");var root=Get<VisualElement>("root");var lobby=Get<VisualElement>("lobbyScreen");
+        var choice=lobby.Q<DropdownField>("lobby-map-choice");CollectionAssert.AreEqual(new[]{"Переправа","Огненный разлом","ИИ-полигон · 8"},choice.choices);
+        var panel=host.GetComponent<UIDocument>().panelSettings;
+        foreach(var size in new[]{new Vector2Int(1280,800),new Vector2Int(1600,1000)})
+        {
+            var image=new RenderTexture(size.x,size.y,24);image.Create();panel.targetTexture=image;root.style.width=1280;root.style.height=800;
+            try
+            {
+                for(int index=0;index<2;index++)
+                {
+                    choice.value=choice.choices[index];for(int frame=0;frame<8;frame++)yield return null;
+                    Assert.AreEqual(index==1,Get<NativeLobbyConfiguration>("lobbySetup").Foundry);
+                    Assert.True(index==1?Get<PlayableProfile>("profile").AuthoredMap is FoundryMap:Get<PlayableProfile>("profile").AuthoredMap is ThreeCrossingsMap);
+                    Assert.AreEqual(index==1?"6 игровых мест":"2 игровых места",lobby.Q<Label>("lobby-map-capacity").text);
+                    var description=lobby.Q<Label>("lobby-map-description");
+                    Assert.AreEqual(index==1?"Над остывшими промышленными площадками дрожит жар лавовой реки. Между шахтами и укреплёнными высотами тишина держится лишь до первых выстрелов.":"Холодная река рассекает каменное плато, оставляя лишь три пути на другой берег. Среди скал и высоких уступов каждый проход становится рубежом, который нельзя отдать.",description.text);
+                    Assert.AreEqual(DisplayStyle.Flex,description.resolvedStyle.display);
+                    Assert.GreaterOrEqual(description.worldBound.yMin,Get<PlayableMapSurface>("lobbyPreview").worldBound.yMax);
+                    Assert.LessOrEqual(description.worldBound.yMax,Get<VisualElement>("mapPanel").worldBound.yMax);
+                    Assert.LessOrEqual(description.worldBound.xMax,Get<VisualElement>("mapPanel").worldBound.xMax);
+                    Assert.LessOrEqual(Get<VisualElement>("mapPanel").worldBound.xMax,root.worldBound.xMax);
+                    string output=Environment.GetEnvironmentVariable("MAP_COPY_EVIDENCE");
+                    if(!string.IsNullOrEmpty(output))
+                    {
+                        var prior=RenderTexture.active;RenderTexture.active=image;var png=new Texture2D(size.x,size.y,TextureFormat.RGB24,false);png.ReadPixels(new Rect(0,0,size.x,size.y),0,0);png.Apply();
+                        System.IO.Directory.CreateDirectory(output);System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,(index==1?"foundry":"crossings")+"-"+size.x+"x"+size.y+".png"),png.EncodeToPNG());RenderTexture.active=prior;UnityEngine.Object.Destroy(png);
+                    }
+                }
+            }
+            finally{panel.targetTexture=null;image.Release();UnityEngine.Object.Destroy(image);}
+        }
+    }
     [Test] public void LobbyIsRealSetupAndHasNoAuthority()
     {
         Call("ShowLobby");
@@ -238,6 +272,131 @@ public sealed class NativeLobbyUiTests
             next.RequestStop();yield return Wait(()=>next.IsStopped);Set("runtime",null);
         }
     }
+    private void SetFirstSeatAi()
+    {
+        var lobby=Get<VisualElement>("lobbyScreen");
+        Get<NativeMenuNavigation>("menuNavigation").ActivateElement(lobby.Q<Button>("lobby-remove-0"));
+        typeof(PlayableBootstrap).GetMethod("AddLobbyParticipant",Flags).Invoke(app,new object[]{false,null});
+        var draft=Get<NativeLobbyConfiguration>("lobbySetup");draft.Participants[0].Team=1;draft.Participants[0].Difficulty=AiDifficulty.Veteran;draft.Participants[0].Name="ИИ Ветеран 1";draft.Participants[1].Team=2;draft.Participants[1].Name="ИИ Боец 2";
+        Call("RebuildRoster");Call("RefreshLobbyValidation");
+    }
+    [UnityTest] public IEnumerator AllAiLobbyStartsViewerAndResetsOnHumanSession()
+    {
+        void Set(string name,object value)=>typeof(PlayableBootstrap).GetField(name,Flags).SetValue(app,value);
+        IEnumerator Wait(Func<bool> ready)
+        {float deadline=Time.realtimeSinceStartup+10;while(!ready()&&Time.realtimeSinceStartup<deadline)yield return null;Assert.True(ready(),"viewer runtime deadline");}
+        Call("ShowLobby");var lobby=Get<VisualElement>("lobbyScreen");
+        SetFirstSeatAi();
+        var draft=Get<NativeLobbyConfiguration>("lobbySetup");Assert.True(draft.Spectator);
+        Assert.IsNull(lobby.Q<Button>("lobby-bind-devices"));
+        Assert.AreEqual("ИИ Ветеран 1",draft.ParticipantName(0));Assert.AreEqual("ИИ Боец 2",draft.ParticipantName(1));
+        yield return CaptureViewerFrame("all-ai-lobby",false);
+        Set("preparing",true);Set("matchSetup",draft.Copy());Call("StartSession");
+        var runtime=Get<PlayableRuntime>("runtime");yield return Wait(()=>runtime.Latest.Paused);
+        Assert.True(Get<bool>("spectatorMode"));Assert.False(Get<Spacewars.Input.PlayableInput>("input").CommandInputEnabled);
+        var scheduler=typeof(PlayableRuntime).GetField("aiScheduler",Flags).GetValue(runtime);var owners=(System.Collections.IEnumerable)scheduler.GetType().GetField("owners",Flags).GetValue(scheduler);var first=owners.Cast<object>().Single(o=>(string)o.GetType().GetProperty("OwnerId",Flags).GetValue(o)=="player-1");var checkpoint=(PlayableAiOwnerCheckpoint)first.GetType().GetProperty("Checkpoint",Flags).GetValue(first);Assert.AreEqual(AiDifficulty.Veteran,checkpoint.Difficulty);
+        Assert.AreEqual(2,runtime.SpectatorFrame(PlayableRuntime.LocalSpectatorId).Players.Count);
+        Call("ReadPresentationFrame");Assert.AreEqual(2,Get<PlayableSnapshot>("view").Buildings.Count(b=>b.Kind==PlayableBuildingKind.Headquarters));
+        Set("inLobby",false);Set("preparing",false);lobby.style.display=DisplayStyle.None;typeof(PlayableBootstrap).GetMethod("SetMatchUi",Flags).Invoke(app,new object[]{true});Call("UpdateFrame");
+        yield return CaptureViewerFrame("all-ai-authored-match",true);
+        Set("spectatorPerspective",(PlayableOwner?)PlayableOwner.Enemy);Set("spectatorCollapsed",true);
+        Call("ReadPresentationFrame");Assert.AreEqual(PlayableOwner.Enemy,Get<PlayableSnapshot>("view").Owner);
+        runtime.RequestPause(false);yield return Wait(()=>runtime.Latest.Tick>=3);Call("UpdateFrame");
+        Assert.AreEqual(0,runtime.Latest.Metrics.Errors);
+        runtime.RequestPause(true);yield return Wait(()=>runtime.Latest.Paused);
+        var domain=typeof(PlayableRuntime).GetField("domain",Flags).GetValue(runtime);
+        var enemyHq=runtime.SpectatorFrame(PlayableRuntime.LocalSpectatorId).Overview.Buildings.Single(b=>b.Owner==PlayableOwner.Enemy&&b.Kind==PlayableBuildingKind.Headquarters);
+        domain.GetType().GetMethod("Damage",Flags).Invoke(domain,new object[]{enemyHq.Id,100000});runtime.RequestPause(false);
+        yield return Wait(()=>runtime.Latest.Outcome==PlayableMatchOutcome.TeamWon);Call("UpdateFrame");
+        Assert.NotNull(runtime.Result);Assert.AreEqual(1,runtime.Result.WinnerTeam);Assert.AreEqual(DisplayStyle.Flex,Get<PostMatchResultsView>("postMatch").Root.style.display.value);
+        Set("preparing",true);Call("Restart");yield return Wait(()=>runtime.IsStopped);Call("UpdateFrame");
+        runtime=Get<PlayableRuntime>("runtime");yield return Wait(()=>runtime.Latest.Paused);
+        Assert.True(Get<bool>("spectatorMode"));Assert.IsNull(Get<PlayableOwner?>("spectatorPerspective"));Assert.False(Get<bool>("spectatorCollapsed"));
+        runtime.RequestStop();yield return Wait(()=>runtime.IsStopped);Set("runtime",null);
+        Call("ShowLobby");draft.Participants[0].Human=true;draft.Participants[0].DeviceId=0;Call("RebuildRoster");Call("RefreshLobbyValidation");
+        Set("matchSetup",draft.Copy());Call("StartSession");runtime=Get<PlayableRuntime>("runtime");yield return Wait(()=>runtime.Latest.Paused);
+        Assert.False(Get<bool>("spectatorMode"));Assert.True(Get<Spacewars.Input.PlayableInput>("input").CommandInputEnabled);
+        runtime.RequestStop();yield return Wait(()=>runtime.IsStopped);Set("runtime",null);
+    }
+    [UnityTest] public IEnumerator EightPlayerTestMapSelectsAndRendersOneOpenTexturedGround()
+    {
+        void Set(string name,object value)=>typeof(PlayableBootstrap).GetField(name,Flags).SetValue(app,value);
+        Call("ShowLobby");var lobby=Get<VisualElement>("lobbyScreen");
+        lobby.Q<DropdownField>("lobby-map-choice").value="ИИ-полигон · 8";
+        var setup=Get<NativeLobbyConfiguration>("lobbySetup");var profile=Get<PlayableProfile>("profile");
+        Assert.True(setup.AiTestMap);Assert.False(setup.Foundry);Assert.True(setup.Spectator);
+        Assert.AreEqual(8,setup.Participants.Count);Assert.AreEqual("8 игровых мест",lobby.Q<Label>("lobby-map-capacity").text);
+        Assert.True(lobby.Q<Button>("lobby-launch").enabledSelf);Assert.True(profile.AuthoredMap is AiTestMap);
+        Assert.AreEqual(1,Get<PlayableMapTerrain>("lobbyTerrain").Texture.GetPixels32().Distinct().Count());
+        setup.HasExplicitSeed=true;setup.ExplicitSeed=7108;
+        yield return CaptureViewerFrame("ai-eight-player-lobby",false);
+        Set("preparing",true);Set("matchSetup",setup.Copy());Call("RecreateMapPresentation");Call("StartSession");
+        var runtime=Get<PlayableRuntime>("runtime");
+        try
+        {
+            float deadline=Time.realtimeSinceStartup+8;
+            while(!runtime.Latest.Paused&&Time.realtimeSinceStartup<deadline)yield return null;
+            Assert.True(runtime.Latest.Paused);Assert.True(Get<bool>("spectatorMode"));
+            Assert.AreEqual(8,runtime.SpectatorFrame(PlayableRuntime.LocalSpectatorId).Players.Count);
+            var ground=host.GetComponentsInChildren<Renderer>().Single(r=>r.name=="AI test open ground");
+            var block=new MaterialPropertyBlock();ground.GetPropertyBlock(block);Assert.AreEqual(-1,block.GetFloat("_SurfaceRole"));
+            Assert.AreSame(Resources.Load<Texture2D>("Environment/NaturalFrontier/Earth"),ground.sharedMaterial.GetTexture("_EarthTex"));
+            Assert.Zero(host.GetComponentsInChildren<Transform>().Count(t=>t.name=="Boundary"||t.name=="Paving joint"||t.name=="Fortification"));
+            Call("ReadPresentationFrame");Set("inLobby",false);Set("preparing",false);lobby.style.display=DisplayStyle.None;
+            typeof(PlayableBootstrap).GetMethod("SetMatchUi",Flags).Invoke(app,new object[]{true});Call("UpdateFrame");
+            var camera=Get<Camera>("cameraView");camera.orthographicSize=170;camera.transform.position=new Vector3(0,250,-100);camera.transform.LookAt(Vector3.zero);
+            yield return CaptureViewerFrame("ai-eight-player-map",true);
+            // Use the ordinary main-thread route host; the authority waits for its answers.
+            runtime.RequestPause(false);deadline=Time.realtimeSinceStartup+8;
+            while(runtime.Latest.Tick<90&&runtime.Latest.Failure==null&&Time.realtimeSinceStartup<deadline)
+            {Call("ServiceRoutes");Call("UpdateFrame");yield return null;}
+            Assert.GreaterOrEqual(runtime.Latest.Tick,90,runtime.Latest.Failure);
+            runtime.RequestPause(true);deadline=Time.realtimeSinceStartup+3;
+            while(!runtime.Latest.Paused&&Time.realtimeSinceStartup<deadline){Call("ServiceRoutes");yield return null;}
+            Assert.True(runtime.Latest.Paused);Assert.IsNull(runtime.Latest.Failure);Assert.AreEqual(0,runtime.Latest.Metrics.Errors);
+            var scheduler=typeof(PlayableRuntime).GetField("aiScheduler",Flags).GetValue(runtime);
+            var owners=((IEnumerable)scheduler.GetType().GetProperty("Owners",Flags).GetValue(scheduler)).Cast<object>().ToArray();
+            Assert.AreEqual(8,owners.Length);
+            foreach(var owner in owners)
+            {
+                var checkpoint=(PlayableAiOwnerCheckpoint)owner.GetType().GetProperty("Checkpoint",Flags).GetValue(owner);
+                Assert.Greater(checkpoint.DecisionTick,0,checkpoint.OwnerId);
+            }
+            runtime.RequestStop();deadline=Time.realtimeSinceStartup+8;while(!runtime.IsStopped&&Time.realtimeSinceStartup<deadline)yield return null;
+            Assert.True(runtime.IsStopped);Set("runtime",null);
+        }
+        finally{runtime.RequestStop();}
+    }
+    private IEnumerator CaptureViewerFrame(string name,bool sceneVisible)
+    {
+        var root=Get<VisualElement>("root");var panel=host.GetComponent<UIDocument>().panelSettings;
+        var texture=new RenderTexture(1600,900,24);texture.Create();panel.targetTexture=texture;
+        float scale=OrbitalTheme.ReadableScale(1600,900);root.style.width=1600/scale;root.style.height=900/scale;
+        var camera=Get<Camera>("cameraView");var backdrop=new RenderTexture(1600,900,24);backdrop.Create();camera.targetTexture=backdrop;
+        var scene=new VisualElement{pickingMode=PickingMode.Ignore};scene.style.position=Position.Absolute;scene.style.left=scene.style.right=scene.style.top=scene.style.bottom=0;
+        scene.style.backgroundImage=new StyleBackground(Background.FromRenderTexture(backdrop));root.Insert(0,scene);
+        try
+        {
+            if(sceneVisible)Call("UpdateFrame");
+            yield return null;yield return null;yield return null;
+            var folder=System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath,"../../.local/spectator-native"));System.IO.Directory.CreateDirectory(folder);
+            var old=RenderTexture.active;RenderTexture.active=texture;var pixels=new Texture2D(1600,900,TextureFormat.RGB24,false);
+            pixels.ReadPixels(new Rect(0,0,1600,900),0,0);pixels.Apply();RenderTexture.active=old;
+            System.IO.File.WriteAllBytes(System.IO.Path.Combine(folder,name+".png"),pixels.EncodeToPNG());UnityEngine.Object.DestroyImmediate(pixels);
+        }
+        finally{scene.RemoveFromHierarchy();panel.targetTexture=null;camera.targetTexture=null;texture.Release();backdrop.Release();UnityEngine.Object.DestroyImmediate(texture);UnityEngine.Object.DestroyImmediate(backdrop);}
+    }
+    [UnityTest] public IEnumerator AllAiControlsFitCompactLobby()
+    {
+        Call("ShowLobby");var root=Get<VisualElement>("root");var lobby=Get<VisualElement>("lobbyScreen");SetFirstSeatAi();
+        foreach(var size in new[]{new Vector2Int(1280,800),new Vector2Int(800,620),new Vector2Int(760,900)})
+        {
+            root.style.width=size.x;root.style.height=size.y;yield return null;yield return null;
+            foreach(var control in lobby.Query<VisualElement>().ToList().Where(e=>e is Button||e is TextField||e is DropdownField))
+            {Assert.Greater(control.worldBound.width,0,control.name);Assert.LessOrEqual(control.worldBound.xMax,root.worldBound.xMax+.5f,control.name);Assert.LessOrEqual(control.worldBound.yMax,root.worldBound.yMax+.5f,control.name);}
+            Assert.LessOrEqual(Get<VisualElement>("rosterPanel").worldBound.yMax,Get<Label>("lobbyStatus").worldBound.yMin+.5f);
+        }
+    }
     [Test] public void BackPreservesDraftAndOnlySwitchesMenu()
     {
         Call("ShowLobby");var lobby=Get<VisualElement>("lobbyScreen");
@@ -258,7 +417,7 @@ public sealed class NativeLobbyUiTests
         var keyboard=UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Keyboard>();var mouse=UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Mouse>();
         try
         {
-            Call("BindLobbyDevices");Call("ShowLobby");var lobby=Get<VisualElement>("lobbyScreen");lobby.Q<DropdownField>("lobby-map-choice").value="Чёрная плавильня";
+            Call("BindLobbyDevices");Call("ShowLobby");var lobby=Get<VisualElement>("lobbyScreen");lobby.Q<DropdownField>("lobby-map-choice").value="Огненный разлом";
             var setup=Get<NativeLobbyConfiguration>("lobbySetup");setup.HasExplicitSeed=true;setup.ExplicitSeed=19092026;Call("RefreshLobbyValidation");
             Assert.True(Get<Button>("launchButton").enabledSelf);Assert.True(Get<PlayableProfile>("profile").AuthoredMap is FoundryMap);
             yield return Shot("lobby-foundry");
@@ -280,7 +439,7 @@ public sealed class NativeLobbyUiTests
             yield return Shot("foundry-results");var generation=runtime.Generation;Call("Restart");yield return Wait(()=>runtime.IsStopped);Call("UpdateFrame");
             var next=Get<PlayableRuntime>("runtime");Assert.Greater(next.Generation,generation);Assert.AreEqual(6,next.Latest.Participants.Count);Assert.True(next.Latest.ActiveProfile.AuthoredMap is FoundryMap);
             Call("ReturnToLobby");yield return Wait(()=>next.IsStopped);Call("UpdateFrame");Assert.True(Get<bool>("inLobby"));
-            lobby.Q<DropdownField>("lobby-map-choice").value="Three Crossings";Assert.AreEqual(2,Get<NativeLobbyConfiguration>("lobbySetup").Capacity(Get<PlayableProfile>("profile")));
+            lobby.Q<DropdownField>("lobby-map-choice").value="Переправа";Assert.AreEqual(2,Get<NativeLobbyConfiguration>("lobbySetup").Capacity(Get<PlayableProfile>("profile")));
             Get<Button>("launchButton").Focus();Get<NativeMenuNavigation>("menuNavigation").Activate();yield return Wait(()=>Get<PlayableRuntime>("runtime")!=null&&!Get<bool>("preparing"));
             var two=Get<PlayableRuntime>("runtime");Assert.True(two.Latest.ActiveProfile.AuthoredMap is ThreeCrossingsMap);Assert.AreEqual(2,two.LobbyConfiguration.Capacity(two.Latest.ActiveProfile));Assert.False(two.LobbyConfiguration.Foundry);two.RequestStop();yield return Wait(()=>two.IsStopped);Set("runtime",null);
         }
@@ -305,7 +464,7 @@ public sealed class NativeLobbyUiTests
         }
         try
         {
-            Call("BindLobbyDevices");Call("ShowLobby");var lobby=Get<VisualElement>("lobbyScreen");lobby.Q<DropdownField>("lobby-map-choice").value="Чёрная плавильня";
+            Call("BindLobbyDevices");Call("ShowLobby");var lobby=Get<VisualElement>("lobbyScreen");lobby.Q<DropdownField>("lobby-map-choice").value="Огненный разлом";
             var setup=Get<NativeLobbyConfiguration>("lobbySetup");setup.Participants.RemoveRange(3,3);
             otherPad.MakeCurrent();typeof(PlayableBootstrap).GetMethod("AddLobbyParticipant",Flags).Invoke(app,new object[]{true,pressedPad});
             Assert.AreEqual(pressedPad.deviceId,setup.Participants.Last().DeviceId);Assert.AreEqual(4,setup.Participants.Count);

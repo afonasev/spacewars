@@ -89,6 +89,50 @@ public sealed class OrbitalMenuTests : InputTestFixture
             Poll(new GamepadState(),.9f);Poll(new GamepadState().WithButton(GamepadButton.South),1f);Assert.AreEqual(2,calls);
         }finally{InputSystem.RemoveDevice(pad);}
     }
+    [UnityTest] public IEnumerator MenuCursorModeFollowsGamepadMouseAndKeyboardAcrossScopes()
+    {
+        var action=OrbitalTheme.Action("Select",()=>{});root.Add(action);yield return null;
+        navigation.Focused=()=>true;navigation.SetScope(root,null,action);
+        var pad=InputSystem.AddDevice<Gamepad>();var mouse=InputSystem.AddDevice<Mouse>();
+        InputSystem.QueueStateEvent(pad,new GamepadState().WithButton(GamepadButton.South));InputSystem.Update();navigation.Tick();
+        Assert.True(navigation.UsingGamepad,"Even a held button at scope entry selects gamepad mode without submitting.");
+        navigation.SetScope(root,null,action);Assert.True(navigation.UsingGamepad,"Opening another menu preserves the input mode.");
+        InputSystem.QueueStateEvent(pad,new GamepadState());InputSystem.QueueStateEvent(mouse,new MouseState{delta=new Vector2(8,0)});InputSystem.Update();navigation.Tick();
+        Assert.False(navigation.UsingGamepad,"Moving the mouse restores its cursor without requiring a click.");
+        InputSystem.QueueStateEvent(pad,new GamepadState().WithButton(GamepadButton.South));InputSystem.Update();navigation.Tick();Assert.True(navigation.UsingGamepad);
+        using(var key=KeyDownEvent.GetPooled('\0',KeyCode.DownArrow,EventModifiers.None)){key.target=action;action.SendEvent(key);}
+        Assert.False(navigation.UsingGamepad,"Keyboard navigation restores pointer mode.");
+    }
+    [TestCase(1,false,false,false)]
+    [TestCase(2,false,false,false)]
+    [TestCase(2,true,true,true)]
+    [TestCase(1,true,false,true)]
+    [TestCase(1,true,true,false)]
+    [TestCase(0,false,true,true)]
+    public void MatchCursorUsesWholeLocalRoster(int humanCount,bool keyboardSeat,bool usingPad,bool visible)
+    {
+        var matchHost=new GameObject("cursor roster contract");var bootstrap=matchHost.AddComponent<PlayableBootstrap>();bootstrap.enabled=false;
+        try
+        {
+            var flags=BindingFlags.Instance|BindingFlags.NonPublic;
+            var participants=new System.Collections.Generic.List<NativeLobbyParticipant>();
+            for(int i=0;i<humanCount;i++)participants.Add(new NativeLobbyParticipant{Human=true,DeviceId=keyboardSeat&&i==0?0:i+1});
+            participants.Add(new NativeLobbyParticipant{Human=false});
+            typeof(PlayableBootstrap).GetField("matchSetup",flags).SetValue(bootstrap,new NativeLobbyConfiguration{Participants=participants});
+            typeof(PlayableBootstrap).GetField("battleController",flags).SetValue(bootstrap,usingPad);
+            var cursor=typeof(PlayableBootstrap).GetProperty("MouseCursorVisible",flags);
+            Assert.AreEqual(visible,cursor.GetValue(bootstrap));
+            typeof(PlayableBootstrap).GetField("root",flags).SetValue(bootstrap,root);
+            typeof(PlayableBootstrap).GetField("localInputFocused",flags).SetValue(bootstrap,true);
+            typeof(PlayableBootstrap).GetMethod("LateUpdate",flags).Invoke(bootstrap,null);
+            Assert.AreEqual(visible,UnityEngine.Cursor.visible,"The policy must reach Unity's OS cursor.");
+            typeof(PlayableBootstrap).GetField("localInputFocused",flags).SetValue(bootstrap,false);
+            typeof(PlayableBootstrap).GetMethod("LateUpdate",flags).Invoke(bootstrap,null);Assert.True(UnityEngine.Cursor.visible);
+            typeof(PlayableBootstrap).GetField("menuNavigation",flags).SetValue(bootstrap,navigation);navigation.SetScope(root);
+            Assert.True((bool)cursor.GetValue(bootstrap),"An open mouse-operated menu overrides the match roster.");
+        }
+        finally{UnityEngine.Object.DestroyImmediate(matchHost);UnityEngine.Cursor.visible=true;}
+    }
     [UnityTest] public IEnumerator GamepadStartUsesTheActiveRouteActionBeforeBack()
     {
         int starts=0,backs=0;var action=OrbitalTheme.Action("Launch",()=>{});root.Add(action);yield return null;

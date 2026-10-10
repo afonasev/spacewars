@@ -58,6 +58,20 @@ namespace Spacewars.Tests.EditMode
             Call("AdvanceResearch",p.TankChassisSeconds);orders=B(center).PrivateState.Research;Assert.True(orders[0].Complete);Assert.True(orders[1].Active);Assert.AreEqual(before-p.TankChassisCost-p.ExplorerAssaultCost,Balance());
             Call("Damage",center,(int)p.ScienceHealth+1);Assert.AreEqual(before-p.TankChassisCost-p.ExplorerAssaultCost,Balance());
         }
+        [Test] public void GuidanceRequiresSixHundredCreditsAndChargesOnce()
+        {
+            int center=Build(PlayableBuildingKind.ScientificCenter,2);
+            Call("AddCredits",PlayableOwner.Player,599d-Balance());
+            Assert.AreEqual(PlayableCommandStatus.InsufficientCredits,Research(PlayableResearchKind.ShkvalGuidance,center));
+            Assert.AreEqual(599d,Balance());
+            Call("AddCredits",PlayableOwner.Player,1d);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Research(PlayableResearchKind.ShkvalGuidance,center));
+            Assert.Zero(Balance());
+            Assert.AreEqual(600d,B(center).PrivateState.Research.Single().PaidCost);
+            Call("AdvanceResearch",p.ShkvalGuidanceSeconds);
+            Assert.AreEqual(PlayableCommandStatus.Rejected,Research(PlayableResearchKind.ShkvalGuidance,center));
+            Assert.Zero(Balance());
+        }
         [Test] public void ResearchSaveStateRoundTripKeepsPaidActiveAndWaitingOrders()
         {
             int center=Build(PlayableBuildingKind.ScientificCenter,2);Research(PlayableResearchKind.TankChassis,center);Research(PlayableResearchKind.ExplorerAssaultGuns,center);

@@ -101,12 +101,66 @@ namespace Spacewars.Runtime
         internal string LastCorridorFailure{get;private set;}
         private bool CorridorFailure(string reason){LastCorridorFailure=reason;return false;}
         private long installedCorridorBytes,installedGeometryBytes,answerCorridorBytes,hostRetainedBytes;
-        internal long CorridorRetainedBytes{get{lock(transportGate)return installedCorridorBytes+installedGeometryBytes+answerCorridorBytes;}}
-        internal long HostRetainedBytes{get{lock(transportGate)return hostRetainedBytes;}}
+        // A reservation protects the remaining host headroom while the sole solver
+        // allocates outside the gate. Corridor growth/installation waits for release;
+        // capture, cancellation and ingress never wait for computation.
+        private int hostAllocationThread;
+        // Wall-clock observation is outside the deterministic authority graph and
+        // save wire. Weak keys let stopped generations release their diagnostics.
+        private sealed class TransportTiming {internal long Wait,Hold;}
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<NavigationSession,TransportTiming> transportTimings=
+            new System.Runtime.CompilerServices.ConditionalWeakTable<NavigationSession,TransportTiming>();
+        internal double TransportWaitMilliseconds=>transportTimings.TryGetValue(this,out var timing)?System.Threading.Interlocked.Read(ref timing.Wait)*1000d/System.Diagnostics.Stopwatch.Frequency:0;
+        internal double TransportHoldMilliseconds=>transportTimings.TryGetValue(this,out var timing)?System.Threading.Interlocked.Read(ref timing.Hold)*1000d/System.Diagnostics.Stopwatch.Frequency:0;
+        // Measure outermost gate occupancy only, avoiding reentrant double counting.
+        private readonly struct TransportScope : IDisposable
+        {
+            private readonly NavigationSession session;
+            private readonly bool outer;
+            private readonly long entered;
+            private readonly TransportTiming timing;
+            internal TransportScope(NavigationSession session)
+            {
+                this.session=session;outer=!System.Threading.Monitor.IsEntered(session.transportGate);
+                timing=outer?transportTimings.GetValue(session,_=>new TransportTiming()):null;
+                long start=outer?System.Diagnostics.Stopwatch.GetTimestamp():0;
+                System.Threading.Monitor.Enter(session.transportGate);
+                entered=outer?System.Diagnostics.Stopwatch.GetTimestamp():0;
+                if(outer)System.Threading.Interlocked.Add(ref timing.Wait,entered-start);
+            }
+            public void Dispose()
+            {
+                if(outer)System.Threading.Interlocked.Add(ref timing.Hold,System.Diagnostics.Stopwatch.GetTimestamp()-entered);
+                System.Threading.Monitor.Exit(session.transportGate);
+            }
+        }
+        private TransportScope EnterTransport()=>new TransportScope(this);
+        internal event Action HostChanged;
+        internal void SignalHost()=>HostChanged?.Invoke();
+        internal long BeginHostAllocation()
+        {
+            using(EnterTransport()){
+                if(hostAllocationThread!=0)throw new InvalidOperationException("Concurrent route kernels.");
+                hostAllocationThread=System.Threading.Thread.CurrentThread.ManagedThreadId;
+                return installedCorridorBytes+installedGeometryBytes+answerCorridorBytes;
+            }
+        }
+        internal void EndHostAllocation(long bytes)
+        {
+            using(EnterTransport()){
+                if(hostAllocationThread!=System.Threading.Thread.CurrentThread.ManagedThreadId)
+                    throw new InvalidOperationException("Route reservation owner mismatch.");
+                bool over=bytes<0||bytes+installedCorridorBytes+installedGeometryBytes+answerCorridorBytes>LayeredNavigationScheduler.MaxRetainedBytes;
+                hostRetainedBytes=Math.Max(0,bytes);hostAllocationThread=0;
+                if(over)throw new InvalidOperationException("Route retention cap exceeded.");
+            }
+        }
+        internal long CorridorRetainedBytes{get{using(EnterTransport())return installedCorridorBytes+installedGeometryBytes+answerCorridorBytes;}}
+        internal long HostRetainedBytes{get{using(EnterTransport())return hostRetainedBytes;}}
         internal void RunHostStep(Action step)
-        {if(step==null)throw new ArgumentNullException(nameof(step));lock(transportGate)step();}
+        {if(step==null)throw new ArgumentNullException(nameof(step));using(EnterTransport())step();}
         internal void SetHostRetainedBytes(long bytes)
-        {lock(transportGate){if(bytes<0)throw new ArgumentOutOfRangeException(nameof(bytes));hostRetainedBytes=bytes;}}
+        {using(EnterTransport()){if(bytes<0)throw new ArgumentOutOfRangeException(nameof(bytes));hostRetainedBytes=bytes;}}
         private long ProspectiveGeometryBytes(int replacing,NavigationRequest request)
         {
             var seen=new HashSet<NavGeometry>();long bytes=0;
@@ -351,13 +405,13 @@ namespace Spacewars.Runtime
         private int admissionBatchDepth;
         private T AdmissionBatch<T>(Func<T> work)
         {
-            lock(transportGate){RejectTransferCallbackReentry();admissionBatchDepth++;bool committed=false;
+            using(EnterTransport()){RejectTransferCallbackReentry();admissionBatchDepth++;bool committed=false;
                 try{var result=work();committed=true;return result;}
                 finally{admissionBatchDepth--;if(committed&&admissionBatchDepth==0)PublishAdmission();}}
         }
         private void AdmissionBatch(Action work)
         {
-            lock(transportGate){RejectTransferCallbackReentry();admissionBatchDepth++;bool committed=false;
+            using(EnterTransport()){RejectTransferCallbackReentry();admissionBatchDepth++;bool committed=false;
                 try{work();committed=true;}
                 finally{admissionBatchDepth--;if(committed&&admissionBatchDepth==0)PublishAdmission();}}
         }
@@ -366,7 +420,7 @@ namespace Spacewars.Runtime
         internal bool TryTransferRoute(Func<NavigationRequest,bool> register, out NavigationRequest request)
         {
             if(register==null)throw new ArgumentNullException(nameof(register));
-            lock(transportGate){RejectTransferCallbackReentry();if(commandGroup!=null||admissionBatchDepth!=0){request=null;return false;}return Requests.TryTransfer(candidate=>{
+            using(EnterTransport()){RejectTransferCallbackReentry();if(commandGroup!=null||admissionBatchDepth!=0){request=null;return false;}return Requests.TryTransfer(candidate=>{
                 if(!Admission.Contains(candidate))return false;
                 registeredRoutes.Add(candidate);
                 transferCallbackThread=System.Threading.Thread.CurrentThread.ManagedThreadId;
@@ -389,7 +443,7 @@ namespace Spacewars.Runtime
             if(scheduler==null)throw new ArgumentNullException(nameof(scheduler));
             if(prepare==null)throw new ArgumentNullException(nameof(prepare));
             NavigationRequest candidate;NavigationAdmission observed;
-            lock(transportGate){RejectTransferCallbackReentry();
+            using(EnterTransport()){RejectTransferCallbackReentry();
                 if(commandGroup!=null||admissionBatchDepth!=0){request=null;return false;}
                 if(!Requests.TryPeek(out candidate)||!Admission.Contains(candidate)){request=null;return false;}
                 observed=Admission;
@@ -399,7 +453,7 @@ namespace Spacewars.Runtime
             var scheduled=prepare(candidate,observed);
             if(scheduled==null){request=null;return false;}
             ValidateScheduledRoute(candidate,scheduled,observed);
-            lock(transportGate){RejectTransferCallbackReentry();
+            using(EnterTransport()){RejectTransferCallbackReentry();
                 if(commandGroup!=null||admissionBatchDepth!=0||!ReferenceEquals(Admission,observed)||!Admission.Contains(candidate)){request=null;return false;}
                 return Requests.TryTransfer(head=>{
                     if(!ReferenceEquals(head,candidate))return false;
@@ -441,13 +495,13 @@ namespace Spacewars.Runtime
         // through the old answer path so it cannot block newer FIFO inputs.
         public bool TryDropStaleRoute(out NavigationRequest request)
         {
-            lock(transportGate){RejectTransferCallbackReentry();if(commandGroup!=null||admissionBatchDepth!=0){request=null;return false;}return Requests.TryTransfer(candidate=>
+            using(EnterTransport()){RejectTransferCallbackReentry();if(commandGroup!=null||admissionBatchDepth!=0){request=null;return false;}return Requests.TryTransfer(candidate=>
                 candidate.Request<=Admission.PublishedThroughRequestSequence&&!Admission.Contains(candidate)&&
                 Answers.TryEnqueue(new NavigationAnswer(candidate,Array.Empty<NavPoint>(),NavSolveStatus.Stale)),out request);}
         }
         internal bool TryRejectUnserviceableRoute(NavigationRequest expected,out NavigationRequest request)
         {
-            lock(transportGate){RejectTransferCallbackReentry();if(commandGroup!=null||admissionBatchDepth!=0){request=null;return false;}
+            using(EnterTransport()){RejectTransferCallbackReentry();if(commandGroup!=null||admissionBatchDepth!=0){request=null;return false;}
                 return Requests.TryTransfer(candidate=>ReferenceEquals(candidate,expected)&&Admission.Contains(candidate)&&
                     Answers.TryEnqueue(new NavigationAnswer(candidate,Array.Empty<NavPoint>(),NavSolveStatus.CapacityExceeded)),out request);}
         }
@@ -455,7 +509,8 @@ namespace Spacewars.Runtime
         public bool TryCompleteRegisteredRoute(NavigationAnswer answer)
         {
             if(answer==null)throw new ArgumentNullException(nameof(answer));
-            lock(transportGate){RejectTransferCallbackReentry();
+            using(EnterTransport()){RejectTransferCallbackReentry();
+                if(hostAllocationThread!=0)return false;
                 int index=registeredRoutes.FindIndex(r=>ReferenceEquals(r,answer.Request));
                 if(index<0)return false;
                 if(answer.Status==NavSolveStatus.Ready&&answer.Request.CertifiedProviderBinding!=null&&answer.Corridor==null||
@@ -468,7 +523,7 @@ namespace Spacewars.Runtime
                 registeredRoutes.RemoveAt(index);return true;
             }
         }
-        public int RegisteredRouteCount { get { lock(transportGate)return registeredRoutes.Count; } }
+        public int RegisteredRouteCount { get { using(EnterTransport())return registeredRoutes.Count; } }
         private readonly AuthoritySlotMap<int,NavigationRequest> pending=new AuthoritySlotMap<int,NavigationRequest>();
         private readonly AuthoritySlotMap<int,long> orders=new AuthoritySlotMap<int,long>();
         private readonly AuthoritySlotMap<int,NavPoint> reservations=new AuthoritySlotMap<int,NavPoint>();
@@ -482,7 +537,7 @@ namespace Spacewars.Runtime
         private readonly List<NavigationAnswer> barrierAnswers=new List<NavigationAnswer>();
         public NavigationRequest Probe(int producer,long order,NavigationProfile typed,NavPoint start,NavPoint goal)
         {
-            lock(transportGate)return ProbeLocked(producer,order,typed,start,goal);
+            using(EnterTransport())return ProbeLocked(producer,order,typed,start,goal);
         }
         private NavigationRequest ProbeLocked(int producer,long order,NavigationProfile typed,NavPoint start,NavPoint goal)
         {
@@ -490,9 +545,9 @@ namespace Spacewars.Runtime
             if(Requests.Count+RegisteredRouteCount>=RouteRequestCapacity||!Requests.TryEnqueue(request))return null;
             probes[-producer]=request;PublishAdmission();return request;
         }
-        public void CancelProbe(int producer){lock(transportGate){probes.Remove(-producer);PublishAdmission();}}
+        public void CancelProbe(int producer){using(EnterTransport()){probes.Remove(-producer);PublishAdmission();}}
         public bool TryProbeAnswer(out NavigationAnswer answer)
-        {lock(transportGate){if(probeAnswers.Count==0){answer=null;return false;}
+        {using(EnterTransport()){if(probeAnswers.Count==0){answer=null;return false;}
             answer=probeAnswers.Dequeue();ReleaseCorridorAnswer(answer);return true;}}
         private long requestSequence;
         private readonly IPlayableTerrain terrain;
@@ -542,7 +597,7 @@ namespace Spacewars.Runtime
                 (answer.Status==NavSolveStatus.Ready)==(answer.Route.Length>0);
         public NavigationSessionState CaptureState()
         {
-            lock(transportGate){RejectTransferCallbackReentry();
+            using(EnterTransport()){RejectTransferCallbackReentry();
                 if(commandGroup!=null||admissionBatchDepth!=0)throw new InvalidOperationException("Cannot capture an open navigation admission batch.");
                 return CaptureStateLocked();}
         }
@@ -758,10 +813,10 @@ namespace Spacewars.Runtime
             var groupMember=Member(id);if(groupMember!=null){groupMember.Goal=goal;groupMember.GoalLocation=goalLocation;groupMember.HasGoal=true;}
             ClearFailure(id);pending[id]=request;movementIdentities[id]=request.HeldIdentity;reservations[id]=goal;PublishAdmission();RouteRequested?.Invoke(request);return true;
         }
-        public void Stop(int id,bool hold){lock(transportGate){ClearFailure(id);MovementCancelled?.Invoke(id);long order;orders.TryGetValue(id,out order);orders[id]=order+1;pending.Remove(id);reservations.Remove(id);retainedGoals.Remove(id);movementIdentities.Remove(id);SetInstalledExecution(id,null);Crowd.Stop(id,hold);PublishAdmission();}}
+        public void Stop(int id,bool hold){using(EnterTransport()){ClearFailure(id);MovementCancelled?.Invoke(id);long order;orders.TryGetValue(id,out order);orders[id]=order+1;pending.Remove(id);reservations.Remove(id);retainedGoals.Remove(id);movementIdentities.Remove(id);SetInstalledExecution(id,null);Crowd.Stop(id,hold);PublishAdmission();}}
         public bool Remove(int id)
         {
-            lock(transportGate)return RemoveLocked(id);
+            using(EnterTransport())return RemoveLocked(id);
         }
         private bool RemoveLocked(int id)
         {
@@ -805,23 +860,29 @@ namespace Spacewars.Runtime
             PublishAdmission();
         }
         // Authority only. Reissue held-geometry changes before freezing this tick's jobs.
-        internal void PrepareDeliveryBarrier(){lock(transportGate){RefreshHeldMovement();PublishAdmission();}}
+        internal void PrepareDeliveryBarrier(){using(EnterTransport()){RefreshHeldMovement();PublishAdmission();}}
         internal bool DeliveryBarrierReady
         {
             get
             {
+                // An allocation reservation is not a solver lock: retry the frozen barrier.
+                using(EnterTransport())if(hostAllocationThread!=0&&pending.Count!=0)return false;
                 // Drain the bounded transport while waiting, so superseded jobs or
                 // a large owner roster cannot fill the answer mailbox and deadlock.
+                bool drained=false;
                 while(Answers.TryDequeue(out var answer))
                 {
+                    drained=true;
                     var r=answer.Request;var active=r.Entity<0?probes:pending;
                     if(active.TryGetValue(r.Entity,out var expected)&&ReferenceEquals(expected,r)&&!barrierAnswers.Exists(a=>ReferenceEquals(a.Request,r)))barrierAnswers.Add(answer);
                     else RejectedResults++;
                 }
+                if(drained)SignalHost();
                 var delivered=new HashSet<NavigationRequest>();
                 foreach(var answer in barrierAnswers)delivered.Add(answer.Request);
                 foreach(var request in pending.Values)if(!delivered.Contains(request))return false;
-                foreach(var request in probes.Values)if(!delivered.Contains(request))return false;
+                // Producer proofs remain asynchronous: combat/production must not
+                // wait for them. Answers still drain and qualify in ApplyResults.
                 return true;
             }
         }
@@ -839,11 +900,14 @@ namespace Spacewars.Runtime
         }
         private void ApplyResultsLocked()
         {
+            if(hostAllocationThread!=0)return;
             RefreshHeldMovement();
             var corridorProviders=new Dictionary<Tuple<NavGeometry,string>,ILayeredNavigationProvider>();
             barrierAnswers.Sort((a,b)=>a.Request.Request.CompareTo(b.Request.Request));
             var ready=new Queue<NavigationAnswer>(barrierAnswers);barrierAnswers.Clear();
-            while(Answers.TryDequeue(out var incoming))ready.Enqueue(incoming);
+            bool drained=false;
+            while(Answers.TryDequeue(out var incoming)){ready.Enqueue(incoming);drained=true;}
+            if(drained)SignalHost();
             while(ready.Count>0){
                 var answer=ready.Dequeue();
                 var r=answer.Request;NavigationRequest expected;

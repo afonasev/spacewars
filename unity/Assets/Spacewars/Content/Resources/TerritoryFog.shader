@@ -13,6 +13,9 @@ Shader "Spacewars/TerritoryFog"
         _FoundryCenterValue("Foundry central concrete value",Float)=.28
         _FoundryVariation("Foundry texture variation",Vector)=(.8,13,0,0)
         _FoundryGrain("Foundry deposit grain contrasts",Vector)=(13,.3,.18,.12)
+        _FoundryLavaFinish("Lava depth glow crust scale flow",Vector)=(3.5,1.2,1.5,.18)
+        _FoundryLavaRim("Molten level rim level enabled",Vector)=(0,0,0,0)
+        _FoundryLavaTint("Molten tint",Color)=(1,.25,.035,1)
         _FoundryLavaHeat("Molten center and cooled rim",2D)="black" {}
         _RoadMask("Dirt road mask",2D)="black" {}
         _GroundTint("Ground tint",Color)=(.45,.46,.39,1)
@@ -25,6 +28,19 @@ Shader "Spacewars/TerritoryFog"
         _RockTex("Rock albedo",2D)="gray" {}
         _ConcreteTex("Concrete albedo",2D)="gray" {}
         _SteelTex("Steel albedo",2D)="gray" {}
+        _TextureVariants("Variant region scale transition concrete contrast",Vector)=(18,.08,2,0)
+        _EarthTexB("Earth sibling B",2D)="gray" {}
+        _EarthTexC("Earth sibling C",2D)="gray" {}
+        _EarthVariantGain("Earth calibrated gain and mean",Vector)=(1,1,1,.2)
+        _RockTexB("Rock sibling B",2D)="gray" {}
+        _RockTexC("Rock sibling C",2D)="gray" {}
+        _RockVariantGain("Rock calibrated gain and mean",Vector)=(1,1,1,.2)
+        _ConcreteTexB("Concrete sibling B",2D)="gray" {}
+        _ConcreteTexC("Concrete sibling C",2D)="gray" {}
+        _ConcreteVariantGain("Concrete calibrated gain and mean",Vector)=(1,1,1,.2)
+        _SteelTexB("Steel sibling B",2D)="gray" {}
+        _SteelTexC("Steel sibling C",2D)="gray" {}
+        _SteelVariantGain("Steel calibrated gain and mean",Vector)=(1,1,1,.2)
         _RockMask("Rock footprint distance",2D)="white" {}
         _Geology("Geology scale coverage strata contrast",Vector)=(52,.52,.85,.32)
         _BasaltTint("Basalt",Color)=(.23,.25,.27,1)
@@ -32,6 +48,7 @@ Shader "Spacewars/TerritoryFog"
         _NaturalBlend("Natural width variation patch ground height",Vector)=(2.4,.45,2.5,0)
         _ShoreMask("Shore distance",2D)="white" {}
         _ArtTiles("Art tile meters",Vector)=(7,6,5,4)
+        _ArtReliefLimit("Maximum micro-relief slope",Float)=.35
         _ArtDetail("Texture relief moss wet width",Vector)=(0,0,0,1)
         _WaterDeep("Deep water",Color)=(.09,.34,.32,1)
         _WaterShallow("Shallow water",Color)=(.34,.63,.6,1)
@@ -64,12 +81,28 @@ Shader "Spacewars/TerritoryFog"
             TEXTURE2D(_RockMask); SAMPLER(sampler_RockMask);
             TEXTURE2D(_ShoreMask); SAMPLER(sampler_ShoreMask);
             TEXTURE2D(_WeatheringMask); SAMPLER(sampler_WeatheringMask);
+            TEXTURE2D(_EarthTexB);
+            TEXTURE2D(_EarthTexC);
+            TEXTURE2D(_RockTexB);
+            TEXTURE2D(_RockTexC);
+            TEXTURE2D(_ConcreteTexB);
+            TEXTURE2D(_ConcreteTexC);
+            TEXTURE2D(_SteelTexB);
+            TEXTURE2D(_SteelTexC);
             CBUFFER_START(UnityPerMaterial)
+                float4 _TextureVariants;
+                float4 _EarthVariantGain;
+                float4 _RockVariantGain;
+                float4 _ConcreteVariantGain;
+                float4 _SteelVariantGain;
                 half4 _BaseColor;
                 half4 _FogColor;
                 float4 _FogBounds;
                 float _SurfaceRole;
+                float _ArtReliefLimit;
                 float4 _FoundryGrain;
+                float4 _FoundryLavaFinish,_FoundryLavaRim;
+                half4 _FoundryLavaTint;
                 float4 _FoundryVariation;
                 float4 _FoundryPadBounds, _FoundryPadFinish;
                 half4 _FoundrySandTint;
@@ -105,16 +138,42 @@ Shader "Spacewars/TerritoryFog"
                 float edge=min(d.x,d.y),aa=max(fwidth(edge),.0001);
                 return 1-smoothstep(width-aa,width+aa,edge);
             }
-            // Fixed world-space projections have identical samples on both sides of a
-            // hard mesh edge. Normal-selected projections would switch at prism corners.
-            #define NATURAL_SAMPLE(tex,smp,p,tile) (SAMPLE_TEXTURE2D(tex,smp,(p).xz/(tile)).rgb*.5 + SAMPLE_TEXTURE2D(tex,smp,(p).zy/(tile)).rgb*.25 + SAMPLE_TEXTURE2D(tex,smp,(p).xy/(tile)).rgb*.25)
-            // Oblique basis keeps every projection two-dimensional on axis-aligned
-            // terrain. Direct XYZ averaging would collapse two samples into stripes.
+            // One fixed detail projection remains continuous across hard mesh edges.
+            // Siblings share a sampler/import contract. Region selection is continuous;
+            // no square-cell ID, UV rotation or discontinuous derivative is introduced.
+            float3 variantWeights(float2 world)
+            {
+                float2 p=world/_TextureVariants.x;
+                p+=float2(noise(p*.73+19),noise(p*.81+43))-.5;
+                float3 scores=float3(noise(p+float2(7,31)),noise(p+float2(53,11)),noise(p+float2(29,71)));
+                float largest=max(scores.x,max(scores.y,scores.z));
+                float3 weights=smoothstep(largest-_TextureVariants.y,largest,scores);
+                return weights/max(dot(weights,1),.0001);
+            }
+            #define VARIANT_SAMPLE(role,smp,coord,world) (SAMPLE_TEXTURE2D(_##role##Tex,smp,coord).rgb*_##role##VariantGain.x*variantWeights(world).x + SAMPLE_TEXTURE2D(_##role##TexB,smp,coord).rgb*_##role##VariantGain.y*variantWeights(world).y + SAMPLE_TEXTURE2D(_##role##TexC,smp,coord).rgb*_##role##VariantGain.z*variantWeights(world).z)
+            #define NATURAL_SAMPLE(role,smp,p,tile) VARIANT_SAMPLE(role,smp,(p).xz/(tile),(p).xz)
+            // Oblique XZ basis retains two-dimensional detail on axis-aligned terrain.
             float3 naturalPosition(float3 p) { return float3(dot(p,float3(0.64863783,-0.57400305,0.49978942)),dot(p,float3(0.68211449,0.72972141,-0.04718577)),dot(p,float3(-0.33762227,0.37152008,0.86486070))); }
+            // Detail projection has equal coverage on the three principal face axes.
+            // The historical noise basis is retained for palette/geology stability;
+            // its near-zero Z coverage must not stretch photographed cliff detail.
+            float3 detailPosition(float3 p)
+            {
+                return float3(dot(p,float3(.70710678,0,-.70710678)),dot(p,float3(.57735027,.57735027,.57735027)),dot(p,float3(.40824829,-.81649658,.40824829)));
+            }
             float naturalNoise(float3 p,float scale)
             {
                 p=naturalPosition(p);
                 return noise(p.xz/scale)*.5+noise(p.zy/scale)*.25+noise(p.xy/scale)*.25;
+            }
+            float3 reliefNormal(float3 normal,float3 gradient)
+            {
+                // Screen derivatives can spike at quad/noise boundaries. Micro relief
+                // must stay finite and bounded; it never changes the underlying surface.
+                float3 slope=clamp(gradient*_ArtDetail.y*.1,-_ArtReliefLimit,_ArtReliefLimit);
+                if(any(slope!=slope))return normal;
+                slope*=min(1,_ArtReliefLimit/max(length(slope),.0001));
+                return normalize(normal-slope);
             }
             half4 frag(Varyings input):SV_Target
             {
@@ -122,7 +181,10 @@ Shader "Spacewars/TerritoryFog"
                 half fog=SAMPLE_TEXTURE2D(_FogMask,sampler_FogMask,uv).r;
                 float3 normal=normalize(input.normalWS);
                 half3 surface=_BaseColor.rgb;
+                // Open AI test field: exactly one albedo, without procedural dressing.
+                if(_SurfaceRole<-.5)surface*=SAMPLE_TEXTURE2D(_EarthTex,sampler_EarthTex,input.positionWS.xz/8).rgb;
                 float highlight=0;
+                half3 emission=0;
                 float3 eye=GetWorldSpaceNormalizeViewDir(input.positionWS);
                 float shore=SAMPLE_TEXTURE2D(_ShoreMask,sampler_ShoreMask,uv).r*_ShoreSettings.z;
                 // Fixed role IDs match ThreeCrossingsWorld; thresholds and projection axes are not art parameters.
@@ -146,8 +208,8 @@ Shader "Spacewars/TerritoryFog"
                         road=smoothstep(0,1,saturate(road+variation*_NaturalBlend.y*road*(1-road)*2));
                         road*=1-smoothstep(0,width,abs(height));
                         half3 soil=lerp(_GroundTint.rgb*(1+broad*_SurfaceNoise.y*2),_RoadTint.rgb*(1+broad*_SurfaceNoise.y),road);
-                        float3 texturePosition=naturalPosition(p);
-                        half3 earth=NATURAL_SAMPLE(_EarthTex,sampler_EarthTex,texturePosition,_ArtTiles.x);
+                        float3 texturePosition=detailPosition(p);
+                        half3 earth=NATURAL_SAMPLE(Earth,sampler_EarthTex,texturePosition,_ArtTiles.x);
                         // One continuous geological field, shared by soil and cliffs. No corner masks.
                         float exposure=naturalNoise(p,_Geology.x)*.65+naturalNoise(p+float3(19,0,7),_Geology.x*.37)*.35;
                         float oxidation=smoothstep(.40,.60,exposure+(_Geology.y-.5)*.7);
@@ -155,7 +217,7 @@ Shader "Spacewars/TerritoryFog"
                         soil=lerp(geology*1.2,_RoadTint.rgb,road)*(1+broad*_SurfaceNoise.y);
                         earth=dot(earth,half3(.2126,.7152,.0722)).xxx;
                         soil*=(1+grain*_SurfaceNoise.w)*lerp(1,clamp(earth/.18,.35,2),_ArtDetail.x*(1-road*.65));
-                        half3 rock=NATURAL_SAMPLE(_RockTex,sampler_RockTex,texturePosition,_ArtTiles.y);
+                        half3 rock=NATURAL_SAMPLE(Rock,sampler_RockTex,texturePosition,_ArtTiles.y);
                         float rockDetail=dot(rock,half3(.2126,.7152,.0722));
                         rock=geology*lerp(1,clamp(rockDetail/.18,.45,1.65),_ArtDetail.x)*_SurfaceExtras.y;
                         float strata=sin((p.y+naturalNoise(p,5)*1.4+p.x*.055+p.z*.025)/_Geology.z*6.283);
@@ -176,7 +238,7 @@ Shader "Spacewars/TerritoryFog"
                     {
                         float joint=joints(plane,_Concrete.yy,_Concrete.z);
                         surface=_Concrete.xxx*(1+broad*_SurfaceNoise.w+grain*_SurfaceNoise.w)*(1-joint*_Concrete.w);
-                        half3 concrete=SAMPLE_TEXTURE2D(_ConcreteTex,sampler_ConcreteTex,plane/_ArtTiles.z).rgb;
+                        half3 concrete=VARIANT_SAMPLE(Concrete,sampler_ConcreteTex,plane/_ArtTiles.z,input.positionWS.xz);
                         surface*=lerp(1,clamp(concrete/.35,.5,1.5),_ArtDetail.x);
                         // Flush service plates and paired rails are surface markings, never obstacles.
                         float2 bay=abs(frac(plane/12+.5)-.5)*12;
@@ -190,7 +252,7 @@ Shader "Spacewars/TerritoryFog"
                         float seam=joints(plane,_Metal.yz,_Concrete.z);
                         float brush=noise(plane/float2(_SurfaceNoise.z,_Metal.y))-.5;
                         surface=_Metal.xxx*(1+brush*_SurfaceExtras.x)*(1-seam*_Metal.w);
-                        half3 steel=SAMPLE_TEXTURE2D(_SteelTex,sampler_SteelTex,plane/_ArtTiles.w).rgb;
+                        half3 steel=VARIANT_SAMPLE(Steel,sampler_SteelTex,plane/_ArtTiles.w,input.positionWS.xz);
                         surface*=lerp(1,clamp(steel/.2,.35,1.8),_ArtDetail.x);
                         // Fine tread ridges and paired fasteners repeat inside the existing panel layout.
                         float2 panel=frac(plane/_Metal.yz+.5);
@@ -245,7 +307,7 @@ Shader "Spacewars/TerritoryFog"
                         float3 r1=cross(dy,normal),r2=cross(normal,dx);
                         float determinant=dot(dx,r1);
                         float3 gradient=(r1*ddx(rough)+r2*ddy(rough))*sign(determinant)/max(abs(determinant),.00001);
-                        normal=normalize(normal-gradient*_ArtDetail.y*.1);
+                        normal=reliefNormal(normal,gradient);
                     }
                 }
                 // Fixed content role contract: 6 ash, 7 gravel, 8 concrete, 9 slag, 10 basalt, 11 lava.
@@ -254,15 +316,17 @@ Shader "Spacewars/TerritoryFog"
                     float3 p=input.positionWS;
                     float broad=noise(p.xz/_FoundryGrain.x)-.5;
                     float grain=noise((p.xz+p.y)/_FoundryGrain.y)-.5;
-                    float3 projected=naturalPosition(p);
-                    // Two oblique bases and different scales break repetitive tiled
-                    // features; broad deposits vary the blend continuously in world space.
-                    float3 alternate=naturalPosition(float3(p.z,p.x,-p.y))*1.37+float3(19,7,31);
-                    float variation=smoothstep(.2,.8,naturalNoise(p,_FoundryVariation.y));
-                    float3 earth=NATURAL_SAMPLE(_EarthTex,sampler_EarthTex,projected,_ArtTiles.x);
-                    float3 rockTexture=NATURAL_SAMPLE(_RockTex,sampler_RockTex,projected,_ArtTiles.y);
-                    earth=lerp(earth,NATURAL_SAMPLE(_EarthTex,sampler_EarthTex,alternate,_ArtTiles.x*.63),variation*_FoundryVariation.x);
-                    rockTexture=lerp(rockTexture,NATURAL_SAMPLE(_RockTex,sampler_RockTex,alternate,_ArtTiles.y*.73),variation*_FoundryVariation.x);
+                    float3 projected=detailPosition(p);
+                    float3 earth=NATURAL_SAMPLE(Earth,sampler_EarthTex,projected,_ArtTiles.x);
+                    float3 rockTexture=NATURAL_SAMPLE(Rock,sampler_RockTex,projected,_ArtTiles.y);
+                    if(_SurfaceRole>=9.5&&_SurfaceRole<10.5)
+                    {
+                        // A single oblique plane becomes singular on some inclined
+                        // basalt feet. Upward faces use world XZ; vertical walls keep
+                        // the balanced projection, blending only the slope transition.
+                        float cap=smoothstep(.35,.65,normal.y);
+                        if(cap>0)rockTexture=lerp(rockTexture,NATURAL_SAMPLE(Rock,sampler_RockTex,p,_ArtTiles.y),cap);
+                    }
                     float2 plane=abs(normal.y)>.5?p.xz:abs(normal.x)>abs(normal.z)?p.zy:p.xy;
                     surface=_BaseColor.rgb*(1+broad*_FoundryGrain.z+grain*_FoundryGrain.w);
                     float detail=dot(earth,float3(.299,.587,.114));
@@ -284,11 +348,11 @@ Shader "Spacewars/TerritoryFog"
                     else if(_SurfaceRole<8.5)
                     {
                         // Concrete finish uses luminance rather than the inherited warm
-                        // tile color, and no regular tiled joint grid. Oblique projections
-                        // keep broad wear from repeating mechanically across the pad.
-                        float3 concrete=NATURAL_SAMPLE(_ConcreteTex,sampler_ConcreteTex,projected,_ArtTiles.z);
+                        // tile color, and no regular tiled joint grid. Sibling regions
+                        // keep broad wear irregular while retaining fine fractures.
+                        float3 concrete=NATURAL_SAMPLE(Concrete,sampler_ConcreteTex,projected,_ArtTiles.z);
                         float wear=dot(concrete,float3(.299,.587,.114));
-                        surface=_BaseColor.rgb*lerp(1,.82+wear*.45,_ArtDetail.x);
+                        surface=_BaseColor.rgb*lerp(1,clamp(.82+wear*.45+(wear-_ConcreteVariantGain.w)*_TextureVariants.z,.35,2),_ArtDetail.x);
                         float2 local=abs(p.xz-_FoundryPadBounds.xy);
                         // Exact inward distance for the fixed six-sided circumscribed
                         // polygon (diagonal slope 1/2), or the unchanged square sites.
@@ -320,15 +384,24 @@ Shader "Spacewars/TerritoryFog"
                         surface*=1-_Geology.w*smoothstep(.65,.95,strata)*(1-saturate(normal.y)*.65);
                         surface*=lerp(1,.3+rockTexture*2.0,_ArtDetail.x);
                         detail=dot(rockTexture,float3(.299,.587,.114));
+                        float warmth=SAMPLE_TEXTURE2D(_FoundryLavaHeat,sampler_FoundryLavaHeat,uv).g*_FoundryLavaRim.z*(1-smoothstep(_FoundryLavaRim.x,max(_FoundryLavaRim.y,_FoundryLavaRim.x+.001),p.y));
+                        emission=_FoundryLavaTint.rgb*warmth*_FoundryLavaFinish.y*.12;
+
                     }
                     else if(_SurfaceRole<11.5)
                     {
                         float heat=SAMPLE_TEXTURE2D(_FoundryLavaHeat,sampler_FoundryLavaHeat,uv).r;
-                        surface=lerp(_BasaltTint.rgb,lerp(_BaseColor.rgb*.28,_BaseColor.rgb*1.6,smoothstep(.25,.75,noise(p.xz/3))),heat);
+                        float2 flow=p.xz+float2(0,_Time.y*_FoundryLavaFinish.w);
+                        float2 q=flow/_FoundryLavaFinish.z;
+                        float crust=smoothstep(.48,.67,noise(q+noise(q*.37)*2)*.7+noise(q*2.7)*.3);
+                        float molten=heat*(1-crust*.92);
+                        surface=_BasaltTint.rgb*(.4+noise(q*3)*.2)*(1-molten);
+                        emission=_FoundryLavaTint.rgb*molten*_FoundryLavaFinish.y*(.65+heat*.65);
+
                     }
                     else
                     {
-                        float3 steel=SAMPLE_TEXTURE2D(_SteelTex,sampler_SteelTex,plane/_ArtTiles.w).rgb;
+                        float3 steel=VARIANT_SAMPLE(Steel,sampler_SteelTex,plane/_ArtTiles.w,input.positionWS.xz);
                         surface*=lerp(1,.65+steel*.65,_ArtDetail.x*.5);
                         detail=dot(steel,float3(.299,.587,.114));
                     }
@@ -337,12 +410,12 @@ Shader "Spacewars/TerritoryFog"
                         float3 dx=ddx(p),dy=ddy(p),r1=cross(dy,normal),r2=cross(normal,dx);
                         float determinant=dot(dx,r1);
                         float3 gradient=(r1*ddx(detail)+r2*ddy(detail))*sign(determinant)/max(abs(determinant),.00001);
-                        normal=normalize(normal-gradient*_ArtDetail.y*.1);
+                        normal=reliefNormal(normal,gradient);
                     }
                     highlight=0;
                 }
                 Light light=GetMainLight();
-                half3 lit=surface*(SampleSH(normal)+light.color*saturate(dot(normal,light.direction)))+highlight*light.color;
+                half3 lit=surface*(SampleSH(normal)+light.color*saturate(dot(normal,light.direction)))+highlight*light.color+emission;
                 // Neutral optical coefficients, not gameplay or designer-tunable values.
                 half grey=dot(lit,half3(.2126,.7152,.0722));
                 lit=lerp(lit,grey.xxx,fog);

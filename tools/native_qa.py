@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
-from check_qa import validate_results
+from check_qa import plan, validate_results
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -17,7 +17,20 @@ def main():
     parser.add_argument('--suite', choices=['editmode', 'playmode', 'build', 'all', 'player'], required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--fixture', action='append', default=[],
+                        help='Exact affected fixture, repeatable; editmode/playmode only')
+    parser.add_argument('--confirm-full-run', action='store_true',
+                        help='Record prior explicit human approval; never infer from build/deploy authorization')
     args = parser.parse_args()
+    if args.fixture:
+        if args.suite not in ('editmode', 'playmode'):
+            parser.error('--fixture requires editmode or playmode')
+        try:
+            plan('focused', 'EditMode' if args.suite == 'editmode' else 'PlayMode', args.fixture)
+        except ValueError as error:
+            parser.error(str(error))
+    if args.suite != 'build' and not args.fixture and not args.dry_run and not args.confirm_full_run:
+        parser.error('Unfiltered tests require prior explicit human approval and --confirm-full-run')
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     steps = (['editmode', 'playmode'] if args.suite == 'all' else
@@ -26,7 +39,8 @@ def main():
     diff = subprocess.check_output(['git', 'diff', 'HEAD', '--', 'unity', 'tools/native_qa.py'], cwd=ROOT)
     (output / 'tracked.diff').write_bytes(diff)
     manifest = {'commit': revision, 'tracked_diff_sha256': hashlib.sha256(diff).hexdigest(),
-                'scope': 'current native runtime; retired comparisons and web suites excluded', 'steps': []}
+                'scope': 'current native runtime; retired comparisons and web suites excluded',
+                'full_run_confirmed': args.confirm_full_run, 'fixtures': args.fixture, 'steps': []}
     failed = False
     for step in steps:
         command = [str(ROOT / 'tools/unity.sh'), 'shared', '-batchmode']
@@ -35,6 +49,8 @@ def main():
         else:
             command += ['-runTests', '-testPlatform', 'EditMode' if step == 'editmode' else 'PlayMode',
                         '-testResults', str(output / (step + '.xml'))]
+        if step != 'build' and args.fixture:
+            command += ['-testFilter', ';'.join(args.fixture)]
         command += ['-logFile', str(output / (step + '.log'))]
         row = {'step': step, 'command': command, 'exit_code': None}
         manifest['steps'].append(row)
@@ -49,7 +65,7 @@ def main():
                 result = ET.parse(xml_path).getroot()
                 row['tests'] = {k: result.get(k) for k in ['result', 'total', 'passed', 'failed', 'skipped']}
                 try:
-                    row['executed'] = validate_results(xml_path)
+                    row['executed'] = validate_results(xml_path, args.fixture)
                     row['passed'] = row['exit_code'] == 0
                 except ValueError as error:
                     row['validation_error'] = str(error)

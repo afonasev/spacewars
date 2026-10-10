@@ -29,6 +29,9 @@
     "tankUpgraded-detail.png": "0fa92d308433ad91174b07f776c82be0044386d7bd31ec579fdfed47bb104b98",
     "explorerUpgraded.glb": "25cd9ed2f34de82dc3307e0e1e45cca93de3644154e7624a2eafef23856e353d",
     "explorerUpgraded-detail.png": "9fd232c0e9bf3e793659da68ce99df64558a5cb2e7591bc4ce2a615445421de7",
-    "shkval-guidance-3.glb": "cf46391287febaf3fc845e91413a457edb2bb9b769478f5a397a7c667d7dd1a1"
-  }
+    "shkval-guidance-3.glb": "cf46391287febaf3fc845e91413a457edb2bb9b769478f5a397a7c667d7dd1a1",
+    "rallyFlag.glb": "79e3f04926999fd77243369466fef0a77b0e9dedd62e81620e2bdb09013aab48",
+    "rallyFlag-detail.png": "b9c428e20865da221f588826d98f76f1e167c8aa76eb55e9d2cf49b7b19d0953"
+  },
+  "rally_source_revision": "d4bde5ef"
 }

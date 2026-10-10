@@ -70,26 +70,35 @@ namespace Spacewars.Runtime
         {
             lock(gate){if(stopping!=0||stopped!=0)throw new InvalidOperationException("Runtime stopped.");
                 if(captureRequest!=null)throw new InvalidOperationException("Capture already pending.");
-                captureRequest=new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);Signal();return captureRequest.Task;}
+                captureRequest=new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);PresentationChanged();Signal();return captureRequest.Task;}
         }
+        internal Action BeforeCaptureSerialization;
         private void CompleteCapture()
         {
-            lock(gate)
-            {
+            TaskCompletionSource<byte[]> request;
+            bool capturedPause;long accepted,ordinal;int capturedOutstanding;
+            PlayableCommandReceipt[] queued,history;OfflineReceipt[] offline;
+            Dictionary<string,long> watermarks;
+            lock(gate){
                 if(captureRequest==null)return;
-                var request=captureRequest;captureRequest=null;
-                try
-                {
-                    if(inbox.Count!=0||humanActions.Count!=0||finishRequested!=0||requestedBalance!=null||requestedAiProfile!=null)throw new InvalidOperationException("Capture requires an empty command/profile ingress barrier.");
-                    var state=PlayableWorldState.Decode(authorityTick.CaptureBytes(snapshotSequence,LastHumanSequenceFor));
-                    state.RuntimeTransport=Pack(w=>{
-                        w.Write(1);w.Write(paused!=0);w.Write(lastAcceptedSequence);w.Write(outstanding);w.Write(receiptOrdinal);
-                        WorldWire.Array(w,receipts.ToArray(),x=>WorldWire.Write(w,x));WorldWire.Array(w,receiptHistory.ToArray(),x=>WorldWire.Write(w,x));
-                        WorldWire.Array(w,offlineReceipts.ToArray(),x=>{w.Write(x.Ordinal);WorldWire.Write(w,x.Receipt);});
-                    });request.SetResult(state.Encode());
-                }
-                catch(Exception e){request.SetException(e);}
+                request=captureRequest;captureRequest=null;
+                if(inbox.Count!=0||humanActions.Count!=0||finishRequested!=0||requestedBalance!=null||requestedAiProfile!=null){
+                    request.SetException(new InvalidOperationException("Capture requires an empty command/profile ingress barrier."));return;}
+                capturedPause=paused!=0;accepted=lastAcceptedSequence;capturedOutstanding=outstanding;ordinal=receiptOrdinal;
+                queued=receipts.ToArray();history=receiptHistory.ToArray();offline=offlineReceipts.ToArray();
+                watermarks=offlineConfiguration==null?new Dictionary<string,long>{{PlayableDomain.PlayerId,lastAcceptedSequence}}:new Dictionary<string,long>(acceptedByOwner);
             }
+            // The single authority is stationary during serialization. Later ingress
+            // belongs after this checkpoint; do not read its live watermarks or ledger.
+            try{
+                BeforeCaptureSerialization?.Invoke();
+                var state=PlayableWorldState.Decode(authorityTick.CaptureBytes(snapshotSequence,id=>watermarks.TryGetValue(id,out var value)?value:0));
+                state.RuntimeTransport=Pack(w=>{
+                    w.Write(1);w.Write(capturedPause);w.Write(accepted);w.Write(capturedOutstanding);w.Write(ordinal);
+                    WorldWire.Array(w,queued,x=>WorldWire.Write(w,x));WorldWire.Array(w,history,x=>WorldWire.Write(w,x));
+                    WorldWire.Array(w,offline,x=>{w.Write(x.Ordinal);WorldWire.Write(w,x.Receipt);});
+                });request.SetResult(state.Encode());
+            }catch(Exception ex){request.SetException(ex);}
         }
         public static PlayableRuntime RestoreBytes(byte[] bytes,PlayableProfile profile,int expectedSeed,AiProfile aiProfile=null,bool autonomousOwnerAi=true,bool autonomousEnemyAi=true,bool humanControlledPlayer=false)
         {

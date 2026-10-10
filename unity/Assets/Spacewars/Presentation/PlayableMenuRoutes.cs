@@ -12,6 +12,31 @@ namespace Spacewars.Presentation
         private Button pauseSettings,pauseMain;
         private bool returningToMain;
         private bool MenuOwnsInput=>inLobby||preparing||paused||childMenu!=null||ModalVisible()||ResultsVisible;
+        // The coordinator alone owns the OS cursor across all split-screen seats.
+        private bool MouseCursorVisible
+        {
+            get
+            {
+                var navigation=(localPauseOwner??this).menuNavigation;
+                if(navigation?.Active==true)return !navigation.UsingGamepad||navigation.CurrentGamepad?.added!=true;
+                if(inLobby||preparing||returningToLobby||matchSetup?.Spectator==true||paused||restarting||quitting)return true;
+                if(input!=null)
+                {
+                    var seats=localPresentations.Count>0?localPresentations.ToArray():new[]{this};
+                    bool mousePlayer=seats.Any(seat=>seat.SeatUsesKeyboard&&(seat.input?.AssignedMouse??Mouse.current)?.added==true&&!seat.PadControlsCursor);
+                    return !seats.Any(seat=>seat.PadControlsCursor)||mousePlayer;
+                }
+                var humans=matchSetup?.Participants?.Where(p=>p.Human).ToArray();
+                if(humans==null||humans.Length==0)return !battleController;
+                if(humans.All(p=>p.DeviceId>0))return false;
+                // A solo seat supports switching between keyboard/mouse and gamepad.
+                return humans.Length!=1||!battleController;
+            }
+        }
+        private void LateUpdate()
+        {
+            if(root!=null)SyncSystemCursor();
+        }
         private void OpenPauseHelp()
         {
             if(!paused)return;modal.style.display=DisplayStyle.None;
@@ -33,7 +58,7 @@ namespace Spacewars.Presentation
         private void TickMenuInput()
         {
             bool owned=MenuOwnsInput;var owner=localPauseOwner??this;owner.menuNavigation?.Tick();
-            if(!owned&&!MenuOwnsInput){var pressed=localPresentations.FirstOrDefault(seat=>seat.SeatPad?.startButton.wasPressedThisFrame==true);if(pressed!=null)PauseFrom(pressed,true);else if(localPresentations.Count==0&&Gamepad.current?.startButton.wasPressedThisFrame==true)Pause(true);}
+            if(!owned&&!MenuOwnsInput){var pressed=localPresentations.FirstOrDefault(seat=>seat.SeatPad?.startButton.wasPressedThisFrame==true);if(pressed!=null){PauseFrom(pressed,true);pressed.menuNavigation?.UseGamepad();}else if(localPresentations.Count==0&&Gamepad.current?.startButton.wasPressedThisFrame==true){Pause(true);menuNavigation?.UseGamepad();}}
         }
         private NativeBalanceStore balanceStore;
         private void EnsureBalanceStore(){if(balanceStore!=null)return;string path=null;

@@ -60,6 +60,8 @@ namespace Spacewars.Simulation.Ai
             new AiProfileField("scouting.revisitSeconds","ИИ / Разведка","Интервал повторной разведки","Срок перепроверки важных известных площадок.","s",10d,180d,5d,45d,false),
             new AiProfileField("scouting.contactHalfLifeSeconds","ИИ / Разведка","Старение разведданных","Период снижения уверенности устаревшего контакта вдвое.","s",10d,300d,5d,60d,false),
             new AiProfileField("scouting.blindRushBudgetScale","ИИ / Разведка","Разведка при слепом раше","Доля обычного scouting budget при blind rush.","ratio",0d,1d,0.05d,0.25d,false),
+            new AiProfileField("opening.forceUnits","ИИ / Дебюты","Начальная боевая группа","Минимум готовых Tank для военного milestone; ArmyRegistry дополнительно проверяет жизнеспособность.","units",1d,12d,1d,3d,true),
+            new AiProfileField("opening.greedyRefineries","ИИ / Дебюты","Доход жадного дебюта","Готовых Refinery до перехода к фабрике.","buildings",1d,6d,1d,2d,true),
             new AiProfileField("opening.deadlineSeconds","ИИ / Дебюты","Срок выполнения дебюта","Fallback deadline дебюта, если milestone не продвигается.","s",30d,300d,10d,120d,false),
             new AiProfileField("phase.minimumResidenceSeconds","ИИ / Фазы игры","Минимальная длительность фазы","Hysteresis early/mid/late.","s",10d,180d,5d,30d,false),
             new AiProfileField("phase.midIncomeStartingRatio","ИИ / Фазы игры","Доход для средней фазы","Settled income относительно стартового для раннего mid signal.","ratio",1d,6d,0.25d,2d,false),

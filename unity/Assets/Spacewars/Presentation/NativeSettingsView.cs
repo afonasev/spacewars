@@ -63,8 +63,8 @@ namespace Spacewars.Presentation
             var page=OrbitalTheme.Screen(root,"settings-screen");var card=OrbitalTheme.Card(page);
             card.AddToClassList("orbital-settings-card");
             card.Add(OrbitalTheme.Text("НАСТРОЙКИ","orbital-title"));
-            var scroll=new ScrollView(ScrollViewMode.Vertical){name="settings-scroll",horizontalScrollerVisibility=ScrollerVisibility.Hidden,verticalScrollerVisibility=ScrollerVisibility.Hidden};
-            scroll.style.flexShrink=1;scroll.style.minHeight=0;card.Add(scroll);var content=scroll.contentContainer;
+            var scroll=new ScrollView(ScrollViewMode.Vertical){name="settings-scroll",horizontalScrollerVisibility=ScrollerVisibility.Hidden,verticalScrollerVisibility=ScrollerVisibility.Auto};
+            scroll.AddToClassList("settings-scroll");scroll.style.flexShrink=1;scroll.style.minHeight=0;card.Add(scroll);var content=scroll.contentContainer;
             var modes=NativeDisplaySettings.AvailableResolutions;
             var resolution=new DropdownField("Разрешение",modes.Select(m=>m.x+" × "+m.y).ToList(),Array.IndexOf(modes,NativeDisplaySettings.Resolution)){name="settings-resolution"};
             resolution.RegisterValueChangedCallback(_=>{if(resolution.index>=0)NativeDisplaySettings.SetResolution(modes[resolution.index]);});content.Add(resolution);
@@ -82,10 +82,9 @@ namespace Spacewars.Presentation
             controls?.AddSliders(content);
             var help=OrbitalTheme.Action("Управление",()=>{page.style.display=DisplayStyle.None;NativeControlsHelp.Open(root,navigation,()=>{page.style.display=DisplayStyle.Flex;navigation.SetScope(page,()=>{page.RemoveFromHierarchy();closed();},card.Q<Button>("settings-controls"));});},"settings-controls");content.Add(help);
             content.Add(OrbitalTheme.Text("Изменения применяются и сохраняются автоматически на этом устройстве.","orbital-muted"));
-            content.Add(OrbitalTheme.Text("Геймпад: крестовина или левый стик — выбор; влево и вправо — изменить значение.","orbital-muted"));
             Action back=()=>{page.RemoveFromHierarchy();closed();};
             card.Add(OrbitalTheme.Action("Назад",back,"settings-back"));
-            var hints=OrbitalTheme.Text("","orbital-hints");card.Add(hints);navigation.SetScope(page,back,resolution,hints);return page;
+            navigation.SetScope(page,back,resolution);return page;
         }
     }
 }

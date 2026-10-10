@@ -11,6 +11,7 @@ namespace Spacewars.Presentation
     // Revealed terrain and selectable owner perspectives are inspection tools, not gameplay fog rules.
     public sealed class FoundryGreybox : MonoBehaviour
     {
+        private readonly CertifiedRouteLane routeLane=new CertifiedRouteLane();
         private PlayableProfile profile; private FoundryMap map;private PlayableWorld world;private PlayableRuntime runtime;
         private UnityHostRouteService routes; private Camera cameraView; private int owner; private long sequence;
         private readonly HashSet<int> selection=new HashSet<int>(); private string notice="";private bool paused;
@@ -21,7 +22,7 @@ namespace Spacewars.Presentation
             RenderSettings.ambientLight=new Color(.65f,.65f,.66f);var sun=new GameObject("Foundry sun").AddComponent<Light>();sun.transform.SetParent(transform);sun.type=LightType.Directional;sun.intensity=1.4f;sun.transform.rotation=Quaternion.Euler(55,-30,0);
             world=new PlayableWorld(transform,profile);world.InspectionSites();world.InspectionReveal();
             cameraView=new GameObject("Greybox camera").AddComponent<Camera>();cameraView.transform.SetParent(transform);cameraView.orthographic=true;cameraView.orthographicSize=(float)(map.HalfExtent*.97);cameraView.nearClipPlane=.1f;cameraView.farClipPlane=600;cameraView.transform.position=new Vector3(0,300,0);cameraView.transform.rotation=Quaternion.Euler(90,0,0);cameraView.backgroundColor=new Color(.08f,.09f,.1f);
-            routes=new UnityHostRouteService();runtime=new PlayableRuntime(map.Configuration(profile,19092026),1,startPaused:true);paused=true;
+            routes=new UnityHostRouteService(routeLane);runtime=new PlayableRuntime(map.Configuration(profile,19092026),1,startPaused:true);paused=true;
         }
         private PlayableSnapshot View=>runtime?.ParticipantView("foundry-"+(owner+1));
         private void Update()
@@ -32,7 +33,7 @@ namespace Spacewars.Presentation
             {
                 for(int i=0;i<6;i++)if(keyboard[(Key)((int)Key.Digit1+i)].wasPressedThisFrame){owner=i;selection.Clear();}
                 if(keyboard.spaceKey.wasPressedThisFrame){paused=!paused;runtime.RequestPause(paused);}
-                if(keyboard.rKey.wasPressedThisFrame){runtime.RequestStop();routes.Dispose();world.Clear();routes=new UnityHostRouteService();runtime=new PlayableRuntime(map.Configuration(profile,19092026),++generation,startPaused:true);sequence=0;paused=true;selection.Clear();}
+                if(keyboard.rKey.wasPressedThisFrame){runtime.RequestStop();routes.Dispose();world.Clear();routes=new UnityHostRouteService(routeLane);runtime=new PlayableRuntime(map.Configuration(profile,19092026),++generation,startPaused:true);sequence=0;paused=true;selection.Clear();}
                 if(keyboard.fKey.wasPressedThisFrame)BuildAtCursor(mouse);
                 if(keyboard.eKey.wasPressedThisFrame)Submit(PlayableCommandKind.QueueExplorer,selection.ToArray());
                 if(keyboard.tKey.wasPressedThisFrame)Submit(PlayableCommandKind.QueueTank,selection.ToArray());

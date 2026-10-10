@@ -58,7 +58,7 @@ namespace Spacewars.Runtime
                 ()=>new PlayableRuntimeMetrics(0,0,0,0,0,domain.Navigation.PendingCount),out var snapshot))return false;
             Latest=snapshot;return true;
         }
-        internal bool TryAdvance(bool paused,long publication,Func<string,long> human,Func<PlayableRuntimeMetrics> metrics,out PlayableSnapshot snapshot)
+        internal bool TryAdvance(bool paused,long publication,Func<string,long> human,Func<PlayableRuntimeMetrics> metrics,out PlayableSnapshot snapshot,bool publishWaiting=true)
         {
             snapshot=null;domain.SetRallyPaused(paused);
             if(!paused)
@@ -70,7 +70,7 @@ namespace Spacewars.Runtime
                 {
                     // Applied commands and terminal receipts are observable while routing;
                     // publishing does not step or review the scheduler again.
-                    Latest=snapshot=domain.PlayerSnapshot(publication,RuntimeStatus.Running,false,metrics(),null,seed);
+                    if(publishWaiting)Latest=snapshot=domain.PlayerSnapshot(publication,RuntimeStatus.Running,false,metrics(),null,seed);
                     return false;
                 }
                 domain.StepWithAiRepairAccounting(1d/30d,scheduler.Owners.Select(o=>o.Budget));prepared=false;
