@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Spacewars.Simulation;
@@ -68,6 +69,50 @@ namespace Spacewars.Runtime
         private sealed class Choice {public long ArmyId;public PlayableEntitySnapshot[] Units;public PlayableEntitySnapshot Target;public double Distance;}
         private static PlayableRouteProof Route(PlayableAiObservation o,PlayableEntitySnapshot u,PlayableEntitySnapshot target)=>
             o.RouteProofs.FirstOrDefault(r=>r.UnitId==u.Id&&r.Owner==o.Owner&&r.Generation==o.Generation&&r.Tick==o.Tick&&r.Origin.Equals(u.Position)&&r.Kind==PlayableRouteTargetKind.VisibleEnemy&&r.TargetId==target.Id);
+        // O5 read-only coverage. Broad A3 threats/preemption remain unchanged.
+        // A registry Active bit or Scheduled intent is not applied physical defense.
+        public bool CoversTechnologyThreats(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiArmyRegistry registry,IEnumerable<PlayableAiTraceRecord> records)
+        {
+            Bind(o);var threats=Threats(o,p);if(threats.Length==0)return true;
+            if(!Active||pendingId!=0||registry.OwnerId!=owner||registry.Generation!=generation)return false;
+            var army=registry.Capture().Armies.SingleOrDefault(a=>a.Id==armyId&&a.OwnerId==owner&&a.TacticalOwner==Policy&&a.Role==AiArmyRole.MobileDefense&&a.Phase!=AiArmyPhase.Disbanded&&a.Objective=="defend:"+targetId);
+            var target=threats.FirstOrDefault(t=>t.Id==targetId);if(army==null||target==null)return false;
+            var members=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)).OrderBy(u=>u.Id).ToArray();
+            if(members.Length<army.MinimumViableForce||members.Any(u=>!AppliedDefenseOrder(o,u,targetId,records)||!CertifiedDefenseRoute(o,u,target,p)))return false;
+            // The defended visible target must lie in EACH threatened center's existing
+            // defense region. A distant committed army cannot waive another front.
+            foreach(var center in o.Buildings.Where(b=>b.Owner==o.Owner&&b.Health>0&&(b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost)))
+            {
+                double region=center.Kind==PlayableBuildingKind.Headquarters?p.HeadquartersVisionRange:p.OutpostVisionRange;
+                if(threats.Any(t=>Distance(t.Position,center.Position)<=region)&&Distance(target.Position,center.Position)>region)return false;
+            }
+            // Same sufficient-force comparison as ordinary A3 admission, for the union
+            // of all threatened fronts (never spend one army's force twice).
+            return Force(members,p,ai)>=Force(threats,p,ai);
+        }
+        private static bool AppliedDefenseOrder(PlayableAiObservation o,PlayableEntitySnapshot u,int target,IEnumerable<PlayableAiTraceRecord> records)
+        {
+            var order=u.CurrentOrder;var stamp=u.OrderStamp;
+            return !u.Held&&order!=null&&order.Kind==PlayableTacticalOrderKind.Attack&&order.TargetId==target&&order.Owner==o.Owner&&order.Generation==o.Generation&&order.UnitId==u.Id&&
+                stamp!=null&&stamp.Owner==o.Owner&&stamp.Generation==o.Generation&&stamp.UnitId==u.Id&&stamp.Origin==PlayableOrderOrigin.Ai&&stamp.Kind==PlayableCommandKind.Attack&&stamp.Source==PlayableAiOpeningComposition.SourceIdentity&&
+                stamp.ActionId>0&&stamp.JobId==stamp.ActionId&&stamp.Sequence==order.CommandSequence&&stamp.Tick==order.IssuedTick&&stamp.Tick<=o.Tick&&
+                (records??Array.Empty<PlayableAiTraceRecord>()).Any(r=>r.Policy==Policy&&r.Kind==PlayableCommandKind.Attack&&r.OwnerId==o.OwnerId&&r.SourceIdentity==stamp.Source&&r.ActionId==stamp.ActionId&&
+                    r.CommandSequence==stamp.Sequence&&r.ApplicationTick==stamp.Tick&&r.Status==PlayableAiDeliveryStatus.Applied&&r.RuntimeStatus==PlayableCommandStatus.Applied&&r.ReceiptIdentity?.Generation==o.Generation&&r.ReceiptIdentity.OwnerId==o.OwnerId);
+        }
+        private static bool CertifiedDefenseRoute(PlayableAiObservation o,PlayableEntitySnapshot u,PlayableEntitySnapshot target,PlayableProfile p)
+        {
+            var r=Route(o,u,target);return r!=null&&r.GeometryRevision>0&&r.Radius==PlayableUnitRules.Radius(p,u.Kind)&&r.Target.Equals(target.Position)&&r.Path.Count>0&&r.Path.Last().Equals(r.Goal);
+        }
+        // Current proof requests use the existing detached native observer/router. No
+        // cached proof, hidden query delegate, attention/army claim or new state schema.
+        public IReadOnlyList<PlayableRouteRequest> TechnologyCoverageRoutes(PlayableAiObservation o,PlayableProfile p,AiArmyRegistry registry,IEnumerable<PlayableAiTraceRecord> records)
+        {
+            Bind(o);if(!Active||pendingId!=0)return Array.Empty<PlayableRouteRequest>();
+            var target=Threats(o,p).FirstOrDefault(t=>t.Id==targetId);if(target==null)return Array.Empty<PlayableRouteRequest>();
+            var army=registry.Capture().Armies.FirstOrDefault(a=>a.Id==armyId&&a.TacticalOwner==Policy&&a.Phase!=AiArmyPhase.Disbanded);if(army==null)return Array.Empty<PlayableRouteRequest>();
+            return o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)&&AppliedDefenseOrder(o,u,targetId,records)).OrderBy(u=>u.Id)
+                .Select(u=>new PlayableRouteRequest(u.Id,PlayableRouteTargetKind.VisibleEnemy,target.Id,o.Generation,o.Tick,u.Position,PlayableUnitRules.Radius(p,u.Kind),target.Position)).ToArray();
+        }
         public PlayableAiAction Propose(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiArmyRegistry registry)
         {
             Bind(o);if(registry==null||registry.OwnerId!=owner||registry.Generation!=generation)throw new ArgumentException("Defense registry binding");if(pendingId!=0)return null;

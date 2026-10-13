@@ -486,8 +486,8 @@ namespace Spacewars.Runtime
                         id.ActivationRevision!=member.OrderRevision)||
                     member!=null&&member.GroupId!=0&&(group==null||id.RootOrderRevision!=group.RootOrderRevision||
                         id.CommandSequence!=group.CommandSequence||id.IssuedTick!=group.IssuedTick)||
-                    terrain!=null&&!(terrain is ThreeCrossingsMap)&&!(terrain is FoundryMap)||
-                    (terrain is ThreeCrossingsMap||terrain is FoundryMap)&&
+                    terrain!=null&&!(terrain is ThreeCrossingsMap)&&!(terrain is FoundryMap)&&!(terrain is BasaltCrownMap)||
+                    (terrain is ThreeCrossingsMap||terrain is FoundryMap||terrain is BasaltCrownMap)&&
                     scheduled.Provider.Binding!=new PartitionNavigationProvider(terrain,candidate.Geometry,candidate.HeldIdentity).Binding)
                     throw new InvalidOperationException("Scheduler subscription differs from admitted request.");
         }
@@ -835,12 +835,31 @@ namespace Spacewars.Runtime
             // Geometry and existing routes are unchanged. Reissue only in-flight solves
             // so a rule change neither restarts moving actors nor floods the mailbox.
             var waiting=new List<NavigationRequest>(pending.Values);
-            profile=next;Crowd.Rebind(next);foreach(var row in installedExecutions.Values)row.Detached=true;pending.Clear();probes.Clear();
+            bool compatible=SameNavigationBinding(profile,next);
+            profile=next;Crowd.Rebind(next);
+            foreach(var pair in installedExecutions){
+                var row=pair.Value;NavUnit actor=null;
+                bool preserve=compatible&&!row.Detached&&Crowd.TryGet(pair.Key,out actor)&&
+                    TryActiveInstalledExecution(pair.Key,out _)&&
+                    ReferenceEquals(row.BaseGeometry,navigationGeometry)&&
+                    row.Corridor.SurfaceProviderId==(terrain?.Id??NavLocation.FlatSurface);
+                if(preserve)preserve=SameNavigationBinding(row.Profile,
+                    next.ForUnit(actor.Radius,actor.Speed,actor.TurnSpeed));
+                if(!preserve)row.Detached=true;
+            }
+            pending.Clear();probes.Clear();
             foreach(var answer in probeAnswers)ReleaseCorridorAnswer(answer);probeAnswers.Clear();
             foreach(var answer in barrierAnswers)ReleaseCorridorAnswer(answer);barrierAnswers.Clear();
             while(Requests.TryDequeue(out _)){}while(Answers.TryDequeue(out var answer))ReleaseCorridorAnswer(answer);
             foreach(var request in waiting)if(Crowd.TryGet(request.Entity,out _)&&!Move(request.Entity,request.Goal)){RecordFailure(request,NavigationOutcome.Rejected);MovementCancelled?.Invoke(request.Entity);}
             PublishAdmission();
+        }
+        private static bool SameNavigationBinding(NavigationProfile current,NavigationProfile next)
+        {
+            if(current==null||next==null||current.ProfileId!=next.ProfileId)return false;
+            foreach(var field in NavigationProfile.Metadata)
+                if(field.Read(current)!=field.Read(next))return false;
+            return true;
         }
         public void ChangeGeometry(NavGeometry next)
         {

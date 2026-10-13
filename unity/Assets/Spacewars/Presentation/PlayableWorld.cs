@@ -12,6 +12,7 @@ namespace Spacewars.Presentation
         public sealed class Actor
         {
             public Transform Root, Hull, Turret, Turbine, Launcher;
+            public ActorMaterialProfile MaterialFinish;
             public bool RefineryUpgraded,UnitUpgraded;public Color? PresentationPaint;
             public GameObject Selection;
             public bool UnitSelection;
@@ -23,7 +24,27 @@ namespace Spacewars.Presentation
         public PlayableFogMask Fog{get;}
         public System.Func<PlayableOwner?,Color> OwnerPaint {get;set;}
         private PlayableProfile profile;
-        public void Rebind(PlayableProfile next){ClearPads();ClearRallyFlags();profile=next;foreach(var id in new List<int>(actors.Keys))Remove(id);ReleaseWorldObject(selectionMaterial);selectionMaterial=null;ReleaseWorldObject(selectionQuad);selectionQuad=null;}
+        public ActorMaterialProfile MaterialFinish {get;set;}=ActorMaterialProfile.Load();
+        public Transform GraphicsRoot=>root;
+        public void ApplyGraphics(ActorMaterialProfile finish,IndustrialLightingProfile lighting)
+        {
+            finish.Validate();lighting.Validate();MaterialFinish=finish;
+            var industrial=new Vector4(lighting.steelHighlight,lighting.steelExponent,lighting.concreteHighlight,lighting.concreteExponent);
+            foreach(var renderer in root.GetComponentsInChildren<Renderer>(true))for(int slot=0;slot<renderer.sharedMaterials.Length;slot++)
+            {var block=new MaterialPropertyBlock();renderer.GetPropertyBlock(block,slot);block.SetVector("_IndustrialFinish",industrial);renderer.SetPropertyBlock(block,slot);}
+            foreach(var actor in actors.Values)
+            {
+                actor.MaterialFinish=finish;
+                foreach(var renderer in actor.Hull.GetComponentsInChildren<Renderer>(true))for(int slot=0;slot<renderer.sharedMaterials.Length;slot++)
+                {
+                    var source=renderer.sharedMaterials[slot];var block=new MaterialPropertyBlock();renderer.GetPropertyBlock(block,slot);
+                    var owner=actor.PresentationPaint;if(!owner.HasValue&&(source.name.EndsWith("team-primary")||source.name.EndsWith("team-emissive")))owner=block.GetColor("_BaseColor");
+                    finish.Apply(renderer,slot,owner,preserveOwnerPaint:true);
+                    if(actor.UnitUpgraded&&source.name.EndsWith("chassis-emissive")){renderer.GetPropertyBlock(block,slot);block.SetColor("_EmissionColor",source.GetColor("_EmissionColor")*(float)profile.TankChassisGlowIntensity*finish.emissionGain);renderer.SetPropertyBlock(block,slot);}
+                }
+            }
+        }
+        public void Rebind(PlayableProfile next){ClearUnitWrecks();ClearPads();ClearRallyFlags();profile=next;WreckProfile.lifetimeSeconds=(float)next.UnitWreckLifetimeSeconds;foreach(var id in new List<int>(actors.Keys))Remove(id);ReleaseWorldObject(selectionMaterial);selectionMaterial=null;ReleaseWorldObject(selectionQuad);selectionQuad=null;}
         private readonly Transform root;
         private int presentationLayer;
         public void SetPresentationLayer(int layer){presentationLayer=layer;Layer(root.gameObject);}
@@ -33,14 +54,16 @@ namespace Spacewars.Presentation
         private static readonly Color Ally = new Color(.19f,.72f,.77f), Enemy = new Color(.93f,.34f,.23f), Dark = new Color(.09f,.13f,.16f);
         public PlayableWorld(Transform parent, PlayableProfile profile)
         {
-            this.profile=profile;double extent=profile.ArenaHalfExtent;
+            this.profile=profile;WreckProfile.lifetimeSeconds=(float)profile.UnitWreckLifetimeSeconds;double extent=profile.ArenaHalfExtent;
             root = new GameObject("Battlefield").transform; root.SetParent(parent,false);
             var shader=Resources.Load<Shader>("TerritoryFog");
             if(!shader)throw new System.InvalidOperationException("Missing territory fog shader");
-            material=new Material(shader);Fog=new PlayableFogMask(profile);
+            material=new Material(shader);IndustrialLightingProfile.Load(profile.AuthoredMap?.Id).ApplyMaterial(material);Fog=new PlayableFogMask(profile);
             material.SetColor("_FogColor",new Color((float)profile.FogTintR,(float)profile.FogTintG,(float)profile.FogTintB));material.SetTexture("_FogMask",Fog.Texture);material.SetVector("_FogBounds",new Vector4((float)extent,(float)extent,0,0));
+            if(profile.AuthoredMap is BasaltCrownMap basalt){CreateBasaltCrown(basalt);return;}
             if(profile.AuthoredMap is FoundryMap foundry){CreateFoundry(foundry);return;}
-            if(profile.AuthoredMap is ThreeCrossingsMap crossings){CreateThreeCrossings(crossings);return;}
+            if(profile.AuthoredMap is ThreeCrossingsMap crossings)
+            {try{CreateThreeCrossings(crossings);}catch{Dispose();throw;}return;}
             if(profile.AuthoredMap is AiTestMap)
             {
                 var texture=Resources.Load<Texture2D>("Environment/NaturalFrontier/Earth");
@@ -101,11 +124,11 @@ namespace Spacewars.Presentation
             a.Launcher=a.Hull.GetComponentsInChildren<Transform>(true).FirstOrDefault(t=>t.name=="launcherPitch");a.UnitUpgraded=e.Upgraded;a.PresentationPaint=null;
             if(e.Kind==PlayableEntityKind.Tank&&e.Upgraded)
                 foreach(var r in a.Hull.GetComponentsInChildren<Renderer>(true))for(int i=0;i<r.sharedMaterials.Length;i++)if(r.sharedMaterials[i].name.EndsWith("chassis-emissive"))
-                {var block=new MaterialPropertyBlock();block.SetColor("_EmissionColor",r.sharedMaterials[i].GetColor("_EmissionColor")*(float)profile.TankChassisGlowIntensity);r.SetPropertyBlock(block,i);}
+                {var block=new MaterialPropertyBlock();r.GetPropertyBlock(block,i);block.SetColor("_EmissionColor",r.sharedMaterials[i].GetColor("_EmissionColor")*(float)profile.TankChassisGlowIntensity*(MaterialFinish?.emissionGain??1));r.SetPropertyBlock(block,i);}
         }
         public Actor Building(int id,string kind,bool friendly,bool upgraded=false)
         {
-            var a=Base(id,friendly);string key=BuildingKey(kind,upgraded);a.RefineryUpgraded=upgraded;
+            var a=Base(id,friendly);a.MaterialFinish=MaterialFinish;string key=BuildingKey(kind,upgraded);a.RefineryUpgraded=upgraded;
             var model=Model(key,a.Root,friendly);a.Hull=model;
             // Authored heights from src/game/manifest.ts preserve web normalization.
             double scale=BuildingScale(key);
@@ -161,7 +184,7 @@ namespace Spacewars.Presentation
             foreach(var renderer in actor.Hull.GetComponentsInChildren<Renderer>(true))for(int slot=0;slot<renderer.sharedMaterials.Length;slot++)
             {
                 var role=renderer.sharedMaterials[slot].name;if(!role.EndsWith("team-primary")&&!role.EndsWith("team-emissive"))continue;
-                var block=new MaterialPropertyBlock();block.SetColor("_BaseColor",owner);if(role.EndsWith("team-emissive"))block.SetColor("_EmissionColor",owner*2.2f);renderer.SetPropertyBlock(block,slot);
+                var block=new MaterialPropertyBlock();renderer.GetPropertyBlock(block,slot);block.SetColor("_BaseColor",owner);if(role.EndsWith("team-emissive"))block.SetColor("_EmissionColor",owner*(actor.MaterialFinish?.teamEmission??2.2f));renderer.SetPropertyBlock(block,slot);
             }
         }
         private Transform Model(string key,Transform parent,bool friendly)
@@ -175,10 +198,11 @@ namespace Spacewars.Presentation
                 for(int slot=0;slot<materials.Length;slot++)
                 {
                     var role=materials[slot].name;
+                    if(MaterialFinish!=null)MaterialFinish.Apply(renderer,slot,owner);
                     if(!role.EndsWith("team-primary")&&!role.EndsWith("team-emissive"))continue;
-                    var properties=new MaterialPropertyBlock();properties.SetColor("_BaseColor",owner);
+                    var properties=new MaterialPropertyBlock();renderer.GetPropertyBlock(properties,slot);properties.SetColor("_BaseColor",owner);
                     // Existing web team-light material convention, not a simulation parameter.
-                    if(role.EndsWith("team-emissive"))properties.SetColor("_EmissionColor",owner*2.2f);
+                    if(role.EndsWith("team-emissive"))properties.SetColor("_EmissionColor",owner*(MaterialFinish?.teamEmission??2.2f));
                     renderer.SetPropertyBlock(properties,slot);
                 }
             }
@@ -213,7 +237,7 @@ namespace Spacewars.Presentation
         }
         private Actor Base(int id,bool friendly,bool unit=false,PlayableEntityKind kind=PlayableEntityKind.Tank)
         {
-            var a=new Actor();a.Root=new GameObject("Entity "+id).transform;a.Root.SetParent(root,false);
+            var a=new Actor{MaterialFinish=MaterialFinish};a.Root=new GameObject("Entity "+id).transform;a.Root.SetParent(root,false);
             a.UnitSelection=unit;
             a.Selection=unit?UnitRing(a.Root,kind):Part("Selection",a.Root,new Vector3(0,.07f,0),new Vector3(2.4f,.035f,2.4f),friendly?Ally:Enemy,PrimitiveType.Cylinder);a.Selection.SetActive(false);
             var healthRoot=new GameObject("Health").transform;healthRoot.SetParent(root,false);healthRoot.localPosition=new Vector3(0,3.8f,0);
@@ -235,8 +259,8 @@ namespace Spacewars.Presentation
             actor.Health.gameObject.SetActive(width>0);
         }
         public void Remove(int id){RemoveRallyFlag(id);if(actors.TryGetValue(id,out var a)){ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);actors.Remove(id);}}
-        public void Clear(){ClearRallyFlags();Fog.Reset();ClearMemories();ClearPads();foreach(var a in actors.Values){ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);}actors.Clear();}
-        public void Dispose(){Clear();Fog.Dispose();surfaceMaterials?.Dispose();if(foundryRoadMask)ReleaseWorldObject(foundryRoadMask);if(foundryLavaHeat)ReleaseWorldObject(foundryLavaHeat);foreach(var mesh in terrainMeshes)ReleaseWorldObject(mesh);terrainMeshes.Clear();if(apronMaterial)ReleaseWorldObject(apronMaterial);ReleaseWorldObject(selectionMaterial);ReleaseWorldObject(selectionQuad);ReleaseWorldObject(material);if(root)ReleaseWorldObject(root.gameObject);}
+        public void Clear(){ClearUnitWrecks();ClearRallyFlags();Fog.Reset();ClearMemories();ClearPads();foreach(var a in actors.Values){ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);}actors.Clear();}
+        public void Dispose(){Clear();wreckFlashVisuals.Dispose();Fog.Dispose();if(basaltPaintMask)ReleaseWorldObject(basaltPaintMask);if(basaltAccentMask)ReleaseWorldObject(basaltAccentMask);if(basaltTerrainMaterial)ReleaseWorldObject(basaltTerrainMaterial);surfaceMaterials?.Dispose();if(foundryRoadMask)ReleaseWorldObject(foundryRoadMask);if(foundryLavaHeat)ReleaseWorldObject(foundryLavaHeat);foreach(var mesh in terrainMeshes)ReleaseWorldObject(mesh);terrainMeshes.Clear();if(apronMaterial)ReleaseWorldObject(apronMaterial);ReleaseWorldObject(selectionMaterial);ReleaseWorldObject(selectionQuad);ReleaseWorldObject(material);if(root)ReleaseWorldObject(root.gameObject);}
         public GameObject Part(string name,Transform parent,Vector3 position,Vector3 scale,Color color,PrimitiveType shape=PrimitiveType.Cube)
         {
             var g=GameObject.CreatePrimitive(shape);g.name=name;g.layer=presentationLayer;g.transform.SetParent(parent,false);g.transform.localPosition=position;g.transform.localScale=scale;

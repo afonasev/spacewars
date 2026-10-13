@@ -28,6 +28,17 @@ namespace Spacewars.Runtime
         private readonly AiRosterCatalog catalog;
         public AiEconomyPlanner(AiRosterCatalog catalog=null){this.catalog=catalog??AiRosterCatalog.Initial;}
         private static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
+        public IReadOnlyList<AiEconomyCandidate> InfrastructureRequests(PlayableAiObservation o,PlayableProfile p,InfrastructureRequest request)
+        {
+            if(request==null)return Array.Empty<AiEconomyCandidate>();
+            // A technology policy never chooses a physical build slot. S2 owns ordinary
+            // macro legality/placement and the same economy callback/budget admission.
+            return o.Sites.Where(site=>site.Owner==o.Owner&&site.Ready&&!site.Contested).OrderBy(site=>site.Site.Id==o.HomeSiteId?0:1).ThenBy(site=>site.Site.Id)
+                .SelectMany(site=>site.Site.Slots.OrderBy(slot=>slot.Id).Select(slot=>{
+                    var a=new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.BuildAt,siteId:site.Site.Id,slotId:slot.Id,parentId:site.CenterId,buildingKind:request.Building,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+                    return new AiEconomyCandidate("economy",a,AiEconomyAdmission.Reject(o,p,a,true,catalog));
+                })).ToArray();
+        }
         public AiEconomyPlan Plan(PlayableAiObservation o,PlayableProfile profile,AiProductionDemand demand=null,AiProfile ai=null,long? available=null,bool recoveryExplorerDemand=false,PlayableEntityKind productionKind=PlayableEntityKind.Tank)
         {
             if(o==null||profile==null)throw new ArgumentNullException();
@@ -80,10 +91,10 @@ namespace Spacewars.Runtime
     {
         internal AiEconomyCandidateDecision(AiEconomyCandidate candidate,PlayableProfile profile,IReadOnlyList<AiIntent> selected,IReadOnlyDictionary<string,string> rejections)
         {
-            var a=candidate.Action;Id=AiEconomyAdmission.IntentId(candidate.Policy,a);Policy=candidate.Policy;Kind=a.Kind;
-            EntityIds=Array.AsReadOnly(a.CopyEntityIds());SiteId=a.SiteId;SlotId=a.SlotId;BuildingKind=a.BuildingKind;UnitKind=a.UnitKind;
-            Credits=a.Kind==PlayableCommandKind.BuildAt?TerritoryRules.Cost(profile,a.BuildingKind):a.Kind==PlayableCommandKind.SellBuilding||a.Kind==PlayableCommandKind.StartBuildingRepair?0:PlayableUnitRules.Cost(profile,a.UnitKind);
-            Population=a.Kind==PlayableCommandKind.QueueTank||a.Kind==PlayableCommandKind.QueueExplorer||a.Kind==PlayableCommandKind.QueueShkval?PlayableUnitRules.Population(profile,a.UnitKind):0;
+            var a=candidate.Action;var productionKind=PlayableUnitRules.ProductionKind(a.Kind);Id=AiEconomyAdmission.IntentId(candidate.Policy,a);Policy=candidate.Policy;Kind=a.Kind;
+            EntityIds=Array.AsReadOnly(a.CopyEntityIds());SiteId=a.SiteId;SlotId=a.SlotId;BuildingKind=a.BuildingKind;UnitKind=productionKind??a.UnitKind;
+            Credits=a.Kind==PlayableCommandKind.BuildAt?TerritoryRules.Cost(profile,a.BuildingKind):productionKind.HasValue?PlayableUnitRules.Cost(profile,productionKind.Value):0;
+            Population=productionKind.HasValue?PlayableUnitRules.Population(profile,productionKind.Value):0;
             Selected=selected.Any(i=>i.Id==Id);
             Reason=candidate.Reason??(Selected?null:rejections.TryGetValue(Id,out var reason)?reason:"proposal unavailable");
         }
@@ -148,7 +159,7 @@ namespace Spacewars.Runtime
                 if(site.Contested)return "site contested";
                 return o.Credits<TerritoryRules.Cost(profile,a.BuildingKind)?"insufficient credits":null;
             }
-            if(a.Kind==PlayableCommandKind.QueueTank||a.Kind==PlayableCommandKind.QueueExplorer||a.Kind==PlayableCommandKind.QueueShkval)
+            if(AiRosterCatalog.IsProduction(a.Kind))
             {
                 catalog=catalog??AiRosterCatalog.Initial;
                 var descriptor=catalog.Production(a.Kind);

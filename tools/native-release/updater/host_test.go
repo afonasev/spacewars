@@ -44,14 +44,24 @@ for i in range(200):
  time.sleep(.02)
 assert s['state']=='available'
 assert not (root/'download-started').exists(), 'download before explicit click'
-old=(root/'active.json').read_text();req('/update',True);s=req('/play',True)
+old=(root/'active.json').read_text();s=req('/update',True)
+assert s['state']=='downloading' and s['done']==0 and s['total']==0, 'click must acknowledge a fresh download'
+for i in range(200):
+ s=req('/status')
+ if s['state']=='error':break
+ time.sleep(.02)
+assert s['state']=='error' and s['error']=='simulated interrupted download'
+assert (root/'active.json').read_text()==old
+s=req('/update',True)
+assert s['state']=='downloading' and s['done']==0 and s['total']==0, 'retry must reset stale progress'
+s=req('/play',True)
 assert s['state']=='downloading', 'play blocked during download'
 for i in range(200):
  s=req('/status')
  assert (root/'active.json').read_text()==old,'activation during play'
  if s['state']=='prepared':break
  time.sleep(.02)
-assert s['state']=='prepared'
+assert s['state']=='prepared' and s['done']==12 and s['total']==12, 'progress must reach completion'
 (root/'player-exiting').write_text('normal exit')
 `)
 		current := sample()
@@ -73,8 +83,14 @@ assert s['state']=='prepared'
 		next.Transport.Asset = "Spacewars-1.0.1-" + next.Platform + ".pack"
 		raw := signWith(next, key)
 		discoverForHost = func(p string) ([]byte, Manifest, error) { return raw, next, nil }
+		attempts := 0
 		stageForHost = func(r, c string, m Manifest, b []byte, progress func(int64, int64)) (string, error) {
 			os.WriteFile(filepath.Join(root, "download-started"), []byte("1"), 0600)
+			attempts++
+			if attempts == 1 {
+				progress(6, 12)
+				return "", errors.New("simulated interrupted download")
+			}
 			progress(0, 12)
 			time.Sleep(300 * time.Millisecond)
 			s := filepath.Join(c, "staged", m.ID)

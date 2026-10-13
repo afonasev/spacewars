@@ -32,6 +32,7 @@ namespace Spacewars.Presentation
         public PlayableProfile Compile(JToken row)
         {
             var data=JsonUtility.FromJson<PlayableProfileData>(row["data"].ToString());
+            if(row["data"]["unitWreckLifetimeSeconds"]==null)data.unitWreckLifetimeSeconds=1;
             if(row["data"]["matchScoreEarnedCreditsDivisor"]==null)data.matchScoreEarnedCreditsDivisor=2;
             if(data.revision!=(int)row["revision"])throw new FormatException("Ревизия не соответствует данным.");
             var result=PlayableProfile.Create(data,baseline.AuthoredMap,(string)row["name"]);

@@ -6,6 +6,7 @@ Shader "Spacewars/TerritoryFog"
         _FogColor("Fog tint",Color)=(0,0,0,1)
         _FogMask("Team fog",2D)="black" {}
         _SurfaceRole("Surface role",Float)=0
+        _IndustrialFinish("Steel strength exponent concrete strength exponent",Vector)=(0,24,0,12)
         _FoundryPadBounds("Foundry pad center extent hex",Vector)=(0,0,1,0)
         _FoundryPadCenter("Foundry central foundation",Float)=0
         _FoundryPadFinish("Foundry sand width scale foundation radius feather",Vector)=(2.25,3,3.5,.25)
@@ -57,6 +58,12 @@ Shader "Spacewars/TerritoryFog"
         _WeatheringMask("Dust contact wear",2D)="black" {}
         _Weathering("Reach strength direction wear",Vector)=(3.25,.72,.61,.18)
         _ContactShade("Contact shade",Float)=.24
+        _ConstructionMask("Platform frames and mine yards",2D)="black" {}
+        _CrossingsInfrastructure("Frame value sand opacity",Vector)=(.07,.38,0,0)
+        _CrossingsPalette("Crossings enabled direction width",Vector)=(0,1,0,64)
+        _CrossingsRegion("Crossings region irregularity scale",Vector)=(18,28,0,0)
+        _CrossingsDustB("Crossings warm mineral dust",Color)=(.55,.49,.42,1)
+        _CrossingsConstruction("Crossings steel width age wear sand removal",Vector)=(.24,.24,.32,.9)
         _Dressing("Dressing kind",Float)=0
         _FogBounds("Map half bounds",Vector)=(32,32,0,0)
     }
@@ -69,11 +76,15 @@ Shader "Spacewars/TerritoryFog"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+            #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
+            #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             TEXTURE2D(_FogMask); SAMPLER(sampler_FogMask);
             TEXTURE2D(_FoundryLavaHeat); SAMPLER(sampler_FoundryLavaHeat);
             TEXTURE2D(_RoadMask); SAMPLER(sampler_RoadMask);
+            TEXTURE2D(_ConstructionMask); SAMPLER(sampler_ConstructionMask);
             TEXTURE2D(_EarthTex); SAMPLER(sampler_EarthTex);
             TEXTURE2D(_RockTex); SAMPLER(sampler_RockTex);
             TEXTURE2D(_ConcreteTex); SAMPLER(sampler_ConcreteTex);
@@ -112,7 +123,10 @@ Shader "Spacewars/TerritoryFog"
                 float4 _ArtTiles, _ArtDetail, _WaterMotion, _ShoreSettings, _NaturalBlend;
                 half4 _WaterDeep, _WaterShallow, _BasaltTint, _RustTint;
                 float4 _Geology, _Weathering;
+                float4 _CrossingsPalette, _CrossingsRegion, _CrossingsConstruction, _CrossingsInfrastructure;
+                half4 _CrossingsDustB;
                 float _ContactShade, _Dressing;
+                float4 _IndustrialFinish;
             CBUFFER_END
             struct Attributes {float4 positionOS:POSITION;float3 normalOS:NORMAL;half4 color:COLOR;};
             struct Varyings {float4 positionCS:SV_POSITION;float3 positionWS:TEXCOORD0;half3 normalWS:TEXCOORD1;half4 color:COLOR;};
@@ -180,6 +194,12 @@ Shader "Spacewars/TerritoryFog"
                 float2 uv=input.positionWS.xz/(2*_FogBounds.xy)+.5;
                 half fog=SAMPLE_TEXTURE2D(_FogMask,sampler_FogMask,uv).r;
                 float3 normal=normalize(input.normalWS);
+                // Map-wide world coordinates: no mesh IDs, tiled palette cells or UV seams.
+                float regionWarp=(noise(input.positionWS.xz/_CrossingsRegion.y+float2(17,43))-.5)*2*_CrossingsRegion.x;
+                float frontier=smoothstep(-_CrossingsPalette.w*.5,_CrossingsPalette.w*.5,
+                    dot(input.positionWS.xz,_CrossingsPalette.yz)+regionWarp);
+                float4 infrastructure=SAMPLE_TEXTURE2D(_ConstructionMask,sampler_ConstructionMask,uv);
+                half3 roadTint=lerp(_RoadTint.rgb,_CrossingsDustB.rgb,frontier*_CrossingsPalette.x);
                 half3 surface=_BaseColor.rgb;
                 // Open AI test field: exactly one albedo, without procedural dressing.
                 if(_SurfaceRole<-.5)surface*=SAMPLE_TEXTURE2D(_EarthTex,sampler_EarthTex,input.positionWS.xz/8).rgb;
@@ -213,8 +233,14 @@ Shader "Spacewars/TerritoryFog"
                         // One continuous geological field, shared by soil and cliffs. No corner masks.
                         float exposure=naturalNoise(p,_Geology.x)*.65+naturalNoise(p+float3(19,0,7),_Geology.x*.37)*.35;
                         float oxidation=smoothstep(.40,.60,exposure+(_Geology.y-.5)*.7);
+                        oxidation=lerp(oxidation,saturate(frontier+(exposure-.5)*.18),_CrossingsPalette.x);
                         half3 geology=lerp(_BasaltTint.rgb,_RustTint.rgb,oxidation);
                         soil=lerp(geology*1.2,_RoadTint.rgb,road)*(1+broad*_SurfaceNoise.y);
+                        if(_CrossingsPalette.x>.5)
+                        {
+                            half3 mineral=lerp(_GroundTint.rgb,_CrossingsDustB.rgb,frontier);
+                            soil=lerp(lerp(geology*1.12,mineral,.55),roadTint,road)*(1+broad*_SurfaceNoise.y);
+                        }
                         earth=dot(earth,half3(.2126,.7152,.0722)).xxx;
                         soil*=(1+grain*_SurfaceNoise.w)*lerp(1,clamp(earth/.18,.35,2),_ArtDetail.x*(1-road*.65));
                         half3 rock=NATURAL_SAMPLE(Rock,sampler_RockTex,texturePosition,_ArtTiles.y);
@@ -233,19 +259,56 @@ Shader "Spacewars/TerritoryFog"
                         rock=lerp(rock,soil*.8,moss);
                         surface=lerp(soil,rock,stone);
                         surface*=1-(1-smoothstep(0,_ArtDetail.w,shore))*.28;
+                        if(_CrossingsPalette.x>.5&&_SurfaceRole<1.5&&_Dressing<.5)
+                        {
+                            half3 slab=VARIANT_SAMPLE(Concrete,sampler_ConcreteTex,plane/_ArtTiles.z,input.positionWS.xz);
+                            float finish=dot(slab,half3(.2126,.7152,.0722));
+                            half3 yard=_Concrete.xxx*lerp(1,clamp(finish/.35,.7,1.3),_ArtDetail.x);
+                            yard*=1-joints(plane,_Concrete.yy,_Concrete.z)*_Concrete.w;
+                            yard=lerp(yard,_CrossingsInfrastructure.xxx,infrastructure.b*.8);
+                            // Inset service lines sit on the yard, never form arbitrary ground decals.
+                            yard*=1-infrastructure.a*_CrossingsConstruction.z;
+                            surface=lerp(surface,yard,infrastructure.g);
+                        }
+
                     }
                     else if(_SurfaceRole<2.5)
                     {
                         float joint=joints(plane,_Concrete.yy,_Concrete.z);
                         surface=_Concrete.xxx*(1+broad*_SurfaceNoise.w+grain*_SurfaceNoise.w)*(1-joint*_Concrete.w);
                         half3 concrete=VARIANT_SAMPLE(Concrete,sampler_ConcreteTex,plane/_ArtTiles.z,input.positionWS.xz);
-                        surface*=lerp(1,clamp(concrete/.35,.5,1.5),_ArtDetail.x);
+                        if(_CrossingsPalette.x>.5)concrete=dot(concrete,half3(.2126,.7152,.0722)).xxx;
+                        if(_CrossingsPalette.x>.5)
+                        {
+                            // Calibrated sibling mean preserves pores/cracks around the base value.
+                            // A fixed divisor and clipped range washed out the authored fine albedo.
+                            float mean=max(_ConcreteVariantGain.w,.02);
+                            half3 finish=clamp(1+(concrete-mean)*_CrossingsInfrastructure.z/mean,.35,2);
+                            surface*=lerp(1,finish,_ArtDetail.x);
+                        }
+                        else surface*=lerp(1,clamp(concrete/.35,.5,1.5),_ArtDetail.x);
                         // Flush service plates and paired rails are surface markings, never obstacles.
                         float2 bay=abs(frac(plane/12+.5)-.5)*12;
                         float edging=(1-smoothstep(.08,.16,abs(bay.x-4.8)))*step(1.2,bay.y);
                         float plate=step(bay.x,1.3)*step(bay.y,2.5);
-                        surface=lerp(surface,surface*.62,plate*.5);
-                        surface=lerp(surface,half3(.28,.20,.075),edging*.65);
+                        if(_CrossingsPalette.x<.5)surface=lerp(surface,surface*.62,plate*.5);
+                        float markingWear=_CrossingsPalette.x>.5?smoothstep(.30,.76,noise(plane/.55))*.6:1;
+                        surface=lerp(surface,half3(.28,.20,.075),edging*.65*markingWear);
+                        if(_CrossingsPalette.x>.5)
+                        {
+                            // Flush steel ties follow existing concrete joints; no extra mesh/collision.
+                            float reinforcement=joints(plane,_Concrete.yy,_CrossingsConstruction.x);
+                            half3 steel=VARIANT_SAMPLE(Steel,sampler_SteelTex,plane/_ArtTiles.w,input.positionWS.xz);
+                            float steelDetail=dot(steel,half3(.2126,.7152,.0722));
+                            half3 metal=_Metal.xxx*clamp(steelDetail/.18,.65,1.45);
+                            float age=noise(plane/_Concrete.y+float2(31,19));
+                            metal=lerp(metal,metal*half3(1.14,.88,.69),age*_CrossingsConstruction.y);
+                            surface=lerp(surface,metal,reinforcement*.45);
+                            surface*=1-_CrossingsConstruction.y*smoothstep(.32,.78,age);
+                            half3 frame=_CrossingsInfrastructure.xxx*(.92+.08*steelDetail);
+                            surface=lerp(surface,frame,infrastructure.r*.9);
+
+                        }
                     }
                     else if(_SurfaceRole<3.5)
                     {
@@ -284,22 +347,32 @@ Shader "Spacewars/TerritoryFog"
                         highlight=pow(saturate(dot(normal,normalize(main.direction+eye))),96)*_WaterMotion.w;
                     }
                     if(_Dressing>.5)surface*=input.color.rgb;
+                    if(_Dressing>2.5)surface*=2; // Wreck vertex paints define authored material separation.
                     if(_SurfaceRole<4.5)
                     {
-                        float3 weather=SAMPLE_TEXTURE2D(_WeatheringMask,sampler_WeatheringMask,uv).rgb;
+                        float4 weather=SAMPLE_TEXTURE2D(_WeatheringMask,sampler_WeatheringMask,uv);
                         float2 wind=float2(cos(_Weathering.z),sin(_Weathering.z));
                         float2 dustUV=float2(dot(input.positionWS.xz,wind),dot(input.positionWS.xz,float2(-wind.y,wind.x)));
                         float grit=noise(dustUV/float2(2.7,.45));
                         float dust=saturate(weather.r*(.6+.7*grit))*_Weathering.y*smoothstep(.3,.85,normal.y);
+                        if(_CrossingsPalette.x>.5){dust=min(dust,_CrossingsInfrastructure.y);dust*=1-weather.b*_CrossingsConstruction.w;dust*=1-infrastructure.r*.65;}
                         if(_Dressing>.5)dust*=.35;
-                        if(_SurfaceRole>1.5&&_SurfaceRole<3.5)
+                        if((_SurfaceRole>1.5&&_SurfaceRole<3.5)||(_SurfaceRole<1.5&&infrastructure.g>.01&&_CrossingsPalette.x>.5))
                         {
-                            half3 sand=_RoadTint.rgb*(.82+.22*grit);
+                            half3 sand=roadTint*(.82+.22*grit);
                             // Keep construction seams readable through the deposit.
                             surface=lerp(surface,sand,dust);highlight*=1-dust;
                         }
                         surface*=1-weather.g*_ContactShade*smoothstep(.2,.85,normal.y);
                         surface*=1-weather.b*_Weathering.w*smoothstep(.3,.85,normal.y);
+                        if(_CrossingsPalette.x>.5&&_Dressing<.5)
+                        {
+                            // Broad tire polishing remains legible at normal zoom; tread is restrained.
+                            float traffic=weather.b*_CrossingsConstruction.z*smoothstep(.3,.85,normal.y);
+                            surface*=1-traffic*(.4+.35*weather.a);
+                            if(_SurfaceRole>1.5&&_SurfaceRole<3.5)
+                                surface=lerp(surface,surface*half3(1.06,1.04,1.01),traffic*.5);
+                        }
 
                         // World-space micro relief, no displacement or collision changes.
                         float rough=natural?naturalNoise(input.positionWS,_SurfaceNoise.z):noise(plane/_SurfaceNoise.z);
@@ -414,13 +487,63 @@ Shader "Spacewars/TerritoryFog"
                     }
                     highlight=0;
                 }
-                Light light=GetMainLight();
-                half3 lit=surface*(SampleSH(normal)+light.color*saturate(dot(normal,light.direction)))+highlight*light.color+emission;
+                Light light=GetMainLight(TransformWorldToShadowCoord(input.positionWS));
+                // Role IDs are the existing fixed material contract, not new geometry.
+                bool steel=_SurfaceRole>2.5&&_SurfaceRole<3.5;
+                bool concrete=(_SurfaceRole>1.5&&_SurfaceRole<2.5)||(_SurfaceRole>7.5&&_SurfaceRole<8.5);
+                float sheen=steel?_IndustrialFinish.x:concrete?_IndustrialFinish.z:0;
+                float exponent=steel?_IndustrialFinish.y:_IndustrialFinish.w;
+                float facing=saturate(dot(normal,light.direction));
+                float specular=pow(saturate(dot(normal,normalize(light.direction+eye))),max(exponent,1))*sheen*facing;
+                // Keep water's established reflection and lava emission; only direct light is shadowed.
+                if(steel&&sheen>0)highlight=specular;else highlight+=specular;
+                AmbientOcclusionFactor contactAO=GetScreenSpaceAmbientOcclusion(GetNormalizedScreenSpaceUV(input.positionCS));
+                half3 lit=surface*(SampleSH(normal)*contactAO.indirectAmbientOcclusion+light.color*facing*light.shadowAttenuation)+highlight*light.color*light.shadowAttenuation+emission;
                 // Neutral optical coefficients, not gameplay or designer-tunable values.
                 half grey=dot(lit,half3(.2126,.7152,.0722));
                 lit=lerp(lit,grey.xxx,fog);
                 return half4(lerp(lit,_FogColor.rgb,fog),1);
             }
+            ENDHLSL
+        }
+        // Depth reconstruction uses the same undeformed positions as the forward pass.
+        // No extra geometry or texture normal detail is introduced.
+        Pass
+        {
+            Name "DepthOnly"
+            Tags { "LightMode"="DepthOnly" }
+            ZWrite On
+            ColorMask R
+            HLSLPROGRAM
+            #pragma vertex depthVert
+            #pragma fragment depthFrag
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            float4 depthVert(float4 positionOS:POSITION):SV_POSITION {return TransformObjectToHClip(positionOS.xyz);}
+            half depthFrag(float4 positionCS:SV_POSITION):SV_Target {return positionCS.z;}
+            ENDHLSL
+        }
+        Pass
+        {
+            Name "ShadowCaster"
+            Tags { "LightMode"="ShadowCaster" }
+            ZWrite On
+            ZTest LEqual
+            ColorMask 0
+            HLSLPROGRAM
+            #pragma vertex shadowVert
+            #pragma fragment shadowFrag
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+            float3 _LightDirection;
+            struct ShadowAttributes {float4 positionOS:POSITION;float3 normalOS:NORMAL;};
+            float4 shadowVert(ShadowAttributes input):SV_POSITION
+            {
+                float3 positionWS=TransformObjectToWorld(input.positionOS.xyz);
+                float3 normalWS=TransformObjectToWorldNormal(input.normalOS);
+                float4 positionCS=TransformWorldToHClip(ApplyShadowBias(positionWS,normalWS,_LightDirection));
+                return ApplyShadowClamping(positionCS);
+            }
+            half4 shadowFrag():SV_Target {return 0;}
             ENDHLSL
         }
     }

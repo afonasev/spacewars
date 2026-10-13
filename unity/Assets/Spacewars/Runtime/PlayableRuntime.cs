@@ -103,6 +103,7 @@ namespace Spacewars.Runtime
         public static PlayableRuntime CreateLobbyMatch(PlayableProfile profile,long generation,NativeLobbyConfiguration setup,bool startPaused=false)
         {
             if(setup==null)throw new ArgumentNullException(nameof(setup));setup=setup.Copy();
+            if(profile.AuthoredMap is BasaltCrownMap)setup.InitializeParticipants();
             var error=setup.Validate(profile,true,true);
             if(error!=null)throw new ArgumentException(error,nameof(setup));
             PlayableRuntime runtime;

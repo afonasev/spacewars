@@ -1,0 +1,16 @@
+{
+  "id": "actor-industrial-finish-v1",
+  "variant": "luminous",
+  "revision": 1,
+  "armorMetallic": 0.2,
+  "armorSmoothness": 0.38,
+  "metalMetallic": 0.5,
+  "metalSmoothness": 0.5,
+  "structureSmoothness": 0.16,
+  "darkLift": 0.1,
+  "emissionGain": 1.65,
+  "teamEmission": 4.4,
+  "bloomIntensity": 0.32,
+  "bloomThreshold": 1.2,
+  "bloomScatter": 0.58
+}

@@ -27,10 +27,9 @@ func replaceFile(a, b string) error {
 	}
 	return nil
 }
-func psQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 func applyWithPermission(exe, stage string) error {
 	// Fixed protected executable and verb. The elevated helper verifies all staged bytes.
-	script := "$p = Start-Process -FilePath " + psQuote(exe) + " -ArgumentList @('--apply', '\"'+" + psQuote(stage) + "+'\"') -Verb RunAs -Wait -PassThru; exit $p.ExitCode"
+	script := windowsApplyScript(exe, stage)
 	b, e := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
 	if e != nil {
 		return fmt.Errorf("update authorization/apply failed: %s: %w", b, e)

@@ -13,7 +13,7 @@ namespace Spacewars.Presentation
 {
     public sealed partial class PlayableBootstrap
     {
-        private const string CrossingsLobbyName="Переправа",FoundryLobbyName="Огненный разлом",AiTestLobbyName="ИИ-полигон · 8";
+        private const string CrossingsLobbyName="Переправа",FoundryLobbyName="Огненный разлом",AiTestLobbyName="ИИ-полигон · 8",BasaltLobbyName=BasaltCrownMap.DisplayName;
         private const string CrossingsLobbyDescription="Холодная река рассекает каменное плато, оставляя лишь три пути на другой берег. Среди скал и высоких уступов каждый проход становится рубежом, который нельзя отдать.";
         private const string FoundryLobbyDescription="Над остывшими промышленными площадками дрожит жар лавовой реки. Между шахтами и укреплёнными высотами тишина держится лишь до первых выстрелов.";
         private NativeLobbyConfiguration lobbySetup = new NativeLobbyConfiguration(), matchSetup;
@@ -98,8 +98,8 @@ namespace Spacewars.Presentation
             mapPanel=LobbyPanel();mapPanel.style.flexGrow=1;mapPanel.style.minWidth=250;mapPanel.style.flexBasis=0;lobbyColumns.Add(mapPanel);
             mapInfo=new VisualElement();mapPanel.Add(mapInfo);
             mapInfo.Add(LobbyText("КАРТА МАТЧА",12,Muted));
-            var maps=new DropdownField("Карта",new List<string>{CrossingsLobbyName,FoundryLobbyName,AiTestLobbyName},0){name="lobby-map-choice"};StyleLobbyField(maps);mapInfo.Add(maps);
-            maps.RegisterValueChangedCallback(evt=>SelectLobbyMap(evt.newValue==FoundryLobbyName,evt.newValue==AiTestLobbyName));
+            var maps=new DropdownField("Карта",new List<string>{CrossingsLobbyName,FoundryLobbyName,AiTestLobbyName,BasaltLobbyName},0){name="lobby-map-choice"};StyleLobbyField(maps);mapInfo.Add(maps);
+            maps.RegisterValueChangedCallback(evt=>SelectLobbyMap(evt.newValue==FoundryLobbyName,evt.newValue==AiTestLobbyName,evt.newValue==BasaltLobbyName));
             var capacity=LobbyText("2 игровых места",14);capacity.name="lobby-map-capacity";mapInfo.Add(capacity);
             lobbyTerrain=new PlayableMapTerrain(profile);lobbyTerrain.ShowPublicTerrain();
             lobbyPreview=new PlayableMapSurface(profile,lobbyTerrain.Texture){OwnerPaint=LobbyPaint};
@@ -121,17 +121,17 @@ namespace Spacewars.Presentation
         }
         private PlayableProfile ComposeLobbyProfile(PlayableProfile balance)
         {
-            IPlayableTerrain map=lobbySetup.AiTestMap?new AiTestMap():lobbySetup.Foundry?new FoundryMap(JsonUtility.FromJson<FoundryProfileData>(Resources.Load<TextAsset>("FoundryProfile").text)):(IPlayableTerrain)new ThreeCrossingsMap(JsonUtility.FromJson<ThreeCrossingsProfileData>(Resources.Load<TextAsset>("ThreeCrossingsProfile").text));
+            IPlayableTerrain map=lobbySetup.BasaltCrown?new BasaltCrownMap():lobbySetup.AiTestMap?new AiTestMap():lobbySetup.Foundry?new FoundryMap(JsonUtility.FromJson<FoundryProfileData>(Resources.Load<TextAsset>("FoundryProfile").text)):(IPlayableTerrain)new ThreeCrossingsMap(JsonUtility.FromJson<ThreeCrossingsProfileData>(Resources.Load<TextAsset>("ThreeCrossingsProfile").text));
             return PlayableProfile.Create(balance.CopyData(),map,balance.DisplayName);
         }
-        private void SelectLobbyMap(bool foundry,bool aiTest=false)
+        private void SelectLobbyMap(bool foundry,bool aiTest=false,bool basalt=false)
         {
             bool defaults=!lobbyRosterEdited;
-            lobbySetup.Foundry=foundry;lobbySetup.AiTestMap=aiTest;if(defaults){lobbySetup.Participants=null;lobbySetup.InitializeParticipants();}
+            lobbySetup.Foundry=foundry;lobbySetup.AiTestMap=aiTest;lobbySetup.BasaltCrown=basalt;if(defaults){lobbySetup.Participants=null;lobbySetup.InitializeParticipants();}
             EnsureBalanceStore();profile=ComposeLobbyProfile(balanceStore.Selected);
             lobbyTerrain?.Dispose();lobbyTerrain=new PlayableMapTerrain(profile);lobbyTerrain.ShowPublicTerrain();lobbyPreview.Rebind(profile,lobbyTerrain.Texture);
             mapInfo.Q<Label>("lobby-map-capacity").text=aiTest?"8 игровых мест":foundry?"6 игровых мест":"2 игровых места";
-            mapPanel.Q<Label>("lobby-map-description").text=aiTest?"Открытый полигон для проверки ИИ: восемь стартов, шахты и точки расширения. Без стен и перепадов высоты.":foundry?FoundryLobbyDescription:CrossingsLobbyDescription;
+            mapPanel.Q<Label>("lobby-map-description").text=basalt?"Базальтовый бастион возвышается над каменным кольцом. Два спуска ведут к центральной шахте и аванпосту; внешние обходы связывают диагональные базы и боковые расширения.":aiTest?"Открытый полигон для проверки ИИ: восемь стартов, шахты и точки расширения. Без стен и перепадов высоты.":foundry?FoundryLobbyDescription:CrossingsLobbyDescription;
             RebuildRoster();RefreshLobbyPreview();RefreshLobbyValidation();
         }
         private void RecreateMapPresentation()

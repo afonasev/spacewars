@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace Spacewars.Simulation
 {
@@ -23,7 +25,31 @@ namespace Spacewars.Simulation
             }
             return result;
         }
-        public static bool Supported(PlayableEntityKind k)=>k==PlayableEntityKind.Tank||k==PlayableEntityKind.Explorer||k==PlayableEntityKind.Shkval;
+        // Expected ground/building damage on the same horizon as the ordinary AI force
+        // estimate. Dispatch belongs to the mechanic adapter, never composition policies.
+        public static double DamagePerSecond(PlayableProfile p,PlayableEntityKind k,bool assault=false)
+        {
+            switch(k)
+            {
+                case PlayableEntityKind.Tank:return p.TankWeaponDamage/p.TankWeaponReloadSeconds;
+                case PlayableEntityKind.Explorer:
+                    int burst=assault?p.ExplorerAssaultBurstSize:p.ExplorerBurstSize;
+                    return p.ExplorerDamage*burst*1000d/(p.ExplorerBurstPauseMs+burst*p.ExplorerBurstShotIntervalMs);
+                case PlayableEntityKind.Shkval:return p.ShkvalDamage*1000d/p.ShkvalFireIntervalMs;
+                default:throw new ArgumentException("Unknown damage mechanic");
+            }
+        }
+        // Single registration of the existing typed ordinary production adapters.
+        // Strategy/admission/ledger paths decode this registry, never enumerate commands.
+        private static readonly IReadOnlyDictionary<PlayableEntityKind,PlayableCommandKind> productionCommands=
+            new Dictionary<PlayableEntityKind,PlayableCommandKind>{
+                {PlayableEntityKind.Tank,PlayableCommandKind.QueueTank},
+                {PlayableEntityKind.Explorer,PlayableCommandKind.QueueExplorer},
+                {PlayableEntityKind.Shkval,PlayableCommandKind.QueueShkval}};
+        public static PlayableCommandKind ProductionCommand(PlayableEntityKind kind)=>productionCommands.TryGetValue(kind,out var command)?command:throw new ArgumentException("Unknown production adapter.");
+        public static PlayableEntityKind? ProductionKind(PlayableCommandKind command)
+        {foreach(var row in productionCommands)if(row.Value==command)return row.Key;return null;}
+        public static bool Supported(PlayableEntityKind k)=>productionCommands.ContainsKey(k);
         public static double Radius(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Shkval?p.ShkvalCollisionRadius:k==PlayableEntityKind.Explorer?p.ExplorerCollisionRadius:p.TankCollisionRadius;
         public static double Speed(PlayableProfile p,PlayableEntityKind k,bool chassis=false)=>k==PlayableEntityKind.Shkval?p.ShkvalSpeed:k==PlayableEntityKind.Explorer?p.ExplorerSpeed:chassis?p.TankChassisSpeed:p.TankSpeed;
         public static double Turn(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Shkval?p.ShkvalTurnSpeed:k==PlayableEntityKind.Explorer?p.ExplorerTurnSpeed:p.TankTurnSpeed;

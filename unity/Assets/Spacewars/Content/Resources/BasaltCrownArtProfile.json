@@ -1,0 +1,21 @@
+{
+  "id": "basalt-crown-warm-stone-v1",
+  "revision": 1,
+  "detailTile": 7,
+  "variantScale": 23,
+  "variantBlend": 0.06,
+  "detailContrast": 0.8,
+  "normalSlope": 0.075,
+  "roadFeather": 0.4,
+  "naturalFeather": 1,
+  "warmHue": 0.055,
+  "warmSaturation": 0.28,
+  "darkValue": 0.29,
+  "stoneValue": 0.48,
+  "lightValue": 0.69,
+  "screeValue": 0.56,
+  "cooledValue": 0.25,
+  "mineralValue": 0.54,
+  "sandValue": 0.62,
+  "receiverBias": 0.025
+}

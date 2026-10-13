@@ -24,6 +24,11 @@ namespace Spacewars.Presentation
             get=>PlayerPrefs.GetInt(Prefix+"shadows",1)!=0;
             set {PlayerPrefs.SetInt(Prefix+"shadows",value?1:0);PlayerPrefs.Save();ApplyShadows();}
         }
+        public static bool VSync
+        {
+            get=>PlayerPrefs.GetInt(Prefix+"vsync",0)!=0;
+            set {PlayerPrefs.SetInt(Prefix+"vsync",value?1:0);PlayerPrefs.Save();ApplyVSync();}
+        }
         public static Vector2Int SavedResolution=>new Vector2Int(PlayerPrefs.GetInt(Prefix+"width",0),PlayerPrefs.GetInt(Prefix+"height",0));
         public static Vector2Int[] ResolutionOptions(IEnumerable<Vector2Int> modes,Vector2Int desktop)
             =>modes.Append(desktop).Where(m=>m.x>0&&m.y>0).Distinct().OrderBy(m=>m.x).ThenBy(m=>m.y).ToArray();
@@ -41,7 +46,8 @@ namespace Spacewars.Presentation
             PlayerPrefs.SetInt(Prefix+"width",size.x);PlayerPrefs.SetInt(Prefix+"height",size.y);PlayerPrefs.Save();ApplyDisplay();
         }
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
-        private static void Initialize(){ApplyDisplay();AudioListener.volume=NativeUserSettings.Volume;}
+        private static void Initialize(){ApplyVSync();ApplyDisplay();AudioListener.volume=NativeUserSettings.Volume;}
+        public static void ApplyVSync()=>QualitySettings.vSyncCount=VSync?1:0;
         public static void ApplyDisplay()
         {
             // Never resize the shared Editor host or its Game view during tests.
@@ -70,8 +76,11 @@ namespace Spacewars.Presentation
             resolution.RegisterValueChangedCallback(_=>{if(resolution.index>=0)NativeDisplaySettings.SetResolution(modes[resolution.index]);});content.Add(resolution);
             var fullscreen=new Toggle("Полный экран"){name="settings-fullscreen",value=NativeDisplaySettings.Fullscreen};
             fullscreen.RegisterValueChangedCallback(e=>NativeDisplaySettings.Fullscreen=e.newValue);content.Add(fullscreen);
+            var vsync=new Toggle("Вертикальная синхронизация"){name="settings-vsync",value=NativeDisplaySettings.VSync};
+            vsync.RegisterValueChangedCallback(e=>NativeDisplaySettings.VSync=e.newValue);content.Add(vsync);
             var shadows=new Toggle("Тени"){name="settings-shadows",value=NativeDisplaySettings.Shadows};
             shadows.RegisterValueChangedCallback(e=>NativeDisplaySettings.Shadows=e.newValue);content.Add(shadows);
+            NativeGraphicsSettingsView.AddBasic(content);
             var health=new Toggle("Показывать здоровье постоянно"){name="settings-health",value=NativeUserSettings.AlwaysHealth};
             health.RegisterValueChangedCallback(e=>NativeUserSettings.AlwaysHealth=e.newValue);content.Add(health);
             var volume=new Slider("Общая громкость",0,1){name="settings-volume",value=NativeUserSettings.Volume,showInputField=false};

@@ -48,6 +48,7 @@ namespace Spacewars.Simulation
         }
         public bool Foundry;
         public bool AiTestMap;
+        public bool BasaltCrown;
         public string HumanName = "Игрок 1";
         public string AiName = "ИИ";
         public int HumanTeam = 1, AiTeam = 2;

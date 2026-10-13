@@ -24,7 +24,10 @@ namespace Spacewars.Simulation
         public readonly NavPoint Position;
         public readonly PlayableEntityKind Weapon;
         public readonly bool Building;
-        public PlayableSoundEvent(long id,long tick,PlayableSoundKind kind,NavPoint position,PlayableEntityKind weapon,bool building=false)
-        {Id=id;Tick=tick;Kind=kind;Position=position;Weapon=weapon;Building=building;}
+        // Permitted transient unit-death pose. Not an authority entity or checkpoint.
+        public readonly int UnitId;
+        public readonly double HullHeading;
+        public PlayableSoundEvent(long id,long tick,PlayableSoundKind kind,NavPoint position,PlayableEntityKind weapon,bool building=false,int unitId=0,double hullHeading=0)
+        {Id=id;Tick=tick;Kind=kind;Position=position;Weapon=weapon;Building=building;UnitId=unitId;HullHeading=hullHeading;}
     }
 }

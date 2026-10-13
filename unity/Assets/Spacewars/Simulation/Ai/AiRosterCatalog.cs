@@ -47,12 +47,15 @@ namespace Spacewars.Simulation.Ai
         }
         public AiRosterDescriptorData[] CopyData()=>descriptors.Select(Copy).ToArray();
         public AiRosterDescriptorData For(PlayableEntityKind kind)=>Copy(descriptors.Single(d=>d.kind==kind));
-        public static PlayableCommandKind Command(PlayableEntityKind kind)
-        {switch(kind){case PlayableEntityKind.Explorer:return PlayableCommandKind.QueueExplorer;case PlayableEntityKind.Tank:return PlayableCommandKind.QueueTank;case PlayableEntityKind.Shkval:return PlayableCommandKind.QueueShkval;default:throw new ArgumentException("Unknown kind.");}}
-        // The adapter is registered once per supported gameplay mechanic. Strategies use
-        // descriptors; they do not decode commands or duplicate gameplay terms.
-        public AiRosterDescriptorData Production(PlayableCommandKind command)=>descriptors
-            .Where(d=>string.IsNullOrWhiteSpace(d.exclusionReason)&&d.productionCommand==command).Select(Copy).SingleOrDefault();
+        public static PlayableCommandKind Command(PlayableEntityKind kind)=>PlayableUnitRules.ProductionCommand(kind);
+        public static bool IsProduction(PlayableCommandKind command)=>PlayableUnitRules.ProductionKind(command).HasValue;
+        // Decode authoritative command-kind terms first. Exclusions cannot alias another
+        // producer command or turn a non-production action into a unit order.
+        public AiRosterDescriptorData Production(PlayableCommandKind command)
+        {
+            var kind=PlayableUnitRules.ProductionKind(command);if(!kind.HasValue)return null;
+            var d=For(kind.Value);return string.IsNullOrWhiteSpace(d.exclusionReason)?d:null;
+        }
         public double CreditCost(PlayableEntityKind kind,PlayableProfile gameplay)
         {For(kind);return PlayableUnitRules.Cost(gameplay,kind);}
         public int PopulationCost(PlayableEntityKind kind,PlayableProfile gameplay)

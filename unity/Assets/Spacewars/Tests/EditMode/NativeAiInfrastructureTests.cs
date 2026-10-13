@@ -172,7 +172,9 @@ namespace Spacewars.Tests.EditMode
                 var sourceRebuild=new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.BuildAt,siteId:state.SiteId,slotId:state.SlotId,parentId:state.ParentId,buildingKind:state.SourceKind,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
                 Assert.Null(AiEconomyAdmission.Reject(o,c.Profile,sourceRebuild),"same-purpose rebuild is individually legal/affordable after demolition");
                 var competitor=new AiIntent("competing-source-rebuild","economy",sourceRebuild,o.Tick+100,TerritoryRules.Cost(c.Profile,state.SourceKind),0,new[]{"slot:"+state.SiteId+":"+state.SlotId});
-                var arbiter=new AiDecisionArbiter(AiProfile.Initial);Assert.IsEmpty(arbiter.Select(new[]{competitor},o.Tick,o.Credits,0,1,Ledger(a)));Assert.AreEqual("reserved claim conflict",arbiter.Rejections[competitor.Id]);
+                var arbiter=new AiDecisionArbiter(AiProfile.Initial);var diagnosticSelected=arbiter.Select(new[]{competitor},o.Tick,o.Credits,0,1,Ledger(a));
+                O5DecisionDiagnostics.Emit("conversion-boundary",a,Owner(a),o,c.Profile,new{Competitor=competitor,CompetitorSelected=diagnosticSelected,CompetitorRejections=arbiter.Rejections,Payment=payment});
+                Assert.IsEmpty(diagnosticSelected);Assert.AreEqual("reserved claim conflict",arbiter.Rejections[competitor.Id]);
                 var bytes=a.CaptureBytes();var b=PlayableAuthorityTick.RestoreBytes(bytes,c);CollectionAssert.AreEqual(bytes,b.CaptureBytes());
                 for(int i=0;i<120;i++){Step(a,host);Step(b,host);CollectionAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes());}
                 Assert.True(Checkpoint(a).Records.Any(r=>r.ReceiptIdentity.Id==payment.Receipt.Id&&r.Status==PlayableAiDeliveryStatus.Applied));

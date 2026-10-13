@@ -1,0 +1,373 @@
+{
+  "models": [
+    {
+      "name": "tank-1",
+      "materials": [
+        {
+          "name": "wreck-neutral",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-neutral-d23faeed.png"
+        },
+        {
+          "name": "wreck-structure",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.25,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-structure-389fbdf3.png"
+        },
+        {
+          "name": "wreck-team",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-team-d938cafb.png"
+        }
+      ]
+    },
+    {
+      "name": "tank-2",
+      "materials": [
+        {
+          "name": "wreck-neutral",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-neutral-d23faeed.png"
+        },
+        {
+          "name": "wreck-structure",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.25,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-structure-389fbdf3.png"
+        },
+        {
+          "name": "wreck-team",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-team-d938cafb.png"
+        }
+      ]
+    },
+    {
+      "name": "tank-3",
+      "materials": [
+        {
+          "name": "wreck-neutral",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-neutral-d23faeed.png"
+        },
+        {
+          "name": "wreck-structure",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.25,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-structure-389fbdf3.png"
+        },
+        {
+          "name": "wreck-team",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-team-d938cafb.png"
+        }
+      ]
+    },
+    {
+      "name": "explorer-1",
+      "materials": [
+        {
+          "name": "wreck-neutral",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-neutral-d23faeed.png"
+        },
+        {
+          "name": "wreck-structure",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.25,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-structure-389fbdf3.png"
+        },
+        {
+          "name": "wreck-team",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-team-d938cafb.png"
+        }
+      ]
+    },
+    {
+      "name": "explorer-2",
+      "materials": [
+        {
+          "name": "wreck-neutral",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-neutral-d23faeed.png"
+        },
+        {
+          "name": "wreck-structure",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.25,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-structure-389fbdf3.png"
+        },
+        {
+          "name": "wreck-team",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-team-d938cafb.png"
+        }
+      ]
+    },
+    {
+      "name": "explorer-3",
+      "materials": [
+        {
+          "name": "wreck-neutral",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-neutral-d23faeed.png"
+        },
+        {
+          "name": "wreck-structure",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.25,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-structure-389fbdf3.png"
+        },
+        {
+          "name": "wreck-team",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-team-d938cafb.png"
+        }
+      ]
+    },
+    {
+      "name": "shkval-1",
+      "materials": [
+        {
+          "name": "wreck-neutral",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-neutral-d23faeed.png"
+        },
+        {
+          "name": "wreck-structure",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.25,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-structure-389fbdf3.png"
+        },
+        {
+          "name": "wreck-team",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-team-d938cafb.png"
+        }
+      ]
+    },
+    {
+      "name": "shkval-2",
+      "materials": [
+        {
+          "name": "wreck-neutral",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-neutral-d23faeed.png"
+        },
+        {
+          "name": "wreck-structure",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.25,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-structure-389fbdf3.png"
+        },
+        {
+          "name": "wreck-team",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-team-d938cafb.png"
+        }
+      ]
+    },
+    {
+      "name": "shkval-3",
+      "materials": [
+        {
+          "name": "wreck-neutral",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-neutral-d23faeed.png"
+        },
+        {
+          "name": "wreck-structure",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.25,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-structure-389fbdf3.png"
+        },
+        {
+          "name": "wreck-team",
+          "baseColor": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "metallic": 0.47999998927116394,
+          "roughness": 0.8799999952316284,
+          "texture": "wreck-team-d938cafb.png"
+        }
+      ]
+    }
+  ]
+}

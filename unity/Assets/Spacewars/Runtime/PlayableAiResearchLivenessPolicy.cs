@@ -68,6 +68,15 @@ namespace Spacewars.Runtime
             if(chassis==null||!chassis.Available||Double.IsNaN(chassis.Cost)||Double.IsInfinity(chassis.Cost)||chassis.Cost<0||observation.Credits<chassis.Cost||tanks==0||tanks<profile.DefensiveReserveUnits||refineries<profile.MinimumRefineries||center==null)return null;pendingActionId=nextActionId++;pendingGeneration=observation.Generation;
             return new PlayableAiAction(pendingActionId,observation.OwnerId,observation.ProfileId,observation.ProfileRevision,observation.Generation,observation.SnapshotSequence,PlayableCommandKind.QueueResearch,new[]{center.Id},researchKind:PlayableResearchKind.TankChassis,seed:observation.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
         }
+        internal PlayableAiAction Admit(PlayableAiObservation o,PlayableAiAction candidate)
+        {
+            if(o.OwnerId!=ownerId)throw new ArgumentException("Foreign research observation.");
+            if(HasPendingObligation&&pendingGeneration!=o.Generation)Clear();
+            if(candidate==null||HasPendingObligation)return null;
+            if(candidate.Kind!=PlayableCommandKind.QueueResearch||candidate.PlayerId!=ownerId||candidate.Generation!=o.Generation)throw new ArgumentException("Foreign research candidate.");
+            pendingActionId=nextActionId++;pendingGeneration=o.Generation;
+            return new PlayableAiAction(pendingActionId,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,candidate.Kind,candidate.CopyEntityIds(),researchKind:candidate.ResearchKind,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+        }
         public void ObserveReceipt(PlayableAiTraceRecord record){if(record==null||!AiStateWire.CallbackGenerationMatches(record,pendingGeneration)||record.OwnerId!=ownerId||record.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity||!HasPendingObligation||record.ActionId!=pendingActionId)return;if(record.Status==PlayableAiDeliveryStatus.Applied||record.Status==PlayableAiDeliveryStatus.Rejected||record.Status==PlayableAiDeliveryStatus.Stale||record.Status==PlayableAiDeliveryStatus.Cancelled||record.Status==PlayableAiDeliveryStatus.Stopped||record.Status==PlayableAiDeliveryStatus.InvalidAction||record.Status==PlayableAiDeliveryStatus.InvalidOwner)Clear();}
         private void Clear(){pendingActionId=0;pendingGeneration=0;}
     }

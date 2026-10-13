@@ -26,6 +26,7 @@ namespace Spacewars.Presentation
             Color ground=new Color(.20f,.25f,.25f);Color.RGBToHSV(ground,out float h,out float s,out float v);
             ground=Color.HSVToRGB(h,s*(float)p.MinimapTerrainSaturation,v*(float)p.MinimapTerrainBrightness);
             var walls=PlayableMap.SolidObstacles(p);
+            var basaltArt=p.AuthoredMap is BasaltCrownMap?BasaltCrownArtProfile.Load():null;
             for(int y=0;y<size;y++)for(int x=0;x<size;x++)
             {
                 double wx=((x+.5)/size*2-1)*p.ArenaHalfExtent,wz=((y+.5)/size*2-1)*p.ArenaHalfExtent;
@@ -33,6 +34,13 @@ namespace Spacewars.Presentation
                 bool edge=false;
                 if(obstacle)foreach(var wall in walls){double band=p.MinimapTerrainStroke*(p.ArenaHalfExtent*2/size);if(wall.Contains(new NavPoint(wx,wz))&&wall.BoundaryDistanceSquared(new NavPoint(wx,wz))<band*band)edge=true;}
                 if(p.AuthoredMap is FoundryMap foundry){var point=new NavPoint(wx,wz);bool road=System.Linq.Enumerable.Any(foundry.Roads,r=>r.Contains(point));terrain[y*size+x]=System.Linq.Enumerable.Any(foundry.Lava,l=>l.Contains(point))?PlayableWorld.FoundryLava:obstacle?PlayableWorld.FoundryRock:road?PlayableWorld.FoundryRoad:PlayableWorld.FoundryGround;}
+                else if(p.AuthoredMap is BasaltCrownMap basalt){
+                    var q=new NavPoint(wx,wz);var patch=basalt.Materials.FirstOrDefault(m=>m.Bounds.Contains(q));
+                    var color=basaltArt.Palette(patch==null?0:BasaltCrownArtProfile.Role(patch.Material));
+                    Color.RGBToHSV(color,out float bh,out float bs,out float bv);
+                    color=Color.HSVToRGB(bh,bs*(float)p.MinimapTerrainSaturation,bv*(float)p.MinimapTerrainBrightness);
+                    terrain[y*size+x]=basalt.SupportAt(q)==null?Color.clear:obstacle?color*(float)(1-p.MinimapTerrainTierContrast):color;
+                }
                 else if(p.AuthoredMap!=null){var support=p.AuthoredMap.SupportAt(new NavPoint(wx,wz));terrain[y*size+x]=obstacle?PlayableWorld.RockColor:support==null?PlayableWorld.WaterColor:support.IsBridge||support.Id.StartsWith("platform-")?PlayableWorld.BridgeColor:PlayableWorld.BankColor;}
                 else terrain[y*size+x]=obstacle?ground+Color.white*(float)(edge?-p.MinimapTerrainTierContrast:p.MinimapTerrainTierContrast):ground;
             }

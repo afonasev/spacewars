@@ -49,6 +49,13 @@ namespace Spacewars.Runtime
         {foreach(var a in Claims(registry).OrderBy(a=>a.Id).Skip(budget).ToArray())registry.Disband(a.Id);}
         private static void Binding(PlayableAiObservation o,AiKnowledgeState k,AiArmyRegistry r)
         {if(o.OwnerId!=k.OwnerId||o.Generation!=k.Generation||o.OwnerId!=r.OwnerId||o.Generation!=r.Generation||o.Tick!=k.ObservationTick)throw new ArgumentException("Scout observation binding");}
+        public bool UsefulProductionDemand(PlayableAiObservation o,AiKnowledgeState knowledge,AiProfile ai,int budget)
+        {
+            if(budget<=0)return false;
+            long revisit=AiProfile.SecondsToTicks(ai.Value("scouting.revisitSeconds"),30);
+            return o.PublicScoutObjectives.Any(t=>t.Reachable&&(knowledge.Areas.All(a=>a.AreaId!=t.SiteId)||
+                knowledge.Areas.Any(a=>a.AreaId==t.SiteId&&o.Tick-a.ActuallyCoveredTick>=revisit)));
+        }
         public PlayableAiAction Plan(PlayableAiObservation o,AiKnowledgeState knowledge,AiArmyRegistry registry,PlayableProfile gameplay,AiProfile ai,int budget)
         {
             Binding(o,knowledge,registry);var claims=Claims(registry).ToArray();

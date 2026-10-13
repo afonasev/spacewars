@@ -1,0 +1,19 @@
+{
+  "id": "industrial-warm-cool-v1",
+  "revision": 3,
+  "sunHue": 0.09,
+  "sunSaturation": 0.16,
+  "sunIntensity": 1.35,
+  "sunElevation": 42,
+  "sunAzimuth": -30,
+  "ambientHue": 0.6,
+  "ambientSaturation": 0.18,
+  "ambientValue": 0.52,
+  "shadowStrength": 0.65,
+  "steelHighlight": 0.18,
+  "steelExponent": 24,
+  "concreteHighlight": 0.03,
+  "concreteExponent": 12,
+  "shadowDistance": 90,
+  "shadowCoveragePadding": 0.3
+}

@@ -11,7 +11,9 @@
     "Spacewars.Runtime",
     "Spacewars.Simulation",
     "Spacewars.BalanceLab",
-    "Unity.Newtonsoft.Json"
+    "Unity.Newtonsoft.Json",
+    "Unity.RenderPipelines.Universal.Runtime",
+    "Unity.RenderPipelines.Core.Runtime"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

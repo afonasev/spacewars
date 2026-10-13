@@ -1,0 +1,479 @@
+{
+  "version": 1,
+  "seed": 90626,
+  "units": "metres",
+  "up": "+Y",
+  "forward": "+Z",
+  "pivot": "ground-center",
+  "collision": "not-integrated; simulation-owned future footprint",
+  "models": [
+    {
+      "key": "wreck.tank.1",
+      "kind": "tank",
+      "variant": 1,
+      "label": "T1",
+      "lod0": {
+        "file": "tank-1.glb",
+        "bounds": {
+          "width": 2.9168,
+          "height": 0.8142,
+          "depth": 2.637
+        },
+        "groundMin": 0.0,
+        "triangles": 15624,
+        "vertices": 8468,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1645236,
+        "sha256": "8834a0ab72ac36884dd34d40f08105ba05bf454c779da557e325cdb1c81062e6"
+      },
+      "lod1": {
+        "file": "tank-1-lod1.glb",
+        "bounds": {
+          "width": 2.9168,
+          "height": 0.8364,
+          "depth": 2.632
+        },
+        "groundMin": 0.0,
+        "triangles": 5922,
+        "vertices": 3623,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 845868,
+        "sha256": "0f7c13702686abc2bd1b20b244fbd198f0d9559cbcd4d4c4d53abb278514de28"
+      }
+    },
+    {
+      "key": "wreck.tank.2",
+      "kind": "tank",
+      "variant": 2,
+      "label": "T2",
+      "lod0": {
+        "file": "tank-2.glb",
+        "bounds": {
+          "width": 3.0283,
+          "height": 0.8599,
+          "depth": 2.637
+        },
+        "groundMin": 0.0,
+        "triangles": 15580,
+        "vertices": 8444,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1641132,
+        "sha256": "9e0fd0ea028cb758802a91e6e260c08c3d5d81bf8775dd0a9518d4a232b83a83"
+      },
+      "lod1": {
+        "file": "tank-2-lod1.glb",
+        "bounds": {
+          "width": 3.0284,
+          "height": 0.8579,
+          "depth": 2.6806
+        },
+        "groundMin": 0.0,
+        "triangles": 5904,
+        "vertices": 3613,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 844960,
+        "sha256": "368fd5779215626a4d55320714b8f95e265afdb1775ccb5089817d81052edd72"
+      }
+    },
+    {
+      "key": "wreck.tank.3",
+      "kind": "tank",
+      "variant": 3,
+      "label": "T3",
+      "lod0": {
+        "file": "tank-3.glb",
+        "bounds": {
+          "width": 2.917,
+          "height": 0.8821,
+          "depth": 2.637
+        },
+        "groundMin": 0.0,
+        "triangles": 14364,
+        "vertices": 7792,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1531760,
+        "sha256": "f53494a455d381a6c43166489e730400deac2375ad9dd5fa4c85432f8cbcafe7"
+      },
+      "lod1": {
+        "file": "tank-3-lod1.glb",
+        "bounds": {
+          "width": 2.917,
+          "height": 0.884,
+          "depth": 2.7605
+        },
+        "groundMin": 0.0,
+        "triangles": 5525,
+        "vertices": 3378,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 808564,
+        "sha256": "2adb5c7c2827ce007f44af22d623d25e1aea1edcb390d488691d7dd5975f7cd7"
+      }
+    },
+    {
+      "key": "wreck.explorer.1",
+      "kind": "explorer",
+      "variant": 1,
+      "label": "E1",
+      "lod0": {
+        "file": "explorer-1.glb",
+        "bounds": {
+          "width": 1.8072,
+          "height": 0.9745,
+          "depth": 2.1546
+        },
+        "groundMin": 0.0,
+        "triangles": 8964,
+        "vertices": 4828,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1111188,
+        "sha256": "81fc3dbebe6d1d6b7b41364b4f52679bf41d2134d2fb048a16882d563e91ddf9"
+      },
+      "lod1": {
+        "file": "explorer-1-lod1.glb",
+        "bounds": {
+          "width": 1.8025,
+          "height": 0.9757,
+          "depth": 2.1537
+        },
+        "groundMin": 0.0,
+        "triangles": 3404,
+        "vertices": 2048,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 602528,
+        "sha256": "090b79378cceb8a0c5035da2bd84a3685f7e0f61281205ac4ebbffad897d26a6"
+      }
+    },
+    {
+      "key": "wreck.explorer.2",
+      "kind": "explorer",
+      "variant": 2,
+      "label": "E2",
+      "lod0": {
+        "file": "explorer-2.glb",
+        "bounds": {
+          "width": 1.8898,
+          "height": 0.8584,
+          "depth": 2.1546
+        },
+        "groundMin": 0.0,
+        "triangles": 8920,
+        "vertices": 4804,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1107084,
+        "sha256": "602ce0d3c441898d485a5391335f4f2d61d30d00f69236a31836d54fc9cde9c1"
+      },
+      "lod1": {
+        "file": "explorer-2-lod1.glb",
+        "bounds": {
+          "width": 1.8856,
+          "height": 0.8602,
+          "depth": 2.1537
+        },
+        "groundMin": 0.0,
+        "triangles": 3388,
+        "vertices": 2038,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 600668,
+        "sha256": "fd9137cdf5c496472fe1070cedc64204a25532ecdb8fadd57a98c5c407fd0d3e"
+      }
+    },
+    {
+      "key": "wreck.explorer.3",
+      "kind": "explorer",
+      "variant": 3,
+      "label": "E3",
+      "lod0": {
+        "file": "explorer-3.glb",
+        "bounds": {
+          "width": 1.7988,
+          "height": 0.8756,
+          "depth": 2.1546
+        },
+        "groundMin": 0.0,
+        "triangles": 8612,
+        "vertices": 4636,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1078356,
+        "sha256": "4d6fc92ea6f16aba5c3c9cf4d7ae89fba5df7a4d475f84d4a9e052b7b36f927f"
+      },
+      "lod1": {
+        "file": "explorer-3-lod1.glb",
+        "bounds": {
+          "width": 1.7945,
+          "height": 0.8773,
+          "depth": 2.1543
+        },
+        "groundMin": 0.0,
+        "triangles": 3270,
+        "vertices": 1965,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 589720,
+        "sha256": "d9e9245d044efca59a06948961c4f491d826ff0711727abf50cc6e8d6145d257"
+      }
+    },
+    {
+      "key": "wreck.shkval.1",
+      "kind": "shkval",
+      "variant": 1,
+      "label": "S1",
+      "lod0": {
+        "file": "shkval-1.glb",
+        "bounds": {
+          "width": 1.8445,
+          "height": 1.0238,
+          "depth": 3.3742
+        },
+        "groundMin": 0.0,
+        "triangles": 14212,
+        "vertices": 7744,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1559308,
+        "sha256": "e996e8011bd4ab366b9d256d115fd555f6ff126844d60da07aef4ab0ebcce874"
+      },
+      "lod1": {
+        "file": "shkval-1-lod1.glb",
+        "bounds": {
+          "width": 1.8444,
+          "height": 1.0244,
+          "depth": 3.3728
+        },
+        "groundMin": 0.0,
+        "triangles": 5398,
+        "vertices": 3337,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 796556,
+        "sha256": "10248d48c35dfde01771fdbb371ef16db3e4a640541330b5118ecb899d497055"
+      }
+    },
+    {
+      "key": "wreck.shkval.2",
+      "kind": "shkval",
+      "variant": 2,
+      "label": "S2",
+      "lod0": {
+        "file": "shkval-2.glb",
+        "bounds": {
+          "width": 1.9401,
+          "height": 1.0518,
+          "depth": 3.4419
+        },
+        "groundMin": 0.0,
+        "triangles": 14168,
+        "vertices": 7720,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1555204,
+        "sha256": "ad8aa2844dbc47bc2b21688e75159726f7ecb20090c93802dbf5e214f564d423"
+      },
+      "lod1": {
+        "file": "shkval-2-lod1.glb",
+        "bounds": {
+          "width": 1.9401,
+          "height": 1.0513,
+          "depth": 3.4408
+        },
+        "groundMin": 0.0,
+        "triangles": 5382,
+        "vertices": 3327,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 795824,
+        "sha256": "1d22230f3527d8fb3651a62ab1a2214924cd74d7b3998c1109949d5d4f17f6f3"
+      }
+    },
+    {
+      "key": "wreck.shkval.3",
+      "kind": "shkval",
+      "variant": 3,
+      "label": "S3",
+      "lod0": {
+        "file": "shkval-3.glb",
+        "bounds": {
+          "width": 1.8632,
+          "height": 0.9568,
+          "depth": 3.4113
+        },
+        "groundMin": 0.0,
+        "triangles": 13316,
+        "vertices": 7264,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1482888,
+        "sha256": "4809442244724b1a61fac776240c8e8057f8bde50ffaa061fe90ec22835f89eb"
+      },
+      "lod1": {
+        "file": "shkval-3-lod1.glb",
+        "bounds": {
+          "width": 1.8632,
+          "height": 0.9582,
+          "depth": 3.4102
+        },
+        "groundMin": 0.0,
+        "triangles": 5056,
+        "vertices": 3134,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "nodes": [
+          "modelRoot"
+        ],
+        "uvCoverage": 1,
+        "bytes": 764504,
+        "sha256": "cb9eba3f6fa1c5fb8c2bd712612e05d11205128665ad22f496c3f18d58d08718"
+      }
+    }
+  ]
+}

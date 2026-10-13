@@ -127,14 +127,18 @@ namespace Spacewars.Presentation
         }
         private void CreateWorld()
         {
-            RenderSettings.ambientLight=new Color(.63f,.69f,.73f);
-            if(localCoordinator==null){var sun=new GameObject("Sun").AddComponent<Light>();sun.transform.SetParent(transform);sun.type=LightType.Directional;sun.intensity=1.4f;sun.transform.rotation=Quaternion.Euler(48,-30,0);NativeDisplaySettings.ConfigureSun(sun);}
+            if(localCoordinator==null){var sun=new GameObject("Sun").AddComponent<Light>();sun.transform.SetParent(transform);IndustrialLightingProfile.Load(profile.AuthoredMap?.Id).ApplyScene(sun);}
             cameraView=new GameObject("Command camera").AddComponent<Camera>();cameraView.transform.SetParent(transform);cameraView.orthographic=true;cameraView.orthographicSize=(float)profile.CameraOrthoSize;
             cameraView.transform.position=new Vector3((float)profile.CameraOffsetX,(float)profile.CameraHeight,(float)profile.CameraOffsetZ);cameraView.transform.LookAt(Vector3.zero);
             if(profile.AuthoredMap!=null&&matchSetup?.Spectator!=true){var start=profile.Headquarters(LocalOwner);cameraView.transform.position+=new Vector3((float)start.X,0,(float)start.Z);}
             RememberKeyboardCamera();
             cameraView.nearClipPlane=.1f;cameraView.farClipPlane=300;cameraView.backgroundColor=new Color(.045f,.075f,.10f);cameraView.clearFlags=CameraClearFlags.SolidColor;
             world=new PlayableWorld(transform,profile){OwnerPaint=LobbyPaint};
+            cameraView.gameObject.AddComponent<ContactOcclusionCamera>().Configure(ContactOcclusionProfile.Load());
+            cameraView.gameObject.AddComponent<ActorGlowCamera>().Configure(ActorMaterialProfile.Load());
+            cameraView.gameObject.AddComponent<CameraAntialiasing>().Configure(CameraAntialiasingProfile.Load());
+            cameraView.gameObject.AddComponent<VisibleShadowCoverage>().Configure(transform,IndustrialLightingProfile.Load(profile.AuthoredMap?.Id));
+            cameraView.gameObject.AddComponent<NativeGraphicsBinding>().Configure(world,profile.AuthoredMap?.Id,transform.GetComponentsInChildren<Light>().FirstOrDefault(l=>l.type==LightType.Directional)??FindObjectsByType<Light>(FindObjectsSortMode.None).FirstOrDefault(l=>l.type==LightType.Directional));
             // Authored map uses the same profile coordinates as the domain.
             if(profile.AuthoredMap==null)foreach(var obstacle in PlayableMap.SolidObstacles(profile))world.Obstacle(obstacle);
 
@@ -356,6 +360,7 @@ namespace Spacewars.Presentation
             foreach(var e in view.Entities){alive.Add(e.Id);if(!world.Actors.TryGetValue(e.Id,out var a))a=world.Tank(e.Id,e.Owner==LocalOwner,e.Kind);world.UpdateResearchModel(a,e);a.Root.position=world.Point(e.Position);var slope=profile.AuthoredMap?.SurfaceGradient(e.Position)??default(NavPoint);a.Root.rotation=Quaternion.FromToRotation(Vector3.up,new Vector3((float)-slope.X,1,(float)-slope.Z).normalized);a.Hull.localRotation=Quaternion.Euler(0,90-(float)e.HullHeading*Mathf.Rad2Deg,0);a.Turret.localRotation=Quaternion.Euler(0,(float)(e.HullHeading-e.TurretHeading)*Mathf.Rad2Deg,0);a.Selection.SetActive(selection.Contains(e.Id));if(matchSetup!=null)PlayableWorld.PaintOwner(a,LobbyPaint(e.Owner));PlayableWorld.UpdateHealth(a,cameraView,(float)e.Health/PlayableUnitRules.Health(profile,e.Kind),selection.Contains(e.Id));}
             foreach(var b in view.Buildings){alive.Add(b.Id);if(b.Phase==ConstructionPhase.Pending)continue;if(!world.Actors.TryGetValue(b.Id,out var a))a=world.Building(b.Id,b.Kind.ToString(),b.Owner==LocalOwner,b.RefineryUpgraded);world.UpdateRefineryModel(a,b,view.Tick);a.Root.position=world.Point(b.Position);a.Root.rotation=Quaternion.Euler(0,-(float)b.Heading*Mathf.Rad2Deg,0);world.FaceBuilding(a,cameraView);a.Root.localScale=new Vector3(1,Mathf.Lerp(.2f,1,(float)b.Progress),1);a.Selection.SetActive(selection.Contains(b.Id));if(matchSetup!=null)PlayableWorld.PaintOwner(a,LobbyPaint(b.Owner));int max=TerritoryRules.Health(profile,b.Kind);PlayableWorld.UpdateHealth(a,cameraView,(float)b.Health/max);}
             foreach(var id in world.Actors.Keys.ToArray())if(!alive.Contains(id)){world.Remove(id);selection.Remove(id);}
+            world.RenderUnitWrecks(view);
             world.RenderRallyFlags(view,selection,matchSetup?.Spectator==true);
             RenderProjectiles();
         }

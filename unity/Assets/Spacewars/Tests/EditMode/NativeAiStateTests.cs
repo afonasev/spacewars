@@ -89,6 +89,7 @@ namespace Spacewars.Tests.EditMode
             Assert.Throws<ArgumentException>(()=>PlayableAuthorityTick.RestoreBytes(bytes,c,ChangedAi()));
             var state=PlayableWorldState.Decode(bytes);state.Version--;Assert.Throws<ArgumentException>(()=>PlayableAuthorityTick.RestoreBytes(state.Encode(),c));
             state=PlayableWorldState.Decode(bytes);state.AiAuthority[4]=99;Assert.Throws<ArgumentException>(()=>PlayableAuthorityTick.RestoreBytes(state.Encode(),c));
+            state=PlayableWorldState.Decode(bytes);Array.Copy(BitConverter.GetBytes(12),0,state.AiAuthority,0,4);Assert.Throws<ArgumentException>(()=>PlayableAuthorityTick.RestoreBytes(state.Encode(),c));
             state=PlayableWorldState.Decode(bytes);state.AiAuthority=Array.Empty<byte>();Assert.Throws<ArgumentException>(()=>PlayableAuthorityTick.RestoreBytes(state.Encode(),c));
             Assert.Throws<ArgumentException>(()=>OfflineParticipantAuthority.Restore(bytes,c));
             CollectionAssert.AreEqual(bytes,t.CaptureBytes());

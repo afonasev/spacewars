@@ -1,0 +1,103 @@
+{
+  "generator": "image_gen.imagegen",
+  "family_policy": "base + two independent palette and scale siblings",
+  "source_revision": "7d0acb8d078451eaf0ed166a6f8b6d748925abf8",
+  "assets": [
+    {
+      "role": "Dark",
+      "prompt": "Generate ONE new square seamless top-down RTS ground albedo tile using the attached web-game material as a style, scale and palette reference. Material: dark charcoal basalt with restrained reddish-brown iron oxide in fine cracks, flattened worn rock plates; dark neutral charcoal dominates, muted warm rusty undertones. High quality fine granular and chipped-rock detail, crisp but moderate contrast, suitable for walkable natural ground seen from an isometric strategy camera. Constant physical scale, rock features similar in size to the reference. Highest available native resolution. Perfectly tileable edges on both axes. Flat diffuse lighting, NO baked cast shadows or specular highlights; no perspective, directional lighting, large heroic stones, deep crevices, lava, vegetation, lettering, collage, panels, labels or borders. Preserve the subdued warm volcanic red-brown level direction rather than saturated red paint. Full-frame tile only.",
+      "reference": "web-dark.png",
+      "file": "Dark.png",
+      "width": 1254,
+      "height": 1254,
+      "linear_mean_luminance": 0.037111336944729,
+      "sha256": "6fc92ee84019a64e597014cbdb8e03a3cf814153f70d3e3c0980232dee77155c"
+    },
+    {
+      "role": "Stone",
+      "prompt": "Generate ONE new square seamless top-down RTS ground albedo tile using the attached web-game material as a style, scale and palette reference. Material: medium warm-grey weathered basalt/slate with muted brown iron-mineral dust and tiny rust seams, fine chipped stone plates; grey-brown stone dominates, no cold blue cast. High quality fine granular and chipped-rock detail, crisp but moderate contrast, suitable for walkable natural ground seen from an isometric strategy camera. Constant physical scale, rock features similar in size to the reference. Highest available native resolution. Perfectly tileable edges on both axes. Flat diffuse lighting, NO baked cast shadows or specular highlights; no perspective, directional lighting, large heroic stones, deep crevices, lava, vegetation, lettering, collage, panels, labels or borders. Preserve the subdued warm volcanic red-brown level direction rather than saturated red paint. Full-frame tile only.",
+      "reference": "web-mid.png",
+      "file": "Stone.png",
+      "width": 1254,
+      "height": 1254,
+      "linear_mean_luminance": 0.11214852583404958,
+      "sha256": "6ca0d59077d59924f7221e634b85f5a2ec974e95945adebcdeddb6c339dae4be"
+    },
+    {
+      "role": "Sand",
+      "prompt": "Generate ONE new square seamless top-down RTS ground albedo tile using the attached web-game material as a style, scale and palette reference. Material: pale warm beige-grey mineral stone and fine crushed rock, muted dusty ochre/sandy undertones, fine gravel integrated with flattened rock; light neutral beige dominates. High quality fine granular and chipped-rock detail, crisp but moderate contrast, suitable for walkable natural ground seen from an isometric strategy camera. Constant physical scale, rock features similar in size to the reference. Highest available native resolution. Perfectly tileable edges on both axes. Flat diffuse lighting, NO baked cast shadows or specular highlights; no perspective, directional lighting, large heroic stones, deep crevices, lava, vegetation, lettering, collage, panels, labels or borders. Preserve the subdued warm volcanic red-brown level direction rather than saturated red paint. Full-frame tile only.",
+      "reference": "web-light.png",
+      "file": "Sand.png",
+      "width": 1254,
+      "height": 1254,
+      "linear_mean_luminance": 0.4502608182456761,
+      "sha256": "4973977c43176cfceccf3585bd7a006555eb61b7037320f5b441bca5210a28c3"
+    },
+    {
+      "role": "Dark",
+      "suffix": "b",
+      "prompt": "Create ONE independent seamless sibling albedo tile for the attached RTS volcanic terrain material. Keep its EXACT overall warm palette, average brightness, rock/gravel feature scale, flat top-down diffuse lighting, and material identity. Change to less angular, slightly more weathered irregular plates with subtly scattered finer mineral debris. This is a different natural stone pattern, not a rotated copy. Fine crisp high-quality texture, warm basalt/rust/sand mood. Seamless both axes, full-frame square, highest native resolution. No cast shadows, perspective, directional highlights, prominent stripes, vegetation, text, border, panels or collage. Similar moderate contrast; no exaggerated crevices or saturated color. Output only one tile.",
+      "reference": "Dark.png",
+      "file": "Dark-b.png",
+      "width": 1254,
+      "height": 1254,
+      "linear_mean_luminance": 0.04651347269367335,
+      "sha256": "4d4a718e17f514ffdf9aa2e588f02da08c4f53e0fbd9134f0d2a9073a92cf284"
+    },
+    {
+      "role": "Dark",
+      "suffix": "c",
+      "prompt": "Create ONE independent seamless sibling albedo tile for the attached RTS volcanic terrain material. Keep its EXACT overall warm palette, average brightness, rock/gravel feature scale, flat top-down diffuse lighting, and material identity. Change the layout to smaller overlapping chipped plates and restrained broken patches with fine mineral dust. This is a different natural stone pattern, not a rotated copy. Fine crisp high-quality texture, warm basalt/rust/sand mood. Seamless both axes, full-frame square, highest native resolution. No cast shadows, perspective, directional highlights, prominent stripes, vegetation, text, border, panels or collage. Similar moderate contrast; no exaggerated crevices or saturated color. Output only one tile.",
+      "reference": "Dark.png",
+      "file": "Dark-c.png",
+      "width": 1254,
+      "height": 1254,
+      "linear_mean_luminance": 0.0442369801207424,
+      "sha256": "5f5869a482cd0f63396fc2b9dd80b2da61e70ce795e4c6d4c679330d4f9cb7f5"
+    },
+    {
+      "role": "Stone",
+      "suffix": "b",
+      "prompt": "Create ONE independent seamless sibling albedo tile for the attached RTS volcanic terrain material. Keep its EXACT overall warm palette, average brightness, rock/gravel feature scale, flat top-down diffuse lighting, and material identity. Change to less angular, slightly more weathered irregular plates with subtly scattered finer mineral debris. This is a different natural stone pattern, not a rotated copy. Fine crisp high-quality texture, warm basalt/rust/sand mood. Seamless both axes, full-frame square, highest native resolution. No cast shadows, perspective, directional highlights, prominent stripes, vegetation, text, border, panels or collage. Similar moderate contrast; no exaggerated crevices or saturated color. Output only one tile.",
+      "reference": "Stone.png",
+      "file": "Stone-b.png",
+      "width": 1254,
+      "height": 1254,
+      "linear_mean_luminance": 0.11002635751185573,
+      "sha256": "fa1a4c0564faf5334e3f246afe1d1e52b2412e3f4af433c55326ef58ac88e180"
+    },
+    {
+      "role": "Stone",
+      "suffix": "c",
+      "prompt": "Create ONE independent seamless sibling albedo tile for the attached RTS volcanic terrain material. Keep its EXACT overall warm palette, average brightness, rock/gravel feature scale, flat top-down diffuse lighting, and material identity. Change the layout to smaller overlapping chipped plates and restrained broken patches with fine mineral dust. This is a different natural stone pattern, not a rotated copy. Fine crisp high-quality texture, warm basalt/rust/sand mood. Seamless both axes, full-frame square, highest native resolution. No cast shadows, perspective, directional highlights, prominent stripes, vegetation, text, border, panels or collage. Similar moderate contrast; no exaggerated crevices or saturated color. Output only one tile.",
+      "reference": "Stone.png",
+      "file": "Stone-c.png",
+      "width": 1254,
+      "height": 1254,
+      "linear_mean_luminance": 0.12016214633443538,
+      "sha256": "de705b722055461537448bce194b4ab1becb534e2622b622e2b69fe92742f0b5"
+    },
+    {
+      "role": "Sand",
+      "suffix": "b",
+      "prompt": "Create ONE independent seamless sibling albedo tile for the attached RTS volcanic terrain material. Keep its EXACT overall warm palette, average brightness, rock/gravel feature scale, flat top-down diffuse lighting, and material identity. Change to less angular, slightly more weathered irregular plates with subtly scattered finer mineral debris. This is a different natural stone pattern, not a rotated copy. Fine crisp high-quality texture, warm basalt/rust/sand mood. Seamless both axes, full-frame square, highest native resolution. No cast shadows, perspective, directional highlights, prominent stripes, vegetation, text, border, panels or collage. Similar moderate contrast; no exaggerated crevices or saturated color. Output only one tile.",
+      "reference": "Sand.png",
+      "file": "Sand-b.png",
+      "width": 1254,
+      "height": 1254,
+      "linear_mean_luminance": 0.42065289630593533,
+      "sha256": "3418e324f31b230b8488be670e1a0eda683d4bc11ad73515dddfbbc7d484e493"
+    },
+    {
+      "role": "Sand",
+      "suffix": "c",
+      "prompt": "Create ONE independent seamless sibling albedo tile for the attached RTS volcanic terrain material. Keep its EXACT overall warm palette, average brightness, rock/gravel feature scale, flat top-down diffuse lighting, and material identity. Change the layout to smaller overlapping chipped plates and restrained broken patches with fine mineral dust. This is a different natural stone pattern, not a rotated copy. Fine crisp high-quality texture, warm basalt/rust/sand mood. Seamless both axes, full-frame square, highest native resolution. No cast shadows, perspective, directional highlights, prominent stripes, vegetation, text, border, panels or collage. Similar moderate contrast; no exaggerated crevices or saturated color. Output only one tile.",
+      "reference": "Sand.png",
+      "file": "Sand-c.png",
+      "width": 1254,
+      "height": 1254,
+      "linear_mean_luminance": 0.43268552839833196,
+      "sha256": "59792a8f3dfd6244759511acb5dff9fece72bf4b5fcdd0a341ef9fc4a64fd53f"
+    }
+  ]
+}

@@ -14,32 +14,41 @@ namespace Spacewars.Presentation
             surfaceMaterials=new ThreeCrossingsMaterials(ThreeCrossingsSurfaceProfile.Load(),map,material,profile);
             foreach(var support in map.Supports)
             {
-                double depth=support.IsBridge?map.DeckThickness:map.WaterDepth;
+                double depth=support.IsBridge?map.DeckThickness*.18:map.WaterDepth;
                 MapPrism(support.Id,support.Bounds,-depth,support.Height,support.IsBridge||support.Id.StartsWith("platform-")?BridgeColor:BankColor,support.HeightAt,support.IsBridge?3:support.Id.StartsWith("platform-")?2:1);
                 if(support.IsBridge)
                 {
                     MapPrism("River below bridge",support.Bounds,-map.WaterDepth-map.DeckThickness,-map.WaterDepth,WaterColor,null,5);
-                    // Canonical bridge silhouette is presentation-only, outside the complete support corridor.
-                    var b=support.Bounds;
                     foreach(int side in new[]{-1,1})
                     {
-                        double edge=side<0?b.MinZ:b.MaxZ,z=edge+side*map.RailThickness/2;
-                        MapBox("Bridge rail",new NavObstacle(b.MinX+map.PostWidth,z-map.RailThickness/2,b.MaxX-map.PostWidth,z+map.RailThickness/2),map.RailHeight/2,map.RailHeight,RockColor,3);
-                        foreach(double x in new[]{b.MinX+map.PostWidth/2,b.MaxX-map.PostWidth/2})
-                        {z=edge+side*map.PostWidth/2;MapBox("Bridge end post",new NavObstacle(x-map.PostWidth/2,z-map.PostWidth/2,x+map.PostWidth/2,z+map.PostWidth/2),map.PostHeight/2,map.PostHeight,BridgeColor,2);}
+                    var steel=CorporateOutpostModules.BridgeSteelwork(support,map,side,surfaceMaterials.Profile);terrainMeshes.Add(steel);
+                    var railing=new GameObject("Bridge metal lattice");railing.transform.SetParent(root,false);
+                    railing.AddComponent<MeshFilter>().sharedMesh=steel;var renderer=railing.AddComponent<MeshRenderer>();renderer.sharedMaterial=material;
+                    var block=new MaterialPropertyBlock();block.SetFloat("_SurfaceRole",3);block.SetFloat("_Dressing",4);block.SetColor("_BaseColor",Color.white);renderer.SetPropertyBlock(block);
                     }
                 }
             }
             foreach(var water in map.Water)MapPrism("River — no support",water,-map.WaterDepth-map.DeckThickness,-map.WaterDepth,WaterColor,null,5);
             foreach(var rock in map.Solids)MapPrism("Solid rock / platform edge",rock,rock.Bottom,rock.Top,double.IsNaN(rock.Top)?RockColor:rock.Top<map.WaterDepth?BridgeColor:rock.Bottom>0?Color.Lerp(RockColor,BridgeColor,.2f):RockColor,null,rock.Top<map.WaterDepth?2:4);
             var details=ThreeCrossingsDetails.Plan(map,profile,surfaceMaterials);
-            surfaceMaterials.BuildWeathering(map,details,material);
-            foreach(bool stones in new[]{true,false})
+            var serviceMesh=ServiceEquipmentKit.Build();terrainMeshes.Add(serviceMesh);
+            var servicePlacements=ThreeCrossingsServiceScenery.Plan(map,profile,surfaceMaterials,details.FindAll(p=>p.Kind!="Boulder"),serviceMesh.bounds);
+            details=ThreeCrossingsServiceScenery.ReserveServicePockets(details,servicePlacements,serviceMesh.bounds,profile,surfaceMaterials);
+            foreach(var placement in servicePlacements)
             {
-                var mesh=ThreeCrossingsDetails.Build(details,surfaceMaterials.Art,stones);terrainMeshes.Add(mesh);
-                var obj=new GameObject(stones?"Detail — geological debris":"Detail — service infrastructure");obj.transform.SetParent(root,false);
+                var obj=new GameObject("Detail — parked service equipment");obj.transform.SetParent(root,false);obj.transform.localPosition=placement.Position;obj.transform.localRotation=Quaternion.Euler(0,placement.Rotation,0);obj.transform.localScale=Vector3.one*placement.Scale;
+                obj.AddComponent<MeshFilter>().sharedMesh=serviceMesh;var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=material;
+                var block=new MaterialPropertyBlock();block.SetFloat("_SurfaceRole",3);block.SetFloat("_Dressing",2);block.SetColor("_BaseColor",Color.white);renderer.SetPropertyBlock(block);
+            }
+            surfaceMaterials.PaintHangarAccesses(map,material);
+            surfaceMaterials.BuildWeathering(map,details,material);
+            foreach(int group in new[]{0,1,2,3,4})
+            {
+                bool stones=group==0;
+                var mesh=ThreeCrossingsDetails.Build(details,surfaceMaterials.Art,stones,group==2,surfaceMaterials.Profile.tractorScale,group==3,surfaceMaterials.Profile.industrialScale,group==4,surfaceMaterials.Profile.mineUtilityScale);terrainMeshes.Add(mesh);
+                var obj=new GameObject(stones?"Detail — geological debris":group==2?"Detail — heavy tractor wrecks":group==3?"Detail — corporate extraction scenery":group==4?"Detail — perimeter building compounds":"Detail — service infrastructure");obj.transform.SetParent(root,false);
                 obj.AddComponent<MeshFilter>().sharedMesh=mesh;obj.AddComponent<MeshRenderer>().sharedMaterial=material;
-                var properties=new MaterialPropertyBlock();properties.SetFloat("_SurfaceRole",stones?4:3);properties.SetFloat("_Dressing",stones?1:2);
+                var properties=new MaterialPropertyBlock();properties.SetFloat("_SurfaceRole",stones?4:3);properties.SetFloat("_Dressing",group+1);
                 properties.SetColor("_BaseColor",Color.white);obj.GetComponent<Renderer>().SetPropertyBlock(properties);
             }
         }

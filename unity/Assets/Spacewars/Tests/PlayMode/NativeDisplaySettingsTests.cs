@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using NUnit.Framework;
 using Spacewars.Presentation;
 using UnityEngine;
@@ -11,7 +12,7 @@ using UnityEngine.UIElements;
 
 public sealed class NativeDisplaySettingsTests
 {
-    private readonly string[] ints={"spacewars.display.fullscreen","spacewars.display.shadows","spacewars.display.width","spacewars.display.height"};
+    private readonly string[] ints={"spacewars.display.fullscreen","spacewars.display.shadows","spacewars.display.vsync","spacewars.display.width","spacewars.display.height"};
     private readonly string[] floats={"spacewars.controls.cursorSpeed","spacewars.controls.cameraSpeed",NativeCameraScrollSettings.EdgeKey,NativeCameraScrollSettings.ArrowKey};
     private readonly Dictionary<string,int> oldInts=new Dictionary<string,int>();
     private readonly Dictionary<string,float> oldFloats=new Dictionary<string,float>();
@@ -19,9 +20,12 @@ public sealed class NativeDisplaySettingsTests
     private GameObject host;
     private PanelSettings panel;
     private NativeMenuNavigation navigation;
+    private int oldVSyncCount;
+    private float oldVolume;
     [SetUp] public void Setup()
     {
         oldInts.Clear();oldFloats.Clear();oldLights.Clear();
+        oldVSyncCount=QualitySettings.vSyncCount;oldVolume=AudioListener.volume;
         foreach(var key in ints){if(PlayerPrefs.HasKey(key))oldInts[key]=PlayerPrefs.GetInt(key);PlayerPrefs.DeleteKey(key);}
         foreach(var key in floats){if(PlayerPrefs.HasKey(key))oldFloats[key]=PlayerPrefs.GetFloat(key);PlayerPrefs.DeleteKey(key);}
         foreach(var light in UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None))oldLights[light]=light.shadows;
@@ -34,11 +38,13 @@ public sealed class NativeDisplaySettingsTests
         foreach(var key in ints){if(oldInts.TryGetValue(key,out int value))PlayerPrefs.SetInt(key,value);else PlayerPrefs.DeleteKey(key);}
         foreach(var key in floats){if(oldFloats.TryGetValue(key,out float value))PlayerPrefs.SetFloat(key,value);else PlayerPrefs.DeleteKey(key);}
         foreach(var pair in oldLights)if(pair.Key!=null)pair.Key.shadows=pair.Value;
+        QualitySettings.vSyncCount=oldVSyncCount;AudioListener.volume=oldVolume;
         PlayerPrefs.Save();
     }
     [Test] public void FirstLaunchUsesFullscreenAndMonitorModesHaveSafeFallback()
     {
         Assert.IsTrue(NativeDisplaySettings.Fullscreen);Assert.IsTrue(NativeDisplaySettings.Shadows);
+        Assert.IsFalse(NativeDisplaySettings.VSync);
         var desktop=new Vector2Int(1920,1080);
         var modes=NativeDisplaySettings.ResolutionOptions(new[]{desktop,new Vector2Int(1280,720),desktop,Vector2Int.zero},desktop);
         CollectionAssert.AreEqual(new[]{new Vector2Int(1280,720),desktop},modes);
@@ -49,6 +55,16 @@ public sealed class NativeDisplaySettingsTests
         Assert.Zero(PlayerPrefs.GetInt("spacewars.display.fullscreen"));Assert.IsFalse(NativeDisplaySettings.Fullscreen);
         NativeDisplaySettings.SetResolution(NativeDisplaySettings.AvailableResolutions[0]);
         Assert.AreEqual(NativeDisplaySettings.AvailableResolutions[0],NativeDisplaySettings.SavedResolution);
+    }
+    [TestCase(false)] [TestCase(true)] public void VSyncAppliesImmediatelyAndRestoresSavedPreferenceAtStartup(bool enabled)
+    {
+        NativeDisplaySettings.VSync=enabled;
+        Assert.AreEqual(enabled?1:0,QualitySettings.vSyncCount);
+        Assert.AreEqual(enabled?1:0,PlayerPrefs.GetInt("spacewars.display.vsync"));
+        Assert.AreEqual(enabled,NativeDisplaySettings.VSync);
+        QualitySettings.vSyncCount=enabled?0:1;
+        typeof(NativeDisplaySettings).GetMethod("Initialize",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,null);
+        Assert.AreEqual(enabled?1:0,QualitySettings.vSyncCount,"BeforeSceneLoad initializer restores the saved choice.");
     }
     [Test] public void CameraScrollUsesCameraDirectionsAndFrameIndependentSpeed()
     {
@@ -81,6 +97,12 @@ public sealed class NativeDisplaySettingsTests
             Assert.Greater(page.Q<ScrollView>("settings-scroll").verticalScroller.worldBound.width,0);
             Assert.LessOrEqual(page.Q<ScrollView>("settings-scroll").verticalScroller.worldBound.width,10.5f);
             AssertColumns(page);
+            var vsync=page.Q<Toggle>("settings-vsync");Assert.IsFalse(vsync.value);
+            navigation.Move(Vector2.down);navigation.Move(Vector2.down);
+            Assert.AreSame(vsync,root.focusController.focusedElement);
+            navigation.Activate();Assert.IsTrue(vsync.value);Assert.AreEqual(1,QualitySettings.vSyncCount);
+            navigation.Activate();Assert.IsFalse(vsync.value);Assert.AreEqual(0,QualitySettings.vSyncCount);
+            navigation.Activate();Assert.IsTrue(vsync.value);
             var edge=page.Q<Slider>("settings-camera-edge");edge.value=edge.highValue;
             var arrows=page.Q<Slider>("settings-camera-arrows");arrows.value=arrows.lowValue;
             Assert.AreEqual(edge.highValue,NativeCameraScrollSettings.EdgeSpeed(8));Assert.AreEqual(arrows.lowValue,NativeCameraScrollSettings.ArrowSpeed(12));
@@ -92,11 +114,13 @@ public sealed class NativeDisplaySettingsTests
             yield return null;yield return null;
             Assert.AreEqual(edge.highValue,page.Q<Slider>("settings-camera-edge").value);Assert.AreEqual(arrows.lowValue,page.Q<Slider>("settings-camera-arrows").value);
             Assert.IsFalse(page.Q<Toggle>("settings-fullscreen").value);Assert.IsFalse(page.Q<Toggle>("settings-shadows").value);
+            Assert.IsTrue(page.Q<Toggle>("settings-vsync").value);Assert.IsTrue(NativeDisplaySettings.VSync);
             Assert.AreSame(page.Q<DropdownField>("settings-resolution"),root.focusController.focusedElement);
             string directory=Environment.GetEnvironmentVariable("SPACEWARS_SETTINGS_EVIDENCE");
             if(!string.IsNullOrEmpty(directory)){Directory.CreateDirectory(directory);Capture(target,Path.Combine(directory,"settings-800x620.png"));}
             var scroll=page.Q<ScrollView>("settings-scroll");
-            for(int i=0;i<12;i++)navigation.Move(Vector2.down);
+            // AA + SSAO + bloom + collapsed graphics foldout add four visible controls.
+            for(int i=0;i<17;i++)navigation.Move(Vector2.down);
             yield return null;yield return null;
             var help=page.Q<Button>("settings-controls");Assert.AreSame(help,root.focusController.focusedElement);
             Assert.GreaterOrEqual(help.worldBound.yMin,scroll.contentViewport.worldBound.yMin-1);
@@ -116,7 +140,7 @@ public sealed class NativeDisplaySettingsTests
     private static void AssertColumns(VisualElement page)
     {
         float left=page.Q<DropdownField>("settings-resolution").Q(className:"unity-base-field__input").worldBound.xMin;
-        foreach(string name in new[]{"settings-fullscreen","settings-shadows","settings-health","settings-volume","settings-camera-edge","settings-camera-arrows","settings-pad-cursorSpeed","settings-pad-cameraSpeed"})
+        foreach(string name in new[]{"settings-fullscreen","settings-vsync","settings-shadows","settings-health","settings-volume","settings-camera-edge","settings-camera-arrows","settings-pad-cursorSpeed","settings-pad-cameraSpeed"})
             Assert.AreEqual(left,page.Q(name).Q(className:"unity-base-field__input").worldBound.xMin,1,name+" control column");
         foreach(var toggle in page.Query<Toggle>().ToList())
         {

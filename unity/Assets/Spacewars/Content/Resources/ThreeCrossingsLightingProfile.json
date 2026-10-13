@@ -1,0 +1,19 @@
+{
+  "id": "three-crossings-warm-v1",
+  "revision": 1,
+  "sunHue": 0.09000000357627869,
+  "sunSaturation": 0.27000001072883606,
+  "sunIntensity": 1.4500000476837158,
+  "sunElevation": 32.0,
+  "sunAzimuth": -55.0,
+  "ambientHue": 0.6000000238418579,
+  "ambientSaturation": 0.2800000011920929,
+  "ambientValue": 0.5,
+  "shadowStrength": 0.699999988079071,
+  "shadowDistance": 90.0,
+  "shadowCoveragePadding": 0.30000001192092896,
+  "steelHighlight": 0.18000000715255737,
+  "steelExponent": 24.0,
+  "concreteHighlight": 0.029999999329447746,
+  "concreteExponent": 12.0
+}

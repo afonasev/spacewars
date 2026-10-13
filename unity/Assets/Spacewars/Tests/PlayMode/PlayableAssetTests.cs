@@ -21,7 +21,7 @@ public sealed class PlayableAssetTests
             if(kind=="ScientificCenter")
             {
                 var system=ally.Hull.GetComponentsInChildren<Renderer>().First(r=>r.sharedMaterial.name.EndsWith("system-emissive"));
-                var block=new MaterialPropertyBlock();system.GetPropertyBlock(block,0);Assert.IsTrue(block.isEmpty);
+                var block=new MaterialPropertyBlock();system.GetPropertyBlock(block,0);Assert.AreEqual(system.sharedMaterial.GetColor("_EmissionColor")*world.MaterialFinish.emissionGain,block.GetColor("_EmissionColor"));
                 Assert.IsTrue(system.sharedMaterial.IsKeywordEnabled("_EMISSION"));
                 Assert.AreEqual(new Color(0,.57f,1.02f,1),system.sharedMaterial.GetColor("_EmissionColor"));
             }

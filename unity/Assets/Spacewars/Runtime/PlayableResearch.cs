@@ -18,8 +18,8 @@ namespace Spacewars.Runtime
         }
         private bool HasResearch(PlayableOwner owner,PlayableResearchKind kind)=>Research(owner).Any(o=>o.Kind==kind&&o.Complete);
         private bool HasActiveResearch(PlayableOwner owner,PlayableResearchKind kind)=>Research(owner).Any(o=>o.Kind==kind&&!o.Complete);
-        private double ResearchCost(PlayableResearchKind kind)=>kind==PlayableResearchKind.TankChassis?profile.TankChassisCost:kind==PlayableResearchKind.ExplorerAssaultGuns?profile.ExplorerAssaultCost:profile.ShkvalGuidanceCost;
-        private double ResearchDuration(PlayableResearchKind kind)=>kind==PlayableResearchKind.TankChassis?profile.TankChassisSeconds:kind==PlayableResearchKind.ExplorerAssaultGuns?profile.ExplorerAssaultSeconds:profile.ShkvalGuidanceSeconds;
+        private double ResearchCost(PlayableResearchKind kind)=>Spacewars.Simulation.Ai.AiResearchCatalog.For(kind).Cost(profile);
+        private double ResearchDuration(PlayableResearchKind kind)=>Spacewars.Simulation.Ai.AiResearchCatalog.For(kind).Duration(profile);
         private PlayableCommandStatus QueueResearch(int centerId,PlayableOwner owner,PlayableResearchKind kind,out string message)
         {
             message="Нужен готовый собственный Научный центр";
@@ -103,7 +103,7 @@ namespace Spacewars.Runtime
             foreach(var owner in research.Keys.ToArray())if(Chassis(owner))foreach(var unit in units.Values)if(unit.Owner==owner&&unit.Kind==PlayableEntityKind.Tank&&!unit.AuthoredUpgrade.HasValue)navigation.Crowd.SetSpeed(unit.Id,profile.TankChassisSpeed);
         }
         private PlayableResearchOrderSnapshot[] ResearchSnapshot(PlayableOwner owner)=>Research(owner).Select(o=>new PlayableResearchOrderSnapshot(o.Id,o.Kind,o.CenterId,o.PaidCost,o.Elapsed,o.Duration,o.Active,o.Complete)).ToArray();
-        private PlayableResearchAvailabilitySnapshot[] ResearchAvailability(PlayableOwner owner)=>new[]{PlayableResearchKind.TankChassis,PlayableResearchKind.ExplorerAssaultGuns,PlayableResearchKind.ShkvalGuidance}.Select(kind=>new PlayableResearchAvailabilitySnapshot(kind,ResearchCost(kind),!HasResearch(owner,kind)&&!HasActiveResearch(owner,kind))).ToArray();
+        private PlayableResearchAvailabilitySnapshot[] ResearchAvailability(PlayableOwner owner)=>Spacewars.Simulation.Ai.AiResearchCatalog.All.Select(d=>d.Kind).Select(kind=>new PlayableResearchAvailabilitySnapshot(kind,ResearchCost(kind),!HasResearch(owner,kind)&&!HasActiveResearch(owner,kind))).ToArray();
         private bool UnitUpgraded(Unit u)=>u.AuthoredUpgrade??(u.Kind==PlayableEntityKind.Tank?Chassis(u.Owner):u.Kind==PlayableEntityKind.Explorer?Assault(u.Owner):Guidance(u.Owner));
         private bool Chassis(PlayableOwner owner)=>HasResearch(owner,PlayableResearchKind.TankChassis);
         private bool Assault(PlayableOwner owner)=>HasResearch(owner,PlayableResearchKind.ExplorerAssaultGuns);

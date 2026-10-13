@@ -672,7 +672,7 @@ namespace Spacewars.Runtime
             Array(w,m.MovementBlockers.ToArray(),x=>Write(w,x));
             Array(w,m.Solids.ToArray(),x=>Write(w,x));
             Array(w,crossings.Water.ToArray(),x=>Write(w,x));
-            }else if(m is FoundryMap foundry){Number(w,foundry.Scale);Number(w,foundry.UpperHeight);Number(w,m.DirectFireHeight);Array(w,m.MovementBlockers.ToArray(),x=>Write(w,x));Array(w,m.Solids.ToArray(),x=>Write(w,x));}else if(m is AiTestMap){Number(w,m.DirectFireHeight);Array(w,m.MovementBlockers.ToArray(),x=>Write(w,x));Array(w,m.Solids.ToArray(),x=>Write(w,x));}else throw new ArgumentException("Unsupported native terrain binding.");
+            }else if(m is FoundryMap foundry){Number(w,foundry.Scale);Number(w,foundry.UpperHeight);Number(w,m.DirectFireHeight);Array(w,m.MovementBlockers.ToArray(),x=>Write(w,x));Array(w,m.Solids.ToArray(),x=>Write(w,x));}else if(m is BasaltCrownMap basalt){String(w,basalt.SourceSha256);Number(w,m.DirectFireHeight);Array(w,m.MovementBlockers.ToArray(),x=>Write(w,x));Array(w,m.Solids.ToArray(),x=>Write(w,x));}else if(m is AiTestMap){Number(w,m.DirectFireHeight);Array(w,m.MovementBlockers.ToArray(),x=>Write(w,x));Array(w,m.Solids.ToArray(),x=>Write(w,x));}else throw new ArgumentException("Unsupported native terrain binding.");
             w.Write(m.Supports.Count);
             foreach(var s in m.Supports){String(w,s.Id);
             Write(w,s.Bounds);

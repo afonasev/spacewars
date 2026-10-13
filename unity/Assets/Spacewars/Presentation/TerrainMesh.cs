@@ -7,7 +7,18 @@ namespace Spacewars.Presentation
     {
         // Geological dressing stays entirely inside the simulation solid. Tessellation
         // lengths/depth limits are mesh quality bounds, not gameplay dimensions.
-        public static Mesh ErodedRock(NavObstacle shape,double bottom,double top,float erosion)
+        public sealed class RockCap
+        {
+            public readonly NavPolygon Footprint;
+            public readonly float MinimumHeight,MaximumHeight;
+            public RockCap(NavPolygon footprint,List<Vector3> vertices)
+            {
+                Footprint=footprint;MinimumHeight=float.PositiveInfinity;MaximumHeight=float.NegativeInfinity;
+                foreach(var v in vertices){MinimumHeight=Mathf.Min(MinimumHeight,v.y);MaximumHeight=Mathf.Max(MaximumHeight,v.y);}
+            }
+        }
+        public static Mesh ErodedRock(NavObstacle shape,double bottom,double top,float erosion)=>ErodedRock(shape,bottom,top,erosion,out _);
+        public static Mesh ErodedRock(NavObstacle shape,double bottom,double top,float erosion,out RockCap cap)
         {
             var vertices=new List<Vector3>();var indices=new List<int>();
             var polygon=shape.Footprint;
@@ -50,6 +61,7 @@ namespace Spacewars.Presentation
             }
             for(int i=0;i<roofPolygon.Triangles.Count;i+=3)
                 Cap(P(roofPolygon.Vertices[roofPolygon.Triangles[i]]),P(roofPolygon.Vertices[roofPolygon.Triangles[i+1]]),P(roofPolygon.Vertices[roofPolygon.Triangles[i+2]]),0);
+            cap=new RockCap(roofPolygon,vertices);
             for(int i=0;i<polygon.Triangles.Count;i+=3)
             {
                 var a=P(polygon.Vertices[polygon.Triangles[i]]);var b=P(polygon.Vertices[polygon.Triangles[i+1]]);var c=P(polygon.Vertices[polygon.Triangles[i+2]]);

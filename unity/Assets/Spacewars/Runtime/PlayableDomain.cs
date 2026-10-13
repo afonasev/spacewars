@@ -337,7 +337,7 @@ namespace Spacewars.Runtime
         {
             if(amount<=0)return;
             var creditedOwner=sourceOwner??(units.TryGetValue(attackerId,out var source)?(PlayableOwner?)source.Owner:null);
-            if(units.TryGetValue(id,out var u)){u.Health-=amount;if(u.Health<=0){if(navigation.Crowd.TryGet(u.Id,out var destroyed))Sound(PlayableSoundKind.Destroyed,destroyed.Position,u.Kind,u.Owner);RecordKill(creditedOwner,u.Owner,id,false,(int)u.Kind,PlayableUnitRules.Cost(profile,u.Kind));InvalidateSpatialCompletion(id);tacticalQueues.Remove(id);navigation.Remove(id);units.Remove(id);RecordArmy(u.Owner);foreach(var key in centerDamage.Where(pair=>pair.Value.AttackerId==id).Select(pair=>pair.Key).ToArray())centerDamage.Remove(key);}else SoundUnitDamage(u);return;}
+            if(units.TryGetValue(id,out var u)){u.Health-=amount;if(u.Health<=0){if(navigation.Crowd.TryGet(u.Id,out var destroyed))Sound(PlayableSoundKind.Destroyed,destroyed.Position,u.Kind,u.Owner,unitId:u.Id,hullHeading:destroyed.Heading);RecordKill(creditedOwner,u.Owner,id,false,(int)u.Kind,PlayableUnitRules.Cost(profile,u.Kind));InvalidateSpatialCompletion(id);tacticalQueues.Remove(id);navigation.Remove(id);units.Remove(id);RecordArmy(u.Owner);foreach(var key in centerDamage.Where(pair=>pair.Value.AttackerId==id).Select(pair=>pair.Key).ToArray())centerDamage.Remove(key);}else SoundUnitDamage(u);return;}
             if(!buildings.TryGetValue(id,out var b)||b.Phase==ConstructionPhase.Pending)return;
             b.LastDamageTime=elapsed;b.Repair=null;
             double before=b.Health;b.Health-=amount*(b.Ready?1:profile.ConstructionDamageMultiplier);

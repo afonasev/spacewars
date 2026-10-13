@@ -198,7 +198,11 @@ func stageUpdate(root, cache string, m Manifest, raw []byte, progress func(int64
 				} else {
 					b, e = fetch(origin+"/objects/"+c.Hash, c.Size)
 				}
-				if e != nil || int64(len(b)) != c.Size || digest(b) != c.Hash {
+				if e != nil {
+					out.Close()
+					return "", fmt.Errorf("download chunk %s: %w", c.Hash[:12], e)
+				}
+				if int64(len(b)) != c.Size || digest(b) != c.Hash {
 					out.Close()
 					return "", errors.New("downloaded chunk rejected")
 				}

@@ -331,6 +331,8 @@ func host(root, exe string) error {
 				return
 			}
 			status.State = "downloading"
+			status.Done = 0
+			status.Total = 0
 			status.Error = ""
 			m, b := next, append([]byte(nil), raw...)
 			go func() {

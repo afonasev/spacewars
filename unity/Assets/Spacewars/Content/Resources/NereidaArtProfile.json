@@ -1,0 +1,15 @@
+{
+  "id": "nereida-polar-shelf-v1",
+  "revision": 1,
+  "detailTile": 7,
+  "variantScale": 24,
+  "variantBlend": 0.06,
+  "detailContrast": 0.45,
+  "normalSlope": 0.15,
+  "snowScale": 27,
+  "snowCoverage": 0.35,
+  "strataSpacing": 0.8,
+  "strataContrast": 0.12,
+  "snowValue": 0.6,
+  "driftFeather": 2
+}

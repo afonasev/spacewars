@@ -1,0 +1,16 @@
+{
+  "id": "actor-industrial-finish-v1",
+  "variant": "restrained",
+  "revision": 1,
+  "armorMetallic": 0.12,
+  "armorSmoothness": 0.28,
+  "metalMetallic": 0.4,
+  "metalSmoothness": 0.42,
+  "structureSmoothness": 0.16,
+  "darkLift": 0.1,
+  "emissionGain": 1.2,
+  "teamEmission": 2.8,
+  "bloomIntensity": 0.16,
+  "bloomThreshold": 1.2,
+  "bloomScatter": 0.45
+}

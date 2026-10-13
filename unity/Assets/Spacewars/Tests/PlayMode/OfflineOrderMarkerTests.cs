@@ -21,13 +21,13 @@ namespace Spacewars.Input.Tests
         [Serializable]sealed class Palette {public string[] colors;}
         [Serializable]sealed class CaptureView {public string owner;public int[] selected;public int markers;}
         [Serializable]sealed class CaptureStage {public string stage;public int seed;public long tick;public double time;public CaptureView[] views;}
-        GameObject go;OfflineTwoLocalBootstrap hud;
+        GameObject go;OfflineTwoLocalBootstrap hud;float oldAudio;
         void Set(string n,object value)=>typeof(OfflineTwoLocalBootstrap).GetField(n,F).SetValue(hud,value);
         T Get<T>(string n)=>(T)typeof(OfflineTwoLocalBootstrap).GetField(n,F).GetValue(hud);
         object Call(string n,params object[] args)=>typeof(OfflineTwoLocalBootstrap).GetMethods(F).Single(m=>m.Name==n&&m.GetParameters().Length==args.Length).Invoke(hud,args);
         static T V<T>(object v,string n)=>(T)v.GetType().GetField(n).GetValue(v);
-        [SetUp]public override void Setup(){base.Setup();go=new GameObject("actual offline marker renderer");hud=go.AddComponent<OfflineTwoLocalBootstrap>();hud.enabled=false;}
-        [TearDown]public override void TearDown(){UnityEngine.Object.DestroyImmediate(go);base.TearDown();}
+        [SetUp]public override void Setup(){base.Setup();go=new GameObject("actual offline marker renderer");hud=go.AddComponent<OfflineTwoLocalBootstrap>();hud.enabled=false;oldAudio=AudioListener.volume;AudioListener.volume=0;var audio=go.AddComponent<GameplayAudioPlayer>();audio.Initialize();Set("gameplayAudio",audio);}
+        [TearDown]public override void TearDown(){UnityEngine.Object.DestroyImmediate(go);AudioListener.volume=oldAudio;base.TearDown();}
         [UnityTest]public IEnumerator ActualTwoViewportMapsUseOwnEventsExpireAndRespectMirroredCamera()
         {
             var profile=PlayableProfile.Default;var starts=new[]{new OfflineStart("left",1,new NavPoint(-24,-24),new NavPoint(-10,-4),pin:1),new OfflineStart("right",2,new NavPoint(24,24),new NavPoint(2,-4),pin:2)};

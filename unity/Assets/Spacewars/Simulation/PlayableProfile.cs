@@ -142,6 +142,7 @@ namespace Spacewars.Simulation
         public double shkvalExhaustOpacity;
         public double weaponMuzzleCoreRatio;
         public double impactEffectSec;
+        public double unitWreckLifetimeSeconds=1;
         public double impactEffectRadius=0.22; // Web default-v2; presentation only.
         public double ballisticWallHeight;
         public double explorerCollisionRadius;
@@ -292,6 +293,7 @@ namespace Spacewars.Simulation
         public double ShkvalExhaustOpacity {get; private set;}
         public double WeaponMuzzleCoreRatio {get; private set;}
         public double ImpactEffectSec {get; private set;}
+        public double UnitWreckLifetimeSeconds {get; private set;}
         public double ImpactEffectRadius {get; private set;}
         public double BallisticWallHeight {get; private set;}
         public double ExplorerCollisionRadius {get; private set;}
@@ -379,6 +381,7 @@ namespace Spacewars.Simulation
             ShkvalExhaustOpacity=data.shkvalExhaustOpacity;
             WeaponMuzzleCoreRatio=data.weaponMuzzleCoreRatio;
             ImpactEffectSec=data.impactEffectSec;
+            UnitWreckLifetimeSeconds=data.unitWreckLifetimeSeconds;
             ImpactEffectRadius=data.impactEffectRadius;
             BallisticWallHeight=data.ballisticWallHeight;
             ExplorerCollisionRadius=data.explorerCollisionRadius;
@@ -820,6 +823,7 @@ namespace Spacewars.Simulation
             new PlayableProfileField("artillery.exhaustOpacity", "Бой · Дульные вспышки", "Шквал · яркость огня", "Непрозрачность светящегося огня у сопла в течение полёта.", "доля", 0.1, 1, 0.05, p=>p.shkvalExhaustOpacity,nameof(PlayableProfileData.shkvalExhaustOpacity)),
             new PlayableProfileField("artillery.weaponMuzzleCoreRatio", "Бой · Дульные вспышки", "Сердцевина вспышки", "Размер жёлто-белой сердцевины внутри оранжевого края.", "доля", 0.1, 0.9, 0.05, p=>p.weaponMuzzleCoreRatio,nameof(PlayableProfileData.weaponMuzzleCoreRatio)),
             new PlayableProfileField("artillery.impactEffectRadius", "Бой · Остовы и эффекты", "Размер эффекта попадания", "Радиус локальной вспышки по правилам веб-версии; не радиус урона.", "м", .03, 1, .01, p=>p.impactEffectRadius,nameof(PlayableProfileData.impactEffectRadius)),
+            new PlayableProfileField("presentation.unitWreck.lifetimeSeconds", "Бой · Остовы и эффекты", "Время жизни остова", "Игровое время после вспышки уничтожения. Остов не мешает проезду.", "с", 0.1, 10, 0.1, p=>p.unitWreckLifetimeSeconds,nameof(PlayableProfileData.unitWreckLifetimeSeconds)),
             new PlayableProfileField("artillery.impactEffectSec", "Бой · Остовы и эффекты", "Эффект попадания", "Продолжительность локального эффекта контакта.", "с", 0.033, 1, 0.01, p=>p.impactEffectSec,nameof(PlayableProfileData.impactEffectSec)),
             new PlayableProfileField("artillery.ballisticWallHeight", "Artillery", "Ballistic wall height", "Ballistic wall height for baseline artillery flight, production or readability; imported release behavior unless marked native geometry.", "m", 0.001, 300, 0.01, p=>p.ballisticWallHeight,nameof(PlayableProfileData.ballisticWallHeight)),
             new PlayableProfileField("explorer.collisionRadius", "Explorer", "collisionRadius", "Explorer collisionRadius: imported main@5 behavior or physical tracer catalog.", "m", 0.001, 100, 0.01, p=>p.explorerCollisionRadius,nameof(PlayableProfileData.explorerCollisionRadius)),

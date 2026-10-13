@@ -30,7 +30,7 @@ public sealed class NativeLobbyUiTests
     [UnityTest] public IEnumerator MapAtmosphereMatchesTerrainAndFitsBelowPreview()
     {
         Call("ShowLobby");var root=Get<VisualElement>("root");var lobby=Get<VisualElement>("lobbyScreen");
-        var choice=lobby.Q<DropdownField>("lobby-map-choice");CollectionAssert.AreEqual(new[]{"Переправа","Огненный разлом","ИИ-полигон · 8"},choice.choices);
+        var choice=lobby.Q<DropdownField>("lobby-map-choice");CollectionAssert.AreEqual(new[]{"Переправа","Огненный разлом","ИИ-полигон · 8",BasaltCrownMap.DisplayName},choice.choices);
         var panel=host.GetComponent<UIDocument>().panelSettings;
         foreach(var size in new[]{new Vector2Int(1280,800),new Vector2Int(1600,1000)})
         {
@@ -60,6 +60,32 @@ public sealed class NativeLobbyUiTests
             }
             finally{panel.targetTexture=null;image.Release();UnityEngine.Object.Destroy(image);}
         }
+    }
+    [UnityTest] public IEnumerator BasaltCrownSelectsTwoDiagonalSeatsAndPublicPreview()
+    {
+        var keyboard=UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Keyboard>();
+        var mouse=UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Mouse>();
+        try{
+        Call("BindLobbyDevices");Call("ShowLobby");var lobby=Get<VisualElement>("lobbyScreen");
+        lobby.Q<DropdownField>("lobby-map-choice").value=BasaltCrownMap.DisplayName;
+        for(int frame=0;frame<8;frame++)yield return null;
+        var setup=Get<NativeLobbyConfiguration>("lobbySetup");var p=Get<PlayableProfile>("profile");
+        Assert.True(setup.BasaltCrown);Assert.False(setup.Foundry);Assert.False(setup.AiTestMap);
+        Assert.AreEqual(2,setup.Capacity(p));Assert.AreEqual(2,setup.Participants.Count);Assert.IsNull(Get<PlayableRuntime>("runtime"));
+        Assert.True(p.AuthoredMap is BasaltCrownMap);Assert.AreEqual(new NavPoint(-40,-32),p.Headquarters(PlayableOwner.Player));
+        Assert.AreEqual("2 игровых места",lobby.Q<Label>("lobby-map-capacity").text);
+        StringAssert.Contains("Базальтовый бастион",lobby.Q<Label>("lobby-map-description").text);
+        Assert.Greater(Get<PlayableMapTerrain>("lobbyTerrain").Texture.GetPixels32().Distinct().Count(),2);
+        Assert.True(Get<Button>("launchButton").enabledSelf);
+        Call("LaunchLobbyMatch");
+        float deadline=Time.realtimeSinceStartup+12;
+        while(Get<PlayableRuntime>("runtime")==null&&Time.realtimeSinceStartup<deadline)yield return null;
+        var runtime=Get<PlayableRuntime>("runtime");Assert.NotNull(runtime);Assert.True(runtime.Latest.ActiveProfile.AuthoredMap is BasaltCrownMap);
+        Assert.AreEqual(2,runtime.Latest.Participants.Count);Assert.IsNull(runtime.Latest.Failure);
+        runtime.RequestStop();float stopDeadline=Time.realtimeSinceStartup+3;
+        while(!runtime.IsStopped&&Time.realtimeSinceStartup<stopDeadline)yield return null;
+        Assert.True(runtime.IsStopped);
+        }finally{UnityEngine.InputSystem.InputSystem.RemoveDevice(keyboard);UnityEngine.InputSystem.InputSystem.RemoveDevice(mouse);}
     }
     [Test] public void LobbyIsRealSetupAndHasNoAuthority()
     {

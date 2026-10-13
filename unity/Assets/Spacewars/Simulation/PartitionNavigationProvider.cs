@@ -14,7 +14,7 @@ namespace Spacewars.Simulation
 
         public PartitionNavigationProvider(IPlayableTerrain terrain, NavGeometry movementGeometry, string holdBinding)
         {
-            if (!(terrain is ThreeCrossingsMap) && !(terrain is FoundryMap))
+            if (!(terrain is ThreeCrossingsMap) && !(terrain is FoundryMap) && !(terrain is BasaltCrownMap))
                 throw new ArgumentException("No authored partition adapter for this terrain.", nameof(terrain));
             if (movementGeometry == null || movementGeometry.HalfExtent != terrain.HalfExtent)
                 throw new ArgumentException("Movement geometry does not match terrain extent.", nameof(movementGeometry));

@@ -61,7 +61,7 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void AffordableFallbackUsesOrdinaryAuthorityAndRestoresSelectedPolicy()
         {
-            var c=Config();var a=new PlayableAuthorityTick(c,71);for(int i=0;i<80;i++)Step(a);
+            var c=Config();var a=new PlayableAuthorityTick(c,71);FactoryFirst(a,c);for(int i=0;i<80;i++)Step(a);
             var domain=Get(a,"domain");var d=domain.GetType();
             d.GetMethod("AdvanceFoundations",F).Invoke(domain,null);
             d.GetMethod("AdvanceBuildings",F).Invoke(domain,new object[]{(double)c.Profile.FactoryBuildSeconds+1});
@@ -87,7 +87,7 @@ namespace Spacewars.Tests.EditMode
 
         [TestCase(false)][TestCase(true)] public void FullSlotsOrdinaryAuthorityUsesProductionOrReportsRealPopulation(bool populationFull)
         {
-            var c=Config();var a=new PlayableAuthorityTick(c,71);var domain=Get(a,"domain");var d=domain.GetType();
+            var c=Config();var a=new PlayableAuthorityTick(c,71);FactoryFirst(a,c);var domain=Get(a,"domain");var d=domain.GetType();
             object Call(string name,params object[] args)=>d.GetMethod(name,F).Invoke(domain,args);
             foreach(var owner in Owners(a))
             {
@@ -255,7 +255,7 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void ScaleAndUseStartupSurvivesCompetingOldProductionResearchRestoreAndProfile()
         {
-            var c=RichEconomyConfig();var a=new PlayableAuthorityTick(c,71);int original=PrepareLine(a,c,true);var d=Get(a,"domain");
+            var c=RichEconomyConfig();var a=new PlayableAuthorityTick(c,71);FactoryFirst(a,c,PlayableAiOpening.Safe);int original=PrepareLine(a,c,true);var d=Get(a,"domain");
             object Call(string name,params object[] args)=>d.GetType().GetMethod(name,F).Invoke(d,args);
             for(int i=0;i<360;i++)Step(a);
             var extra=AwaitAdditionalFactory(a,c,original);Assert.AreNotEqual(ConstructionPhase.Ready,extra.Phase);
@@ -288,8 +288,11 @@ namespace Spacewars.Tests.EditMode
                 Step(a);Assert.AreEqual(launch,ledger.Capture().Reserved.Single(x=>x.Id==hold.Id).Amount);
                 oldLinePaid|=ledger.PaidTotal>oldPaid&&ledger.Capture().Paid.Any(e=>e.CreatedTick>hold.CreatedTick&&e.Action.EntityIds.Contains(original)&&e.Action.Kind==PlayableCommandKind.QueueTank);
                 var rejects=(System.Collections.Generic.IReadOnlyDictionary<string,string>)Get(Get(owner,"arbiter"),"rejections");researchBlocked|=rejects.Any(x=>x.Key.StartsWith("research:QueueResearch:")&&x.Value=="ledger budget unavailable");
+                if(((PlayableAiOwnerCheckpoint)owner.GetType().GetProperty("Checkpoint",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic).GetValue(owner)).DecisionTick==a.Tick)
+                    O5DecisionDiagnostics.Emit("held-research-decision",a,owner,PlayableAiObservation.From(EconomyView(a,c)),c.Profile);
             }
             TestContext.WriteLine("O3_HELD_RESEARCH "+Newtonsoft.Json.JsonConvert.SerializeObject(new{Tick=a.Tick,OldLinePaid=oldLinePaid,ResearchBlocked=researchBlocked,Hold=ledger.Capture().Reserved.Single(x=>x.Id==hold.Id).Amount,Research=EconomyView(a,c).ResearchAvailability,Rejects=Get(Get(owner,"arbiter"),"rejections")}));
+            O5DecisionDiagnostics.Emit("held-research-boundary",a,owner,PlayableAiObservation.From(EconomyView(a,c)),c.Profile,new{OldLinePaid=oldLinePaid,ResearchBlocked=researchBlocked});
             Assert.True(oldLinePaid,"useful old-line orders may spend outside the held startup amount");Assert.True(researchBlocked,"ordinary eligible research must encounter the real held-fund budget blocker");
             Journal(a);var before=a.CaptureBytes();var restored=PlayableAuthorityTick.RestoreBytes(before,c);
             for(int i=0;i<20;i++){Step(a);Step(restored);CollectionAssert.AreEqual(a.CaptureBytes(),restored.CaptureBytes());}
@@ -487,6 +490,17 @@ namespace Spacewars.Tests.EditMode
             return new OfflineMatchConfiguration(c.Profile,c.SourceIdentity,c.MapIdentity,c.RouteProvenance,c.Seed,
                 c.Roster.Select(p=>new OfflineParticipant(p.Id,p.LogicalPlayer,p.Team,OfflineControl.Ai)).ToArray(),c.Starts.ToArray(),c.Sites.ToArray(),c.Obstacles.ToArray(),routes);
         }
+        // E1/E3 fixtures require the authored factory-first military situation, not
+        // the weighted opening chosen by a hash that changes when profile fields grow.
+        private static void FactoryFirst(PlayableAuthorityTick a,OfflineMatchConfiguration c,PlayableAiOpening opening=PlayableAiOpening.BlindRush)
+        {
+            foreach(var o in Owners(a))
+            {
+                var state=PlayableAiOpeningComposition.Initialize(c.Seed,Budget(o).OwnerId,forcedOpening:opening);
+                o.GetType().GetField("opening",F).SetValue(o,state);o.GetType().GetField("openingExecutor",F).SetValue(o,new AiOpeningExecutor(state,a.Generation));
+                TestContext.WriteLine("O4_E1_AUTHORED_FACTORY "+state.OwnerId+" "+state.Opening+" "+state.ProfileIdentity+" seed="+c.Seed);
+            }
+        }
         private static void Step(PlayableAuthorityTick t)
         {while(t.Requests.TryDequeue(out var r))Assert.True(t.Answers.TryEnqueue(new NavigationAnswer(r,Array.Empty<NavPoint>())));if(!t.TryAdvance()){while(t.Requests.TryDequeue(out var r))Assert.True(t.Answers.TryEnqueue(new NavigationAnswer(r,Array.Empty<NavPoint>())));Assert.True(t.TryAdvance());}}
         [Test] public void LedgerRealAuthoritySaveRestorePendingAndPaidSuffix()
@@ -504,7 +518,7 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void LedgerRealDestroyedProducerReleasesReservation()
         {
-            var c=Config();var a=new PlayableAuthorityTick(c,71);for(int i=0;i<80;i++)Step(a);
+            var c=Config();var a=new PlayableAuthorityTick(c,71);FactoryFirst(a,c);for(int i=0;i<80;i++)Step(a);
             var owner=Owners(a)[0];var ledger=Budget(owner);var domain=Get(a,"domain");
             var logical=domain.GetType().GetMethod("OwnerFor",F).Invoke(domain,new object[]{ledger.OwnerId});
             var snapshot=(PlayableSnapshot)domain.GetType().GetMethod("PlayerSnapshot",F).Invoke(domain,new object[]{1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,c.Seed,logical});
@@ -517,7 +531,7 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void LedgerRealProfileBarrierPreservesPaidAndRepricesReserve()
         {
-            var c=Config();var a=new PlayableAuthorityTick(c,71);for(int i=0;i<80;i++)Step(a);
+            var c=Config();var a=new PlayableAuthorityTick(c,71);FactoryFirst(a,c);for(int i=0;i<80;i++)Step(a);
             var owner=Owners(a)[0];var ledger=Budget(owner);var paid=ledger.Capture().Paid.First(e=>e.Action.Kind==PlayableCommandKind.BuildAt);
             var domain=Get(a,"domain");var logical=domain.GetType().GetMethod("OwnerFor",F).Invoke(domain,new object[]{ledger.OwnerId});
             domain.GetType().GetMethod("AddCredits",F).Invoke(domain,new[]{logical,(object)10000d});

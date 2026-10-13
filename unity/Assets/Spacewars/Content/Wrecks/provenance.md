@@ -1,0 +1,1 @@
+Approved unchanged web GLB sources from commit 42da044a, public/assets/models/wrecks/. Nine original LOD0 meshes preserved byte-for-byte; SHA256 and bounds in source-manifest.json. Existing glTF import adapts only materials to URP; no geometry or art redesign. Runtime transforms apply existing approved unit scale.
