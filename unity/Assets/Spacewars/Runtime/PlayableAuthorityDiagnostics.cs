@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Spacewars.Simulation;
 namespace Spacewars.Runtime
@@ -9,6 +10,13 @@ namespace Spacewars.Runtime
         public PlayableSnapshot ParticipantView(string id)=>domain.PlayerSnapshot(sequence,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,seed,domain.OwnerFor(id));
         // Detached live ledger, not the older policy-observation checkpoint. Read-only diagnostics.
         public AiBudgetState[] CaptureDiagnosticBudgets()=>scheduler.Owners.Select(o=>o.Budget.Capture()).ToArray();
+        public AiBudgetState CaptureDiagnosticBudget(string ownerId)
+        {
+            if(string.IsNullOrWhiteSpace(ownerId))throw new ArgumentException("A diagnostic budget owner is required.",nameof(ownerId));
+            var owner=scheduler.Owners.SingleOrDefault(o=>o.OwnerId==ownerId);
+            if(owner==null)throw new ArgumentException("Unknown diagnostic budget owner.",nameof(ownerId));
+            return owner.Budget.Capture();
+        }
         public bool DiagnosticFactoryExitUsable(int id,PlayableEntityKind kind)=>domain.DiagnosticFactoryExitUsable(id,kind);
         public int? WinnerTeam=>domain.WinnerTeam;
     }

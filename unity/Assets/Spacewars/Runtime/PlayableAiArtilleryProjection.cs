@@ -71,7 +71,7 @@ namespace Spacewars.Runtime
                 if(nav!=null)
                 {
                     var router=new SharedFlowRouter(safeGeometry,profile.Navigation.ForUnit(radius,nav.Speed,nav.TurnSpeed));
-                    foreach(var candidate in candidates.Distinct().Where(p=>vision.IsVisible(p)&&safeGeometry.IsFree(p,radius))
+                    foreach(var candidate in candidates.Distinct().Where(p=>safeGeometry.IsFree(p,radius))
                         .Where(p=>!threatened||nearest(p)>nearest(gun.Position))
                         .OrderByDescending(supported).ThenByDescending(p=>useful(p,gun.Id))
                         .ThenBy(p=>distance(gun.Position,p)))
@@ -79,7 +79,7 @@ namespace Spacewars.Runtime
                         var path=router.FindPath(gun.Position,candidate);if(path.Length==0)continue;
                         var from=gun.Position;bool safe=true;
                         foreach(var point in path)
-                        {if(!Geometry.SegmentFree(from,point,radius)||!VisibleSegment(vision,from,point)){safe=false;break;}from=point;}
+                        {if(!Geometry.SegmentFree(from,point,radius)){safe=false;break;}from=point;}
                         if(!safe||distance(from,candidate)>1.5)continue;
                         chosen=candidate;chosenUseful=useful(candidate,gun.Id);break;
                     }

@@ -81,6 +81,15 @@ namespace Spacewars.Runtime
         {scheduler.ReserveExternalBytes(ExternalBytes()+nextRegistration);
             peakRetainedBytes=Math.Max(peakRetainedBytes,RetainedBytes);
             if(!allocating)currentPort?.SetHostRetainedBytes(OwnedRetainedBytes);}
+        public void ReleaseForWorldCheckpoint(NavigationRoutePort port)
+        {
+            if(port==null)throw new ArgumentNullException(nameof(port));
+            if(currentPort!=null&&!ReferenceEquals(currentPort,port))
+                throw new InvalidOperationException("Checkpoint host is bound to another session.");
+            port.ReleaseHostForWorldCheckpoint(Clear);
+            // ClearWorld releases owned caches/work but retains this scheduler's epoch
+            // and remaining quotas. Rebinding must not manufacture a fresh allotment.
+        }
         public void Clear()
         {
             var oldPort=currentPort;

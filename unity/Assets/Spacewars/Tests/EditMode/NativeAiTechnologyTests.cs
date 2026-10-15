@@ -15,13 +15,21 @@ namespace Spacewars.Tests.EditMode
         private static object Get(object o,string name)=>o.GetType().GetField(name,F).GetValue(o);
         private static object Owner(PlayableAuthorityTick a)=>((IEnumerable)Get(Get(a,"scheduler"),"owners")).Cast<object>().Single();
         private static AiBudgetLedger Budget(PlayableAiObservation o){var b=new AiBudgetLedger(o.OwnerId,o.Generation);b.ObserveBank(o.Credits);return b;}
-        private static PlayableAiObservation View(PlayableProfile p,PlayableEntityKind kind=PlayableEntityKind.Tank,bool center=true,PlayableResearchOrderSnapshot[] research=null,PlayableProductionOrderSnapshot[] orders=null,int credits=10000)
+        private static PlayableAiObservation View(PlayableProfile p,PlayableEntityKind kind=PlayableEntityKind.Tank,bool center=true,PlayableResearchOrderSnapshot[] research=null,PlayableProductionOrderSnapshot[] orders=null,int credits=10000,PlayableEntityKind? secondKind=null)
         {
             var buildings=new[]{new PlayableBuildingSnapshot(4,PlayableOwner.Player,center?PlayableBuildingKind.ScientificCenter:PlayableBuildingKind.Factory,default(NavPoint),100,1,orders?.Length??0,0,default(NavPoint),orders:orders)}
                 .Concat(center?new[]{new PlayableBuildingSnapshot(5,PlayableOwner.Player,PlayableBuildingKind.Factory,new NavPoint(4,0),100,1,0,0,default(NavPoint))}:Array.Empty<PlayableBuildingSnapshot>()).ToArray();
+            var entities=new[]{new PlayableEntitySnapshot(2,PlayableOwner.Player,kind,default(NavPoint),PlayableUnitRules.Health(p,kind),false,0,0,0)}
+                .Concat(secondKind.HasValue?new[]{new PlayableEntitySnapshot(3,PlayableOwner.Player,secondKind.Value,new NavPoint(2,0),PlayableUnitRules.Health(p,secondKind.Value),false,0,0,0)}:Array.Empty<PlayableEntitySnapshot>()).ToArray();
             return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,41,1,45,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,credits,null,
-                new[]{new PlayableEntitySnapshot(2,PlayableOwner.Player,kind,default(NavPoint),PlayableUnitRules.Health(p,kind),false,0,0,0)},buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,
+                entities,buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,
                 researchAvailability:AiResearchCatalog.All.Select(d=>new PlayableResearchAvailabilitySnapshot(d.Kind,d.Cost(p),true)).ToArray(),ownerResearch:research));
+        }
+        private static AiBudgetLedger WithTechnologyHold(PlayableAiObservation o,PlayableProfile p,PlayableResearchKind branch,int amount)
+        {
+            var b=Budget(o);var action=new PlayableAiAction(90,o.OwnerId,p.ProfileId,p.Revision,o.Generation,o.SnapshotSequence,PlayableCommandKind.QueueResearch,new[]{4},researchKind:branch,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            var entry=new AiBudgetEntry("technology-funding:Research:"+branch+":1:1:1",AiTechnologyFunding.Purpose,action,amount,1,o.Tick,o.Tick+300,"test hold",Array.Empty<string>(),p.ProfileId+"@"+p.Revision);
+            Assert.True(b.Reserve(entry),"fixture technology reservation fits observed cash");return b;
         }
         [TestCase(PlayableEntityKind.Tank,PlayableResearchKind.TankChassis)]
         [TestCase(PlayableEntityKind.Explorer,PlayableResearchKind.ExplorerAssaultGuns)]
@@ -34,6 +42,26 @@ namespace Spacewars.Tests.EditMode
             foreach(var b in plan.Branches){Assert.AreEqual(b.Descriptor.Unit==unit?PlayableUnitRules.Cost(p,unit):0,b.AffectedValue);Assert.AreEqual(b.Descriptor.Unit==unit,b.Utility>0);}
             var d=AiResearchCatalog.For(kind);double expected=unit==PlayableEntityKind.Tank?p.TankChassisSpeed/p.TankSpeed-1:unit==PlayableEntityKind.Explorer?PlayableUnitRules.DamagePerSecond(p,unit,true)/PlayableUnitRules.DamagePerSecond(p,unit)-1:p.ShkvalGuidanceRange/p.ShkvalBaseRange-1;
             Assert.AreEqual(expected,d.RelativeGain(p),1e-12);
+        }
+        [Test] public void ReadyCenter_FullHoldForOwnBranchMakesThatBranchPayable()
+        {
+            var p=PlayableProfile.Default;var o=View(p,PlayableEntityKind.Shkval,credits:(int)p.ShkvalGuidanceCost);var budget=WithTechnologyHold(o,p,PlayableResearchKind.ShkvalGuidance,(int)p.ShkvalGuidanceCost);
+            var plan=new AiTechnologyPlanner().Plan(o,p,AiProfile.Initial,budget.Capture(),preferredFunding:PlayableResearchKind.ShkvalGuidance);
+            Assert.AreEqual(PlayableResearchKind.ShkvalGuidance,plan.FundingGoal.Research);Assert.AreEqual(PlayableResearchKind.ShkvalGuidance,plan.Action.ResearchKind);
+        }
+        [Test] public void ReadyCenter_UnrelatedFreeCashStillFundsHigherUtilityBranch()
+        {
+            var p=PlayableProfile.Default;var o=View(p,PlayableEntityKind.Explorer,credits:500,secondKind:PlayableEntityKind.Shkval);var budget=WithTechnologyHold(o,p,PlayableResearchKind.ShkvalGuidance,200);
+            Assert.AreEqual(300,budget.Available);
+            var plan=new AiTechnologyPlanner().Plan(o,p,AiProfile.Initial,budget.Capture(),preferredFunding:PlayableResearchKind.ShkvalGuidance);
+            Assert.AreEqual(PlayableResearchKind.ShkvalGuidance,plan.FundingGoal.Research);Assert.AreEqual(PlayableResearchKind.ExplorerAssaultGuns,plan.Action.ResearchKind);
+        }
+        [Test] public void ReadyCenter_UnrelatedPartialHoldCannotPayForDifferentBranch()
+        {
+            var p=PlayableProfile.Default;var o=View(p,PlayableEntityKind.Explorer,credits:400,secondKind:PlayableEntityKind.Shkval);var budget=WithTechnologyHold(o,p,PlayableResearchKind.ShkvalGuidance,200);
+            Assert.AreEqual(200,budget.Available);
+            var plan=new AiTechnologyPlanner().Plan(o,p,AiProfile.Initial,budget.Capture(),preferredFunding:PlayableResearchKind.ShkvalGuidance);
+            Assert.AreEqual(PlayableResearchKind.ShkvalGuidance,plan.FundingGoal.Research);Assert.IsNull(plan.Action);
         }
         [Test] public void PrerequisiteAndBudgetUseSharedSafetyAndDoNotMutateLedger()
         {

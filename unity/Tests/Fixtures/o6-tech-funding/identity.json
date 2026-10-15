@@ -1,0 +1,20 @@
+{
+  "schema": "o6-actual-natural-checkpoint-v1",
+  "source": "e8fa6dfbed542fc86493940fbc0f7cc1361f16f0",
+  "original_archive_sha256": "7d2aba0e7d49b7be45830ca084bda54dd9c550b7e94554112d755b49ccf76c38",
+  "seed": 7109,
+  "generation": 71,
+  "tick": 3900,
+  "original_horizon": 18000,
+  "target_owner": "ai-4",
+  "target_opening": "GreedySafe",
+  "actual_bank": 176,
+  "actual_income_per_second": 11,
+  "actual_guard_emergency": false,
+  "actual_reason": "no affordable useful available research",
+  "no_injection": true,
+  "files": {
+    "original-input.json": "ea4b26c51860d344ca9ce3118076e3de7330706cc7a2e23bc5403667351001f4",
+    "checkpoint-3900.world": "adb5a83b5fc184ddd1dd74869c139fbef3a21aaba00a6c115f3f52be2c0e7f1c"
+  }
+}

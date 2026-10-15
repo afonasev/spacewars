@@ -44,7 +44,7 @@ namespace Spacewars.Runtime
         private const int Tag=0x47525031;
         internal static void WriteExtension(BinaryWriter w,NavigationSessionState state)
         {
-            w.Write(Tag);w.Write(7);w.Write(state.GroupSequence);
+            w.Write(Tag);w.Write(8);w.Write(state.GroupSequence);
             Array(w,state.Groups??System.Array.Empty<GroupOrderState>(),g=>{
                 w.Write(g.WorldGeneration);w.Write(g.GroupId);w.Write(g.OrderRevision);w.Write(g.CommandSequence);w.Write(g.IssuedTick);w.Write(g.MembershipRevision);
                 String(w,g.OwnerId);w.Write(g.TeamId);w.Write((int)g.Origin);w.Write((int)g.Kind);String(w,g.Source);w.Write(g.JobId);w.Write(g.ActionId);WorldWire.Write(w,g.OriginalGoal);w.Write(g.TargetId);
@@ -75,12 +75,15 @@ namespace Spacewars.Runtime
             Array(w,state.Groups,g=>{w.Write(g.GroupId);w.Write(g.MarchVersion);w.Write(g.MarchProfileRevision);
                 Number(w,g.MarchStretch);Number(w,g.MarchAnchor);w.Write(g.MarchInitialized);
                 Array(w,g.Members,m=>{w.Write(m.Entity);w.Write(m.ProgressRequest);});});
+            w.Write(state.InstalledExecutionLayoutVersion);
+            Array(w,state.InstalledExecutionKeys??System.Array.Empty<int>(),key=>w.Write(key));
+            Array(w,state.InstalledExecutionLayout??System.Array.Empty<int>(),slot=>w.Write(slot));
         }
         internal static void ReadExtension(BinaryReader r,NavigationSessionState state)
         {
             if(r.BaseStream.Position==r.BaseStream.Length){LegacyAnswerStatuses(state);return;}
             if(r.ReadInt32()!=Tag)throw new ArgumentException("Unsupported navigation group extension.");
-            int version=r.ReadInt32();if(version<1||version>7)throw new ArgumentException("Unsupported navigation surface extension.");
+            int version=r.ReadInt32();if(version<1||version>8)throw new ArgumentException("Unsupported navigation surface extension.");
             state.GroupSequence=r.ReadInt64();state.Groups=Array(r,()=>new GroupOrderState{
                 WorldGeneration=r.ReadInt64(),GroupId=r.ReadInt64(),OrderRevision=r.ReadInt64(),CommandSequence=r.ReadInt64(),IssuedTick=r.ReadInt64(),MembershipRevision=r.ReadInt64(),
                 OwnerId=String(r),TeamId=r.ReadInt32(),Origin=EnumValue<PlayableOrderOrigin>(r),Kind=EnumValue<PlayableCommandKind>(r),Source=String(r),JobId=r.ReadInt64(),ActionId=r.ReadInt64(),OriginalGoal=ReadPoint(r),TargetId=r.ReadInt32(),
@@ -138,6 +141,11 @@ namespace Spacewars.Runtime
                     int members=r.ReadInt32();if(members!=group.Members.Length)throw new ArgumentException("March member count mismatch.");
                     foreach(var member in group.Members){if(r.ReadInt32()!=member.Entity)throw new ArgumentException("March member identity mismatch.");member.ProgressRequest=r.ReadInt64();}
                 }
+            }
+
+            if(version>=8){
+                state.InstalledExecutionLayoutVersion=r.ReadInt32();if(state.InstalledExecutionLayoutVersion!=1)throw new ArgumentException("Version eight requires installed execution allocation layout.");state.InstalledExecutionKeys=Array(r,()=>r.ReadInt32());state.InstalledExecutionLayout=Array(r,()=>r.ReadInt32());
+                NavigationSession.ValidateInstalledExecutionLayout(state);
             }
 
             void ReadCorridors(NavigationAnswerState[] answers)

@@ -121,7 +121,7 @@ namespace Spacewars.Tests.EditMode
             int limit=(int)AiProfile.Initial.Value("decision.retryLimit");long retry=AiProfile.SecondsToTicks(AiProfile.Initial.Value("decision.retrySeconds"),30);
             for(int i=0;i<limit;i++){a.Select(new[]{rejected,useful},i*retry,0,0,1);a.Terminal(rejected,i*retry,PlayableAiDeliveryStatus.Rejected);}
             var b=new AiDecisionArbiter(AiProfile.Initial);using(var stream=new MemoryStream())
-            {using(var w=new BinaryWriter(stream,System.Text.Encoding.UTF8,true))typeof(AiDecisionArbiter).GetMethod("WriteState",F).Invoke(a,new object[]{w});stream.Position=0;using(var r=new BinaryReader(stream))typeof(AiDecisionArbiter).GetMethod("ReadState",F).Invoke(b,new object[]{r,limit*retry});}
+            {using(var w=new BinaryWriter(stream,System.Text.Encoding.UTF8,true))typeof(AiDecisionArbiter).GetMethod("WriteState",F).Invoke(a,new object[]{w});stream.Position=0;using(var r=new BinaryReader(stream))typeof(AiDecisionArbiter).GetMethod("ReadState",F).Invoke(b,new object[]{r,limit*retry,"a",71L,PlayableProfile.Default,AiProfile.Initial});}
             long aging=AiProfile.SecondsToTicks(AiProfile.Initial.Value("decision.intentAgingSeconds"),30);
             CollectionAssert.AreEqual(a.Select(new[]{rejected,Intent("micro",1),useful},aging,0,0,1).Select(i=>i.Id),b.Select(new[]{rejected,Intent("micro",1),useful},aging,0,0,1).Select(i=>i.Id));Assert.AreEqual("useful",b.Select(new[]{rejected,Intent("micro",1),useful},aging,0,0,1).Single().Id);
         }

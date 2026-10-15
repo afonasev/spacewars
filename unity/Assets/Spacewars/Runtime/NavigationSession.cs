@@ -58,6 +58,7 @@ namespace Spacewars.Runtime
         public NavigationAnswerState[] AnswerMailbox, BarrierAnswers;
         public NavigationTechnicalFailureState[] TechnicalFailures;
         public int CorridorWireVersion; public NavigationInstalledExecutionState[] InstalledExecutions;
+        public int InstalledExecutionLayoutVersion; public int[] InstalledExecutionKeys,InstalledExecutionLayout;
         public int RejectedResults, AppliedResults, UnreachableResults;
         public int[][] CollectionLayouts;
     }
@@ -95,8 +96,8 @@ namespace Spacewars.Runtime
     // bounded cross-thread surfaces.
     public sealed partial class NavigationSession
     {
-        private readonly Dictionary<int,NavigationInstalledExecutionState> installedExecutions=
-            new Dictionary<int,NavigationInstalledExecutionState>();
+        private readonly AuthoritySlotMap<int,NavigationInstalledExecutionState> installedExecutions=
+            new AuthoritySlotMap<int,NavigationInstalledExecutionState>();
         private readonly HashSet<NavigationAnswer> countedCorridorAnswers=new HashSet<NavigationAnswer>();
         internal string LastCorridorFailure{get;private set;}
         private bool CorridorFailure(string reason){LastCorridorFailure=reason;return false;}
@@ -225,6 +226,27 @@ namespace Spacewars.Runtime
         }
         private void DetachInstalledExecution(int entity)
         {if(installedExecutions.TryGetValue(entity,out var state))state.Detached=true;}
+        internal static void ValidateInstalledExecutionLayout(NavigationSessionState state)
+        {
+            if(state.InstalledExecutionLayoutVersion==0){
+                if(state.InstalledExecutionKeys!=null&&state.InstalledExecutionKeys.Length!=0||state.InstalledExecutionLayout!=null&&state.InstalledExecutionLayout.Length!=0)
+                    throw new ArgumentException("Legacy installed execution layout has metadata.");
+                return; // v1-v7 recorded no allocation state; reconstruction is dense.
+            }
+            if(state.InstalledExecutionLayoutVersion!=1||state.CorridorWireVersion!=1||state.InstalledExecutions==null||state.InstalledExecutionKeys==null||state.InstalledExecutionLayout==null||state.InstalledExecutionKeys.Length!=state.InstalledExecutions.Length)
+                throw new ArgumentException("Invalid installed execution layout mode/count.");
+            if(state.Crowd==null||state.Crowd.Units==null)throw new ArgumentException("Missing installed execution actors.");
+            var actors=new HashSet<int>();foreach(var actor in state.Crowd.Units)if(actor==null||!actors.Add(actor.Id))throw new ArgumentException("Invalid installed execution actors.");
+            var entities=new HashSet<int>();int previous=-1;
+            foreach(var row in state.InstalledExecutions){
+                if(row==null||row.Entity<0||row.Entity<=previous||!actors.Contains(row.Entity)||row.Corridor==null||row.Corridor.Entity!=row.Entity||!entities.Add(row.Entity))
+                    throw new ArgumentException("Invalid canonical installed execution row/actor binding.");
+                previous=row.Entity;
+            }
+            var validation=new AuthoritySlotMap<int,byte>();
+            foreach(int key in state.InstalledExecutionKeys){if(!entities.Contains(key))throw new ArgumentException("Unknown installed execution key.");validation.Add(key,0);}
+            validation.RestoreLayout(state.InstalledExecutionLayout);
+        }
         private void RestoreInstalledExecutions(NavigationSessionState state,NavGeometry[] geometryTable)
         {
             if(state.CorridorWireVersion==0){
@@ -282,6 +304,11 @@ namespace Spacewars.Runtime
                     InstalledRoute=(NavPoint[])row.InstalledRoute.Clone(),Profile=historicalProfile,
                     MovementGeometry=historicalGeometry,BaseGeometry=historicalBase,HeldIdentity=row.HeldIdentity});
                 installedCorridorBytes+=descriptor.EstimatedRetainedBytes+16L*row.InstalledRoute.Length;
+            }
+            if(state.InstalledExecutionLayoutVersion==1){
+                var rows=installedExecutions.ToDictionary(pair=>pair.Key,pair=>pair.Value);
+                installedExecutions.Clear();foreach(int key in state.InstalledExecutionKeys)installedExecutions.Add(key,rows[key]);
+                installedExecutions.RestoreLayout(state.InstalledExecutionLayout);
             }
             RecountInstalledGeometryBytes();
             if(CorridorRetainedBytes>LayeredNavigationScheduler.MaxRetainedBytes)
@@ -595,6 +622,24 @@ namespace Spacewars.Runtime
             =>answer.Route!=null&&Enum.IsDefined(typeof(NavSolveStatus),answer.Status)&&
                 answer.Status!=NavSolveStatus.Pending&&
                 (answer.Status==NavSolveStatus.Ready)==(answer.Route.Length>0);
+        // Caller owns and quiesces the synchronous host. Validate replay before releasing
+        // any work; then release actual memory and return every registered input to FIFO.
+        internal void ReleaseHostForWorldCheckpoint(Action releaseHost)
+        {
+            if(releaseHost==null)throw new ArgumentNullException(nameof(releaseHost));
+            using(EnterTransport()){
+                RejectTransferCallbackReentry();
+                if(commandGroup!=null||admissionBatchDepth!=0||hostAllocationThread!=0)
+                    throw new InvalidOperationException("Checkpoint requires quiescent authority and host allocation.");
+                CaptureStateLocked(); // Also rejects unaccounted pending/probe inputs before mutation.
+                var replay=registeredRoutes.Concat(Requests.CopyItems()).OrderBy(r=>r.Request).ToArray();
+                releaseHost();
+                if(hostRetainedBytes!=0)throw new InvalidOperationException("Checkpoint host resources were not released.");
+                Requests.ReplaceItemsForCheckpoint(replay);
+                registeredRoutes.Clear();registeredGraphKeys.Clear();
+                PublishAdmission();
+            }
+        }
         public NavigationSessionState CaptureState()
         {
             using(EnterTransport()){RejectTransferCallbackReentry();
@@ -629,7 +674,7 @@ namespace Spacewars.Runtime
             var geometries=new List<NavGeometry>{geometry};var geometryIndices=new Dictionary<NavGeometry,int>{{geometry,0}};
             Func<NavGeometry,int> geometryIndex=g=>{if(!geometryIndices.TryGetValue(g,out var index)){index=geometries.Count;geometryIndices.Add(g,index);geometries.Add(g);}return index;};
             int baseIndex=geometryIndex(navigationGeometry);
-            var state=new NavigationSessionState{TransportVersion=1,CorridorWireVersion=1,InstalledExecutions=installedExecutions.Values.OrderBy(x=>x.Entity).Select(x=>new NavigationInstalledExecutionState{Entity=x.Entity,Detached=x.Detached,Corridor=x.Corridor,InstalledRoute=(NavPoint[])x.InstalledRoute.Clone(),ProfileId=x.Profile.ProfileId,ProfileRevision=x.Profile.Revision,ProfileValues=SaveProfile(x.Profile),HeldIdentity=x.HeldIdentity,GeometryIndex=geometryIndex(x.MovementGeometry),BaseGeometryIndex=geometryIndex(x.BaseGeometry)}).ToArray(),SurfaceSemanticsVersion=terrain?.SurfaceSemanticsVersion??1,SurfaceProviderId=terrain?.Id??NavLocation.FlatSurface,NavigationGeometryIndex=baseIndex,Generation=Generation,RequestSequence=requestSequence,GroupSequence=groupSequence,Groups=GroupOrders.ToArray(),GroupLayoutVersion=1,GroupKeys=groups.Keys.ToArray(),MemberGroupKeys=memberGroups.Keys.ToArray(),GroupLayouts=new[]{groups.CaptureLayout(),memberGroups.CaptureLayout()},Geometry=SaveGeometry(geometry),NavigationGeometry=SaveGeometry(navigationGeometry),
+            var state=new NavigationSessionState{InstalledExecutionLayoutVersion=1,InstalledExecutionKeys=installedExecutions.Keys.ToArray(),InstalledExecutionLayout=installedExecutions.CaptureLayout(),TransportVersion=1,CorridorWireVersion=1,InstalledExecutions=installedExecutions.Values.OrderBy(x=>x.Entity).Select(x=>new NavigationInstalledExecutionState{Entity=x.Entity,Detached=x.Detached,Corridor=x.Corridor,InstalledRoute=(NavPoint[])x.InstalledRoute.Clone(),ProfileId=x.Profile.ProfileId,ProfileRevision=x.Profile.Revision,ProfileValues=SaveProfile(x.Profile),HeldIdentity=x.HeldIdentity,GeometryIndex=geometryIndex(x.MovementGeometry),BaseGeometryIndex=geometryIndex(x.BaseGeometry)}).ToArray(),SurfaceSemanticsVersion=terrain?.SurfaceSemanticsVersion??1,SurfaceProviderId=terrain?.Id??NavLocation.FlatSurface,NavigationGeometryIndex=baseIndex,Generation=Generation,RequestSequence=requestSequence,GroupSequence=groupSequence,Groups=GroupOrders.ToArray(),GroupLayoutVersion=1,GroupKeys=groups.Keys.ToArray(),MemberGroupKeys=memberGroups.Keys.ToArray(),GroupLayouts=new[]{groups.CaptureLayout(),memberGroups.CaptureLayout()},Geometry=SaveGeometry(geometry),NavigationGeometry=SaveGeometry(navigationGeometry),
                 Crowd=Crowd.CaptureState(),Requests=new NavigationRequestState[all.Count],Orders=new NavigationEntityOrderState[orders.Count],
                 Reservations=new NavigationEntityPointState[reservations.Count],RetainedGoals=new NavigationEntityPointState[retainedGoals.Count],
                 MovementIdentities=new NavigationMovementIdentityState[movementIdentities.Count],ProbeRequestIndices=new int[probes.Count],ProbeAnswers=new NavigationAnswerState[probeAnswers.Count],
@@ -665,6 +710,7 @@ namespace Spacewars.Runtime
                 Requests.Count!=0||Answers.Count!=0||Crowd.Units.Count!=0||!SameGeometry(state.Geometry,geometry)||!SameGeometry(state.NavigationGeometry,navigationGeometry))
                 throw new ArgumentException("Navigation session checkpoint or destination mismatch.",nameof(state));
             if(state.GeometryTable==null||state.GeometryTable.Length<1||state.NavigationGeometryIndex<0||state.NavigationGeometryIndex>=state.GeometryTable.Length||!SameGeometry(state.GeometryTable[0],geometry)||!SameGeometry(state.GeometryTable[state.NavigationGeometryIndex],navigationGeometry)||(state.NavigationGeometryIndex==0)!=Object.ReferenceEquals(geometry,navigationGeometry))throw new ArgumentException("Invalid geometry identity table.");
+            ValidateInstalledExecutionLayout(state);
             ValidateSurfaceState(state);
             var geometryTable=new NavGeometry[state.GeometryTable.Length];for(int i=0;i<geometryTable.Length;i++)geometryTable[i]=i==0?geometry:i==state.NavigationGeometryIndex?navigationGeometry:LoadGeometry(state.GeometryTable[i]);
             var restored=new NavigationRequest[state.Requests.Length];long maxRequest=0;var requestIds=new HashSet<string>();

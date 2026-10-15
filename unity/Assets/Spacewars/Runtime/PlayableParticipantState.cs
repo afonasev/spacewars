@@ -12,6 +12,11 @@ namespace Spacewars.Runtime
         private readonly HashSet<PlayableOwner> eliminated=new HashSet<PlayableOwner>();
         internal int? WinnerTeam{get;private set;}
         private IEnumerable<PlayableOwner> Owners=>offline==null?new[]{PlayableOwner.Player,PlayableOwner.Enemy}:Enumerable.Range(0,offline.Roster.Count).Select(i=>(PlayableOwner)i);
+        private void ResynchronizeTankMobility(PlayableOwner owner)
+        {
+            foreach(var unit in units.Values.Where(unit=>unit.Owner==owner&&unit.Kind==PlayableEntityKind.Tank))
+                navigation.Crowd.SetSpeed(unit.Id,PlayableUnitRules.Speed(profile,unit.Kind,UnitUpgraded(unit)));
+        }
         internal IEnumerable<string> OwnerIds=>Owners.Select(OwnerName);
         private bool HasOwner(PlayableOwner owner)=>Owners.Contains(owner);
         private bool TryOwner(string id,out PlayableOwner owner){owner=PlayableOwner.Player;if(offline==null){if(id==PlayerId)return true;owner=PlayableOwner.Enemy;return id=="enemy-1";}for(int i=0;i<offline.Roster.Count;i++)if(offline.Roster[i].Id==id){owner=(PlayableOwner)i;return true;}return false;}
@@ -51,7 +56,7 @@ namespace Spacewars.Runtime
                 eliminated.Add(owner);
                 foreach(var u in units.Values.Where(u=>u.Owner==owner)){tacticalQueues.Remove(u.Id);InvalidateSpatialCompletion(u.Id);InterruptBurst(u);u.Target=0;u.ExplicitTarget=false;u.HasAttackMove=false;u.CurrentOrder=null;navigation.Stop(u.Id,true);}
                 foreach(var b in buildings.Values.Where(b=>b.Owner==owner).ToArray()){b.Repair=null;b.Orders.Clear();b.RepeatTank=false;if(b.Phase==ConstructionPhase.Pending)RemoveBuilding(b,false);}
-                research.Remove(owner);foreach(var key in centerDamage.Keys.ToArray())if(centerDamage[key].Owner==owner||!units.ContainsKey(centerDamage[key].AttackerId))centerDamage.Remove(key);
+                research.Remove(owner);ResynchronizeTankMobility(owner);foreach(var key in centerDamage.Keys.ToArray())if(centerDamage[key].Owner==owner||!units.ContainsKey(centerDamage[key].AttackerId))centerDamage.Remove(key);
                 foreach(var site in sites.Values)if(site.Claimant==owner){site.Claimant=null;site.Progress=0;if(site.Locked==owner)site.Locked=null;}
             }
             var teams=Owners.Where(x=>!eliminated.Contains(x)).Select(TeamOf).Distinct().ToArray();

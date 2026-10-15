@@ -21,10 +21,11 @@ namespace Spacewars.Runtime
     }
     public sealed class AiTechnologyPlan
     {
-        internal AiTechnologyPlan(AiResearchAssessment[] branches,InfrastructureRequest infrastructure,PlayableAiAction action,string reason)
-        {Branches=Array.AsReadOnly(branches);Infrastructure=infrastructure;Action=action;Reason=reason;}
+        internal AiTechnologyPlan(AiResearchAssessment[] branches,InfrastructureRequest infrastructure,PlayableAiAction action,string reason,InfrastructureRequest fundingGoal=null)
+        {Branches=Array.AsReadOnly(branches);Infrastructure=infrastructure;Action=action;Reason=reason;FundingGoal=fundingGoal;}
         public IReadOnlyList<AiResearchAssessment> Branches{get;} public InfrastructureRequest Infrastructure{get;}
         public PlayableAiAction Action{get;} public string Reason{get;}
+        public InfrastructureRequest FundingGoal{get;}
     }
     // Pure proposals. Ordinary owner research orders are the durable progress authority:
     // an interrupted active order disappears; waiting orders survive and completed effects persist.
@@ -37,12 +38,12 @@ namespace Spacewars.Runtime
             return String.IsNullOrWhiteSpace(descriptor.exclusionReason)&&descriptor.unlockDependencies.All(kind=>o.OwnerResearch.Any(r=>r.Kind==kind&&r.Complete))&&
                 AiProductionDemand.Lines(o,catalog,research.Unit).Any(b=>!AiProductionDemand.Blocked(b));
         }
-        public AiTechnologyPlan Plan(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiBudgetState budget,bool emergency=false,AiRosterCatalog catalog=null)
+        public AiTechnologyPlan Plan(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiBudgetState budget,bool emergency=false,AiRosterCatalog catalog=null,PlayableResearchKind? preferredFunding=null)
         {
             if(o==null||p==null||ai==null||budget==null)throw new ArgumentNullException();
             if(budget.OwnerId!=o.OwnerId||budget.Generation!=o.Generation||p.ProfileId!=o.ProfileId||p.Revision!=o.ProfileRevision)throw new ArgumentException("Foreign technology context.");
             catalog=catalog??AiRosterCatalog.Initial;
-            var centers=o.Buildings.Where(b=>b.Owner==o.Owner&&b.Health>0&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.PrivateState?.Lifecycle?.Selling!=true).OrderBy(b=>b.Id).ToArray();
+            var centers=o.Buildings.Where(b=>b.Owner==o.Owner&&(b.Health>0||b.Phase==ConstructionPhase.Pending||b.Phase==ConstructionPhase.Constructing&&b.Progress==0)&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.PrivateState?.Lifecycle?.Selling!=true).OrderBy(b=>b.Id).ToArray();
             var center=centers.FirstOrDefault(b=>b.Phase==ConstructionPhase.Ready);
             double missing=centers.Length==0?TerritoryRules.Cost(p,PlayableBuildingKind.ScientificCenter):0;
             double construction=centers.Length==0?p.ScienceBuildSeconds:center==null?centers.Min(b=>Math.Max(0,1-b.Progress)*p.ScienceBuildSeconds):0;
@@ -68,14 +69,16 @@ namespace Spacewars.Runtime
             // Existing-center proposals remain visible to shared admission/retry diagnostics.
             // Missing science must fit both construction and unheld future research cost;
             // a waiting order's already accepted unpaid amount is never reserved twice.
+            var goal=branches.Where(b=>b.Progress==AiResearchProgress.Available&&b.Utility>0&&ProductivePrerequisiteReady(o,b.Descriptor,catalog)&&o.ResearchAvailability.Any(r=>r.Kind==b.Descriptor.Kind&&r.Available)).OrderByDescending(b=>b.Descriptor.Kind==preferredFunding).ThenByDescending(b=>b.Utility).ThenBy(b=>b.Descriptor.Cost(p)).ThenBy(b=>b.Descriptor.Kind).FirstOrDefault();
+            var fundingGoal=goal==null?null:new InfrastructureRequest(goal.Descriptor.Kind,goal.Utility);
             var best=branches.Where(b=>b.Utility>0&&ProductivePrerequisiteReady(o,b.Descriptor,catalog)&&(b.Progress==AiResearchProgress.Waiting||o.ResearchAvailability.Any(r=>r.Kind==b.Descriptor.Kind&&r.Available))&&
-                (center!=null?o.Credits>=b.Descriptor.Cost(p):available>=Math.Ceiling(missing+(b.Progress==AiResearchProgress.Waiting&&budget.Unpaid.Any(e=>e.AwaitingPayment&&e.Action.Kind==PlayableCommandKind.QueueResearch&&e.Action.ResearchKind==b.Descriptor.Kind)?0:b.Descriptor.Cost(p)))))
+                (center!=null?available+AiTechnologyFunding.CoveredAmount(budget,b.Descriptor.Kind,p)>=b.Descriptor.Cost(p):available+AiTechnologyFunding.CoveredAmount(budget,b.Descriptor.Kind,p)>=Math.Ceiling(missing+(b.Progress==AiResearchProgress.Waiting&&budget.Unpaid.Any(e=>e.AwaitingPayment&&e.Action.Kind==PlayableCommandKind.QueueResearch&&e.Action.ResearchKind==b.Descriptor.Kind)?0:b.Descriptor.Cost(p)))))
                 .OrderByDescending(b=>b.Utility).ThenBy(b=>b.Descriptor.Cost(p)).ThenBy(b=>b.Descriptor.Kind).FirstOrDefault();
-            if(best==null)return new AiTechnologyPlan(branches,null,null,emergency?"visible center threat: defer new technology":branches.Any(b=>b.Utility>0)&&!branches.Any(b=>b.Utility>0&&ProductivePrerequisiteReady(o,b.Descriptor,catalog))?"compatible productive prerequisite unresolved":"no affordable useful available research");
-            if(center==null)return new AiTechnologyPlan(branches,centers.Length==0?new InfrastructureRequest(best.Descriptor.Kind,best.Utility):null,null,centers.Length==0?"request science prerequisite through shared macro":"science construction pending");
+            if(best==null)return new AiTechnologyPlan(branches,null,null,emergency?"visible center threat: defer new technology":branches.Any(b=>b.Utility>0)&&!branches.Any(b=>b.Utility>0&&ProductivePrerequisiteReady(o,b.Descriptor,catalog))?"compatible productive prerequisite unresolved":"no affordable useful available research",fundingGoal);
+            if(center==null)return new AiTechnologyPlan(branches,centers.Length==0?new InfrastructureRequest(best.Descriptor.Kind,best.Utility):null,null,centers.Length==0?"request science prerequisite through shared macro":"science construction pending",fundingGoal);
             if(best.Progress==AiResearchProgress.Waiting)return new AiTechnologyPlan(branches,null,null,"ordinary waiting research owns its existing order/receipt");
             var action=new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.QueueResearch,new[]{center.Id},researchKind:best.Descriptor.Kind,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
-            return new AiTechnologyPlan(branches,null,action,"highest gameplay payoff research");
+            return new AiTechnologyPlan(branches,null,action,"highest gameplay payoff research",fundingGoal);
         }
     }
 }

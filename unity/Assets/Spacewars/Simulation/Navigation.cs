@@ -216,6 +216,12 @@ namespace Spacewars.Simulation
         public int Count { get { lock(gate) return queue.Count; } }
         // The owner must quiesce producers and consumers before a checkpoint.
         public T[] CopyItems() { lock(gate) { RejectTransferReentry();return queue.ToArray(); } }
+        // Only the quiesced authority checkpoint owner may replace transport FIFO.
+        internal void ReplaceItemsForCheckpoint(T[] items)
+        {
+            if(items==null||items.Length>capacity)throw new ArgumentException("Checkpoint mailbox capacity.");
+            lock(gate){RejectTransferReentry();queue.Clear();foreach(var item in items)queue.Enqueue(item);}
+        }
         internal bool TryPeek(out T item) { lock(gate) { RejectTransferReentry();if(queue.Count==0){item=default(T);return false;}item=queue.Peek();return true; } }
         public bool TryEnqueue(T item) { lock (gate) { RejectTransferReentry();if (queue.Count >= capacity) return false; queue.Enqueue(item); return true; } }
         public bool TryDequeue(out T item) { lock (gate) { RejectTransferReentry();if (queue.Count == 0) { item = default(T); return false; } item = queue.Dequeue(); return true; } }

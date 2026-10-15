@@ -53,6 +53,10 @@ namespace Spacewars.Runtime
 
     public sealed class AiBudgetLedger
     {
+#if UNITY_INCLUDE_TESTS
+        internal static Action<string,long,string,string,string> CurrentSafeFundingExpiryReadbackForTests;
+        internal static string CurrentSafeFundingExpiryOwnerForTests;
+#endif
         private readonly Dictionary<string,AiBudgetEntry> reserved=new Dictionary<string,AiBudgetEntry>(StringComparer.Ordinal);
         private readonly Dictionary<string,AiBudgetEntry> unpaid=new Dictionary<string,AiBudgetEntry>(StringComparer.Ordinal);
         // Bounded diagnostic history; the cumulative settled total remains durable. Old receipts
@@ -72,6 +76,7 @@ namespace Spacewars.Runtime
         public IReadOnlyList<string> ActiveClaims=>Array.AsReadOnly(reserved.Values.Concat(unpaid.Values).SelectMany(x=>x.Claims).OrderBy(x=>x,StringComparer.Ordinal).ToArray());
         public void ObserveBank(int liquid){if(liquid<0)throw new ArgumentException("Negative bank.");Liquid=liquid;}
         public void SetSafetyReserve(int amount){if(amount<0)throw new ArgumentException("Negative safety reserve.");SafetyReserve=amount;}
+        public bool HasReservationPurpose(string purpose)=>reserved.Values.Any(e=>e.Purpose==purpose);
         public long ReservationAmount(string intentId)=>reserved.TryGetValue(intentId,out var entry)?entry.Amount:0;
         internal AiBudgetEntry ReservationEntry(string intentId)=>reserved.TryGetValue(intentId,out var entry)?entry:null;
         public bool HasUnpaid(string intentId)=>unpaid.ContainsKey(intentId);
@@ -100,6 +105,22 @@ namespace Spacewars.Runtime
             if(!Fits(entry,entry.Id))return false;
             reserved.Remove(entry.Id);unpaid.Add(entry.Id,entry);admittedDecision=entry.Receipt.DecisionOrdinal;admittedAction=entry.Receipt.ActionOrdinal;return true;
         }
+        // One validation/commit boundary: science invoice plus research remainder never
+        // exposes its released cash to another selected intent or observable ledger snapshot.
+        public bool AcceptReserved(AiBudgetEntry entry,string reservationId,AiBudgetEntry remainder=null)
+        {
+            ValidateEntry(entry,true);if(remainder!=null)ValidateEntry(remainder,false);
+            if(!reserved.TryGetValue(reservationId,out var hold)||unpaid.ContainsKey(entry.Id)||entry.AwaitingPayment||
+                entry.Receipt.DecisionOrdinal<admittedDecision||entry.Receipt.DecisionOrdinal==admittedDecision&&entry.Receipt.ActionOrdinal<=admittedAction||
+                unpaid.Values.Concat(paid).Any(x=>x.Receipt.Id==entry.Receipt.Id))return false;
+            if(entry.Amount+(remainder?.Amount??0)!=hold.Amount||remainder!=null&&(remainder.Id==entry.Id||remainder.ExpiresTick-remainder.CreatedTick>ReservationLifetimeTicks||unpaid.ContainsKey(remainder.Id)||reserved.ContainsKey(remainder.Id)&&remainder.Id!=reservationId))return false;
+            if(remainder!=null&&entry.Claims.Intersect(remainder.Claims,StringComparer.Ordinal).Any())return false;
+            var active=reserved.Values.Concat(unpaid.Values).Where(x=>x.Id!=reservationId).ToArray();
+            if(entry.Amount+(remainder?.Amount??0)>Math.Max(0,(long)Liquid-SafetyReserve-active.Sum(x=>(long)x.Amount))||
+                active.SelectMany(x=>x.Claims).Intersect(entry.Claims.Concat(remainder?.Claims??Array.Empty<string>()),StringComparer.Ordinal).Any())return false;
+            reserved.Remove(reservationId);unpaid.Add(entry.Id,entry);if(remainder!=null)reserved.Add(remainder.Id,remainder);
+            admittedDecision=entry.Receipt.DecisionOrdinal;admittedAction=entry.Receipt.ActionOrdinal;return true;
+        }
         private bool Fits(AiBudgetEntry entry,string replacing)
         {
             var active=reserved.Values.Concat(unpaid.Values).Where(x=>x.Id!=replacing).ToArray();
@@ -113,7 +134,29 @@ namespace Spacewars.Runtime
         public void Expire(long tick,Func<AiBudgetEntry,bool> stillValid=null)
         {
             if(tick<0)throw new ArgumentException("Negative tick.");
+#if UNITY_INCLUDE_TESTS
+            bool captureFundingExpiry=CurrentSafeFundingExpiryReadbackForTests!=null&&
+                (CurrentSafeFundingExpiryOwnerForTests==null||CurrentSafeFundingExpiryOwnerForTests==OwnerId);
+            if(!captureFundingExpiry)
+            {
+                foreach(var entry in reserved.Values.Where(x=>tick>x.ExpiresTick||stillValid!=null&&!stillValid(x)).ToArray())reserved.Remove(entry.Id);
+                return;
+            }
+            var expired=reserved.Values.ToArray().Select(entry=>new{Entry=entry,Elapsed=tick>entry.ExpiresTick,Valid=tick>entry.ExpiresTick||stillValid==null?true:stillValid(entry)}).Where(x=>x.Elapsed||!x.Valid).ToArray();
+            foreach(var candidate in expired)
+            {
+                var entry=candidate.Entry;bool elapsed=candidate.Elapsed,valid=candidate.Valid;
+                string before=entry.Purpose==AiTechnologyFunding.Purpose?string.Join(";",reserved.Values.Where(AiTechnologyFunding.IsFunding).Select(x=>$"{x.Id}:{x.Amount}@{x.CreatedTick}-{x.ExpiresTick}")):null;
+                reserved.Remove(entry.Id);
+                if(AiTechnologyFunding.IsFunding(entry))
+                {
+                    string after=string.Join(";",reserved.Values.Where(AiTechnologyFunding.IsFunding).Select(x=>$"{x.Id}:{x.Amount}@{x.CreatedTick}-{x.ExpiresTick}"));
+                    CurrentSafeFundingExpiryReadbackForTests(OwnerId,tick,entry.Id,before,after+";reason="+(elapsed?"time-expiry":"actual-invalidity")+";valid="+(elapsed?"NotEvaluated":valid.ToString()));
+                }
+            }
+#else
             foreach(var entry in reserved.Values.Where(x=>tick>x.ExpiresTick||stillValid!=null&&!stillValid(x)).ToArray())reserved.Remove(entry.Id);
+#endif
         }
         public bool Reconcile(string intentId,AiReceiptIdentity receipt,PlayableAiDeliveryStatus status,bool gameplayPaid=true)
         {

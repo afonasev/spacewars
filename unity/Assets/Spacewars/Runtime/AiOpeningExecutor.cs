@@ -35,6 +35,22 @@ namespace Spacewars.Runtime
         public AiScoutPlan ScoutPlan=>phase!=PlayableAiOpeningPhase.Active?AiScoutPlan.Standard:definition.Opening==PlayableAiOpening.BlindRush?AiScoutPlan.BlindRush:definition.Opening==PlayableAiOpening.ExplorerAllIn?AiScoutPlan.ScoutLed:AiScoutPlan.Standard;
         // Existing opportunistic C4 expansion remains live; this template adds a mandatory center milestone.
         public bool AllowsExpansion=>true;
+        // Pressure/intel/expansion are not economic prerequisites for useful technology.
+        public bool MissingEssentialEconomy(PlayableAiObservation o,AiProfile ai)=>phase==PlayableAiOpeningPhase.Active&&definition.Milestones.Any(m=>
+            m.Goal==AiOpeningGoal.Factory&&!HomeBuildings(o,PlayableBuildingKind.Factory).Any(b=>b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true)||
+            m.Goal==AiOpeningGoal.Income&&HomeBuildings(o,PlayableBuildingKind.Refinery).Count(b=>b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true)<IncomeCount(ai)||
+            m.Goal==AiOpeningGoal.Force&&o.Entities.Count(u=>u.Owner==o.Owner&&u.Kind==PlayableEntityKind.Tank&&u.Health>0)<ai.Value("opening.forceUnits"));
+        private static IEnumerable<PlayableBuildingSnapshot> HomeBuildings(PlayableAiObservation o,PlayableBuildingKind kind)
+            =>o.Buildings.Where(b=>b.Owner==o.Owner&&b.SiteId==o.HomeSiteId&&b.Kind==kind);
+        internal int RequiredHomeRefineryCount(AiProfile ai)=>IncomeCount(ai);
+        internal bool HomeEconomyReady(PlayableAiObservation o,AiProfile ai)
+            =>o.HomeSiteId>0&&HomeBuildings(o,PlayableBuildingKind.Factory).Any(b=>b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true)&&
+              HomeBuildings(o,PlayableBuildingKind.Refinery).Count(b=>b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true)>=IncomeCount(ai);
+        internal int HomeEconomyQuote(PlayableAiObservation o,PlayableProfile p,AiProfile ai,IEnumerable<AiEconomyCandidate> normal)
+            =>MacroRequests(o,p,ai,normal).Where(c=>(c.Legal||c.Reason=="insufficient credits")&&c.Policy=="economy"&&c.Action.Kind==PlayableCommandKind.BuildAt&&
+                c.Action.SiteId==o.HomeSiteId&&((c.Action.BuildingKind==PlayableBuildingKind.Factory&&(Wants(AiOpeningGoal.Factory)||phase!=PlayableAiOpeningPhase.Active)&&HomeBuildings(o,PlayableBuildingKind.Factory).Count(b=>b.Health>0&&b.PrivateState?.Lifecycle?.Selling!=true)<1)||
+                    (c.Action.BuildingKind==PlayableBuildingKind.Refinery&&HomeBuildings(o,PlayableBuildingKind.Refinery).Count(b=>b.Health>0&&b.PrivateState?.Lifecycle?.Selling!=true)<IncomeCount(ai))))
+                .Select(c=>TerritoryRules.Cost(p,c.Action.BuildingKind)).DefaultIfEmpty(0).Min();
         public bool AllowsPressure=>phase!=PlayableAiOpeningPhase.Active||Wants(AiOpeningGoal.Pressure);
         private void Abort(string why){phase=PlayableAiOpeningPhase.Aborted;reason=why+"; fallback "+definition.Fallback;}
         private void Replan(long tick,AiProfile ai,string why)
@@ -54,7 +70,7 @@ namespace Spacewars.Runtime
             if(producer!=0&&!o.Buildings.Any(b=>b.Id==producer&&b.Owner==o.Owner&&b.Health>0&&b.PrivateState?.Lifecycle?.Selling!=true))Replan(o.Tick,ai,"producer lost");
             if(expansionSite!=0&&!o.Sites.Any(s=>s.Site.Id==expansionSite&&s.Owner==o.Owner&&s.Ready))Replan(o.Tick,ai,"expansion site lost");
             if(phase!=PlayableAiOpeningPhase.Active)return;
-            if(completed.Contains("income")&&o.Buildings.Count(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.Refinery&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true)<IncomeCount(ai))Replan(o.Tick,ai,"income prerequisite lost");
+            if(completed.Contains("income")&&HomeBuildings(o,PlayableBuildingKind.Refinery).Count(b=>b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true)<IncomeCount(ai))Replan(o.Tick,ai,"home income prerequisite lost");
             if(completed.Contains("force")&&o.Entities.Count(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==PlayableEntityKind.Tank)<ai.Value("opening.forceUnits"))Replan(o.Tick,ai,"opening force lost");
             if(phase!=PlayableAiOpeningPhase.Active)return;
             foreach(var m in definition.Milestones.Where(Enabled))
@@ -63,10 +79,10 @@ namespace Spacewars.Runtime
                 switch(m.Goal)
                 {
                     case AiOpeningGoal.Factory:
-                        var factory=o.Buildings.Where(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.Factory&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true).OrderBy(b=>b.Id).FirstOrDefault();
+                        var factory=HomeBuildings(o,PlayableBuildingKind.Factory).Where(b=>b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true).OrderBy(b=>b.Id).FirstOrDefault();
                         success=factory!=null;if(success)producer=factory.Id;break;
                     case AiOpeningGoal.Income:
-                        success=o.Buildings.Count(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.Refinery&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true)>=IncomeCount(ai);break;
+                        success=HomeBuildings(o,PlayableBuildingKind.Refinery).Count(b=>b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true)>=IncomeCount(ai);break;
                     case AiOpeningGoal.Expansion:
                         var site=o.Sites.Where(s=>s.Owner==o.Owner&&s.Ready&&s.Site.Id!=o.HomeSiteId&&o.Buildings.Any(b=>b.Id==s.CenterId&&b.Owner==o.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready)).OrderBy(s=>s.Site.Id).FirstOrDefault();
                         success=site!=null;if(success)expansionSite=site.Site.Id;break;
@@ -83,8 +99,8 @@ namespace Spacewars.Runtime
             {
                 var kind=m.Goal==AiOpeningGoal.Factory?PlayableBuildingKind.Factory:PlayableBuildingKind.Refinery;
                 int required=m.Goal==AiOpeningGoal.Factory?1:IncomeCount(ai);
-                int built=o.Buildings.Count(b=>b.Owner==o.Owner&&b.Kind==kind&&b.Health>0&&b.PrivateState?.Lifecycle?.Selling!=true);
-                bool free=o.Sites.Any(s=>s.Owner==o.Owner&&s.Ready&&!s.Contested&&s.Site.Slots.Any(slot=>!o.Buildings.Any(b=>b.SiteId==s.Site.Id&&b.SlotId==slot.Id)));
+                int built=HomeBuildings(o,kind).Count(b=>b.Health>0&&b.PrivateState?.Lifecycle?.Selling!=true);
+                bool free=o.Sites.Any(s=>s.Site.Id==o.HomeSiteId&&s.Owner==o.Owner&&s.Ready&&!s.Contested&&s.Site.Slots.Any(slot=>!o.Buildings.Any(b=>b.SiteId==s.Site.Id&&b.SlotId==slot.Id)));
                 if(built<required&&!free){Abort("no owned slot for "+m.Id);return;}
             }
             if(completed.Count==definition.Milestones.Count){phase=PlayableAiOpeningPhase.Complete;reason="all milestones completed";}
@@ -105,14 +121,21 @@ namespace Spacewars.Runtime
             {
                 bool wanted=kind==PlayableBuildingKind.Factory?Wants(AiOpeningGoal.Factory):Wants(AiOpeningGoal.Income);
                 int count=kind==PlayableBuildingKind.Factory?1:IncomeCount(ai);
-                if(!wanted||o.Buildings.Count(b=>b.Owner==o.Owner&&b.Kind==kind&&b.Health>0&&b.PrivateState?.Lifecycle?.Selling!=true)>=count)continue;
-                foreach(var site in o.Sites.Where(s=>s.Owner==o.Owner&&s.Ready&&!s.Contested).OrderBy(s=>s.Site.Id==o.HomeSiteId?0:1).ThenBy(s=>s.Site.Id))
+                if(!wanted||HomeBuildings(o,kind).Count(b=>b.Health>0&&b.PrivateState?.Lifecycle?.Selling!=true)>=count)continue;
+                foreach(var site in o.Sites.Where(s=>s.Site.Id==o.HomeSiteId&&s.Owner==o.Owner&&s.Ready&&!s.Contested))
                     foreach(var slot in site.Site.Slots.OrderBy(s=>s.Id))
                     {
                         var a=new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.BuildAt,siteId:site.Site.Id,slotId:slot.Id,parentId:site.CenterId,buildingKind:kind,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
                         requests.Add(new AiEconomyCandidate("economy",a,AiEconomyAdmission.Reject(o,p,a,true),1));
                     }
             }
+            if(HomeBuildings(o,PlayableBuildingKind.Refinery).Count(b=>b.Health>0&&b.PrivateState?.Lifecycle?.Selling!=true)<IncomeCount(ai))
+                foreach(var site in o.Sites.Where(s=>s.Site.Id==o.HomeSiteId&&s.Owner==o.Owner&&s.Ready&&!s.Contested))
+                    foreach(var slot in site.Site.Slots.OrderBy(s=>s.Id))
+                    {
+                        var a=new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.BuildAt,siteId:site.Site.Id,slotId:slot.Id,parentId:site.CenterId,buildingKind:PlayableBuildingKind.Refinery,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+                        requests.Add(new AiEconomyCandidate("economy",a,AiEconomyAdmission.Reject(o,p,a,true),1));
+                    }
             bool explorer=Wants(AiOpeningGoal.Expansion)||Wants(AiOpeningGoal.Intel);
             if(explorer&&!o.Entities.Any(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==PlayableEntityKind.Explorer)&&!o.Buildings.Any(b=>b.Owner==o.Owner&&b.PrivateState!=null&&b.PrivateState.Orders.Any(q=>q.Kind==PlayableEntityKind.Explorer)))
                 foreach(var factory in AiProductionDemand.Lines(o))
@@ -121,11 +144,8 @@ namespace Spacewars.Runtime
                     requests.Add(new AiEconomyCandidate("production",a,AiEconomyAdmission.Reject(o,p,a,true),1));
                 }
             requests.AddRange(normal.Where(c=>c.Policy=="production"));
-            if(definition.Opening!=PlayableAiOpening.GreedySafe&& !o.Buildings.Any(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.Refinery)&&
-                (completed.Contains("factory")||!requests.Any(c=>c.Legal)))
-                requests.AddRange(normal.Where(c=>c.Action.Kind==PlayableCommandKind.BuildAt&&c.Action.BuildingKind==PlayableBuildingKind.Refinery));
             // An already captured expansion still needs its ordinary center build.
-            if(Wants(AiOpeningGoal.Expansion))requests.AddRange(normal.Where(c=>c.Action.Kind==PlayableCommandKind.BuildAt&&c.Action.BuildingKind==PlayableBuildingKind.Mine));
+            if(Wants(AiOpeningGoal.Expansion)&&HomeEconomyReady(o,ai))requests.AddRange(normal.Where(c=>c.Action.Kind==PlayableCommandKind.BuildAt&&c.Action.BuildingKind==PlayableBuildingKind.Mine));
             return requests.GroupBy(c=>AiEconomyAdmission.IntentId(c.Policy,c.Action)).Select(g=>g.First()).ToArray();
         }
         internal void WriteState(BinaryWriter w)

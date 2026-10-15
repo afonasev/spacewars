@@ -12,6 +12,7 @@ namespace Spacewars.Runtime
         internal NavigationRoutePort(NavigationSession session)
         { this.session = session ?? throw new ArgumentNullException(nameof(session)); }
 
+        internal void ReleaseHostForWorldCheckpoint(Action releaseHost)=>session.ReleaseHostForWorldCheckpoint(releaseHost);
         public NavigationAdmission Admission => session.Admission;
         public long CorridorRetainedBytes=>session.CorridorRetainedBytes;
         internal int QueuedRequestCount=>session.Requests.Count;

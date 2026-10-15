@@ -116,8 +116,18 @@ namespace Spacewars.Runtime
             foreach(var id in intent.Action.EntityIds)
             {
                 if(!membership.TryGetValue(id,out var armyId))continue;
-                var a=armies[armyId];if(a.TacticalOwner!=intent.Policy&&!(intent.Policy==AiDefensePlanner.Policy&&intent.Priority>=2&&a.Major&&a.Members.SequenceEqual(intent.Action.EntityIds.OrderBy(x=>x))))return "unit tactical owner conflict";
-                if(!a.Major&&intent.Action.Kind!=PlayableCommandKind.Move&&intent.Action.Kind!=PlayableCommandKind.Hold&&intent.Action.Kind!=PlayableCommandKind.Stop&&!(a.Role==AiArmyRole.Transport&&intent.Action.Kind==PlayableCommandKind.BuildAt))return "scout/transport combat requires major army";
+                var a=armies[armyId];
+                bool preparationHandoff=intent.Policy=="expansion"&&a.Role==AiArmyRole.Scout&&a.TacticalOwner==AiScoutPlanner.Policy&&
+                    a.Members.Length==1&&a.Members[0]==id&&intent.Action.EntityIds.SequenceEqual(new[]{id})&&
+                    (intent.Action.Kind==PlayableCommandKind.Move||intent.Action.Kind==PlayableCommandKind.BuildAt)&&
+                    AiScoutPlanner.IsPreparationObjective(a.Objective,intent.Action.SiteId);
+                bool defenseAssembly=intent.Policy==AiDefensePlanner.Policy&&(intent.Action.Kind==PlayableCommandKind.Move||intent.Action.Kind==PlayableCommandKind.Follow)&&
+                    a.TacticalOwner==AiDefensePlanner.Policy&&a.Major&&a.Reinforcements.Contains(id)&&intent.Action.EntityIds.All(unit=>membership.TryGetValue(unit,out var assigned)&&assigned==a.Id);
+                bool defenseCoreAttack=intent.Policy==AiDefensePlanner.Policy&&intent.Action.Kind==PlayableCommandKind.Attack&&a.TacticalOwner==AiDefensePlanner.Policy&&a.Major&&
+                    a.Members.Contains(id)&&!a.Reinforcements.Contains(id)&&intent.Action.EntityIds.All(unit=>membership.TryGetValue(unit,out var assigned)&&assigned==a.Id&&!a.Reinforcements.Contains(unit));
+                if(a.TacticalOwner!=intent.Policy&&!preparationHandoff&&!defenseAssembly&&!defenseCoreAttack&&!(intent.Policy==AiDefensePlanner.Policy&&intent.Priority>=2&&a.Major&&a.Members.SequenceEqual(intent.Action.EntityIds.OrderBy(x=>x))))return "unit tactical owner conflict";
+                if(!a.Major&&intent.Action.Kind!=PlayableCommandKind.Move&&intent.Action.Kind!=PlayableCommandKind.Hold&&intent.Action.Kind!=PlayableCommandKind.Stop&&
+                    !(preparationHandoff&&intent.Action.Kind==PlayableCommandKind.BuildAt)&&!(a.Role==AiArmyRole.Transport&&intent.Action.Kind==PlayableCommandKind.BuildAt))return "scout/transport combat requires major army";
             }
             return null;
         }

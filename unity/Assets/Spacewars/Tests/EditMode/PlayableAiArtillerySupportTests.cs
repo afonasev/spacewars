@@ -60,6 +60,18 @@ namespace Spacewars.Tests.EditMode
             var restored=new PlayableAiArtillerySupportPolicy(profile);restored.Restore(policy.Capture());
             Assert.AreEqual(policy.Capture().HeldPosition.X,restored.Capture().HeldPosition.X);
         }
+        [Test]public void ProjectionMayReturnSafeArtilleryPositionBeyondCurrentVision()
+        {
+            int gun=Spawn(PlayableOwner.Player,PlayableEntityKind.Shkval,-12,0);
+            Spawn(PlayableOwner.Player,PlayableEntityKind.Tank,-5,0);
+            Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,3,0);
+            var view=View();var fog=new PlayableVision(view.Vision.Team,profile.ArenaHalfExtent,profile.ArenaHalfExtent,profile.VisionCellSize,profile.FogEdgeFeather);
+            fog.Refresh(new[]{new VisionSource(view.Entities.Single(e=>e.Id==gun).Position,1)},Array.Empty<KnownBuilding>());
+            var facts=(PlayableArtillerySupportSnapshot[])Domain.GetMethod("ProjectArtillery",Flags).Invoke(domain,new object[]{PlayableOwner.Player,fog,view.Entities,view.Buildings,null});
+            var fact=facts.Single(x=>x.UnitId==gun);
+            Assert.True(fact.Position.HasValue,"The current safe reposition search still finds a native destination");
+            Assert.False(fog.IsVisible(fact.Position.Value),"An owned reposition goal may lie beyond current vision");
+        }
         [Test]public void SeedStableDoctrineSurvivesRestoreWithoutHiddenEnemy()
         {
             Spawn(PlayableOwner.Player,PlayableEntityKind.Tank,-18,0);

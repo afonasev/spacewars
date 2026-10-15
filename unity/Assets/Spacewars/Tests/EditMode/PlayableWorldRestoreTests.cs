@@ -121,9 +121,9 @@ namespace Spacewars.Tests.EditMode
                     if(v is int integer){writer.Write(integer);return;}if(v is long wide){writer.Write(wide);return;}if(v is bool flag){writer.Write(flag);return;}if(v is byte octet){writer.Write(octet);return;}
                     if(t.IsEnum){writer.Write(Convert.ToInt32(v));return;}
                     if(v is IEnumerable<byte> raw){var bytes=v as byte[]??raw.ToArray();writer.Write(bytes.Length);writer.Write(bytes);return;}
-                    // Geometry/request reference aliases are operational authority. Others
+                    // Geometry/request and session/port ownership aliases are operational authority. Others
                     // are values or views; profile object aliases do not change execution.
-                    if(authority&&(v is NavGeometry||v is NavigationRequest)){if(identities.TryGetValue(v,out var identity)){writer.Write(identity);return;}writer.Write(identities.Count);identities.Add(v,identities.Count);}
+                    if(authority&&(v is NavGeometry||v is NavigationRequest||v is NavigationSession||v is NavigationRoutePort)){if(identities.TryGetValue(v,out var identity)){writer.Write(identity);return;}writer.Write(identities.Count);identities.Add(v,identities.Count);}
                     if(authority&&t.IsGenericType&&t.GetGenericTypeDefinition()==typeof(AuthoritySlotMap<,>)){
                         // Independent reflection over actual allocation state, never its
                         // CaptureLayout helper. The key->slot index is derived lookup.
@@ -151,6 +151,54 @@ namespace Spacewars.Tests.EditMode
                 }
                 Visit(value);writer.Flush();return memory.ToArray();
             }
+        }
+        private static NavigationSession OracleSession(long generation=71)
+            =>new NavigationSession(generation,new NavGeometry(20,Array.Empty<NavObstacle>(),1),new NavigationProfile());
+        private static byte[] ExactOracle(object value)
+        {
+            var cached=FactBytes(value,true,true);
+            CollectionAssert.AreEqual(FactBytes(value,true,false),cached,"Immutable metadata caches must preserve every byte");
+            return cached;
+        }
+        [Test,Timeout(10000)] public void IndependentOracleTerminatesActualSessionPortCycleAndMatchesSeparateAllocations()
+        {
+            var a=OracleSession();var b=OracleSession();
+            Assert.AreSame(a.RoutePort,a.RoutePort);Assert.AreNotSame(a.RoutePort,b.RoutePort);
+            Assert.AreSame(a,typeof(NavigationRoutePort).GetField("session",F).GetValue(a.RoutePort));
+            CollectionAssert.AreEqual(ExactOracle(a),ExactOracle(b));
+            CollectionAssert.AreEqual(ExactOracle(a.RoutePort),ExactOracle(b.RoutePort));
+            CollectionAssert.AreEqual(ExactOracle(new object[]{a,a.RoutePort,a}),ExactOracle(new object[]{b,b.RoutePort,b}));
+        }
+        [Test,Timeout(10000)] public void IndependentOracleDistinguishesPortBoundToOtherSameValuedSession()
+        {
+            var a=OracleSession();var b=OracleSession();var other=OracleSession();
+            var ownA=a.RoutePort;var ownB=b.RoutePort;var otherPort=other.RoutePort;
+            CollectionAssert.AreEqual(ExactOracle(a),ExactOracle(other),"Owners have equal values before corrupting ownership");
+            typeof(NavigationSession).GetField("routePort",F).SetValue(b,otherPort);
+            CollectionAssert.AreNotEqual(ExactOracle(a),ExactOracle(b),"A port referring to another equal-valued session must differ");
+            CollectionAssert.AreNotEqual(ExactOracle(new object[]{a,ownA}),ExactOracle(new object[]{b,ownB}),"Repeated port aliases must retain ownership");
+        }
+        [Test,Timeout(10000)] public void IndependentOracleReadsIncludedSessionStateThroughPortAfterMutation()
+        {
+            var a=OracleSession();var port=a.RoutePort;var before=ExactOracle(port);
+            typeof(NavigationSession).GetField("requestSequence",F).SetValue(a,17L);
+            CollectionAssert.AreNotEqual(before,ExactOracle(port),"Session private sequence remains included through the backreference");
+            before=ExactOracle(port);a.Crowd.Add(42,new NavPoint(1,2));
+            CollectionAssert.AreNotEqual(before,ExactOracle(port),"First session definition must include crowd state");
+            before=ExactOracle(port);Assert.True(a.Move(42,new NavPoint(4,2)));
+            CollectionAssert.AreNotEqual(before,ExactOracle(port),"Pending request and mailbox state remain included");
+            var differentGeneration=OracleSession(72);var otherPort=differentGeneration.RoutePort;
+            CollectionAssert.AreNotEqual(ExactOracle(OracleSession()),ExactOracle(differentGeneration));
+        }
+        [Test] public void IndependentOracleRetainsGeometryAndRequestReferenceAliases()
+        {
+            var geometry=new NavGeometry(20,Array.Empty<NavObstacle>(),1);
+            var duplicate=new NavGeometry(20,Array.Empty<NavObstacle>(),1);var profile=new NavigationProfile();
+            CollectionAssert.AreEqual(ExactOracle(geometry),ExactOracle(duplicate));
+            CollectionAssert.AreNotEqual(ExactOracle(new[]{geometry,geometry}),ExactOracle(new[]{geometry,duplicate}));
+            NavigationRequest Request()=>new NavigationRequest(71,1,42,1,profile,geometry,new NavPoint(1,2),new NavPoint(4,2));
+            var request=Request();var other=Request();CollectionAssert.AreEqual(ExactOracle(request),ExactOracle(other));
+            CollectionAssert.AreNotEqual(ExactOracle(new[]{request,request}),ExactOracle(new[]{request,other}));
         }
         private sealed class ReferenceIdentityComparer : IEqualityComparer<object>
         {

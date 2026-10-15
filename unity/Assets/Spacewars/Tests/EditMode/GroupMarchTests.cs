@@ -96,12 +96,12 @@ namespace Spacewars.Tests.EditMode
         [Test] public void A30V6CheckpointKeepsCertifiedSidecarsInExplicitLegacyMotionMode()
         {
             var session=ReadyPair(.5);
-            var current=WorldWire.Pack(w=>WorldWire.Write(w,session.CaptureState()));
+            var checkpoint=session.CaptureState();var current=WorldWire.Pack(w=>WorldWire.Write(w,checkpoint));
             int tag=-1;for(int i=0;i<current.Length-7;i++)if(BitConverter.ToInt32(current,i)==0x47525031){tag=i;break;}
             Assert.GreaterOrEqual(tag,0);
             // v7 appends one march row: count + group fields + two member request identities.
             int marchTail=4+37+2*12;
-            var legacy=current.Take(current.Length-marchTail).ToArray();
+            var legacy=current.Take(current.Length-marchTail-QueueLegacyLayout.InstalledLayoutTailBytes(checkpoint)).ToArray();
             BitConverter.GetBytes(6).CopyTo(legacy,tag+4);
             var state=WorldWire.Unpack(legacy,WorldWire.ReadNavigationSessionState);
             var restored=new NavigationSession(1,new NavGeometry(30,Array.Empty<NavObstacle>(),1),PlayableProfile.Default.Navigation);
@@ -187,20 +187,29 @@ namespace Spacewars.Tests.EditMode
             world.Binding=WorldWire.BindingLegacyMarch(profile);
             using(var input=new MemoryStream(world.Domain))using(var r=new BinaryReader(input))
             using(var output=new MemoryStream())using(var w=new BinaryWriter(output)){
+                var currentFields=PlayableProfileMetadata.Fields.ToArray();
+                var legacyFields=LegacyMarchCodec.Fields;
+                Assert.AreEqual("science.scienceHealth",legacyFields[0].Path);
                 int terms=r.ReadInt32();w.Write(terms);
+                int emittedCount=0;double emittedScienceHealth=double.NaN;
                 for(int i=0;i<terms;i++){
                     w.Write(r.ReadInt32());WorldWire.String(w,WorldWire.String(r));
-                    foreach(var field in PlayableProfileMetadata.Fields){
-                        double value=r.ReadDouble();if(field.Path!="groupMarch.maximumStretch")w.Write(value);
+                    var values=currentFields.ToDictionary(field=>field.Path,_=>r.ReadDouble());
+                    foreach(var field in legacyFields){
+                        double value=values[field.Path];w.Write(value);emittedCount++;
+                        if(emittedCount==1)emittedScienceHealth=value;
                     }
                 }
+                Assert.AreEqual(terms*legacyFields.Length,emittedCount,"Legacy positional row must contain exactly the registered v6 fields.");
+                Assert.AreEqual(PlayableProfileMetadata.Fields.Single(f=>f.Path=="science.scienceHealth").Read(profile.CopyData()),emittedScienceHealth,
+                    "The first legacy value must be science.scienceHealth, not the current first metadata value.");
                 w.Write(r.ReadBytes((int)(input.Length-input.Position)));
                 world.Domain=output.ToArray();
             }
             int tag=-1;for(int i=0;i<world.Navigation.Length-7;i++)if(BitConverter.ToInt32(world.Navigation,i)==0x47525031){tag=i;break;}
             Assert.GreaterOrEqual(tag,0);
             const int singleGroupTail=4+37+12;
-            world.Navigation=world.Navigation.Take(world.Navigation.Length-singleGroupTail).ToArray();
+            world.Navigation=world.Navigation.Take(world.Navigation.Length-singleGroupTail-QueueLegacyLayout.InstalledLayoutTailBytes(WorldWire.Unpack(world.Navigation,WorldWire.ReadNavigationSessionState))).ToArray();
             BitConverter.GetBytes(6).CopyTo(world.Navigation,tag+4);
             var restored=type.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic)
                 .Invoke(null,new object[]{world.Encode(),profile,19,"legacy-march"});

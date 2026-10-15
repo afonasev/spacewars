@@ -14,16 +14,18 @@ namespace Spacewars.Tests.EditMode
     {
         private const BindingFlags F=BindingFlags.Instance|BindingFlags.NonPublic;
         private static object Get(object o,string name)=>o.GetType().GetField(name,F).GetValue(o);
+        private static object Call(object o,string name,params object[] a)=>o.GetType().GetMethod(name,F).Invoke(o,a);
         private static object Owner(PlayableAuthorityTick a)=>((IEnumerable)Get(Get(a,"scheduler"),"owners")).Cast<object>().Single();
         private static AiOpeningExecutor Executor(PlayableAuthorityTick a)=>(AiOpeningExecutor)Get(Owner(a),"openingExecutor");
-        private static OfflineMatchConfiguration Config(int seed=19092026)
+        private static OfflineMatchConfiguration Config(int seed=19092026,bool noFactorySlot=false)
         {
             var data=PlayableProfile.Default.CopyData();data.startingCredits=20000;var p=PlayableProfile.Create(data);
             var starts=new[]{new OfflineStart("west",1,new NavPoint(-24,0),new NavPoint(-24,8),pin:1),new OfflineStart("east",2,new NavPoint(24,0),new NavPoint(24,8),pin:2)};
             // Authored slots stay inside the default arena including the validator's swept envelope.
             var slots=new[]{new TerritorySlot(1,new NavPoint(-24,-9),0),new TerritorySlot(2,new NavPoint(-14,0),0),new TerritorySlot(3,new NavPoint(-14,-9),0),new TerritorySlot(4,new NavPoint(-24,-18),0),new TerritorySlot(5,new NavPoint(-14,-18),0)};
             var sites=new[]{new TerritorySite(1,PlayableBuildingKind.Headquarters,starts[0].Position,slots),new TerritorySite(2,PlayableBuildingKind.Headquarters,starts[1].Position,Array.Empty<TerritorySlot>()),new TerritorySite(3,PlayableBuildingKind.Mine,new NavPoint(-10,20),p)};
-            return new OfflineMatchConfiguration(p,"o3-diagnostic-funded","o3-flat-two-starts","UnityHostRouteService",seed,new[]{new OfflineParticipant("west-owner",1,1,OfflineControl.Ai),new OfflineParticipant("east-owner",2,2,OfflineControl.Human)},starts,sites,Array.Empty<NavObstacle>(),new double[,]{{0,48},{48,0}});
+            var scenario=noFactorySlot?slots.Select((s,i)=>new OfflineScenarioBuilding(1,i==0?PlayableBuildingKind.Refinery:PlayableBuildingKind.ScientificCenter,1,s.Id,s.Position,s.Heading)).ToArray():Array.Empty<OfflineScenarioBuilding>();
+            return new OfflineMatchConfiguration(p,"o3-diagnostic-funded","o3-flat-two-starts","UnityHostRouteService",seed,new[]{new OfflineParticipant("west-owner",1,1,OfflineControl.Ai),new OfflineParticipant("east-owner",2,2,OfflineControl.Human)},starts,sites,Array.Empty<NavObstacle>(),new double[,]{{0,48},{48,0}},scenarioBuildings:scenario);
         }
         private static void Force(PlayableAuthorityTick a,PlayableAiOpening opening)
         {
@@ -74,6 +76,62 @@ namespace Spacewars.Tests.EditMode
             if(factory)buildings.Add(new PlayableBuildingSnapshot(2,PlayableOwner.Player,PlayableBuildingKind.Factory,site.Slots[0].Position,100,1,0,0,default,siteId:site.Id,slotId:site.Slots[0].Id,parentId:1));
             var units=Enumerable.Range(10,tanks).Select(id=>new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(id,0),100,false,0,0,0)).ToArray();
             return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,7,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,10000,null,units,buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,1,true)},population:new PlayablePopulationSnapshot(tanks,0,p.ArmyCapacity)));
+        }
+        private static PlayableAiObservation HomeEconomyObservation(int tick,int readyHomeRefineries,bool readyHomeFactory,bool readyNonhomeEconomy)
+        {
+            var p=PlayableProfile.Default;var home=TerritoryRules.Sites(p).First(s=>s.Kind==PlayableBuildingKind.Headquarters);
+            var nonhome=new TerritorySite(99,PlayableBuildingKind.Outpost,new NavPoint(-10,20),p);
+            var buildings=new System.Collections.Generic.List<PlayableBuildingSnapshot>{new PlayableBuildingSnapshot(1,PlayableOwner.Player,PlayableBuildingKind.Headquarters,home.Position,100,1,0,0,default,siteId:home.Id)};
+            int id=2;
+            for(int i=0;i<readyHomeRefineries;i++){var slot=home.Slots[i];buildings.Add(new PlayableBuildingSnapshot(id++,PlayableOwner.Player,PlayableBuildingKind.Refinery,slot.Position,100,1,0,0,default,siteId:home.Id,slotId:slot.Id,parentId:1));}
+            if(readyHomeFactory){var slot=home.Slots[readyHomeRefineries];buildings.Add(new PlayableBuildingSnapshot(id++,PlayableOwner.Player,PlayableBuildingKind.Factory,slot.Position,100,1,0,0,default,siteId:home.Id,slotId:slot.Id,parentId:1));}
+            var sites=new System.Collections.Generic.List<TerritorySiteSnapshot>{new TerritorySiteSnapshot(home,PlayableOwner.Player,PlayableOwner.Player,1,false,1,true)};
+            if(readyNonhomeEconomy)
+            {
+                buildings.Add(new PlayableBuildingSnapshot(50,PlayableOwner.Player,PlayableBuildingKind.Outpost,nonhome.Position,100,1,0,0,default,siteId:nonhome.Id));
+                buildings.Add(new PlayableBuildingSnapshot(51,PlayableOwner.Player,PlayableBuildingKind.Refinery,nonhome.Slots[0].Position,100,1,0,0,default,siteId:nonhome.Id,slotId:nonhome.Slots[0].Id,parentId:50));
+                buildings.Add(new PlayableBuildingSnapshot(52,PlayableOwner.Player,PlayableBuildingKind.Factory,nonhome.Slots[1].Position,100,1,0,0,default,siteId:nonhome.Id,slotId:nonhome.Slots[1].Id,parentId:50));
+                sites.Add(new TerritorySiteSnapshot(nonhome,PlayableOwner.Player,PlayableOwner.Player,1,false,50,true));
+            }
+            return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,7,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,10000,null,Array.Empty<PlayableEntitySnapshot>(),buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:sites.ToArray(),homeSiteId:home.Id));
+        }
+        [Test] public void HomeEconomyGateRequiresActualReadyBuildingsAtHomeAndProtectsCurrentOpeningQuote()
+        {
+            var ai=AiProfile.Initial;var profile=PlayableProfile.Default;var state=PlayableAiOpeningComposition.Initialize(7,"player-1",forcedOpening:PlayableAiOpening.GreedySafe);
+            var executor=new AiOpeningExecutor(state,71);int required=executor.RequiredHomeRefineryCount(ai);
+            var foreignOnly=HomeEconomyObservation(1,0,false,true);
+            Assert.False(executor.HomeEconomyReady(foreignOnly,ai),"nonhome READY income and factory do not satisfy home opening facts");
+            var readyHome=HomeEconomyObservation(2,required,true,true);
+            Assert.True(executor.HomeEconomyReady(readyHome,ai),"the required home refineries and first home factory satisfy the gate by READY world facts");
+            var beforeHome=HomeEconomyObservation(3,0,false,false);var normal=new AiEconomyPlanner().Plan(beforeHome,profile).Candidates;
+            Assert.AreEqual(TerritoryRules.Cost(profile,PlayableBuildingKind.Refinery),executor.HomeEconomyQuote(beforeHome,profile,ai,normal),"protect the current legal home opening quote from discretionary technology");
+            var requested=executor.MacroRequests(beforeHome,profile,ai,normal).Where(c=>c.Legal&&c.Policy=="economy"&&c.Action.Kind==PlayableCommandKind.BuildAt&&
+                (c.Action.BuildingKind==PlayableBuildingKind.Refinery||c.Action.BuildingKind==PlayableBuildingKind.Factory)).ToArray();
+            Assert.True(requested.Length>0);Assert.True(requested.All(c=>c.Action.SiteId==beforeHome.HomeSiteId),"opening income/factory requests stay at the home site");
+        }
+        [Test] public void AbortedOpeningQuotesLegalHomeFactoryAfterOrdinarySaleFreesTheLastSlot()
+        {
+            var c=Config(noFactorySlot:true);var a=new PlayableAuthorityTick(c,71);Force(a,PlayableAiOpening.BlindRush);var ai=AiProfile.Initial;
+            try
+            {
+                using(var host=new UnityHostRouteService())
+                {
+                    var before=PlayableAiObservation.From(a.ParticipantView("west-owner"));var executor=Executor(a);
+                    var owner=Owner(a);var finance=Get(owner,"expansionFinancial");var arbiter=Get(owner,"arbiter");
+                    Assert.True(executor.MissingEssentialEconomy(before,ai));Assert.True((bool)Call(finance,"BootstrapActive",arbiter));
+                    Assert.Zero(executor.HomeEconomyQuote(before,c.Profile,ai,new AiEconomyPlanner().Plan(before,c.Profile).Candidates),"no open home slot means no quote");
+                    Step(a,host);var aborted=PlayableAiObservation.From(a.ParticipantView("west-owner"));
+                    Assert.AreEqual(PlayableAiOpeningPhase.Aborted,executor.Capture().Phase);Assert.False(executor.MissingEssentialEconomy(aborted,ai));
+                    int science=aborted.Buildings.First(b=>b.Kind==PlayableBuildingKind.ScientificCenter).Id;
+                    Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,(long)Get(Get(a,"domain"),"nextAiSequence"),"west-owner",PlayableCommandKind.SellBuilding,new[]{science})).Status);
+                    for(int i=0;i<=(int)Math.Ceiling(c.Profile.BuildingSaleDemolitionSec*30)+2;i++)Step(a,host);
+                    var free=PlayableAiObservation.From(a.ParticipantView("west-owner"));var normal=new AiEconomyPlanner().Plan(free,c.Profile).Candidates;
+                    Assert.True(normal.Any(x=>x.Legal&&x.Action.Kind==PlayableCommandKind.BuildAt&&x.Action.BuildingKind==PlayableBuildingKind.Factory&&x.Action.SiteId==free.HomeSiteId),"ordinary economy has a legal home factory request after demolition");
+                    Assert.AreEqual(TerritoryRules.Cost(c.Profile,PlayableBuildingKind.Factory),executor.HomeEconomyQuote(free,c.Profile,ai,normal));
+                    Assert.True((bool)Call(finance,"BootstrapActive",arbiter));
+                }
+            }
+            finally{a.Stop();}
         }
         [Test] public void LostPrerequisite_ReplansThenDeadlineEnablesLiveFallback()
         {

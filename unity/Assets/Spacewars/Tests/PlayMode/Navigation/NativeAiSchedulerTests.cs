@@ -92,7 +92,7 @@ namespace Spacewars.Tests.PlayMode
             }
             Assert.Fail("Routed attack must cause ordinary domain combat damage");
         }
-        [UnityTest] public IEnumerator RealtimeRuntimeUsesSameRouteBarrier()
+        [UnityTest] public IEnumerator RealtimeRuntimeContinuesWorldWhilePendingActorWaitsForSameRouteService()
         {
             var config=Config();var runtime=new PlayableRuntime(config,71,startPaused:true);
             try
@@ -105,11 +105,14 @@ namespace Spacewars.Tests.PlayMode
                 Assert.AreEqual(PlayableCommandStatus.Accepted,runtime.TrySubmit(new PlayableCommand(71,1,"west-owner",PlayableCommandKind.Move,new[]{tank},new NavPoint(20,-8))).Status);
                 while(runtime.Requests.Count==0&&timeout.Elapsed.TotalSeconds<4)yield return null;
                 Assert.Greater(runtime.Requests.Count,0);long tick=runtime.Latest.Tick;
+                var pendingPosition=runtime.Latest.Entities.Single(e=>e.Id==tank).Position;
                 var delay=System.Diagnostics.Stopwatch.StartNew();while(delay.Elapsed.TotalSeconds<.1)yield return null;
-                Assert.AreEqual(tick,runtime.Latest.Tick,"Realtime ticks also wait at the same delivery barrier");
+                Assert.Greater(runtime.Latest.Tick,tick,"Approved per-unit asynchronous wait must not stop the world");
+                Assert.AreEqual(pendingPosition,runtime.Latest.Entities.Single(e=>e.Id==tank).Position,"The requesting tank physically waits until its certified route arrives");
+                Assert.Greater(runtime.Requests.Count,0,"World advancement must not consume the unserviced route");
                 using(var service=new UnityHostRouteService())
                 {
-                    while(runtime.Latest.Tick<=tick&&timeout.Elapsed.TotalSeconds<4){service.Service(runtime,1);yield return null;}
+                    while(!runtime.Latest.Entities.Single(e=>e.Id==tank).Moving&&timeout.Elapsed.TotalSeconds<4){service.Service(runtime,1);yield return null;}
                     Assert.Greater(runtime.Latest.Tick,tick);Assert.AreEqual(RuntimeStatus.Running,runtime.Latest.Status);
                     Assert.True(runtime.Latest.Entities.Single(e=>e.Id==tank).Moving);
                 }

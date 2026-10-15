@@ -7,6 +7,22 @@ using Spacewars.Simulation.Ai;
 
 namespace Spacewars.Runtime
 {
+#if UNITY_INCLUDE_TESTS
+    internal static class AiExpansionPlannerGuardObserverForTests
+    {
+        internal static Action<string,long,int,int,string,bool> Observer;
+        internal static string OwnerFilter;
+        internal static Action<string,long,int,int,int,NavPoint,double,double,string> SafetyObserver;
+    }
+    internal sealed class AiExpansionCompletionReadbackForTests
+    {
+        internal AiExpansionCompletionReadbackForTests(string ownerId,int siteId,long createdTick,string phase,string reason,
+            double initialIncome,long ownerTick,double settledIncome,double exactCredits,double incomeRate)
+        {OwnerId=ownerId;SiteId=siteId;CreatedTick=createdTick;Phase=phase;Reason=reason;InitialIncome=initialIncome;OwnerTick=ownerTick;SettledIncome=settledIncome;ExactCredits=exactCredits;IncomeRate=incomeRate;}
+        public string OwnerId{get;} public int SiteId{get;} public long CreatedTick{get;} public string Phase{get;} public string Reason{get;}
+        public double InitialIncome{get;} public long OwnerTick{get;} public double SettledIncome{get;} public double ExactCredits{get;} public double IncomeRate{get;}
+    }
+#endif
     public sealed class AiExpansionState
     {
         internal AiExpansionState(int site,int actor,long created,long expires,long progress,string phase,string reason)
@@ -18,6 +34,10 @@ namespace Spacewars.Runtime
     // observed settlement/loss/expiry. Neither command acceptance nor a receipt creates territory or income.
     public sealed class AiExpansionPlanner
     {
+#if UNITY_INCLUDE_TESTS
+        internal static Action<AiExpansionCompletionReadbackForTests> CompletionReadbackForTests;
+        internal static string CompletionReadbackOwnerFilterForTests;
+#endif
         private readonly string ownerId;
         private int siteId,actorId;
         private long created,expires,progress,pendingId,pendingGeneration,nextId=1;
@@ -30,6 +50,7 @@ namespace Spacewars.Runtime
         public AiExpansionState Capture()=>new AiExpansionState(siteId,actorId,created,expires,progress,phase,reason);
         public bool ClaimsActor(int id)=>siteId!=0&&actorId==id;
         public bool ClaimsSite(int id)=>siteId!=0&&siteId==id;
+        internal bool AllowsScoutReuse(int id)=>ClaimsActor(id)&&(phase=="construction"||phase=="income");
         internal long PendingId=>pendingId;
         internal long PendingGeneration=>pendingGeneration;
         private static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
@@ -51,19 +72,51 @@ namespace Spacewars.Runtime
             .SelectMany(u=>objectives.Where(g=>g.Role!=PlayablePublicScoutObjectiveRole.PossibleEnemyStart&&g.Reachable&&
                 sites.Any(s=>s.Site.Id==g.SiteId&&s.CenterId==0&&!s.Contested&&(!s.Owner.HasValue||s.Owner==owner)&&(!s.Claimant.HasValue||s.Claimant==owner)))
                 .OrderBy(g=>g.SiteId).Select(g=>new PlayableRouteRequest(u.Id,PlayableRouteTargetKind.PublicObjective,g.SiteId,generation,tick,u.Position,PlayableUnitRules.Radius(profile,u.Kind),g.Approach))).ToArray();
-        private static bool Safe(PlayableAiObservation o,PlayableProfile p,AiProfile ai,TerritorySiteSnapshot s,PlayableEntitySnapshot actor,PlayableRouteProof route)
+        internal static bool Safe(PlayableAiObservation o,PlayableProfile p,AiProfile ai,TerritorySiteSnapshot s,PlayableEntitySnapshot actor,PlayableRouteProof route)
         {
             var points=route==null?new[]{s.Site.Position,actor.Position}:route.Path.Concat(new[]{s.Site.Position,actor.Position}).ToArray();
             var range=PlayableUnitRules.Vision(p,actor.Kind);
-            bool danger=o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0&&points.Any(x=>Distance(x,e.Position)<=range)).Any()||
-                o.Buildings.Where(b=>o.IsHostile(b.Owner)&&b.Health>0&&points.Any(x=>Distance(x,b.Position)<=range)).Any();
+            bool Near(int id,NavPoint position,string kind)
+            {
+                foreach(var point in points)
+                {double distance=Distance(point,position);if(distance<=range)
+                    {
+#if UNITY_INCLUDE_TESTS
+                    if(AiExpansionPlannerGuardObserverForTests.SafetyObserver!=null&&(AiExpansionPlannerGuardObserverForTests.OwnerFilter==null||AiExpansionPlannerGuardObserverForTests.OwnerFilter==o.OwnerId))AiExpansionPlannerGuardObserverForTests.SafetyObserver(o.OwnerId,o.Tick,s.Site.Id,actor.Id,id,point,distance,range,kind);
+#endif
+                    return true;
+                    }}
+                return false;
+            }
+            bool danger=o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0).Any(e=>Near(e.Id,e.Position,"unit"))||
+                o.Buildings.Where(b=>o.IsHostile(b.Owner)&&b.Health>0).Any(b=>Near(b.Id,b.Position,"building"));
             // E4 has no escort/force evaluator. Any known local hostile requires S3 escort.
             return !s.Contested&&!danger;
         }
-        public void Observe(PlayableAiObservation o,PlayableProfile p,AiProfile ai)
+        public void Observe(PlayableAiObservation o,PlayableProfile p,AiProfile ai)=>ObserveCore(o,p,ai,double.NaN);
+#if UNITY_INCLUDE_TESTS
+        internal void Observe(PlayableAiObservation o,PlayableProfile p,AiProfile ai,double exactCredits)=>ObserveCore(o,p,ai,exactCredits);
+#endif
+        private void ObserveCore(PlayableAiObservation o,PlayableProfile p,AiProfile ai,double exactCredits)
         {
             if(o.OwnerId!=ownerId)throw new ArgumentException("Foreign expansion observation.");
             if(siteId==0)return;
+            // Applied BuildAt transfers the live obligation from a mobile Explorer
+            // to the owned center. The Explorer may scout while it is being built;
+            // visibility and actor safety no longer decide whether the paid center
+            // still exists or may produce its promised income.
+            if(phase=="construction"||phase=="income")
+            {
+                if(o.Tick>=expires){Release("commitment expired",true);return;}
+                var paidCenter=o.Buildings.FirstOrDefault(b=>b.SiteId==siteId&&b.SlotId==0&&b.Owner==o.Owner&&b.Health>0&&b.PrivateState?.Lifecycle?.Selling!=true);
+                if(paidCenter==null||paidCenter.Kind!=pendingActionBuildingKind){Release("accepted expansion center lost",true);return;}
+                if(paidCenter.Phase==ConstructionPhase.Ready&&phase!="income")
+                {initialIncome=o.SettledIncome;phase="income";progress=o.Tick;}
+                if(paidCenter.Phase==ConstructionPhase.Ready&&TerritoryRules.Income(p,paidCenter.Kind)>0&&o.IncomePerSecond>0&&
+                    o.SettledIncome-initialIncome>=o.IncomePerSecond)
+                {ObserveCompletionForTests(o,exactCredits);Release("observed ready income center and settled owner income",false);}
+                return;
+            }
             var actor=o.Entities.FirstOrDefault(u=>u.Id==actorId&&u.Owner==o.Owner&&u.Health>0);
             var site=o.Sites.FirstOrDefault(s=>s.Site.Id==siteId);
             condition=Condition(site,actor,o,p,ai);
@@ -79,23 +132,50 @@ namespace Spacewars.Runtime
             // live center; a smaller HQ-only credit cannot finish expansion.
             if(center?.Phase==ConstructionPhase.Ready&&center.PrivateState?.Lifecycle?.Selling!=true&&TerritoryRules.Income(p,center.Kind)>0&&
                 o.IncomePerSecond>0&&o.SettledIncome-initialIncome>=o.IncomePerSecond)
-                Release("observed ready income center and settled owner income",false);
+            {ObserveCompletionForTests(o,exactCredits);Release("observed ready income center and settled owner income",false);}
         }
-        public PlayableAiAction TryPlan(PlayableAiObservation o,PlayableProfile p,AiProfile ai)
+        private void ObserveCompletionForTests(PlayableAiObservation o,double exactCredits)
+        {
+#if UNITY_INCLUDE_TESTS
+            if(CompletionReadbackForTests!=null&&(CompletionReadbackOwnerFilterForTests==null||CompletionReadbackOwnerFilterForTests==ownerId))
+                CompletionReadbackForTests(new AiExpansionCompletionReadbackForTests(ownerId,siteId,created,phase,reason,initialIncome,o.Tick,o.SettledIncome,exactCredits,o.IncomePerSecond));
+#endif
+        }
+        internal bool Suppressed(TerritorySiteSnapshot site,PlayableEntitySnapshot actor,PlayableAiObservation o,PlayableProfile p,AiProfile ai)=>failed.TryGetValue(site.Site.Id,out var f)&&f==Condition(site,actor,o,p,ai);
+        public PlayableAiAction TryPlan(PlayableAiObservation o,PlayableProfile p,AiProfile ai)=>TryPlan(o,p,ai,0,null);
+        internal PlayableAiAction TryPlan(PlayableAiObservation o,PlayableProfile p,AiProfile ai,int financialSite,Func<int,bool> admissibleActor,Func<int,bool> admissibleSite=null)
         {
             if(o.OwnerId!=ownerId)throw new ArgumentException("Foreign expansion observation.");
-            if(pendingId!=0)return null;
+            if(pendingId!=0){Guard(ownerId,o.Tick,siteId,actorId,"pending-expansion-action",false);return null;}
+            Guard(ownerId,o.Tick,siteId,actorId,"pending-expansion-action",true);
             bool newClaim=siteId==0;
             TerritorySiteSnapshot site=null;PlayableEntitySnapshot actor=null;PlayablePublicScoutObjective objective=null;
             if(siteId==0)
             {
                 var choices=from s in o.Sites
-                    where (s.Site.Kind==PlayableBuildingKind.Mine||s.Site.Kind==PlayableBuildingKind.Outpost)&&TerritoryRules.Income(p,s.Site.Kind)>0&&s.CenterId==0&&!s.Contested&&(!s.Owner.HasValue||s.Owner==o.Owner)&&(!s.Claimant.HasValue||s.Claimant==o.Owner)&&o.Credits>=TerritoryRules.Cost(p,s.Site.Kind)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"financial-site-filter",financialSite==0||s.Site.Id==financialSite)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-admissibility",admissibleSite==null||admissibleSite(s.Site.Id))
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-kind-and-income",(s.Site.Kind==PlayableBuildingKind.Mine||s.Site.Kind==PlayableBuildingKind.Outpost)&&TerritoryRules.Income(p,s.Site.Kind)>0)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-unoccupied",s.CenterId==0)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-uncontested",!s.Contested)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-owner",!s.Owner.HasValue||s.Owner==o.Owner)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-claimant",!s.Claimant.HasValue||s.Claimant==o.Owner)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"raw-site-cost",o.Credits>=TerritoryRules.Cost(p,s.Site.Kind))
                     from u in o.Entities
-                    where u.Owner==o.Owner&&u.Kind==PlayableEntityKind.Explorer&&u.Health>0&&!u.Moving&&u.CurrentOrder==null
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"actor-owner",u.Owner==o.Owner)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"actor-kind",u.Kind==PlayableEntityKind.Explorer)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"actor-alive",u.Health>0)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"actor-idle-moving",!u.Moving)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"actor-current-order",u.CurrentOrder==null)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"army-and-pending-claim",admissibleActor==null||admissibleActor(u.Id))
                     let g=o.PublicScoutObjectives.FirstOrDefault(g=>g.SiteId==s.Site.Id&&g.Reachable&&g.Role!=PlayablePublicScoutObjectiveRole.PossibleEnemyStart)
                     let route=o.RouteProofs.FirstOrDefault(r=>r.UnitId==u.Id&&r.TargetId==s.Site.Id&&r.Kind==PlayableRouteTargetKind.PublicObjective)
-                    where g!=null&&route!=null&&Safe(o,p,ai,s,u,route)&&(!failed.TryGetValue(s.Site.Id,out var f)||f!=Condition(s,u,o,p,ai))
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"public-objective",g!=null)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"typed-route-proof",route!=null)
+                    let safe=Safe(o,p,ai,s,u,route)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"visible-threat-safety",safe)
+                    let suppressed=failed.TryGetValue(s.Site.Id,out var f)&&f==Condition(s,u,o,p,ai)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"failed-site-suppression",!suppressed)
                     let length=RouteLength(route)
                     orderby TerritoryRules.Cost(p,s.Site.Kind)/(TerritoryRules.Income(p,s.Site.Kind)/p.IncomePeriodSeconds),length,s.Site.Id,u.Id
                     select new{s,u,g};
@@ -108,22 +188,28 @@ namespace Spacewars.Runtime
             }
             else
             {site=o.Sites.FirstOrDefault(s=>s.Site.Id==siteId);actor=o.Entities.FirstOrDefault(u=>u.Id==actorId&&u.Owner==o.Owner&&u.Health>0);objective=o.PublicScoutObjectives.FirstOrDefault(g=>g.SiteId==siteId);}
-            if(site==null||actor==null||objective==null)return null;
+            if(site==null||actor==null||objective==null){Guard(o.OwnerId,o.Tick,siteId,actorId,"commitment-target-present",false);return null;}
             PlayableCommandKind kind;NavPoint target=default;int[] units=null;
-            if(site.CenterId!=0)return null;
-            if(site.Progress>=1&&site.Claimant==o.Owner){kind=PlayableCommandKind.BuildAt;units=new[]{actorId};if(o.Credits<TerritoryRules.Cost(p,site.Site.Kind))return null;}
+            if(site.CenterId!=0){Guard(o.OwnerId,o.Tick,site.Site.Id,actorId,"site-unoccupied-before-command",false);return null;}
+            if(site.Progress>=1&&site.Claimant==o.Owner){kind=PlayableCommandKind.BuildAt;units=new[]{actorId};if(o.Credits<TerritoryRules.Cost(p,site.Site.Kind)){Guard(o.OwnerId,o.Tick,site.Site.Id,actorId,"build-cost-credits",false);return null;}}
             else
             {
                 // Holding within capture radius is progress through gameplay, not an order to resend.
-                if(!newClaim&&Distance(actor.Position,site.Site.Position)<=TerritoryRules.CaptureRadius(p,site.Site.Kind))return null;
-                if(actor.Moving||actor.CurrentOrder!=null&&actor.CurrentOrder.Kind==PlayableTacticalOrderKind.Move&&actor.CurrentOrder.Destination.Equals(objective.Approach))return null;
-                if(!o.RouteProofs.Any(r=>r.UnitId==actorId&&r.TargetId==siteId&&r.Kind==PlayableRouteTargetKind.PublicObjective))return null;
+                if(!newClaim&&Distance(actor.Position,site.Site.Position)<=TerritoryRules.CaptureRadius(p,site.Site.Kind)){Guard(o.OwnerId,o.Tick,site.Site.Id,actorId,"already-in-capture-radius",false);return null;}
+                if(actor.Moving||actor.CurrentOrder!=null&&actor.CurrentOrder.Kind==PlayableTacticalOrderKind.Move&&actor.CurrentOrder.Destination.Equals(objective.Approach)){Guard(o.OwnerId,o.Tick,site.Site.Id,actorId,"same-order-or-moving",false);return null;}
+                if(!o.RouteProofs.Any(r=>r.UnitId==actorId&&r.TargetId==siteId&&r.Kind==PlayableRouteTargetKind.PublicObjective)){Guard(o.OwnerId,o.Tick,site.Site.Id,actorId,"typed-route-before-move",false);return null;}
                 kind=PlayableCommandKind.Move;target=objective.Approach;units=new[]{actorId};
             }
             pendingId=nextId++;pendingGeneration=o.Generation;
             return new PlayableAiAction(pendingId,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,kind,units,target,siteId:siteId,buildingKind:site.Site.Kind,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
         }
-        private static double RouteLength(PlayableRouteProof r){double total=0;var from=r.Origin;foreach(var point in r.Path){total+=Distance(from,point);from=point;}return total;}
+#if UNITY_INCLUDE_TESTS
+        internal static bool Guard(string owner,long tick,int site,int actor,string stage,bool result)
+        {if(AiExpansionPlannerGuardObserverForTests.Observer!=null&&(AiExpansionPlannerGuardObserverForTests.OwnerFilter==null||AiExpansionPlannerGuardObserverForTests.OwnerFilter==owner))AiExpansionPlannerGuardObserverForTests.Observer(owner,tick,site,actor,stage,result);return result;}
+#else
+        private static bool Guard(string owner,long tick,int site,int actor,string stage,bool result)=>result;
+#endif
+        internal static double RouteLength(PlayableRouteProof r){double total=0;var from=r.Origin;foreach(var point in r.Path){total+=Distance(from,point);from=point;}return total;}
         public void ObserveReceipt(PlayableAiTraceRecord r)
         {
             if(r==null||r.OwnerId!=ownerId||r.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity||r.ActionId!=pendingId||!AiStateWire.CallbackGenerationMatches(r,pendingGeneration))return;

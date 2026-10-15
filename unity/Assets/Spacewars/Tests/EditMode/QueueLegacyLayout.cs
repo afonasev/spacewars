@@ -23,7 +23,7 @@ namespace Spacewars.Tests.EditMode
             if(BitConverter.ToInt32(world.Navigation,group+4)>=7){
                 var current=WorldWire.Unpack(world.Navigation,WorldWire.ReadNavigationSessionState);
                 int marchTail=4+current.Groups.Sum(g=>37+12*g.Members.Length);
-                world.Navigation=world.Navigation.Take(world.Navigation.Length-marchTail).ToArray();
+                world.Navigation=world.Navigation.Take(world.Navigation.Length-marchTail-(BitConverter.ToInt32(world.Navigation,group+4)>=8?InstalledLayoutTailBytes(current):0)).ToArray();
                 BitConverter.GetBytes(6).CopyTo(world.Navigation,group+4);
             }
             if(BitConverter.ToInt32(world.Navigation,group+4)>=4){
@@ -48,6 +48,7 @@ namespace Spacewars.Tests.EditMode
                 w.Write(r.ReadBytes((int)(input.Length-input.Position)));return output.ToArray();
             }
         }
+        internal static int InstalledLayoutTailBytes(NavigationSessionState state)=>12+4*((state.InstalledExecutionKeys?.Length??0)+(state.InstalledExecutionLayout?.Length??0));
         internal static int Tag(byte[] bytes,int tag){for(int k=0;k<bytes.Length-3;k++)if(BitConverter.ToInt32(bytes,k)==tag)return k;throw new ArgumentException("Missing test layout tag.");}
     }
 }

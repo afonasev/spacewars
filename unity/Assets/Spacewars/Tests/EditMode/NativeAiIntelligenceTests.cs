@@ -224,6 +224,30 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(13,planner.Plan(o,k,r,PlayableProfile.Default,AiProfile.Initial,2).SiteId);
             o=ScoutView(routes:false);Assert.Null(planner.Plan(o,ScoutKnowledge(o),r,PlayableProfile.Default,AiProfile.Initial,2));
         }
+        [Test] public void FirstIncomePreparationPrioritizesCurrentSiteAndKeepsOnlyItsVisibilityClaim()
+        {
+            var planner=new AiScoutPlanner();var registry=new AiArmyRegistry("player-1",71,AiProfile.Initial,AiDifficulty.Fighter);var o=ScoutView(scouts:3);
+            var known=ScoutKnowledge(o,new AiVisitedArea(12,o.Tick,true,false));
+            var existing=planner.Plan(o,known,registry,PlayableProfile.Default,AiProfile.Initial,2);
+            Assert.AreEqual(13,existing.SiteId);planner.Commit(o,existing,registry);
+            var preparation=planner.Plan(o,known,registry,PlayableProfile.Default,AiProfile.Initial,2,preparationSite:12);
+            Assert.NotNull(preparation);Assert.AreEqual(12,preparation.SiteId);Assert.AreEqual(2,preparation.EntityIds.Single());
+            planner.Commit(o,preparation,registry,preparationSite:12);
+            Assert.True(planner.IsPreparationActor(registry,12,2));Assert.False(planner.IsPreparationActor(registry,12,1));
+            var buildPrep=new AiIntent("prep-build","expansion",new PlayableAiAction(3,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.BuildAt,new[]{2},siteId:12,buildingKind:PlayableBuildingKind.Mine),100,0,0,new[]{"recipient:2"},1);
+            Assert.IsNull(registry.Reject(buildPrep),"only the recorded first-income preparation may hand off to its same-site BuildAt");
+            var stealSurvey=new AiIntent("survey-build","expansion",new PlayableAiAction(4,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.BuildAt,new[]{1},siteId:13,buildingKind:PlayableBuildingKind.Mine),100,0,0,new[]{"recipient:1"},1);
+            Assert.AreEqual("unit tactical owner conflict",registry.Reject(stealSurvey),"an ordinary busy scout is not a preparation handoff");
+            var next=ScoutView(o.Tick+1);var covered=ScoutKnowledge(next,new AiVisitedArea(12,o.Tick,true,false));
+            planner.Observe(next,covered,registry,AiProfile.Initial,2,preparationSite:12);
+            Assert.Greater(registry.ArmyFor(1),0,"existing scout ownership is retained");
+            Assert.Greater(registry.ArmyFor(2),0,"covered preparation stays in place while ready funding awaits ordinary build admission");
+            var held=registry.Capture().Armies.Single(a=>a.LeaderId==2);
+            Assert.AreEqual("prepare:12",held.Objective,"deferred admission preserves visibility at the funded site");
+            planner.ReleasePreparation(registry,12,2);
+            Assert.Zero(registry.ArmyFor(2),"the accepted BuildAt transfer releases only its exact preparation owner");
+            Assert.Greater(registry.ArmyFor(1),0,"the ordinary scout remains assigned");
+        }
         [Test] public void ScoutBudget_DifficultyPersonalityAndBlindRushAreBounded()
         {
             var p=new AiScoutPlanner();foreach(AiDifficulty d in Enum.GetValues(typeof(AiDifficulty)))

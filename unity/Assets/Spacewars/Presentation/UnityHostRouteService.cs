@@ -117,6 +117,16 @@ namespace Spacewars.Presentation
                 if(!answers.TryEnqueue(answer)){deferredAnswer=answer;return;}
             }
         }
+        // Explicit world-only boundary for the caller-owned synchronous certified host.
+        // Keep this host/ledger for rebind; no Service call or solver work is hidden here.
+        public void ReleaseForWorldCheckpoint(PlayableRouteBinding binding)
+        {
+            CheckThread();
+            if(binding==null||binding.RoutePort==null)throw new ArgumentException("Missing checkpoint route owner.");
+            if(worker!=null||router!=null||smallRouter!=null||deferredRequest!=null||deferredAnswer!=null)
+                throw new NotSupportedException("Checkpoint release requires a quiesced synchronous certified host.");
+            certified.ReleaseForWorldCheckpoint(binding.RoutePort);
+        }
         public void Dispose(){CheckThread();worker?.Dispose();worker=null;workerPort=null;certified.Clear();router?.Dispose();router=null;smallRouter=null;routedGeometry=null;routedProfile=null;deferredRequest=null;deferredAnswer=null;}
     }
 }

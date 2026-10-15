@@ -207,7 +207,7 @@ namespace Spacewars.Tests.EditMode
             int newId=0;long queued=0;int livingAtQueue=0;bool complete=false;
             for(int i=0;i<3000;i++)
             {
-                Step(a);var view=EconomyView(a,c);
+                Step(a);var view=EconomyView(a,c);if(a.Tick%300==0)FundingEvidence(a,c);
                 var extra=view.Buildings.FirstOrDefault(b=>b.Owner==view.Owner&&b.Kind==PlayableBuildingKind.Factory&&b.Id!=original);
                 if(extra!=null)newId=extra.Id;
                 if(extra?.PrivateState.Orders.Count>0&&queued==0){queued=extra.PrivateState.Orders[0].Id;livingAtQueue=view.Entities.Count(e=>e.Owner==view.Owner&&e.Kind==PlayableEntityKind.Tank);}
@@ -243,9 +243,14 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual("producer exit blocked",(string)row["Record"]["ProductionCapacity"]["ScalingReason"]);Assert.AreEqual(1,(int)row["Record"]["ProductionCapacity"]["BlockedExits"]);
         }
         private static object EconomyOwner(PlayableAuthorityTick a,OfflineMatchConfiguration c)=>Owners(a).Single(o=>Budget(o).OwnerId==c.Roster[0].Id);
+        private static void FundingEvidence(PlayableAuthorityTick a,OfflineMatchConfiguration c)
+        {
+            var owner=EconomyOwner(a,c);var view=EconomyView(a,c);var checkpoint=a.CaptureDiagnosticCheckpoints().Single(x=>x.OwnerId==c.Roster[0].Id);var ledger=Budget(owner).Capture();
+            TestContext.WriteLine("C4_SCALING_ACTUAL "+Newtonsoft.Json.JsonConvert.SerializeObject(new{a.Tick,view.Credits,view.SettledIncome,view.IncomePerSecond,checkpoint.OpeningExecution,checkpoint.EconomyDecision,Ledger=ledger,Buildings=view.Buildings.Where(b=>b.Owner==view.Owner).Select(b=>new{b.Id,b.Kind,b.SiteId,b.SlotId,b.Phase,Queue=b.PrivateState?.Orders}),Technology=((AiTechnologyPlan)owner.GetType().GetProperty("TechnologyPlan",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic).GetValue(owner))}));
+        }
         private static PlayableBuildingSnapshot AwaitAdditionalFactory(PlayableAuthorityTick a,OfflineMatchConfiguration c,int original)
         {
-            for(int i=0;i<3000;i++){Step(a);var b=EconomyView(a,c).Buildings.FirstOrDefault(x=>x.Owner==PlayableOwner.Player&&x.Kind==PlayableBuildingKind.Factory&&x.Id!=original);if(b!=null)return b;}
+            for(int i=0;i<3000;i++){Step(a);if(a.Tick%300==0)FundingEvidence(a,c);var b=EconomyView(a,c).Buildings.FirstOrDefault(x=>x.Owner==PlayableOwner.Player&&x.Kind==PlayableBuildingKind.Factory&&x.Id!=original);if(b!=null)return b;}
             Assert.Fail("Expected real additional factory");return null;
         }
         private static OfflineMatchConfiguration WithEconomyProfile(OfflineMatchConfiguration c,PlayableProfile p)
@@ -295,7 +300,7 @@ namespace Spacewars.Tests.EditMode
             O5DecisionDiagnostics.Emit("held-research-boundary",a,owner,PlayableAiObservation.From(EconomyView(a,c)),c.Profile,new{OldLinePaid=oldLinePaid,ResearchBlocked=researchBlocked});
             Assert.True(oldLinePaid,"useful old-line orders may spend outside the held startup amount");Assert.True(researchBlocked,"ordinary eligible research must encounter the real held-fund budget blocker");
             Journal(a);var before=a.CaptureBytes();var restored=PlayableAuthorityTick.RestoreBytes(before,c);
-            for(int i=0;i<20;i++){Step(a);Step(restored);CollectionAssert.AreEqual(a.CaptureBytes(),restored.CaptureBytes());}
+            for(int i=0;i<20;i++){Step(a);Step(restored);Assert.True(a.CaptureBytes().AsSpan().SequenceEqual(restored.CaptureBytes()),"exact startup C9 bytes at tick "+a.Tick);}
             var profileData=c.Profile.CopyData();profileData.revision++;var next=PlayableProfile.Create(profileData);var aiData=AiProfile.Initial.CopyData();aiData.revision++;var ai=new AiProfile(aiData);
             Assert.IsNull(a.ApplyProfile(next,ai));c=WithEconomyProfile(c,next);ledger=Budget(EconomyOwner(a,c));
             var rebound=ledger.Capture().Reserved.Single(x=>x.Id==hold.Id);Assert.AreEqual(launch,rebound.Amount);Assert.AreEqual(next.ProfileId+"@"+next.Revision,rebound.Terms);
@@ -303,7 +308,7 @@ namespace Spacewars.Tests.EditMode
             restored=PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c,ai);long firstOrder=0;bool produced=false;int living=0;long previousHold=ledger.ReservationAmount(hold.Id);
             for(int i=0;i<1800;i++)
             {
-                Step(a);Step(restored);CollectionAssert.AreEqual(a.CaptureBytes(),restored.CaptureBytes());var v=EconomyView(a,c);var b=v.Buildings.Single(x=>x.Id==extra.Id);
+                Step(a);Step(restored);Assert.True(a.CaptureBytes().AsSpan().SequenceEqual(restored.CaptureBytes()),"exact startup C9 bytes at tick "+a.Tick);var v=EconomyView(a,c);var b=v.Buildings.Single(x=>x.Id==extra.Id);
                 long nowHeld=ledger.ReservationAmount(hold.Id);if(nowHeld!=previousHold){TestContext.WriteLine("E3_STARTUP_TRANSITION "+Newtonsoft.Json.JsonConvert.SerializeObject(new{Tick=a.Tick,PreviousHeld=previousHold,Held=nowHeld,Budget=ledger.Capture(),NewLine=b.PrivateState}));previousHold=nowHeld;}
                 if(firstOrder==0&&b.PrivateState.Orders.Count>0){firstOrder=b.PrivateState.Orders[0].Id;living=v.Entities.Count(x=>x.Owner==v.Owner&&x.Kind==PlayableEntityKind.Tank);}
                 var progress=ledger.Capture();int terminalCycles=progress.Paid.Count(x=>x.Action.EntityIds.Contains(extra.Id)&&x.Action.Kind==PlayableCommandKind.QueueTank);

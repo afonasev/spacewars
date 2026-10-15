@@ -284,12 +284,17 @@ namespace Spacewars.Runtime
         {
             WorldWire.Array(w,history.OrderBy(x=>x.Key,StringComparer.Ordinal).ToArray(),p=>{String(w,p.Key);w.Write(p.Value.FirstTick);w.Write(p.Value.NextRetry);w.Write(p.Value.Failures);String(w,p.Value.Conditions);});
         }
-        internal void ReadState(BinaryReader r,long tick)
+        internal void ReadState(BinaryReader r,long tick,string owner,long generation,PlayableProfile profile,AiProfile ai)
         {
-            foreach(var p in WorldWire.Array(r,()=>new KeyValuePair<string,History>(String(r),new History{FirstTick=r.ReadInt64(),NextRetry=r.ReadInt64(),Failures=r.ReadInt32(),Conditions=String(r)})))
+            var entries=WorldWire.Array(r,()=>new KeyValuePair<string,History>(String(r),new History{FirstTick=r.ReadInt64(),NextRetry=r.ReadInt64(),Failures=r.ReadInt32(),Conditions=String(r)}));
+            AiStateWire.Require(entries.Select(p=>p.Key).Distinct(StringComparer.Ordinal).Count()==entries.Length,"duplicate arbiter history");
+            foreach(var p in entries)
             {
-                AiStateWire.Require(!string.IsNullOrWhiteSpace(p.Key)&&p.Value.FirstTick>=0&&p.Value.FirstTick<=tick&&p.Value.NextRetry>=0&&p.Value.Failures>=0&&!history.ContainsKey(p.Key),"arbiter history");history.Add(p.Key,p.Value);
+                AiStateWire.Require(!string.IsNullOrWhiteSpace(p.Key)&&p.Value.FirstTick>=0&&p.Value.FirstTick<=tick&&p.Value.NextRetry>=0&&p.Value.Failures>=0&&!history.ContainsKey(p.Key),"arbiter history");
+                if(p.Key==AiExpansionFinancial.MemoKey)AiStateWire.Require(p.Value.FirstTick==0&&p.Value.NextRetry==0&&p.Value.Failures==0&&!string.IsNullOrWhiteSpace(p.Value.Conditions),"site finance memo requires typed payload and no hidden clock or retry counter");
+                if(p.Key==FundingMemoKey){AiStateWire.Require(p.Value.Failures==0,"funding memo is not retry history");AiTechnologyFunding.ValidateMemory(p.Value.Conditions,p.Value.FirstTick,p.Value.NextRetry,tick,owner,generation,profile,ai);}
             }
+            foreach(var p in entries)history.Add(p.Key,p.Value);
         }
     }
     internal sealed partial class PlayableAiOwnerLoop
@@ -300,13 +305,14 @@ namespace Spacewars.Runtime
         {
             if(next.Hash==nativeProfile.Hash)return;
             while(pending!=null)Cancel(PlayableAiDeliveryStatus.Cancelled,"AI profile revision changed.");
-            nativeProfile=next;knowledge.Rebind(next);nativeConfig=new AiOwnerConfig(OwnerId,nativeConfig.Difficulty,opening.MatchSeed,next);
+            var previousFinancial=expansionFinancial.Detach(budget);nativeProfile=next;knowledge.Rebind(next);nativeConfig=new AiOwnerConfig(OwnerId,nativeConfig.Difficulty,opening.MatchSeed,next);
             DecisionIntervalTicks=AiProfile.SecondsToTicks(next.DifficultyValue(nativeConfig.Difficulty,"decisionSeconds"),30);
             ObservationDelayTicks=AiProfile.SecondsToTicks(next.DifficultyValue(nativeConfig.Difficulty,"reactionSeconds"),30);
             actionLimit=(int)next.DifficultyValue(nativeConfig.Difficulty,"actionsPerDecision");
             repeatTicks=AiProfile.SecondsToTicks(next.Value("decision.repeatOrderSeconds"),30);arbiter.Rebind(next);
             armies.Rebind(next,nativeConfig.Difficulty);scoutPlanner.ReconcileBudget(armies,ScoutBudget);armyPlanner.ReconcileRegistry(armies,authorityTick);defense.ReconcileRegistry(armies);demand.Rebind(next,authorityTick);expansion.Rebind(authorityTick,next);
-            budget.RebindLifetime(AiProfile.SecondsToTicks(next.Value("economy.reservationExpirySeconds"),30));launches.RebindHorizon(budget);infrastructure.Rebind(profile,budget,authorityTick);launches.ReconcileFunding(budget,profile,authorityTick);expansion.ReconcileFunding(budget,profile,authorityTick,pendingItems.Select(x=>x.Intent));
+            budget.RebindLifetime(AiProfile.SecondsToTicks(next.Value("economy.reservationExpirySeconds"),30));technologyFunding.Rebind(profile,next,budget,arbiter);launches.RebindHorizon(budget);infrastructure.Rebind(profile,budget,authorityTick);launches.ReconcileFunding(budget,profile,authorityTick);expansion.ReconcileFunding(budget,profile,authorityTick,pendingItems.Select(x=>x.Intent));
+            expansionFinancial.Rebind(profile,next,authorityTick,budget,arbiter,previousFinancial);
             Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);
         }
         internal void WriteState(BinaryWriter w)
@@ -335,7 +341,7 @@ namespace Spacewars.Runtime
             o.lastDecisionTick=r.ReadInt64();o.lastScoutTick=r.ReadInt64();o.lastScoutOrderTick=r.ReadInt64();o.lastCommandSequence=r.ReadInt64();o.ordinal=r.ReadInt64();o.authorityTick=r.ReadInt64();
             o.lastPolicy=String(r);o.lastActionKind=Boolean(r)?(PlayableCommandKind?)EnumValue<PlayableCommandKind>(r):null;
             AiStateWire.Require(o.lastDecisionTick>=0&&o.lastDecisionTick<=tick&&o.lastScoutTick>=-1&&o.lastScoutTick<=tick&&o.lastScoutOrderTick>=-1&&o.lastScoutOrderTick<=tick&&o.lastCommandSequence>=0&&o.ordinal>=0&&o.authorityTick>=0&&o.authorityTick<=tick,"owner clocks/ordinals");
-            o.economy.ReadState(r);o.production.ReadState(r);o.research.ReadState(r);o.scout.ReadState(r);o.mission.ReadState(r);o.midgame.ReadState(r);o.artillery.ReadState(r);o.arbiter.ReadState(r,tick);
+            o.economy.ReadState(r);o.production.ReadState(r);o.research.ReadState(r);o.scout.ReadState(r);o.mission.ReadState(r);o.midgame.ReadState(r);o.artillery.ReadState(r);o.arbiter.ReadState(r,tick,o.OwnerId,generation,profile,ai);
             o.budget=AiBudgetStateWire.Read(r,tick);o.demand=AiProductionDemand.ReadState(r,tick,ai);o.launches=AiFactoryLaunchCommitments.ReadState(r,tick);o.expansion.ReadState(r,tick,generation);o.infrastructure.ReadState(r,tick,generation);o.armies=AiArmyRegistry.ReadState(r,ai,difficulty,tick,o.OwnerId,generation);o.armyPlanner.ReadState(r,tick,o.armies);o.defense.ReadState(r,tick,o.armies);o.knowledge=AiKnowledgeTracker.ReadState(r,o.OwnerId,generation,tick,ai);o.openingExecutor.ReadState(r,tick);o.composition.ReadState(r,tick);var budgetState=o.budget.Capture();
             AiStateWire.Require(o.budget.OwnerId==o.OwnerId&&o.budget.Generation==generation&&budgetState.AdmittedDecision<=o.ordinal&&
                 budgetState.ReservationLifetimeTicks==AiProfile.SecondsToTicks(ai.Value("economy.reservationExpirySeconds"),30),"budget owner binding/allocator/profile horizon");

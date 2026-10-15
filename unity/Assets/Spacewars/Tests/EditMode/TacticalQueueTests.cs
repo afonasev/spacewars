@@ -42,7 +42,7 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(0,state.Requests.Length);Assert.AreEqual(0,state.InstalledExecutions.Length);
             var world=PlayableWorldState.Decode((byte[])Call("CaptureWorldBytes",7,"queue-test"));int tag=QueueLegacyLayout.Tag(world.Navigation,0x47525031);BitConverter.GetBytes(3).CopyTo(world.Navigation,tag+4);int tail=12+8*state.GroupKeys.Length+4*state.MemberGroupKeys.Length+state.GroupLayouts.Sum(layout=>4+4*layout.Length)+
                 12+4*(state.ProbeAnswers.Length+state.AnswerMailbox.Length+state.BarrierAnswers.Length)+4+16*state.TechnicalFailures.Length+
-                20+4+state.Groups.Sum(g=>37+12*g.Members.Length); // v6 corridor sidecars and v7 march rows
+                20+4+state.Groups.Sum(g=>37+12*g.Members.Length)+QueueLegacyLayout.InstalledLayoutTailBytes(state); // v6 corridor, v7 march, v8 allocation layout
             world.Navigation=world.Navigation.Take(world.Navigation.Length-tail).ToArray();domain=D.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{world.Encode(),PlayableProfile.Default,7,"queue-test"});nav=(NavigationSession)D.GetProperty("Navigation",F).GetValue(domain);Assert.AreEqual(request.Request,nav.Crowd.Units.Single(u=>u.Id==id).FailedRequest);Assert.NotNull(Queue(id).Pending);Restore();Assert.NotNull(Queue(id).Pending);
         }
         [Test]public void SpatialAndQueueSlotReuseSurvivesNonSortedAndEmptyMapRestore()

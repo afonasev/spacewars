@@ -164,6 +164,73 @@ namespace Spacewars.Tests.EditMode
             Type.GetProperty("Geometry",Flags).SetValue(domain,blocked);Nav.ChangeGeometry(blocked);
             Assert.IsEmpty(PlayableAiObservation.From(RouteView(request)).RouteProofs,"The real navigation geometry blocks this leg.");
         }
+        [Test] public void FriendlyRouteProofMayCrossFogToItsCurrentlyObservedOwnAnchor()
+        {
+            var before=View();var unit=before.Entities.First(e=>e.Owner==PlayableOwner.Player);var start=unit.Position;
+            var geometry=(NavGeometry)Type.GetProperty("Geometry",Flags).GetValue(domain);
+            double radius=PlayableProfile.Default.ExplorerCollisionRadius;
+            var profile=PlayableProfile.Default;
+            double sourceRadius=PlayableUnitRules.Vision(profile,PlayableEntityKind.Explorer);
+            double separation=2*sourceRadius+4;
+            bool foundNav=Nav.Crowd.TryGet(unit.Id,out var navUnit);
+            Assert.True(foundNav,"The route actor must have a current native navigation body");
+            var router=new SharedFlowRouter(geometry,profile.Navigation.ForUnit(radius,navUnit.Speed,navUnit.TurnSpeed));
+            NavPoint? selected=null;
+            for(int ring=0;ring<4&&!selected.HasValue;ring++)
+            for(int angleIndex=0;angleIndex<32&&!selected.HasValue;angleIndex++)
+            {
+                double angle=2*Math.PI*angleIndex/32;double distance=separation+ring*8;
+                var candidate=new NavPoint(start.X+distance*Math.Cos(angle),start.Z+distance*Math.Sin(angle));
+                if(!geometry.IsFree(candidate,PlayableUnitRules.Radius(profile,PlayableEntityKind.Explorer)))continue;
+                var path=router.FindPath(start,candidate);if(path.Length==0)continue;var pathFrom=start;bool safe=true;
+                foreach(var point in path){if(!geometry.SegmentFree(pathFrom,point,radius)){safe=false;break;}pathFrom=point;}
+                if(safe){selected=candidate;break;}
+            }
+            Assert.True(selected.HasValue,"A free authoritative endpoint and native full-geometry route are required");
+            var target=selected.Value;
+            int ally=Spawn(target.X,target.Z);var visible=View();
+            Assert.True(visible.Vision.IsVisible(target),"The own ally supplies current owner knowledge of the semantic anchor");
+            unit=visible.Entities.First(e=>e.Id!=ally&&e.Owner==PlayableOwner.Player);
+            var request=new PlayableRouteRequest(unit.Id,PlayableRouteTargetKind.FriendlyAnchor,ally,visible.Generation,visible.Tick,unit.Position,radius,target);
+            var fog=new PlayableVision(visible.Team,profile.ArenaHalfExtent,profile.ArenaHalfExtent,profile.VisionCellSize,profile.FogEdgeFeather);
+            var sources=new System.Collections.Generic.List<VisionSource>{new VisionSource(unit.Position,sourceRadius),new VisionSource(target,sourceRadius)};
+            foreach(var obstacle in geometry.Obstacles)
+            {
+                sources.Add(new VisionSource(new NavPoint(obstacle.MinX,obstacle.MinZ),0.01));
+                sources.Add(new VisionSource(new NavPoint(obstacle.MaxX,obstacle.MinZ),0.01));
+                sources.Add(new VisionSource(new NavPoint(obstacle.MinX,obstacle.MaxZ),0.01));
+                sources.Add(new VisionSource(new NavPoint(obstacle.MaxX,obstacle.MaxZ),0.01));
+            }
+            fog.Refresh(sources,Array.Empty<KnownBuilding>());
+            Assert.True(fog.IsVisible(unit.Position)&&fog.IsVisible(target),"Both friendly semantic endpoints are currently observed");
+            Assert.False(fog.IsVisible(new NavPoint((unit.Position.X+target.X)/2,(unit.Position.Z+target.Z)/2)),"Actual vision-source separation creates a fog interval");
+            var proofs=(PlayableRouteProof[])Type.GetMethod("ProjectRoutes",Flags).Invoke(domain,new object[]{PlayableOwner.Player,new[]{request},fog,visible.Entities,visible.Buildings,null});
+            var fogView=new PlayableSnapshot(visible.ProfileId,visible.ProfileRevision,visible.Generation,visible.Seed,visible.Sequence,visible.Tick,visible.Status,visible.Paused,
+                visible.Outcome,visible.Credits,geometry,visible.Entities.ToArray(),visible.Buildings.ToArray(),visible.Projectiles.ToArray(),visible.Metrics,visible.Failure,
+                vision:fog.Snapshot(),routeProofs:proofs,owner:visible.Owner,ownerId:visible.OwnerId,team:visible.Team,participants:visible.Participants.ToArray(),activeProfile:profile);
+            var proof=PlayableAiObservation.From(fogView).RouteProofs.Single();
+            Assert.AreEqual(ally,proof.TargetId);Assert.AreEqual(target,proof.Target);
+            Assert.True(geometry.IsFree(proof.Goal,proof.Radius));
+            var from=proof.Origin;bool crossesFog=false;
+            foreach(var point in proof.Path)
+            {if(!(bool)Type.GetMethod("VisibleSegment",Flags).Invoke(domain,new object[]{(object)fog,from,point}))crossesFog=true;from=point;}
+            Assert.True(crossesFog,"A valid native route may travel through fog between visible endpoints");
+        }
+        [Test] public void ArmyMoveSafetyAllowsAFreeHiddenMapCoordinate()
+        {
+            var view=View();var unit=view.Entities.First(e=>e.Owner==PlayableOwner.Player);
+            var geometry=(NavGeometry)Type.GetProperty("Geometry",Flags).GetValue(domain);
+            bool accepted=false;
+            for(int i=0;i<16&&!accepted;i++)
+            {
+                double angle=2*Math.PI*i/16;var target=new NavPoint(unit.Position.X+35*Math.Cos(angle),unit.Position.Z+35*Math.Sin(angle));
+                if(!geometry.IsFree(target,PlayableUnitRules.Radius(PlayableProfile.Default,unit.Kind))||view.Vision.IsVisible(target))continue;
+                var action=new PlayableAiAction(1,"player-1",view.ProfileId,view.ProfileRevision,view.Generation,view.Sequence,
+                    PlayableCommandKind.Move,new[]{unit.Id},target,seed:view.Seed);
+                accepted=(bool)Type.GetMethod("ArmyMoveSafe",Flags).Invoke(domain,new object[]{action});
+            }
+            Assert.True(accepted,"A free known-map Move destination beyond current vision remains valid");
+        }
         [Test] public void EnemyRouteProofUsesOnlyItsOwnVisibleAnchor()
         {
             var enemy=View(PlayableOwner.Enemy);

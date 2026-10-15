@@ -6,8 +6,71 @@ using Spacewars.Simulation.Ai;
 
 namespace Spacewars.Runtime
 {
+#if UNITY_INCLUDE_TESTS
+    internal enum PlayableRouteProjectionReadbackOutcome
+    {
+        BindingRejected, TargetUnresolved, TargetMismatch, OriginOrTargetNotVisible,
+        NoCandidateGenerated, AllCandidatesInvisible, AllCandidatesRejected, ProofPublished
+    }
+    internal enum PlayableRouteProjectionCandidateOutcome { Invisible, RouterReturnedEmpty, UnsafeSegment, ProofPublished }
+    internal sealed class PlayableRouteProjectionCandidateReadback
+    {
+        internal PlayableRouteProjectionCandidateReadback(int index,NavPoint candidate,bool? visible,
+            PlayableRouteProjectionCandidateOutcome outcome,NavPoint[] path,int failedSegmentIndex,
+            NavPoint? failedFrom,NavPoint? failedTo,bool? authoritativeSegmentFree,bool? visibleSegment)
+        {
+            Index=index;Candidate=candidate;Visible=visible;Outcome=outcome;
+            Path=Array.AsReadOnly((NavPoint[])(path??Array.Empty<NavPoint>()).Clone());
+            FailedSegmentIndex=failedSegmentIndex;FailedFrom=failedFrom;FailedTo=failedTo;
+            AuthoritativeSegmentFree=authoritativeSegmentFree;VisibleSegment=visibleSegment;
+        }
+        internal int Index{get;} internal NavPoint Candidate{get;} internal bool? Visible{get;}
+        internal PlayableRouteProjectionCandidateOutcome Outcome{get;} internal IReadOnlyList<NavPoint> Path{get;}
+        internal int FailedSegmentIndex{get;} internal NavPoint? FailedFrom{get;} internal NavPoint? FailedTo{get;}
+        internal bool? AuthoritativeSegmentFree{get;} internal bool? VisibleSegment{get;}
+    }
+    internal sealed class PlayableRouteProjectionReadback
+    {
+        internal PlayableRouteProjectionReadback(string ownerId,PlayableOwner owner,PlayableRouteRequest request,
+            PlayableRouteProjectionReadbackOutcome outcome,string bindingRejection,NavPoint? resolvedTarget,
+            bool? originVisible,bool? targetVisible,int observedGeometryRevision,int observedObstacleCount,
+            int candidateCount,PlayableRouteProjectionCandidateReadback[] candidates)
+        {
+            OwnerId=ownerId;Owner=owner;UnitId=request.UnitId;Kind=request.Kind;TargetId=request.TargetId;
+            Generation=request.Generation;Tick=request.Tick;Origin=request.Origin;Radius=request.Radius;RequestedTarget=request.Target;
+            Outcome=outcome;BindingRejection=bindingRejection;ResolvedTarget=resolvedTarget;
+            OriginVisible=originVisible;TargetVisible=targetVisible;ObservedGeometryRevision=observedGeometryRevision;
+            ObservedObstacleCount=observedObstacleCount;CandidateCount=candidateCount;
+            Candidates=Array.AsReadOnly((PlayableRouteProjectionCandidateReadback[])(candidates??Array.Empty<PlayableRouteProjectionCandidateReadback>()).Clone());
+        }
+        internal string OwnerId{get;} internal PlayableOwner Owner{get;} internal int UnitId{get;}
+        internal PlayableRouteTargetKind Kind{get;} internal int TargetId{get;} internal long Generation{get;} internal long Tick{get;}
+        internal NavPoint Origin{get;} internal double Radius{get;} internal NavPoint RequestedTarget{get;}
+        internal PlayableRouteProjectionReadbackOutcome Outcome{get;} internal string BindingRejection{get;}
+        internal NavPoint? ResolvedTarget{get;} internal bool? OriginVisible{get;} internal bool? TargetVisible{get;}
+        internal int ObservedGeometryRevision{get;} internal int ObservedObstacleCount{get;} internal int CandidateCount{get;}
+        internal IReadOnlyList<PlayableRouteProjectionCandidateReadback> Candidates{get;}
+    }
+#endif
     internal sealed partial class PlayableDomain
     {
+#if UNITY_INCLUDE_TESTS
+        // A test-only, per-domain observer. It is absent from non-test runtime builds and is
+        // never written to authority state or serialized checkpoints.
+        internal Action<PlayableRouteProjectionReadback> RouteProjectionReadbackForTests;
+        internal Action<string,long,PlayableRouteRequest[]> RouteRequestsReadbackForTests;
+        internal string RouteProjectionOwnerFilterForTests;
+        internal bool CaptureCurrentExpansionRoutesForTests;
+
+        private void PublishRouteProjectionReadback(Action<PlayableRouteProjectionReadback> observer,int ownerIndex,
+            PlayableOwner owner,PlayableRouteRequest request,PlayableRouteProjectionReadbackOutcome outcome,string bindingRejection,
+            NavPoint? resolvedTarget,bool? originVisible,bool? targetVisible,int geometryRevision,int obstacleCount,int candidateCount,
+            List<PlayableRouteProjectionCandidateReadback> candidates)
+        {
+            observer(new PlayableRouteProjectionReadback(offline.Roster[ownerIndex].Id,owner,request,outcome,bindingRejection,
+                resolvedTarget,originVisible,targetVisible,geometryRevision,obstacleCount,candidateCount,candidates.ToArray()));
+        }
+#endif
         private static readonly bool routePerformanceTrace=Array.IndexOf(Environment.GetCommandLineArgs(),"-routePerformanceEvidence")>=0;
         private readonly Dictionary<int,PlayableVision> visions=new Dictionary<int,PlayableVision>();
         private PlayableVision Vision(PlayableOwner owner)
@@ -89,7 +152,19 @@ namespace Spacewars.Runtime
             if(expansionRoutes)routeRequests=AiExpansionPlanner.RouteRequests(es,liveSites,objectives,owner,navigation.Generation,Tick,profile)
                 .Concat(armyRoutes?AiScoutPlanner.RouteRequests(es,objectives,owner,navigation.Generation,Tick,profile):Array.Empty<PlayableRouteRequest>())
                 .Concat(armyRoutes?AiArmyPlanner.RouteRequests(es,bs,objectives,owner,navigation.Generation,Tick,profile,other=>Hostile(other,owner)).Concat(AiTacticalExecutor.RouteRequests(es,bs,armyState,owner,navigation.Generation,Tick,profile)):
-                    !paused&&status==RuntimeStatus.Running&&Outcome==PlayableMatchOutcome.Playing&&!eliminated.Contains(owner)?AiTacticalExecutor.AssemblyRouteRequests(es,armyState,owner,navigation.Generation,Tick,profile):Array.Empty<PlayableRouteRequest>()).GroupBy(r=>new {r.UnitId,r.Kind,r.TargetId}).Select(g=>g.First()).ToArray();
+                    !paused&&status==RuntimeStatus.Running&&Outcome==PlayableMatchOutcome.Playing&&!eliminated.Contains(owner)?AiTacticalExecutor.AssemblyRouteRequests(es,armyState,owner,navigation.Generation,Tick,profile):Array.Empty<PlayableRouteRequest>()).GroupBy(r=>new {r.UnitId,r.Kind,r.TargetId,r.Target}).Select(g=>g.First()).ToArray();
+#if UNITY_INCLUDE_TESTS
+            // Ordinary participant-view queries do not generate route requests. Observe
+            // only the real request-generation path, including an empty generated set.
+            if(RouteRequestsReadbackForTests!=null&&expansionRoutes&&routeRequests!=null)
+            {
+                int requestOwnerIndex=(int)owner;
+                string requestOwnerId=offline!=null&&requestOwnerIndex>=0&&requestOwnerIndex<offline.Roster.Count?
+                    offline.Roster[requestOwnerIndex].Id:owner.ToString();
+                if(RouteProjectionOwnerFilterForTests==null||requestOwnerId==RouteProjectionOwnerFilterForTests)
+                    RouteRequestsReadbackForTests(requestOwnerId,Tick,routeRequests.Where(r=>!CaptureCurrentExpansionRoutesForTests||r.Kind==PlayableRouteTargetKind.PublicObjective).ToArray());
+            }
+#endif
             return new PlayableSnapshot(profile.ProfileId,profile.Revision,navigation.Generation,seed,sequence,Tick,status,paused,Outcome,
                 (int)Math.Floor(Balance(owner)),projectileGeometry,es.ToArray(),bs.ToArray(),ps.ToArray(),metrics,failure,liveSites,
                 Income(owner)/profile.IncomePeriodSeconds,information,discovered,Population(owner),impacts.Where(p=>(fullOverview||(p.VisibleMask&(1<<(int)owner))!=0)&&v.IsVisible(p.Point.Ground)).Select(p=>new PlayableImpactSnapshot(p.Id,p.Owner,p.Point,p.Radius,p.Tick,fullOverview?255:1<<(int)owner)).ToArray(),researchAvailability:ResearchAvailability(owner),ownerResearch:ResearchSnapshot(owner),publicScoutObjectives:objectives,
@@ -138,16 +213,15 @@ namespace Spacewars.Runtime
             pool.Add(cache); // Bounded least-recently-used profile ownership, never persisted.
             // A request can add both floor and attachment fields. Evict old fields while
             // retaining exact grid predicates for this unchanged observer geometry/profile.
-            if(cache.Router==null)cache.Router=new SharedFlowRouter(cache.Geometry,basis.ForUnit(radius,speed,turn));
+            if(cache.Router==null)cache.Router=new SharedFlowRouter(cache.Geometry,basis.ForUnit(radius,speed,turn),null);
             else if(cache.Router.CachedFieldCount>=ObservedRouteFieldLimit-1)cache.Router.TrimFields(ObservedRouteFieldLimit-2);
             return cache.Router;
         }
         private NavGeometry ObservedGeometry(PlayableVision vision)
         {
-            bool visibleObstacle(NavObstacle o)=>vision.IsVisible(new NavPoint(o.MinX,o.MinZ))&&vision.IsVisible(new NavPoint(o.MaxX,o.MinZ))&&vision.IsVisible(new NavPoint(o.MinX,o.MaxZ))&&vision.IsVisible(new NavPoint(o.MaxX,o.MaxZ));
-            // Authored map blockers are public geography. Vision gates dynamic solids,
-            // not the static map known equally to every participant.
-            var observed=Geometry.Obstacles.Where(o=>offline?.Obstacles.Contains(o)==true||visibleObstacle(o)).ToArray();
+            // The observer solves on visible solids with the production navigation solver, then
+            // checks every segment against authoritative solids. Hidden geometry can only remove proof.
+            var observed=Geometry.Obstacles.Where(o=>IsObservedObstacle(o,vision)).ToArray();
             // This identity depends only on observed solids, never on hidden authority revisions.
             int observedRevision=1;
             unchecked{foreach(var obstacle in observed)observedRevision=observedRevision*31+obstacle.MinX.GetHashCode()+obstacle.MinZ.GetHashCode()+obstacle.MaxX.GetHashCode()+obstacle.MaxZ.GetHashCode();}
@@ -188,13 +262,50 @@ namespace Spacewars.Runtime
             var result=new List<PlayableRouteProof>();
             foreach(var request in requests)
             {
-                if(request==null||request.UnitId<=0||request.TargetId<=0||request.Generation!=navigation.Generation||request.Tick!=Tick||!units.TryGetValue(request.UnitId,out var unit)||unit.Owner!=owner||unit.Health<=0||!navigation.Crowd.TryGet(unit.Id,out var nav)||request.Origin.X!=nav.Position.X||request.Origin.Z!=nav.Position.Z||request.Radius!=nav.Radius)continue;
+#if UNITY_INCLUDE_TESTS
+                var observer=RouteProjectionReadbackForTests;
+                int ownerIndex=(int)owner;
+                bool capture=request!=null&&observer!=null&&offline!=null&&ownerIndex>=0&&ownerIndex<offline.Roster.Count&&
+                    (CaptureCurrentExpansionRoutesForTests&&offline.Roster[ownerIndex].Id==RouteProjectionOwnerFilterForTests&&request.Kind==PlayableRouteTargetKind.PublicObjective||
+                    offline.Roster[ownerIndex].Id=="ai-5"&&request.Tick==8424&&request.Kind==PlayableRouteTargetKind.VisibleEnemy&&request.TargetId==83&&
+                    (request.UnitId==38||request.UnitId==52||request.UnitId==60||request.UnitId==89));
+                string bindingRejection=null;NavPoint? resolvedTarget=null;bool? originVisible=null,targetVisible=null;
+                var candidateReadbacks=capture?new List<PlayableRouteProjectionCandidateReadback>():null;
+                PlayableRouteProjectionReadbackOutcome finalOutcome=PlayableRouteProjectionReadbackOutcome.BindingRejected;
+#endif
+                Unit unit=null;NavUnit nav=null;
+#if UNITY_INCLUDE_TESTS
+                if(capture)
+                {
+                    if(request.UnitId<=0)bindingRejection="unit-id";
+                    else if(request.TargetId<=0)bindingRejection="target-id";
+                    else if(request.Generation!=navigation.Generation)bindingRejection="generation";
+                    else if(request.Tick!=Tick)bindingRejection="tick";
+                    else if(!units.TryGetValue(request.UnitId,out unit))bindingRejection="unit-missing";
+                    else if(unit.Owner!=owner)bindingRejection="unit-owner";
+                    else if(unit.Health<=0)bindingRejection="unit-dead";
+                    else if(!navigation.Crowd.TryGet(unit.Id,out nav))bindingRejection="nav-unit-missing";
+                    else if(request.Origin.X!=nav.Position.X)bindingRejection="origin-x";
+                    else if(request.Origin.Z!=nav.Position.Z)bindingRejection="origin-z";
+                    else if(request.Radius!=nav.Radius)bindingRejection="radius";
+                    if(bindingRejection!=null){PublishRouteProjectionReadback(observer,ownerIndex,owner,request,finalOutcome,bindingRejection,resolvedTarget,originVisible,targetVisible,0,safeGeometry.Obstacles.Count,0,candidateReadbacks);continue;}
+                }
+                else
+#endif
+                if(request==null||request.UnitId<=0||request.TargetId<=0||request.Generation!=navigation.Generation||request.Tick!=Tick||!units.TryGetValue(request.UnitId,out unit)||unit.Owner!=owner||unit.Health<=0||!navigation.Crowd.TryGet(unit.Id,out nav)||request.Origin.X!=nav.Position.X||request.Origin.Z!=nav.Position.Z||request.Radius!=nav.Radius)continue;
                 NavPoint target,goal;bool buildingTarget=false;double friendlyRadius=0;
                 if(request.Kind==PlayableRouteTargetKind.VisibleEnemy)
                 {
                     var enemy=entities.FirstOrDefault(e=>e.Id==request.TargetId&&Hostile(e.Owner,owner)&&e.Health>0);
                     var enemyBuilding=buildings.FirstOrDefault(b=>b.Id==request.TargetId&&Hostile(b.Owner,owner)&&b.Health>0);
-                    if(enemy==null&&enemyBuilding==null)continue;target=goal=enemy!=null?enemy.Position:enemyBuilding.Position;buildingTarget=enemy==null;
+                    if(enemy==null&&enemyBuilding==null)
+                    {
+#if UNITY_INCLUDE_TESTS
+                        if(capture){finalOutcome=PlayableRouteProjectionReadbackOutcome.TargetUnresolved;PublishRouteProjectionReadback(observer,ownerIndex,owner,request,finalOutcome,bindingRejection,resolvedTarget,originVisible,targetVisible,observedRevision,safeGeometry.Obstacles.Count,0,candidateReadbacks);}
+#endif
+                        continue;
+                    }
+                    target=goal=enemy!=null?enemy.Position:enemyBuilding.Position;buildingTarget=enemy==null;
                 }
                 else if(request.Kind==PlayableRouteTargetKind.FriendlyAnchor)
                 {
@@ -214,16 +325,36 @@ namespace Spacewars.Runtime
                     if(objective==null)continue;target=goal=objective.Approach;
                 }
                 else continue;
-                if(request.Target.X!=target.X||request.Target.Z!=target.Z)continue;
+                if(request.Target.X!=target.X||request.Target.Z!=target.Z)
+                {
+#if UNITY_INCLUDE_TESTS
+                    if(capture){finalOutcome=PlayableRouteProjectionReadbackOutcome.TargetMismatch;resolvedTarget=target;PublishRouteProjectionReadback(observer,ownerIndex,owner,request,finalOutcome,bindingRejection,resolvedTarget,originVisible,targetVisible,observedRevision,safeGeometry.Obstacles.Count,0,candidateReadbacks);}
+#endif
+                    continue;
+                }
+#if UNITY_INCLUDE_TESTS
+                if(capture)resolvedTarget=target;
+#endif
                 var radius=nav.Radius;
-                // A public objective is a known map destination, rather than a current
-                // enemy observation.  Its route may deliberately leave the present
-                // vision envelope; the observer still solves it using observed solids
-                // only, so that doing so cannot reveal a hidden obstacle or owner.
-                if(!vision.IsVisible(nav.Position)||(request.Kind!=PlayableRouteTargetKind.PublicObjective&&!vision.IsVisible(target)))continue;
+                // Routes may cross fog using known destinations and observed solids.
+                // Only a hostile semantic target still requires current visibility.
+#if UNITY_INCLUDE_TESTS
+                if(capture)
+                {
+                    originVisible=vision.IsVisible(nav.Position);
+                    if(originVisible.Value&&request.Kind==PlayableRouteTargetKind.VisibleEnemy)targetVisible=vision.IsVisible(target);
+                    if(!originVisible.Value||targetVisible==false)
+                    {
+                        finalOutcome=PlayableRouteProjectionReadbackOutcome.OriginOrTargetNotVisible;
+                        PublishRouteProjectionReadback(observer,ownerIndex,owner,request,finalOutcome,bindingRejection,resolvedTarget,originVisible,targetVisible,observedRevision,safeGeometry.Obstacles.Count,0,candidateReadbacks);continue;
+                    }
+                }
+                else
+#endif
+                if(!vision.IsVisible(nav.Position)||(request.Kind==PlayableRouteTargetKind.VisibleEnemy&&!vision.IsVisible(target)))continue;
                 var actor=entities.First(e=>e.Id==unit.Id);
                 var goals=buildingTarget?PlayableUnitRules.AttackApproachCandidates(profile,nav.Position,target,friendlyRadius>0?friendlyRadius/profile.AttackApproachRangeRatio:PlayableUnitRules.Range(profile,actor.Kind,actor.Upgraded))
-                    .Where(p=>vision.IsVisible(p)&&safeGeometry.IsFree(p,radius))
+                    .Where(p=>safeGeometry.IsFree(p,radius))
                     .Where(p=>request.Kind!=PlayableRouteTargetKind.FriendlyAnchor||entities.Where(e=>e.Id!=unit.Id).All(e=>
                         Distance(p,e.Position)>=Math.Max(profile.Navigation.ArrivalSlotSpacing,4*radius+2*profile.Navigation.ArrivalTolerance+2*profile.Navigation.LocalGridCell)&&
                         (e.CurrentOrder?.Kind!=PlayableTacticalOrderKind.Move||Distance(p,e.CurrentOrder.Destination)>=Math.Max(profile.Navigation.ArrivalSlotSpacing,4*radius+2*profile.Navigation.ArrivalTolerance+2*profile.Navigation.LocalGridCell))))
@@ -234,12 +365,20 @@ namespace Spacewars.Runtime
                     actor.CurrentOrder==null&&nav.Outcome==NavigationOutcome.Arrived&&actor.OrderStamp?.Origin==PlayableOrderOrigin.Ai&&actor.OrderStamp.Kind==PlayableCommandKind.Move&&
                     actor.OrderStamp.Owner==owner&&actor.OrderStamp.Generation==navigation.Generation&&actor.OrderStamp.Source==PlayableAiOpeningComposition.SourceIdentity&&
                     armyState!=null&&armyState.Generation==navigation.Generation&&armyState.Armies.Any(a=>(a.Phase==AiArmyPhase.Retreating||a.Phase==AiArmyPhase.Recovering)&&a.TacticalOwner==AiArmyPlanner.Policy&&a.Members.Contains(actor.Id)&&!a.Reinforcements.Contains(actor.Id));
-                if(withdrawalArrival)goals=Distance(nav.Goal,target)<=friendlyRadius+profile.Navigation.ArrivalTolerance&&vision.IsVisible(nav.Goal)&&safeGeometry.IsFree(nav.Goal,radius)?new[]{nav.Goal}:Array.Empty<NavPoint>();
+                if(withdrawalArrival)goals=Distance(nav.Goal,target)<=friendlyRadius+profile.Navigation.ArrivalTolerance&&safeGeometry.IsFree(nav.Goal,radius)?new[]{nav.Goal}:Array.Empty<NavPoint>();
+#if UNITY_INCLUDE_TESTS
+                int candidateCount=goals.Length;
+                bool proofPublished=false;
+#endif
                 foreach(var candidate in goals)
                 {
-                    if(request.Kind!=PlayableRouteTargetKind.PublicObjective&&!vision.IsVisible(candidate))continue;
-                    if(request.Kind!=PlayableRouteTargetKind.PublicObjective&&
-                        !PlayableVision.MayShareSampledVisiblePath(vision.Snapshot().Sources,nav.Position,candidate,profile.VisionCellSize/2))continue;
+#if UNITY_INCLUDE_TESTS
+                    bool? candidateVisible=null;int candidateIndex=capture?candidateReadbacks.Count:0;
+                    if(capture)
+                    {
+                        candidateVisible=vision.IsVisible(candidate);
+                    }
+#endif
                     var router=ObservedRouter(owner,safeGeometry,profile.Navigation,radius,nav.Speed,nav.TurnSpeed);
                     long pathBegin=routePerformanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0;
                     long expanded=routePerformanceTrace?router.ExpandedCells:0,checks=routePerformanceTrace?router.GridGeometryChecks:0;
@@ -250,23 +389,72 @@ namespace Spacewars.Runtime
                             "OBS_PATH tick={0} owner={1} actor={2} kind={3} target={4} radius={5:R} candidates={6} ms={7:F4} expanded={8} checks={9} rebuilds={10} points={11}",
                             Tick,owner,unit.Id,request.Kind,request.TargetId,radius,goals.Length,ms,router.ExpandedCells-expanded,router.GridGeometryChecks-checks,router.RebuildCount-rebuilds,path.Length));}
                     // A solver's empty route is not arrival evidence. Only the existing
-                    // arrival tolerance plus a current free, visible native sweep certifies
-                    // this tiny/degenerate friendly leg; unreachable legs still have no proof.
+                    // arrival tolerance plus a current free native sweep certifies this
+                    // tiny/degenerate friendly leg; unreachable legs still have no proof.
                     if(path.Length==0&&request.Kind==PlayableRouteTargetKind.FriendlyAnchor&&Distance(nav.Position,candidate)<=profile.Navigation.ArrivalTolerance&&
-                        Geometry.SegmentFree(nav.Position,candidate,radius)&&safeGeometry.SegmentFree(nav.Position,candidate,radius)&&VisibleSegment(vision,nav.Position,candidate))path=new[]{candidate};
-                    if(path.Length==0)continue;
-                    var from=nav.Position;bool safe=true;
-                    foreach(var point in path)
+                        Geometry.SegmentFree(nav.Position,candidate,radius)&&safeGeometry.SegmentFree(nav.Position,candidate,radius))path=new[]{candidate};
+                    if(path.Length==0)
                     {
-                        // Expansion Explorer routes depend only on observed geometry. Authority execution
-                        // still handles hidden obstacles through the ordinary route barrier.
-                        if((request.Kind!=PlayableRouteTargetKind.PublicObjective&&(!Geometry.SegmentFree(from,point,radius)||!VisibleSegment(vision,from,point)))){safe=false;break;}
-                        from=point;
+#if UNITY_INCLUDE_TESTS
+                        if(capture)candidateReadbacks.Add(new PlayableRouteProjectionCandidateReadback(candidateIndex,candidate,candidateVisible,
+                            PlayableRouteProjectionCandidateOutcome.RouterReturnedEmpty,path,-1,null,null,null,null));
+#endif
+                        continue;
                     }
-                    if(!safe)continue;
+#if UNITY_INCLUDE_TESTS
+                    if(capture)
+                    {
+                        var from=nav.Position;bool safe=true;int failedSegment=-1;NavPoint? failedFrom=null,failedTo=null;bool? authoritativeFree=true,visibleSegment=true;
+                        for(int pathIndex=0;pathIndex<path.Length;pathIndex++)
+                        {
+                            var point=path[pathIndex];
+                            if(request.Kind!=PlayableRouteTargetKind.PublicObjective)
+                            {
+                                bool segmentFree=Geometry.SegmentFree(from,point,radius);
+                                authoritativeFree=authoritativeFree.Value&&segmentFree;
+                                visibleSegment=visibleSegment.Value&&VisibleSegment(vision,from,point);
+                                if(!segmentFree){safe=false;failedSegment=pathIndex;failedFrom=from;failedTo=point;break;}
+                            }
+                            from=point;
+                        }
+                        if(!safe)
+                        {
+                            candidateReadbacks.Add(new PlayableRouteProjectionCandidateReadback(candidateIndex,candidate,candidateVisible,
+                                PlayableRouteProjectionCandidateOutcome.UnsafeSegment,path,failedSegment,failedFrom,failedTo,authoritativeFree,visibleSegment));
+                            continue;
+                        }
+                        candidateReadbacks.Add(new PlayableRouteProjectionCandidateReadback(candidateIndex,candidate,candidateVisible,
+                            PlayableRouteProjectionCandidateOutcome.ProofPublished,path,-1,null,null,authoritativeFree,visibleSegment));
+                    }
+                    else
+#endif
+                    {
+                        var from=nav.Position;bool safe=true;
+                        foreach(var point in path)
+                        {
+                            // Routes may cross fog using observed geometry; authoritative geometry and the
+                            // ordinary native route barrier remain responsible for hidden solids.
+                            if(request.Kind!=PlayableRouteTargetKind.PublicObjective&&!Geometry.SegmentFree(from,point,radius)){safe=false;break;}
+                            from=point;
+                        }
+                        if(!safe)continue;
+                    }
                     result.Add(new PlayableRouteProof(unit.Id,unit.Owner,navigation.Generation,Tick,observedRevision,nav.Position,radius,request.Kind,request.TargetId,target,candidate,path));
+#if UNITY_INCLUDE_TESTS
+                    if(capture)proofPublished=true;
+#endif
                     break;
                 }
+#if UNITY_INCLUDE_TESTS
+                if(capture)
+                {
+                    finalOutcome=proofPublished?PlayableRouteProjectionReadbackOutcome.ProofPublished:
+                        candidateCount==0?PlayableRouteProjectionReadbackOutcome.NoCandidateGenerated:
+                        candidateReadbacks.Count>0&&candidateReadbacks.All(x=>x.Outcome==PlayableRouteProjectionCandidateOutcome.Invisible)?PlayableRouteProjectionReadbackOutcome.AllCandidatesInvisible:
+                        PlayableRouteProjectionReadbackOutcome.AllCandidatesRejected;
+                    PublishRouteProjectionReadback(observer,ownerIndex,owner,request,finalOutcome,bindingRejection,resolvedTarget,originVisible,targetVisible,observedRevision,safeGeometry.Obstacles.Count,candidateCount,candidateReadbacks);
+                }
+#endif
             }
             if(routePerformanceTrace){double ms=(System.Diagnostics.Stopwatch.GetTimestamp()-projectionBegin)*1000d/System.Diagnostics.Stopwatch.Frequency;
                 if(ms>=5)Console.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,"OBS_ROUTES tick={0} owner={1} requests={2} ms={3:F4}",Tick,owner,requests.Count,ms));}
@@ -276,6 +464,14 @@ namespace Spacewars.Runtime
         // uses current visible facts and the existing router; no per-tick army solve.
         internal bool ArmyMoveSafe(PlayableAiAction action)=>CheckArmyMove(action,false);
         internal bool ArmyWithdrawalSafe(PlayableAiAction action)=>CheckArmyMove(action,true);
+        // Authored map blockers are public geography. Dynamic solids remain fog-gated
+        // until all four obstacle corners are currently visible.
+        private bool IsObservedObstacle(NavObstacle obstacle,PlayableVision vision)
+            =>offline?.Obstacles.Any(authored=>authored.GeometryEquals(obstacle))==true||
+                vision.IsVisible(new NavPoint(obstacle.MinX,obstacle.MinZ))&&
+                vision.IsVisible(new NavPoint(obstacle.MaxX,obstacle.MinZ))&&
+                vision.IsVisible(new NavPoint(obstacle.MinX,obstacle.MaxZ))&&
+                vision.IsVisible(new NavPoint(obstacle.MaxX,obstacle.MaxZ));
         private bool CheckArmyMove(PlayableAiAction action,bool withdrawal)
         {
             var owner=OwnerFor(action.PlayerId);var snapshot=PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,action.Seed,owner);
@@ -283,8 +479,8 @@ namespace Spacewars.Runtime
             var leader=action.Kind==PlayableCommandKind.Follow?o.Entities.FirstOrDefault(u=>u.Id==action.TargetId&&u.Owner==owner&&u.Health>0):null;
             if(action.Kind==PlayableCommandKind.Follow&&(leader==null||Spacewars.Simulation.Ai.AiRosterCatalog.Initial.For(leader.Kind).lineWeight<=0))return false;
             var target=leader==null?action.Target:PlayableUnitRules.FollowGoal(profile,leader.Position,leader.HullHeading);
-            if(!vision.IsVisible(target))return false;
-            var observed=Geometry.Obstacles.Where(x=>vision.IsVisible(new NavPoint(x.MinX,x.MinZ))&&vision.IsVisible(new NavPoint(x.MaxX,x.MinZ))&&vision.IsVisible(new NavPoint(x.MinX,x.MaxZ))&&vision.IsVisible(new NavPoint(x.MaxX,x.MaxZ))).ToArray();
+            // Move coordinates and own-entity Follow goals remain actionable through fog.
+            var observed=Geometry.Obstacles.Where(x=>IsObservedObstacle(x,vision)).ToArray();
             var geometry=new NavGeometry(Geometry.HalfExtent,observed,1);
             var slots=leader==null?navigation.AllocateArrivalSlots(target,action.EntityIds):action.EntityIds.Select(_=>target).ToArray();
             if(slots.Length!=action.EntityIds.Count||leader==null&&slots.Length==1&&!slots[0].Equals(target))return false;
@@ -292,11 +488,11 @@ namespace Spacewars.Runtime
             {
                 int id=action.EntityIds[index];var goal=slots[index];
                 var unit=o.Entities.FirstOrDefault(u=>u.Id==id&&u.Owner==owner&&u.Health>0);if(unit==null||!navigation.Crowd.TryGet(id,out var nav))return false;
-                var radius=PlayableUnitRules.Radius(profile,unit.Kind);if(!geometry.IsFree(goal,radius)||!vision.IsVisible(goal))return false;
+                var radius=PlayableUnitRules.Radius(profile,unit.Kind);if(!geometry.IsFree(goal,radius))return false;
                 var path=new SharedFlowRouter(geometry,profile.Navigation.ForUnit(radius,nav.Speed,nav.TurnSpeed)).FindPath(unit.Position,goal);
-                if(path.Length==0&&Distance(unit.Position,goal)<=profile.Navigation.ArrivalTolerance&&Geometry.SegmentFree(unit.Position,goal,radius)&&VisibleSegment(vision,unit.Position,goal))path=new[]{goal};
+                if(path.Length==0&&Distance(unit.Position,goal)<=profile.Navigation.ArrivalTolerance&&Geometry.SegmentFree(unit.Position,goal,radius))path=new[]{goal};
                 if(path.Length==0||!path.Last().Equals(goal)||!(withdrawal?AiTacticalExecutor.WithdrawalPath(o,unit.Position,path,radius,profile):AiTacticalExecutor.SafePath(o,unit.Position,path,radius,profile)))return false;
-                var at=unit.Position;foreach(var point in path){if(!Geometry.SegmentFree(at,point,radius)||!VisibleSegment(vision,at,point))return false;at=point;}
+                var at=unit.Position;foreach(var point in path){if(!Geometry.SegmentFree(at,point,radius))return false;at=point;}
             }
             return true;
         }
