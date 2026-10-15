@@ -23,7 +23,7 @@ namespace Spacewars.Runtime
             foreach(var owner in scheduler.Owners)owner.ReconcileBudget(domain);
             var state=domain.CaptureWorldState(seed,SourceIdentity);
             state.AiAuthority=Pack(w=>{
-                w.Write(0x41495331);w.Write(AiStateWire.Version);String(w,RouteDeliveryPolicy);w.Write(publication);w.Write(prepared);
+                w.Write(0x41495331);w.Write(AiStateWire.Version);String(w,EffectiveRouteDeliveryPolicy);w.Write(publication);w.Write(prepared);
                 WorldWire.Array(w,domain.OwnerIds.OrderBy(x=>x,StringComparer.Ordinal).ToArray(),id=>{String(w,id);w.Write(human(id));});
                 scheduler.WriteState(w);
             });return state.Encode();
@@ -39,13 +39,15 @@ namespace Spacewars.Runtime
             AiStateWire.Require(state.AiAuthority.Length>0,"missing live AI authority section");
             var d=PlayableDomain.RestoreConfiguredWorldBytes(bytes,profile,seed,source,config,true);
             return Unpack(state.AiAuthority,r=>{
-                AiStateWire.Require(r.ReadInt32()==0x41495331&&r.ReadInt32()==AiStateWire.Version&&String(r)==RouteDeliveryPolicy,"unsupported authority schema/route policy");
+                AiStateWire.Require(r.ReadInt32()==0x41495331&&r.ReadInt32()==AiStateWire.Version,"unsupported authority schema");
+                string policy=String(r);AiStateWire.Require(policy==RouteDeliveryPolicy||policy==AsyncRouteDeliveryPolicy,"unsupported route policy");
                 long publication=r.ReadInt64();bool barrier=Boolean(r);AiStateWire.Require(publication>=0,"publication sequence");
+                AiStateWire.Require(policy!=AsyncRouteDeliveryPolicy||!barrier,"asynchronous policy cannot freeze a tick");
                 var h=WorldWire.Array(r,()=>new KeyValuePair<string,long>(String(r),r.ReadInt64()));
                 AiStateWire.Require(h.Select(p=>p.Key).SequenceEqual(d.OwnerIds.OrderBy(x=>x,StringComparer.Ordinal))&&h.All(p=>p.Value>=0),"human watermarks");
                 var scheduler=AiAuthorityScheduler.ReadState(r,profile,ai,state.Generation,seed,state.Tick,owners);
                 foreach(var owner in scheduler.Owners)owner.ValidateBudget(d);
-                var result=new PlayableAuthorityTick(d,scheduler,seed){sequence=publication,prepared=barrier,savedConfiguration=config};
+                var result=new PlayableAuthorityTick(d,scheduler,seed,config,policy==AsyncRouteDeliveryPolicy){sequence=publication,prepared=barrier};
                 foreach(var pair in h)result.humans.Add(pair.Key,pair.Value);
                 result.Latest=d.PlayerSnapshot(publication,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,seed);
                 return result;

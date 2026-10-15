@@ -486,8 +486,8 @@ namespace Spacewars.Runtime
                         id.ActivationRevision!=member.OrderRevision)||
                     member!=null&&member.GroupId!=0&&(group==null||id.RootOrderRevision!=group.RootOrderRevision||
                         id.CommandSequence!=group.CommandSequence||id.IssuedTick!=group.IssuedTick)||
-                    terrain!=null&&!(terrain is ThreeCrossingsMap)&&!(terrain is FoundryMap)&&!(terrain is BasaltCrownMap)||
-                    (terrain is ThreeCrossingsMap||terrain is FoundryMap||terrain is BasaltCrownMap)&&
+                    terrain!=null&&!(terrain is ThreeCrossingsMap)&&!(terrain is FoundryMap)&&!(terrain is BasaltCrownMap)&&!(terrain is MossHighlandMap)||
+                    (terrain is ThreeCrossingsMap||terrain is FoundryMap||terrain is BasaltCrownMap||terrain is MossHighlandMap)&&
                     scheduled.Provider.Binding!=new PartitionNavigationProvider(terrain,candidate.Geometry,candidate.HeldIdentity).Binding)
                     throw new InvalidOperationException("Scheduler subscription differs from admitted request.");
         }
@@ -974,12 +974,18 @@ namespace Spacewars.Runtime
             }
             PublishAdmission();
         }
+        // Execution policy belongs to the saved authority envelope. Suspend without
+        // changing mobility revision/order, so the in-flight certificate stays current.
+        internal bool SuspendPendingMovement {get;set;}
         public void Step(double dt)
         {
             if(dt<=0||double.IsNaN(dt)||double.IsInfinity(dt))throw new ArgumentException("Invalid step duration.");
             AdmissionBatch(()=>{
                 ApplyResultsLocked();
-                try{PrepareMarch(dt);Crowd.Step(dt);}finally{Crowd.ClearPreferredMotion();}
+                try{
+                    if(SuspendPendingMovement)foreach(int actor in pending.Keys)Crowd.Suspend(actor);
+                    PrepareMarch(dt);Crowd.Step(dt);
+                }finally{Crowd.ClearPreferredMotion();}
                 foreach(var unit in Crowd.Units)if(!unit.Moving&&!pending.ContainsKey(unit.Id)){
                     reservations.Remove(unit.Id);retainedGoals.Remove(unit.Id);
                 }

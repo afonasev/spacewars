@@ -37,6 +37,7 @@ namespace Spacewars.Presentation
 
         public void Initialize()
         {
+            if(NativeSilentStartup.IsSilent)return;
             if(voices!=null)return;
             profile=NativeGameplayAudioProfile.Current;profile.Validate();
             plan=new GameplayAudioPlan(profile);
@@ -57,7 +58,7 @@ namespace Spacewars.Presentation
         private AudioSource Source(string name)
         {
             var host=new GameObject(name);host.transform.SetParent(transform,false);
-            var source=host.AddComponent<AudioSource>();source.playOnAwake=false;source.spatialBlend=0;source.dopplerLevel=0;source.volume=0;
+            var source=NativeQuietStartup.AddSource(host);source.playOnAwake=false;source.spatialBlend=0;source.dopplerLevel=0;source.volume=0;
             return source;
         }
         public void ResetAudio()
@@ -68,6 +69,7 @@ namespace Spacewars.Presentation
         }
         public void Command(PlayableCommand command,bool accepted)
         {
+            if(NativeSilentStartup.IsSilent)return;
             Initialize();if(command==null||command.Origin==PlayableOrderOrigin.Ai||command.Kind==PlayableCommandKind.Restart)return;
             string key=command.Generation+":"+command.PlayerId+":"+command.Sequence;
             double now=Time.unscaledTimeAsDouble;
@@ -77,6 +79,7 @@ namespace Spacewars.Presentation
         }
         public void Receipt(PlayableCommandReceipt receipt,long commandGeneration)
         {
+            if(NativeSilentStartup.IsSilent)return;
             if(receipt==null||receipt.Status==PlayableCommandStatus.Accepted)return;
             string key=commandGeneration+":"+receipt.OwnerId+":"+receipt.Sequence;
             if(!pendingCommands.Remove(key))return;
@@ -97,16 +100,19 @@ namespace Spacewars.Presentation
         }
         public static void Ui()
         {
+            if(NativeSilentStartup.IsSilent)return;
             var player=FindAnyObjectByType<GameplayAudioPlayer>();
             if(player&&player.isActiveAndEnabled){player.Initialize();player.SignalClip("ui",Time.unscaledTimeAsDouble);}
         }
         public void Selection(string owner,string signature)
         {
+            if(NativeSilentStartup.IsSilent)return;
             Initialize();if(selections.TryGetValue(owner,out var previous)&&previous==signature)return;
             selections[owner]=signature;SignalClip("select",Time.unscaledTimeAsDouble);
         }
         public void PresentationState(long matchGeneration,bool active,bool paused,bool finished)
         {
+            if(NativeSilentStartup.IsSilent)return;
             Initialize();string clip=null;
             if(finished&&!stateFinished)clip="result";
             else if(paused!=statePaused&&stateGeneration==matchGeneration)clip="pause";
@@ -116,6 +122,7 @@ namespace Spacewars.Presentation
         }
         public void Tick(IReadOnlyList<GameplayAudioScreen> screens,bool active,double seconds)
         {
+            if(NativeSilentStartup.IsSilent)return;
             Initialize();
             if(!ReferenceEquals(profile,NativeGameplayAudioProfile.Current))
             {ResetAudio();foreach(var v in voices)Destroy(v.Source.gameObject);Destroy(notification.gameObject);voices=null;Initialize();}

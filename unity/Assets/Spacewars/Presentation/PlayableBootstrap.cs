@@ -12,6 +12,11 @@ namespace Spacewars.Presentation
 {
     public sealed partial class PlayableBootstrap : MonoBehaviour
     {
+        private static readonly Unity.Profiling.ProfilerMarker RouteServiceMarker=new Unity.Profiling.ProfilerMarker("Spacewars.Main.RouteService");
+        private static readonly Unity.Profiling.ProfilerMarker RenderMarker=new Unity.Profiling.ProfilerMarker("Spacewars.Main.Render");
+        private static readonly Unity.Profiling.ProfilerMarker FogMarker=new Unity.Profiling.ProfilerMarker("Spacewars.Main.Fog");
+        private static readonly Unity.Profiling.ProfilerMarker HudMarker=new Unity.Profiling.ProfilerMarker("Spacewars.Main.Hud");
+        private static readonly Unity.Profiling.ProfilerMarker MapsMarker=new Unity.Profiling.ProfilerMarker("Spacewars.Main.Maps");
         private readonly CertifiedRouteLane routeLane=new CertifiedRouteLane();
         private PlayableProfile profile;
         private PlayableRuntime runtime;
@@ -34,6 +39,7 @@ namespace Spacewars.Presentation
         private int selectedSite,selectedSlot;
         private long generation,sequence,noticeSequence,lastTick=-1;
         private bool paused,restarting,quitting;
+        private bool routePerformanceEvidence;
         private string notice="";
         private string evidence;
         private StreamWriter metrics,actions;
@@ -41,6 +47,12 @@ namespace Spacewars.Presentation
         private float started;
         private int captures;
         private double lastMainUpdateMs,maxMainUpdateMs,maxSteadyFrameMs;
+        private double routeServiceFrameMs,renderFrameMs,hudFrameMs,mapsFrameMs,audioFrameMs;
+        private double RouteStageElapsed(ref long began)
+        {
+            if(began==0)return 0;
+            long now=System.Diagnostics.Stopwatch.GetTimestamp();double elapsed=(now-began)*1000d/System.Diagnostics.Stopwatch.Frequency;began=now;return elapsed;
+        }
         private int longSteadyFrames;
         private PlayableSnapshot view;
         private readonly List<NavPoint> pads=new List<NavPoint>();
@@ -86,7 +98,7 @@ namespace Spacewars.Presentation
 #endif
                 // Render cadence belongs to this prototype profile; the domain remains 30 Hz.
                 QualitySettings.vSyncCount=0;Application.targetFrameRate=profile.RenderTargetFramesPerSecond;
-                AudioListener.volume=NativeUserSettings.Volume;
+                if(!NativeSilentStartup.IsSilent)AudioListener.volume=NativeUserSettings.Volume;
                 Application.runInBackground=true;
                 var args=Environment.GetCommandLineArgs();for(int i=0;i+1<args.Length;i++)if(args[i]=="-playableEvidence")evidence=args[i+1];
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -95,6 +107,8 @@ namespace Spacewars.Presentation
                 for(int i=0;i+1<args.Length;i++)if(args[i]=="-resultUiEvidence")resultUiEvidence=args[i+1];
                 for(int i=0;i+1<args.Length;i++)if(args[i]=="-resultActionEvidence")resultActionEvidence=args[i+1];
                 styleASceneEvidence=Array.IndexOf(args,"-styleASceneEvidence")>=0;
+                routePerformanceEvidence=Array.IndexOf(args,"-routePerformanceEvidence")>=0;
+                if(routePerformanceEvidence&&evidence==null)throw new ArgumentException("Route performance evidence requires -playableEvidence directory.");
                 if(resultActionEvidence!=null&&resultActionEvidence!="restart"&&resultActionEvidence!="exit"&&resultActionEvidence!="manual")throw new ArgumentException("Unsupported result action evidence mode.");
 #endif
                 if(evidence!=null){Directory.CreateDirectory(evidence);metrics=new StreamWriter(Path.Combine(evidence,"native-live.csv"));metrics.WriteLine("elapsed,generation,tick,tick_cpu_ms,tick_interval_ms,command_ms,command_backlog,nav_requests,nav_answers,frame_ms,units,credits,paused,outcome,errors,heap_bytes,nav_pending,missed_deadlines,max_tick_cpu_ms,main_update_ms,max_main_update_ms,max_steady_frame_ms,long_steady_frames,gc0_count,render_frame,buildings,pending_buildings,ready_outposts,ready_mines,income_per_second,fog_targets,fog_uploads,fog_scans,map_uploads,memory_models,own_science,active_refinery_upgrades,upgraded_refineries");actions=new StreamWriter(Path.Combine(evidence,"native-input.txt"));routeFrames=new NativeRouteFrameTelemetry(Path.Combine(evidence,"native-route-frames.csv"));}
@@ -104,7 +118,7 @@ namespace Spacewars.Presentation
                 input=gameObject.AddComponent<PlayableInput>();
                 input.Capture=()=>{if(evidence!=null){CaptureProductionSnapshot(++captures);ScreenCapture.CaptureScreenshot(Path.Combine(evidence,"native-"+captures.ToString("D2")+".png"));Record("capture "+captures);}};
                 input.Select=Select;input.Order=Order;input.Stop=()=>Submit(PlayableCommandKind.Stop);input.Hold=()=>Submit(PlayableCommandKind.Hold);
-                input.CancelContext=()=>{if(mapOpen){CloseMap();return true;}return CloseBattleContext();};input.TogglePause=()=>Pause(!paused);input.Restart=Restart;input.FocusLost=()=>{if(!battleHudUnattended)Pause(true);};
+                input.CancelContext=()=>{if(mapOpen){CloseMap();return true;}return CloseBattleContext();};input.TogglePause=()=>Pause(!paused);input.Restart=Restart;input.FocusLost=()=>{if(!battleHudUnattended&&!routePerformanceEvidence)Pause(true);};
                 input.IsPointerOverUi=OverUi;input.IsKeyboardInUi=()=>MenuOwnsInput||spectatorMode&&root?.focusController?.focusedElement is VisualElement focus&&focus!=root||root?.focusController?.focusedElement is Button||root?.focusController?.focusedElement is TextField;
                 input.MapAt=MapAt;input.MapSelect=MapSelect;input.MapOrder=MapOrder;input.ToggleMap=ToggleMap;input.CloseMap=CloseMap;
                 input.Pan=Pan;input.Zoom=Zoom;input.Drag=DrawDrag;
@@ -301,11 +315,12 @@ namespace Spacewars.Presentation
         {
             if(root==null)return;
             long begin=System.Diagnostics.Stopwatch.GetTimestamp();
+            routeServiceFrameMs=renderFrameMs=hudFrameMs=mapsFrameMs=audioFrameMs=0;
             // Diagnostic thresholds: discard startup's first five seconds and count >100ms frames.
             // These define evidence buckets, not gameplay or presentation tuning.
             if(Time.realtimeSinceStartup-started>=5){double ms=Time.unscaledDeltaTime*1000;maxSteadyFrameMs=Math.Max(maxSteadyFrameMs,ms);if(ms>100)longSteadyFrames++;}
             try{UpdateFrame();}
-            finally{UpdateMusic();UpdateGameplayAudio();lastMainUpdateMs=(System.Diagnostics.Stopwatch.GetTimestamp()-begin)*1000d/System.Diagnostics.Stopwatch.Frequency;maxMainUpdateMs=Math.Max(maxMainUpdateMs,lastMainUpdateMs);RecordRouteFrame();}
+            finally{long audioStage=routeFrames==null?0:System.Diagnostics.Stopwatch.GetTimestamp();UpdateMusic();UpdateGameplayAudio();audioFrameMs=RouteStageElapsed(ref audioStage);lastMainUpdateMs=(System.Diagnostics.Stopwatch.GetTimestamp()-begin)*1000d/System.Diagnostics.Stopwatch.Frequency;maxMainUpdateMs=Math.Max(maxMainUpdateMs,lastMainUpdateMs);RecordRouteFrame();}
         }
         private void UpdateFrame()
         {
@@ -327,7 +342,13 @@ namespace Spacewars.Presentation
             if(runtime.IsStopped){if(quitting){Flush();Application.Quit();return;}if(restarting)StartSession();}
             var captured=matchSetup?.Participants!=null&&!matchSetup.Spectator?runtime.OfflineFrame:null;ReadPresentationFrame();if(view==null)return;
             RefreshLocalKeyboardBinding();input.WorldInputEnabled=childMenu==null&&!inLobby&&!preparing&&!returningToLobby&&SeatReady&&!paused&&!restarting&&!quitting&&(view.Outcome==PlayableMatchOutcome.Playing||resultOverview)&&!ResultsVisible&&string.IsNullOrEmpty(view.Failure);input.CommandInputEnabled=input.WorldInputEnabled&&matchSetup?.Spectator!=true;
-            RebindPresentation();ServiceRoutes();Render();UpdateHud();UpdateMaps();UpdateLifecycleMarkers();UpdateIncomeMarkers();PollBattleController();UpdateKeyboardPresentation();
+            RebindPresentation();
+            long phase=routeFrames==null?0:System.Diagnostics.Stopwatch.GetTimestamp();
+            using(RouteServiceMarker.Auto())ServiceRoutes();routeServiceFrameMs=RouteStageElapsed(ref phase);
+            using(RenderMarker.Auto())Render();renderFrameMs=RouteStageElapsed(ref phase);
+            using(HudMarker.Auto())UpdateHud();hudFrameMs=RouteStageElapsed(ref phase);
+            using(MapsMarker.Auto())UpdateMaps();mapsFrameMs=RouteStageElapsed(ref phase);
+            UpdateLifecycleMarkers();UpdateIncomeMarkers();PollBattleController();UpdateKeyboardPresentation();
             var allReceipts=runtime.DrainReceipts().ToArray();var markerReceipts=allReceipts.Where(r=>r.OwnerId==LocalOwnerId).ToArray();foreach(var receipt in markerReceipts){if(receipt.Sequence>=noticeSequence&&!(receipt.Status==PlayableCommandStatus.Applied&&receipt.Message==null)){noticeSequence=receipt.Sequence;notice=Friendly(receipt.Status);}Record("receipt "+receipt.Sequence+" "+receipt.Status+" latency_ms="+receipt.LatencyMilliseconds);}
             UpdateOrderMarkers(markerReceipts);PresentLocalChildren(captured,allReceipts);foreach(var receipt in allReceipts)gameplayAudio?.Receipt(receipt,generation);
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -335,6 +356,7 @@ namespace Spacewars.Presentation
             DriveResultUiEvidence();
             DrivePrototypeResearchEvidence();
             DriveStyleASceneEvidence();
+            DriveRoutePerformanceEvidence();
 #endif
             if(view.Tick!=lastTick){lastTick=view.Tick;metrics?.WriteLine(string.Join(",",(Time.realtimeSinceStartup-started).ToString("F3",System.Globalization.CultureInfo.InvariantCulture),generation,view.Tick,view.Metrics.TickCpuMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture),view.Metrics.TickIntervalMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture),view.Metrics.CommandLatencyMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture),view.Metrics.CommandBacklog,runtime.Requests.Count,runtime.Answers.Count,Time.unscaledDeltaTime*1000,view.Entities.Count,view.Credits,paused,view.Outcome,view.Metrics.Errors,GC.GetTotalMemory(false),view.Metrics.NavigationPending,view.Metrics.MissedDeadlines,view.Metrics.MaximumTickCpu,lastMainUpdateMs,maxMainUpdateMs,maxSteadyFrameMs,longSteadyFrames,GC.CollectionCount(0),Time.frameCount,view.Buildings.Count,view.Buildings.Count(b=>b.Phase==ConstructionPhase.Pending),view.Buildings.Count(b=>b.Kind==PlayableBuildingKind.Outpost&&b.Phase==ConstructionPhase.Ready),view.Buildings.Count(b=>b.Kind==PlayableBuildingKind.Mine&&b.Phase==ConstructionPhase.Ready),view.IncomePerSecond,world.Fog.TargetBuilds,world.Fog.Uploads,world.Fog.ScannedFrames,mapTerrain.Uploads,world.MemoryCount,view.Buildings.Count(b=>b.Owner==LocalOwner&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true),view.Buildings.Count(b=>b.PrivateState?.Upgrade?.Active==true),view.Buildings.Count(b=>b.Owner==LocalOwner&&b.RefineryUpgraded)));if(view.Tick%30==0)Flush();}
         }
@@ -342,24 +364,37 @@ namespace Spacewars.Presentation
         {
             if(routeFrames==null||runtime==null||view==null)return;
             var host=routeService?.CertifiedPublication;var counters=host?.Counters;
+            int motionActor=0;NavPoint authorityPosition=default;Vector3 displayPosition=default;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if(routePerformanceActor>0&&world.Actors.TryGetValue(routePerformanceActor,out var motionModel)){
+                for(int i=0;i<view.Entities.Count;i++)if(view.Entities[i].Id==routePerformanceActor){
+                    motionActor=routePerformanceActor;authorityPosition=view.Entities[i].Position;displayPosition=motionModel.Root.position;break;
+                }
+            }
+#endif
             routeFrames.TryWrite(new NativeRouteFrameSample{
                 Elapsed=Time.realtimeSinceStartup-started,Frame=Time.frameCount,Generation=view.Generation,Tick=view.Tick,Sequence=view.Sequence,
-                FrameMs=Time.unscaledDeltaTime*1000,UpdateMs=lastMainUpdateMs,Units=runtime.DiagnosticGlobalUnits,Buildings=runtime.DiagnosticGlobalBuildings,
+                FrameMs=Time.unscaledDeltaTime*1000,UpdateMs=lastMainUpdateMs,RouteServiceMs=routeServiceFrameMs,RenderMs=renderFrameMs,HudMs=hudFrameMs,MapsMs=mapsFrameMs,AudioMs=audioFrameMs,Units=runtime.DiagnosticGlobalUnits,Buildings=runtime.DiagnosticGlobalBuildings,
                 BarrierPolls=runtime.BarrierPolls,Reuses=runtime.BarrierPayloadReuses,Builds=runtime.BarrierPayloadPublications,Pumps=host?.Pumps??0,
                 PrepareMs=host?.PreparationElapsedMilliseconds??0,ProviderMs=host?.ProviderElapsedMilliseconds??0,SolveMs=host?.SolveElapsedMilliseconds??0,
                 ProjectionMs=host?.ProjectionElapsedMilliseconds??0,TransportWaitMs=host?.TransportWaitMilliseconds??0,TransportHoldMs=host?.TransportHoldMilliseconds??0,
                 PublishMs=runtime.PayloadBuildElapsedMilliseconds,Pending=counters?.PendingSubscriptions??0,Ready=counters?.ReadyResults??0,
                 QueueAge=counters?.PeakQueueAge??0,Retained=host?.RetainedBytes??0,PeakRetained=host?.PeakRetainedBytes??0,
+                MotionActor=motionActor,AuthorityX=authorityPosition.X,AuthorityZ=authorityPosition.Z,DisplayX=displayPosition.x,DisplayY=displayPosition.y,DisplayZ=displayPosition.z,
                 Heap=GC.GetTotalMemory(false),GC0=GC.CollectionCount(0),MainAllocated=GC.GetAllocatedBytesForCurrentThread(),WorkerAllocated=host?.AllocatedBytes??0});
         }
         private void ServiceRoutes()=>routeService.Service(runtime,profile.NavigationRequestsPerFrame);
+        private readonly PlayableUnitMotion unitMotion=new PlayableUnitMotion();
         private void Render()
         {
-            world.Fog.Update(view.Vision,Time.unscaledDeltaTime);world.RenderMemories(view,cameraView);world.RenderSites(view,cameraView);
+            using(FogMarker.Auto())world.Fog.Update(view.Vision,Time.unscaledDeltaTime);world.RenderMemories(view,cameraView);world.RenderSites(view,cameraView);
+            unitMotion.BeginFrame(view,paused||preparing||restarting||inLobby);
+            double poseTime=Time.realtimeSinceStartup;
             var alive=new HashSet<int>();
-            foreach(var e in view.Entities){alive.Add(e.Id);if(!world.Actors.TryGetValue(e.Id,out var a))a=world.Tank(e.Id,e.Owner==LocalOwner,e.Kind);world.UpdateResearchModel(a,e);a.Root.position=world.Point(e.Position);var slope=profile.AuthoredMap?.SurfaceGradient(e.Position)??default(NavPoint);a.Root.rotation=Quaternion.FromToRotation(Vector3.up,new Vector3((float)-slope.X,1,(float)-slope.Z).normalized);a.Hull.localRotation=Quaternion.Euler(0,90-(float)e.HullHeading*Mathf.Rad2Deg,0);a.Turret.localRotation=Quaternion.Euler(0,(float)(e.HullHeading-e.TurretHeading)*Mathf.Rad2Deg,0);a.Selection.SetActive(selection.Contains(e.Id));if(matchSetup!=null)PlayableWorld.PaintOwner(a,LobbyPaint(e.Owner));PlayableWorld.UpdateHealth(a,cameraView,(float)e.Health/PlayableUnitRules.Health(profile,e.Kind),selection.Contains(e.Id));}
+            foreach(var e in view.Entities){alive.Add(e.Id);if(!world.Actors.TryGetValue(e.Id,out var a))a=world.Tank(e.Id,e.Owner==LocalOwner,e.Kind);world.UpdateResearchModel(a,e);var pose=unitMotion.Sample(e,poseTime);a.Root.position=world.Point(pose.Position);var slope=profile.AuthoredMap?.SurfaceGradient(pose.Position)??default(NavPoint);a.Root.rotation=Quaternion.FromToRotation(Vector3.up,new Vector3((float)-slope.X,1,(float)-slope.Z).normalized);a.Hull.localRotation=Quaternion.Euler(0,90-(float)pose.Hull*Mathf.Rad2Deg,0);a.Turret.localRotation=Quaternion.Euler(0,(float)(pose.Hull-pose.Turret)*Mathf.Rad2Deg,0);a.Selection.SetActive(selection.Contains(e.Id));if(matchSetup!=null)PlayableWorld.PaintOwner(a,LobbyPaint(e.Owner));PlayableWorld.UpdateHealth(a,cameraView,(float)e.Health/PlayableUnitRules.Health(profile,e.Kind),selection.Contains(e.Id));}
             foreach(var b in view.Buildings){alive.Add(b.Id);if(b.Phase==ConstructionPhase.Pending)continue;if(!world.Actors.TryGetValue(b.Id,out var a))a=world.Building(b.Id,b.Kind.ToString(),b.Owner==LocalOwner,b.RefineryUpgraded);world.UpdateRefineryModel(a,b,view.Tick);a.Root.position=world.Point(b.Position);a.Root.rotation=Quaternion.Euler(0,-(float)b.Heading*Mathf.Rad2Deg,0);world.FaceBuilding(a,cameraView);a.Root.localScale=new Vector3(1,Mathf.Lerp(.2f,1,(float)b.Progress),1);a.Selection.SetActive(selection.Contains(b.Id));if(matchSetup!=null)PlayableWorld.PaintOwner(a,LobbyPaint(b.Owner));int max=TerritoryRules.Health(profile,b.Kind);PlayableWorld.UpdateHealth(a,cameraView,(float)b.Health/max);}
             foreach(var id in world.Actors.Keys.ToArray())if(!alive.Contains(id)){world.Remove(id);selection.Remove(id);}
+            unitMotion.KeepVisible(alive);
             world.RenderUnitWrecks(view);
             world.RenderRallyFlags(view,selection,matchSetup?.Spectator==true);
             RenderProjectiles();

@@ -41,6 +41,7 @@ namespace Spacewars.Runtime
             AddCredits(owner,-cost);
             var building=new Building{TermsRevision=profile.Revision,Id=nextId++,Owner=owner,Kind=kind,Position=position,SiteId=siteId,SlotId=slotId,ParentId=parentId,PaidCost=cost,Phase=ConstructionPhase.Pending,Heading=heading};
             buildings.Add(building.Id,building);
+            Fact(owner,MatchFactKind.BuildingOrdered,cost,(int)kind,kind.ToString());
             if(slotId==0){site.CenterId=building.Id;site.Locked=owner;}
             message="Construction ordered.";return PlayableCommandStatus.Applied;
         }

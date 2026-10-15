@@ -27,8 +27,8 @@ namespace Spacewars.Presentation
                 postMatch=new PostMatchResultsView(runtime.Result,()=>{ClosePostMatchOverview();},ReturnToMainMenu,Restart,
                     p=>matchSetup?.Participants!=null||matchSetup?.Foundry==true?matchSetup.ParticipantName(p.Slot):matchSetup!=null?(p.IsAi?matchSetup.MatchAiName:matchSetup.MatchHumanName):p.IsAi?"ИИ":"Игрок",
                     p=>matchSetup!=null?LobbyPaint(p.Owner):PostMatchResultsView.Palette[p.Slot],
-                    f=>f.Kind==MatchFactKind.AiDecision?PostMatchResultsView.FactLabel(f):f.Kind==MatchFactKind.UnitCompleted?UnitName((PlayableEntityKind)f.EntityKind):BuildingName((PlayableBuildingKind)f.EntityKind),
-                    f=>f.Kind==MatchFactKind.AiDecision?"◆":f.Kind==MatchFactKind.UnitCompleted?UnitSymbol((PlayableEntityKind)f.EntityKind):"⬡");
+                    f=>f.Kind==MatchFactKind.AiDecision||f.Kind==MatchFactKind.ResearchOrdered||f.Kind==MatchFactKind.RefineryUpgradeOrdered?PostMatchResultsView.FactLabel(f):f.Kind==MatchFactKind.UnitOrdered?UnitName((PlayableEntityKind)f.EntityKind):BuildingName((PlayableBuildingKind)f.EntityKind),
+                    f=>f.Kind==MatchFactKind.AiDecision||f.Kind==MatchFactKind.ResearchOrdered||f.Kind==MatchFactKind.RefineryUpgradeOrdered?"◆":f.Kind==MatchFactKind.UnitOrdered?UnitSymbol((PlayableEntityKind)f.EntityKind):"⬡");
                 root.Add(postMatch.Root);ShowPostMatch();
             }
         }

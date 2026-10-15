@@ -9,7 +9,40 @@ using UnityEngine.UIElements;
 
 public sealed class NativeMainMenuTests
 {
-    [UnityTest] public IEnumerator MenuShowsSeparateUpdateAndDoesNotStartMatch()
+    private static IEnumerator Capture(NativeMainMenu menu,string name,int width=1280,int height=800)
+    {
+        string output=Environment.GetEnvironmentVariable("LOBBY_LAYOUT_EVIDENCE");if(string.IsNullOrEmpty(output))yield break;
+        var panel=menu.GetComponent<UIDocument>().panelSettings;var texture=new RenderTexture(width,height,24);texture.Create();panel.targetTexture=texture;
+        try
+        {
+            // A fresh capture target needs every retained UI element repainted, even if its layout did not change.
+            foreach(var element in menu.ScreenRoot.Query<VisualElement>().ToList())element.MarkDirtyRepaint();
+            for(int i=0;i<5;i++)yield return null;
+            var copyright=menu.ScreenRoot.Q<Label>("menu-copyright");
+            Assert.AreEqual(DisplayStyle.Flex,copyright.resolvedStyle.display,name+" copyright display");
+            Debug.Log(name+" copyright bounds "+copyright.worldBound+" screen "+menu.ScreenRoot.worldBound);
+            Assert.Greater(copyright.worldBound.height,0,name+" copyright height");
+            Assert.LessOrEqual(copyright.worldBound.yMax,menu.ScreenRoot.worldBound.yMax,name+" copyright viewport");
+            var prior=RenderTexture.active;RenderTexture.active=texture;var png=new Texture2D(width,height,TextureFormat.RGB24,false);
+            try{png.ReadPixels(new Rect(0,0,width,height),0,0);png.Apply();System.IO.Directory.CreateDirectory(output);System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,name+".png"),png.EncodeToPNG());}
+            finally{RenderTexture.active=prior;UnityEngine.Object.Destroy(png);}
+        }
+        finally{panel.targetTexture=null;texture.Release();UnityEngine.Object.Destroy(texture);}
+    }
+    [UnityTest] public IEnumerator ReleaseFooterRemainsReadableInStandardAndCompactWindows()
+    {
+        var saved=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT");Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",null);
+        var go=new GameObject("release footer layout");var menu=go.AddComponent<NativeMainMenu>();yield return null;
+        try
+        {
+            // Example metadata exercises the complete release caption without inventing a dev release date.
+            menu.ScreenRoot.Q<Label>("menu-copyright").text=OrbitalTheme.FormatFooter("1.2.3","2026-10-13");
+            foreach(var size in new[]{new Vector2Int(1280,800),new Vector2Int(800,620)})
+                yield return Capture(menu,"release-footer-example-"+size.x+"x"+size.y,size.x,size.y);
+        }
+        finally{UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",saved);}
+    }
+    [UnityTest] public IEnumerator MenuKeepsUpdateInFooterAndDoesNotStartMatch()
     {
         string endpoint=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT");Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",null);
         var go=new GameObject("main menu contract");var menu=go.AddComponent<NativeMainMenu>();bool played=false;menu.Play=()=>played=true;
@@ -18,8 +51,12 @@ public sealed class NativeMainMenuTests
         {
             var root=go.GetComponent<UIDocument>().rootVisualElement;
             var actions=root.Query<Button>().ToList();
-            CollectionAssert.AreEqual(new[]{"В бой!","Сетевая игра","Настройки","Управление","Лаборатория геймдизайна","Обновить","Выйти","Проверить","Перезапустить"},actions.ConvertAll(b=>b.text));
-            Assert.False(actions[1].enabledSelf);Assert.That(root.Q<Button>("main-restart").style.display.value,Is.EqualTo(DisplayStyle.None));Assert.False(root.Q<Button>("main-check").enabledSelf);
+            CollectionAssert.AreEqual(new[]{"В бой!","Сетевая игра","Настройки","Управление","Лаборатория геймдизайна","Выйти","Обновить","Перезапустить"},actions.ConvertAll(b=>b.text));
+            Assert.False(actions[1].enabledSelf);Assert.That(root.Q<Button>("main-restart").style.display.value,Is.EqualTo(DisplayStyle.None));Assert.IsNull(root.Q<Button>("main-check"));
+            Assert.IsNull(root.Q(className:"orbital-hints"));
+            Assert.AreEqual(DisplayStyle.Flex,root.Q("main-update-panel").style.display.value,"Panel is visible before startup status is received");
+            Assert.AreEqual(DisplayStyle.None,root.Q<Button>("main-update").style.display.value);
+            Assert.True(root.Q<Button>("main-update").parent.parent.ClassListContains("orbital-menu-footer"));
             Assert.False(root.Query<Label>().ToList().Exists(l=>l.text.Contains("ТЕРРИТОРИЯ")));
             Assert.That(played,Is.False,"Displaying the main menu must not start a match.");
             Assert.That(root.Q<Button>("main-update").enabledSelf,Is.False,"A Player without the trusted installed launcher must not start updating.");
@@ -33,11 +70,15 @@ public sealed class NativeMainMenuTests
         var go=new GameObject("update state test");var menu=go.AddComponent<NativeMainMenu>();yield return null;
         try{
             var type=typeof(NativeMainMenu);var stateType=type.GetNestedType("UpdateState",BindingFlags.NonPublic);
-            foreach(string state in new[]{"downloading","prepared"}){
+            foreach(string state in new[]{"checking","offline","current","downloading","prepared"}){
                 var value=Activator.CreateInstance(stateType,true);stateType.GetField("state").SetValue(value,state);stateType.GetField("version").SetValue(value,"test");
                 type.GetField("current",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,value);type.GetMethod("ShowStatus",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(menu,null);
-                Assert.True(menu.ScreenRoot.Q<Button>("main-play").enabledSelf);Assert.False(menu.ScreenRoot.Q<Button>("main-check").enabledSelf);
+                Assert.AreEqual(state=="current"?DisplayStyle.None:DisplayStyle.Flex,menu.ScreenRoot.Q("main-update-panel").style.display.value);
+                Assert.AreEqual(state=="checking"?DisplayStyle.Flex:DisplayStyle.None,menu.ScreenRoot.Q("main-update-spinner").style.display.value);
+                Assert.AreEqual(DisplayStyle.None,menu.ScreenRoot.Q<Button>("main-update").style.display.value);
+                Assert.True(menu.ScreenRoot.Q<Button>("main-play").enabledSelf);Assert.IsNull(menu.ScreenRoot.Q<Button>("main-check"));
                 Assert.AreEqual(state=="prepared"?DisplayStyle.Flex:DisplayStyle.None,menu.ScreenRoot.Q<Button>("main-restart").style.display.value);
+                if(state=="checking"||state=="offline"||state=="current")yield return Capture(menu,"update-"+state);
             }
         }finally{UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",endpoint);}
     }
@@ -62,6 +103,10 @@ public sealed class NativeMainMenuTests
             stateType.GetField("state").SetValue(value,"available");show.Invoke(menu,null);
             Assert.AreEqual("Запрос отклонён: HTTP 409",status.text,"Polling must not erase the failed click.");Assert.True(menu.ScreenRoot.Q<Button>("main-update").enabledSelf);
             Assert.AreEqual(DisplayStyle.None,progress.style.display.value);
+            Assert.AreEqual(DisplayStyle.Flex,menu.ScreenRoot.Q<Button>("main-update").style.display.value);
+            type.GetField("requestError",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,null);
+            stateType.GetField("available").SetValue(value,"1.0.1");show.Invoke(menu,null);yield return Capture(menu,"update-available");
+            stateType.GetField("available").SetValue(value,null);
             type.GetField("requestError",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,null);
             stateType.GetField("state").SetValue(value,"error");stateType.GetField("error").SetValue(value,"downloaded chunk rejected");show.Invoke(menu,null);
             StringAssert.Contains("downloaded chunk rejected",status.text);Assert.False(menu.ScreenRoot.Q<Button>("main-update").enabledSelf,"Discovery failures cannot retry an absent candidate.");
@@ -90,8 +135,42 @@ public sealed class NativeMainMenuTests
             var deadline=Time.realtimeSinceStartup+20;while((bool)type.GetField("busy",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(menu)&&Time.realtimeSinceStartup<deadline)yield return null;
             Assert.False((bool)type.GetField("busy",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(menu));StringAssert.Contains("409",status.text);
             type.GetMethod("ShowStatus",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(menu,null);StringAssert.Contains("409",status.text);
-            Assert.True(menu.ScreenRoot.Q<Button>("main-update").enabledSelf);Assert.True(server.IsCompleted);Assert.False(server.IsFaulted);
+            Assert.True(menu.ScreenRoot.Q<Button>("main-update").enabledSelf,"Failed update must allow retry");
+            while(!server.IsCompleted&&Time.realtimeSinceStartup<deadline)yield return null;
+            Assert.True(server.IsCompleted,"HTTP fixture must finish within the original request deadline");Assert.False(server.IsFaulted);
         }finally{listener.Stop();UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",saved);}
+    }
+
+    [UnityTest] public IEnumerator StatusFailuresStopSpinnerAndRecoverAutomatically()
+    {
+        var saved=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT");Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",null);
+        var go=new GameObject("status recovery test");var menu=go.AddComponent<NativeMainMenu>();yield return null;
+        var listener=new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);listener.Start();
+        var server=System.Threading.Tasks.Task.Run(()=>{
+            foreach(var body in new[]{"unavailable","invalid JSON","{\"state\":\"current\",\"version\":\"test\"}"})
+            using(var client=listener.AcceptTcpClient())using(var stream=client.GetStream()){
+                var reader=new System.IO.StreamReader(stream);while(!string.IsNullOrEmpty(reader.ReadLine())){}
+                var bytes=System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 "+(body=="unavailable"?"503 Unavailable":"200 OK")+"\r\nContent-Length: "+body.Length+"\r\nConnection: close\r\n\r\n"+body);stream.Write(bytes,0,bytes.Length);
+            }
+        });
+        try
+        {
+            var type=typeof(NativeMainMenu);var stateType=type.GetNestedType("UpdateState",BindingFlags.NonPublic);var value=Activator.CreateInstance(stateType,true);
+            stateType.GetField("state").SetValue(value,"checking");type.GetField("current",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,value);
+            type.GetField("endpoint",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,"http://127.0.0.1:"+((System.Net.IPEndPoint)listener.LocalEndpoint).Port);
+            type.GetField("token",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,"fixture-token");
+            var show=type.GetMethod("ShowStatus",BindingFlags.Instance|BindingFlags.NonPublic);show.Invoke(menu,null);
+            for(int i=0;i<3;i++)
+            {
+                // Invoke Request with a null callback; inspect/recover status through ShowStatus.
+                yield return (IEnumerator)type.GetMethod("Request",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(menu,new object[]{"/status","GET",null});
+                show.Invoke(menu,null);
+                Assert.AreEqual(DisplayStyle.Flex,menu.ScreenRoot.Q("main-update-panel").style.display.value,"Errors and ongoing checks remain visible");
+                if(i<2){StringAssert.Contains("Не удалось",menu.ScreenRoot.Q<Label>("main-update-status").text);Assert.AreEqual(DisplayStyle.None,menu.ScreenRoot.Q("main-update-spinner").style.display.value);}
+                else{StringAssert.Contains("Проверяем",menu.ScreenRoot.Q<Label>("main-update-status").text);Assert.AreEqual(DisplayStyle.Flex,menu.ScreenRoot.Q("main-update-spinner").style.display.value);}
+            }
+        }
+        finally{listener.Stop();UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",saved);}
     }
 
 }

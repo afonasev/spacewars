@@ -57,11 +57,26 @@ namespace Spacewars.Simulation
     {
         private readonly NavObstacle[] obstacles;
         private readonly IReadOnlyList<NavObstacle> obstacleView;
+        // Immutable broad phase. Exact footprint/sweep predicates still decide every hit.
+        private const int SpatialWidth=16;
+        private readonly int[][] spatial;
+        public long SpatialIndexRetainedBytes {get;private set;}
         public NavGeometry(double halfExtent, NavObstacle[] obstacles, int revision)
         {
             if (halfExtent <= 0d || Double.IsNaN(halfExtent) || Double.IsInfinity(halfExtent)) throw new ArgumentException("Invalid half extent.");
             if (revision < 1) throw new ArgumentException("Geometry revision must be positive.");
             HalfExtent = halfExtent; Revision = revision; this.obstacles = obstacles == null ? new NavObstacle[0] : (NavObstacle[])obstacles.Clone(); obstacleView = Array.AsReadOnly(this.obstacles);
+            if(this.obstacles.Length>=8){
+                var buckets=new List<int>[SpatialWidth*SpatialWidth];
+                for(int i=0;i<this.obstacles.Length;i++){
+                    var o=this.obstacles[i];int left=Bucket(o.MinX),right=Bucket(o.MaxX),bottom=Bucket(o.MinZ),top=Bucket(o.MaxZ);
+                    for(int x=left;x<=right;x++)for(int z=bottom;z<=top;z++){
+                        int index=x*SpatialWidth+z;if(buckets[index]==null)buckets[index]=new List<int>();buckets[index].Add(i);
+                    }
+                }
+                spatial=new int[buckets.Length][];SpatialIndexRetainedBytes=32+8L*spatial.Length;
+                for(int i=0;i<spatial.Length;i++)if(buckets[i]!=null){spatial[i]=buckets[i].ToArray();SpatialIndexRetainedBytes+=32+4L*spatial[i].Length;}
+            }
         }
         public double HalfExtent { get; private set; }
         public int Revision { get; private set; }
@@ -69,14 +84,31 @@ namespace Spacewars.Simulation
         public bool IsFree(NavPoint point, double radius)
         {
             if (radius < 0d || Double.IsNaN(radius) || Double.IsInfinity(radius) || Double.IsNaN(point.X) || Double.IsInfinity(point.X) || Double.IsNaN(point.Z) || Double.IsInfinity(point.Z) || Math.Abs(point.X) + radius > HalfExtent || Math.Abs(point.Z) + radius > HalfExtent) return false;
-            for (int i = 0; i < obstacles.Length; i++) if (point.X+radius>=obstacles[i].MinX&&point.X-radius<=obstacles[i].MaxX&&point.Z+radius>=obstacles[i].MinZ&&point.Z-radius<=obstacles[i].MaxZ&&PointRectDistanceSquared(point, obstacles[i]) <= radius * radius) return false;
+            bool Hit(int i)=>point.X+radius>=obstacles[i].MinX&&point.X-radius<=obstacles[i].MaxX&&point.Z+radius>=obstacles[i].MinZ&&point.Z-radius<=obstacles[i].MaxZ&&(obstacles[i].Polygon!=null?(obstacles[i].Polygon.Contains(point)||obstacles[i].Polygon.BoundaryWithin(point,radius)):PointRectDistanceSquared(point,obstacles[i])<=radius*radius);
+            if(spatial!=null&&SmallQuery(point.X-radius,point.Z-radius,point.X+radius,point.Z+radius,out int left,out int bottom,out int right,out int top)){
+                for(int x=left;x<=right;x++)for(int z=bottom;z<=top;z++){var ids=spatial[x*SpatialWidth+z];if(ids!=null)for(int n=0;n<ids.Length;n++)if(Hit(ids[n]))return false;}
+            }else for(int i=0;i<obstacles.Length;i++)if(Hit(i))return false;
             return true;
         }
         public bool SegmentFree(NavPoint from, NavPoint to, double radius)
         {
             if (!IsFree(from, radius) || !IsFree(to, radius)) return false;
-            for (int i = 0; i < obstacles.Length; i++) if (Math.Max(from.X,to.X)+radius>=obstacles[i].MinX&&Math.Min(from.X,to.X)-radius<=obstacles[i].MaxX&&Math.Max(from.Z,to.Z)+radius>=obstacles[i].MinZ&&Math.Min(from.Z,to.Z)-radius<=obstacles[i].MaxZ&&SegmentRectDistanceSquared(from, to, obstacles[i]) <= radius * radius) return false;
+            return SegmentFreeBetweenFreeEndpoints(from,to,radius);
+        }
+        // Internal callers must own exact free-footprint certificates for this immutable geometry.
+        internal bool SegmentFreeBetweenFreeEndpoints(NavPoint from,NavPoint to,double radius)
+        {
+            double minX=Math.Min(from.X,to.X)-radius,minZ=Math.Min(from.Z,to.Z)-radius,maxX=Math.Max(from.X,to.X)+radius,maxZ=Math.Max(from.Z,to.Z)+radius;
+            bool Hit(int i)=>maxX>=obstacles[i].MinX&&minX<=obstacles[i].MaxX&&maxZ>=obstacles[i].MinZ&&minZ<=obstacles[i].MaxZ&&(obstacles[i].Polygon!=null?obstacles[i].Polygon.SweepWithin(from,to,radius):SegmentRectDistanceSquared(from,to,obstacles[i])<=radius*radius);
+            if(spatial!=null&&SmallQuery(minX,minZ,maxX,maxZ,out int left,out int bottom,out int right,out int top)){
+                for(int x=left;x<=right;x++)for(int z=bottom;z<=top;z++){var ids=spatial[x*SpatialWidth+z];if(ids!=null)for(int n=0;n<ids.Length;n++)if(Hit(ids[n]))return false;}
+            }else for(int i=0;i<obstacles.Length;i++)if(Hit(i))return false;
             return true;
+        }
+        private int Bucket(double coordinate)=>(int)Math.Max(0,Math.Min(SpatialWidth-1,Math.Floor((coordinate+HalfExtent)/(2*HalfExtent)*SpatialWidth)));
+        private bool SmallQuery(double minX,double minZ,double maxX,double maxZ,out int left,out int bottom,out int right,out int top){
+            left=Bucket(minX);bottom=Bucket(minZ);right=Bucket(maxX);top=Bucket(maxZ);
+            return (right-left+1)*(top-bottom+1)<=8;
         }
         private static double PointRectDistanceSquared(NavPoint p, NavObstacle r)
         {

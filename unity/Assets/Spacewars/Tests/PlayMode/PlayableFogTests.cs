@@ -91,6 +91,77 @@ public sealed class PlayableFogTests
             TestContext.WriteLine("FOG_BASELINE trial="+trial+" sample_value_sum="+sampleValue+" unit="+unit+" allocations="+allocations+" median_ms="+times[8].ToString("F4",System.Globalization.CultureInfo.InvariantCulture)+" p95_ms="+times[15].ToString("F4",System.Globalization.CultureInfo.InvariantCulture)+" sha256="+hash);
         }
     }
+    [TestCase(32d,16d,4)]
+    [TestCase(360d,360d,256)]
+    [TestCase(19d,240d,64)]
+    public void BoundedRasterMatchesAllSourceReference(double halfWidth,double halfDepth,int count)
+    {
+        var p=PlayableProfile.Default;int size=PlayableVision.RasterResolution;
+        var vision=new PlayableVision(0,halfWidth,halfDepth,4,p.FogEdgeFeather);
+        var random=new System.Random(7108);var sources=new VisionSource[count];
+        using(var fog=new PlayableFogMask(p))
+        {
+            var current=Enumerable.Repeat((float)p.FogUnseenOpacity,size*size).ToArray();
+            var expected=new Color32[current.Length];double referenceMs=0,boundedMs=0;
+            for(int step=0;step<4;step++)
+            {
+                for(int n=0;n<count;n++)sources[n]=new VisionSource(new NavPoint((random.NextDouble()*2.4-1.2)*halfWidth,(random.NextDouble()*2.4-1.2)*halfDepth),1+random.NextDouble()*12);
+                vision.Refresh(step==2?Array.Empty<VisionSource>():sources,Empty);var view=vision.Snapshot();
+                float seconds=step==3?1f:.016f;
+                var timer=System.Diagnostics.Stopwatch.StartNew();
+                for(int y=0;y<size;y++)for(int x=0;x<size;x++)
+                {
+                    int index=y*size+x;double wx=((x+.5)/size*2-1)*view.HalfWidth,wz=((y+.5)/size*2-1)*view.HalfDepth;
+                    float visible=0;
+                    for(int n=0;n<view.Sources.Count;n++)
+                    {
+                        var source=view.Sources[n];double dx=wx-source.Position.X,dz=wz-source.Position.Z;
+                        visible=Math.Max(visible,(float)Math.Max(0,Math.Min(1,(source.Radius+p.FogEdgeFeather-Math.Sqrt(dx*dx+dz*dz))/p.FogEdgeFeather)));
+                    }
+                    float explored=view.Coverage[index]/255f;
+                    float target=Mathf.Lerp(Mathf.Lerp((float)p.FogUnseenOpacity,(float)p.FogExploredOpacity,explored),0,visible);
+                    current[index]=Mathf.MoveTowards(current[index],target,seconds*1000/(float)(target<current[index]?p.FogRevealMs:p.FogConcealMs));
+                    expected[index]=new Color32((byte)Mathf.RoundToInt(Mathf.Clamp01(current[index])*255),(byte)Mathf.RoundToInt(Mathf.Clamp01(explored)*255),0,255);
+                }
+                referenceMs+=timer.Elapsed.TotalMilliseconds;timer.Restart();
+                fog.Update(view,seconds);boundedMs+=timer.Elapsed.TotalMilliseconds;
+                CollectionAssert.AreEqual(expected,fog.Texture.GetPixels32(),"Every channel, including transitions, must match at step "+step);
+            }
+            long referenceSamples=3L*size*size*count;
+            Assert.Less(fog.TargetSourceSamples,referenceSamples);
+            if(count==256)Assert.Less(fog.TargetSourceSamples,referenceSamples/10,"Large-map raster must avoid scanning all sources at every pixel.");
+            TestContext.WriteLine("FOG_BOUNDED sources="+count+" reference_ms="+referenceMs+" bounded_ms="+boundedMs+" reference_samples="+referenceSamples+" bounded_samples="+fog.TargetSourceSamples);
+        }
+    }
+    [Test] public void CachedMapPaintKeepsEveryPixelForFadesUnionResetAndPublicTransitions()
+    {
+        var p=PlayableProfile.ThreeCrossingsDefault;int size=PlayableVision.RasterResolution;
+        var a=new PlayableVision(0,64,64,4,p.FogEdgeFeather);var b=new PlayableVision(1,64,64,4,p.FogEdgeFeather);
+        using(var fog=new PlayableFogMask(p))using(var other=new PlayableFogMask(p))using(var map=new PlayableMapTerrain(p))
+        {
+            var ground=(Color[])typeof(PlayableMapTerrain).GetField("terrain",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(map);
+            var tint=new Color((float)p.FogTintR,(float)p.FogTintG,(float)p.FogTintB);var expected=new Color32[size*size];
+            for(int step=0;step<32;step++){
+                if(step==16){fog.Reset();other.Reset();}
+                if(step==20)map.ShowPublicTerrain();
+                if(step%4==0){
+                    a.Refresh(step==12?Array.Empty<VisionSource>():new[]{new VisionSource(new NavPoint(-30+step,step-20),7)},Empty);
+                    b.Refresh(new[]{new VisionSource(new NavPoint(24-step,8),10)},Empty);
+                }
+                fog.Update(a.Snapshot(),step%5==0?.05f:.016f);other.Update(b.Snapshot(),.016f);
+                bool union=step%2==0;if(union)map.UpdateUnion(new[]{fog,other});else map.Update(fog);
+                var first=fog.Texture.GetPixels32();var second=other.Texture.GetPixels32();
+                for(int i=0;i<expected.Length;i++){
+                    byte opacity=union?Math.Min(first[i].r,second[i].r):first[i].r;
+                    expected[i]=Color.Lerp(ground[i]*1.3f,tint,opacity/255f*.72f);
+                }
+                CollectionAssert.AreEqual(expected,map.Texture.GetPixels32(),"Every original map pixel at "+step);
+            }
+            Assert.Less(fog.TransitionPixels,32L*size*size/4,"Only unsettled pixels should fade.");
+            Assert.Less(fog.TargetPixels,8L*size*size/2,"Unchanged input colors must be reused.");
+            Assert.Less(map.PaintedPixels,32L*size*size/2,"Unchanged map colors must be reused.");
+        }
+    }
     [Test] public void RememberedModelHasNoLiveFeedbackAndIsRemovedOnVisibleConfirmation()
     {
         var p=PlayableProfile.Default;var parent=new GameObject("memory test");PlayableWorld world=null;

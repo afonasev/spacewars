@@ -13,7 +13,7 @@ namespace Spacewars.Presentation
         private GameplayAudioPlayer SharedAudio=>(localCoordinator??this).gameplayAudio;
         private void InitializeGameplayAudio()
         {
-            if(localCoordinator!=null||gameplayAudio)return;
+            if(NativeSilentStartup.IsSilent||localCoordinator!=null||gameplayAudio)return;
             gameplayAudio=gameObject.AddComponent<GameplayAudioPlayer>();gameplayAudio.Initialize();
         }
         private void AudioCommand(PlayableCommand command,bool accepted)=>SharedAudio?.Command(command,accepted);

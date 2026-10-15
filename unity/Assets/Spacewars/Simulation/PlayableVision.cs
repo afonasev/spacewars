@@ -74,6 +74,25 @@ namespace Spacewars.Simulation
             }
             return false;
         }
+        public static bool MayShareSampledVisiblePath(IReadOnlyList<VisionSource> current,NavPoint from,NavPoint to,double maximumStep)
+        {
+            if(current==null||!VisionSource.Finite(maximumStep)||maximumStep<=0)throw new ArgumentException("Invalid visible-path scope.");
+            var seen=new bool[current.Count];var queue=new Queue<int>();
+            bool Contains(VisionSource s,NavPoint p){double x=p.X-s.Position.X,z=p.Z-s.Position.Z,r=s.Radius+0.0001;return x*x+z*z<=r*r;}
+            for(int i=0;i<current.Count;i++)if(Contains(current[i],from)){seen[i]=true;queue.Enqueue(i);}
+            while(queue.Count>0){
+                int i=queue.Dequeue();if(Contains(current[i],to))return true;
+                for(int j=0;j<current.Count;j++)if(!seen[j]){
+                    double x=current[i].Position.X-current[j].Position.X,z=current[i].Position.Z-current[j].Position.Z;
+                    // Accepted segment samples are at most maximumStep apart. Widen
+                    // further by a second step so numerical/tiny-gap cases are retained.
+                    double reach=(current[i].Radius+0.0001)+(current[j].Radius+0.0001)+2*maximumStep;
+                    double d=x*x+z*z,limit=reach*reach;
+                    if(!VisionSource.Finite(d)||!VisionSource.Finite(limit)||d<=limit){seen[j]=true;queue.Enqueue(j);}
+                }
+            }
+            return false;
+        }
         public void Refresh(IEnumerable<VisionSource> nextSources,IReadOnlyList<KnownBuilding> actualBuildings)
         {
             var next=nextSources.OrderBy(s=>s.Position.X).ThenBy(s=>s.Position.Z).ThenBy(s=>s.Radius).ToArray();

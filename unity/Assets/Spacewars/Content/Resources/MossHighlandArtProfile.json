@@ -1,0 +1,22 @@
+{
+  "id": "moss-highland-wet-v1",
+  "revision": 1,
+  "detailTile": 9.0,
+  "variantScale": 19.0,
+  "variantBlend": 0.06,
+  "detailContrast": 0.85,
+  "naturalFeather": 0.9,
+  "soilScale": 13.0,
+  "soilCoverage": 0.3,
+  "mossHue": 0.235,
+  "mossSaturation": 0.42,
+  "mossValue": 0.42,
+  "rockValue": 0.47,
+  "ridgeErosion": 0.6,
+  "strataSpacing": 0.5,
+  "strataContrast": 0.12,
+  "normalSlope": 0.1,
+  "detailDensity": 0.45,
+  "pebbleSize": 0.35,
+  "receiverBias": 0.025
+}

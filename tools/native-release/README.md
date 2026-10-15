@@ -41,3 +41,7 @@ Tests: `python3 -m unittest discover -s tools -p 'test_*.py'`; `cd tools/native-
 5. Retain exact installers/evidence needed for device acceptance, then clean only owned intermediate builds and caches. Record remaining physical Windows/macOS checks separately. Compilation, CI installation and metadata signatures do not establish OS publisher signing or physical acceptance.
 
 Routine release publication never uploads installers or update bytes to the VPS. The landing discovers releases on GitHub without per-version deployment. Legacy VPS objects remain until an explicitly authorized, verified migration; do not delete them merely because a new GitHub prerelease exists.
+
+### Footer release date
+
+`build.py --release-date YYYY-MM-DD` embeds the designated release date in the Player footer and records `release_date` in `native-build.json`. The default is the UTC release preparation day; pass an explicit date when publication is planned for a different day. Version comes from the Player's bundle version. Editor/dev Players without release metadata show only the version. Release generation restores the temporary `Resources/NativeReleaseInfo.json` and its meta file after success or failure. This metadata change does not authorize building or publishing.

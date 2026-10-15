@@ -16,17 +16,23 @@ namespace Spacewars.Presentation
         private bool publicTerrainShown;
         private readonly Color[] terrain;
         private readonly Color32[] pixels;
+        private readonly byte[] paintedOpacity;
+        private bool paintedValid,unionPaint;
+        public long PaintedPixels{get;private set;}
         private readonly Color tint;
         public PlayableMapTerrain(PlayableProfile p)
         {
-            int size=PlayableVision.RasterResolution;terrain=new Color[size*size];pixels=new Color32[terrain.Length];
+            int size=PlayableVision.RasterResolution;terrain=new Color[size*size];pixels=new Color32[terrain.Length];paintedOpacity=new byte[terrain.Length];
             Texture=new Texture2D(size,size,TextureFormat.RGBA32,false){name="Shared map terrain",filterMode=FilterMode.Bilinear,wrapMode=TextureWrapMode.Clamp};
             tint=new Color((float)p.FogTintR,(float)p.FogTintG,(float)p.FogTintB);
             // Reuse the world's basalt palette; profile controls all added contrast tuning.
             Color ground=new Color(.20f,.25f,.25f);Color.RGBToHSV(ground,out float h,out float s,out float v);
             ground=Color.HSVToRGB(h,s*(float)p.MinimapTerrainSaturation,v*(float)p.MinimapTerrainBrightness);
             var walls=PlayableMap.SolidObstacles(p);
+            var mossArt=p.AuthoredMap is MossHighlandMap?MossHighlandArtProfile.Load():null;
             var basaltArt=p.AuthoredMap is BasaltCrownMap?BasaltCrownArtProfile.Load():null;
+            var basaltMines=p.AuthoredMap is BasaltCrownMap bm?BasaltCrownDetails.Mines(bm,p):null;
+            var sitePads=p.AuthoredMap is BasaltCrownMap padMap?BasaltCrownDetails.SitePads(padMap,p,basaltArt):Array.Empty<BasaltCrownDetails.SitePad>();
             for(int y=0;y<size;y++)for(int x=0;x<size;x++)
             {
                 double wx=((x+.5)/size*2-1)*p.ArenaHalfExtent,wz=((y+.5)/size*2-1)*p.ArenaHalfExtent;
@@ -34,9 +40,17 @@ namespace Spacewars.Presentation
                 bool edge=false;
                 if(obstacle)foreach(var wall in walls){double band=p.MinimapTerrainStroke*(p.ArenaHalfExtent*2/size);if(wall.Contains(new NavPoint(wx,wz))&&wall.BoundaryDistanceSquared(new NavPoint(wx,wz))<band*band)edge=true;}
                 if(p.AuthoredMap is FoundryMap foundry){var point=new NavPoint(wx,wz);bool road=System.Linq.Enumerable.Any(foundry.Roads,r=>r.Contains(point));terrain[y*size+x]=System.Linq.Enumerable.Any(foundry.Lava,l=>l.Contains(point))?PlayableWorld.FoundryLava:obstacle?PlayableWorld.FoundryRock:road?PlayableWorld.FoundryRoad:PlayableWorld.FoundryGround;}
+                else if(p.AuthoredMap is MossHighlandMap moss){
+                    var q=new NavPoint(wx,wz);var patch=moss.Materials.FirstOrDefault(m=>m.Bounds.Contains(q));var color=mossArt.Palette(patch==null?4:MossHighlandArtProfile.Role(patch.Material));
+                    Color.RGBToHSV(color,out float mh,out float ms,out float mv);color=Color.HSVToRGB(mh,ms*(float)p.MinimapTerrainSaturation,mv*(float)p.MinimapTerrainBrightness);
+                    terrain[y*size+x]=obstacle?color*(float)(1-p.MinimapTerrainTierContrast):color;
+                }
                 else if(p.AuthoredMap is BasaltCrownMap basalt){
                     var q=new NavPoint(wx,wz);var patch=basalt.Materials.FirstOrDefault(m=>m.Bounds.Contains(q));
                     var color=basaltArt.Palette(patch==null?0:BasaltCrownArtProfile.Role(patch.Material));
+                    if(!obstacle&&basaltMines.Any(site=>Math.Max(Math.Max(Math.Abs(wx-site.Position.X),Math.Abs(wz-site.Position.Z)),(Math.Abs(wx-site.Position.X)+Math.Abs(wz-site.Position.Z))*.70710678)<basaltArt.mineApronRadius-basaltArt.mineApronFeather))color=Color.HSVToRGB(basaltArt.warmHue,basaltArt.warmSaturation*basaltArt.pavingSaturation,basaltArt.mineApronValue);
+                    if(!obstacle)color=Color.Lerp(color,basaltArt.Palette(2),BasaltCrownRoads.Coverage((float)wx,(float)wz,basaltArt));
+                    if(!obstacle&&sitePads.Any(pad=>BasaltCrownDetails.PadDistance(q,pad,basaltArt.siteLinkWidth)<-basaltArt.siteApronFeather))color=Color.HSVToRGB(basaltArt.warmHue,basaltArt.warmSaturation*basaltArt.pavingSaturation,basaltArt.siteApronValue);
                     Color.RGBToHSV(color,out float bh,out float bs,out float bv);
                     color=Color.HSVToRGB(bh,bs*(float)p.MinimapTerrainSaturation,bv*(float)p.MinimapTerrainBrightness);
                     terrain[y*size+x]=basalt.SupportAt(q)==null?Color.clear:obstacle?color*(float)(1-p.MinimapTerrainTierContrast):color;
@@ -48,29 +62,37 @@ namespace Spacewars.Presentation
         public void ShowPublicTerrain()
         {
             if(publicTerrainShown)return;
-            publicTerrainShown=true;
+            publicTerrainShown=true;paintedValid=false;
             Texture.SetPixels(terrain);Texture.Apply(false,false);Uploads++;
         }
         public bool UpdateUnion(IReadOnlyList<PlayableFogMask> masks)
         {
-            if(unionUploads!=null&&unionUploads.Length==masks.Count){bool changed=false;for(int i=0;i<masks.Count;i++)changed|=unionUploads[i]!=masks[i].Uploads;if(!changed)return false;}
-            unionUploads=new long[masks.Count];for(int i=0;i<masks.Count;i++)unionUploads[i]=masks[i].Uploads;
-            var union=masks[0].Texture.GetPixels32();
-            for(int n=1;n<masks.Count;n++){var next=masks[n].Texture.GetPixels32();for(int i=0;i<union.Length;i++)union[i].r=Math.Min(union[i].r,next[i].r);}
-            for(int i=0;i<pixels.Length;i++)pixels[i]=MapFogColor(terrain[i],union[i].r/255f);
+            if(unionPaint&&unionUploads!=null&&unionUploads.Length==masks.Count){bool changed=false;for(int i=0;i<masks.Count;i++)changed|=unionUploads[i]!=masks[i].Uploads;if(!changed)return false;}
+            unionPaint=true;unionUploads=new long[masks.Count];for(int i=0;i<masks.Count;i++)unionUploads[i]=masks[i].Uploads;
+            for(int i=0;i<pixels.Length;i++){
+                byte opacity=masks[0].OpacityAt(i);
+                for(int n=1;n<masks.Count;n++)opacity=Math.Min(opacity,masks[n].OpacityAt(i));
+                PaintFogPixel(i,opacity);
+            }
+            paintedValid=true;
             Texture.SetPixels32(pixels);Texture.Apply(false,false);Uploads++;return true;
         }
         public bool Update(PlayableFogMask fog)
         {
-            if(fogUpload==fog.Uploads)return false;fogUpload=fog.Uploads;
-            // Texture readback is CPU resident (no GPU readback); stable frames do no work.
-            var mask=fog.Texture.GetPixels32();
-            for(int i=0;i<pixels.Length;i++)pixels[i]=MapFogColor(terrain[i],mask[i].r/255f);
+            if(!unionPaint&&fogUpload==fog.Uploads)return false;unionPaint=false;fogUpload=fog.Uploads;
+            // Read the same authoritative presentation bytes without copying a texture.
+            for(int i=0;i<pixels.Length;i++)PaintFogPixel(i,fog.OpacityAt(i));
+            paintedValid=true;
             Texture.SetPixels32(pixels);Texture.Apply(false,false);Uploads++;return true;
         }
         // Fixed paint floor preserves public geography independently of hidden entities. Pixel-size bounds below
         // prevent dots disappearing or symbols covering compact terrain; these are UI packing invariants,
         // not changes to designer-owned vision radii, masks or marker eligibility.
+        private void PaintFogPixel(int index,byte opacity)
+        {
+            if(paintedValid&&paintedOpacity[index]==opacity)return;
+            pixels[index]=MapFogColor(terrain[index],opacity/255f);paintedOpacity[index]=opacity;PaintedPixels++;
+        }
         private Color MapFogColor(Color ground,float fog)=>Color.Lerp(ground*1.3f,tint,fog*.72f);
         public void Dispose(){if(Texture)UnityEngine.Object.Destroy(Texture);}
     }

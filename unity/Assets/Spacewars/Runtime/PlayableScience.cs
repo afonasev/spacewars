@@ -25,6 +25,7 @@ namespace Spacewars.Runtime
             message=UpgradeBlocked(b);if(message!=null)return PlayableCommandStatus.Rejected;
             AddCredits(owner,-profile.RefineryUpgradeCost);
             b.Upgrade=new RefineryUpgrade{TermsRevision=profile.Revision,PaidCost=profile.RefineryUpgradeCost,Duration=profile.RefineryUpgradeSeconds};
+            Fact(owner,MatchFactKind.RefineryUpgradeOrdered,b.Upgrade.PaidCost,(int)b.Kind);
             Sound(PlayableSoundKind.UpgradeStarted,b.Position,PlayableEntityKind.Tank,owner,true);
             message="Улучшение завода начато";return PlayableCommandStatus.Applied;
         }

@@ -195,6 +195,10 @@ namespace Spacewars.Runtime
             budget.ObserveBank(domain.AiLiquidCredits(OwnerId));
             Finish(item,sequence,domain.Tick,status==PlayableCommandStatus.Applied?PlayableAiDeliveryStatus.Applied:PlayableAiDeliveryStatus.Rejected,status,message,domain.AiCommandPaid(action));
         }
+        internal long StartupReviewTick=>DecisionIntervalTicks;
+        internal PlayableAiOwnerLoop CreateStartupWarmup()=>new PlayableAiOwnerLoop(profile,
+            PlayableAiOpeningComposition.Initialize(opening.MatchSeed,OwnerId,aiProfile:nativeProfile),
+            Generation,null,nativeProfile,nativeConfig.Difficulty);
         internal AiArmyRegistryState ArmyState=>armies.Capture();
         internal bool NeedsArmyRoutes(long tick)=>pendingItems.Any(Technology)||tick-lastDecisionTick>=DecisionIntervalTicks||
             armies.HasReinforcements&&records.Any(r=>r.Policy==AiArmyPlanner.Policy&&r.Status==PlayableAiDeliveryStatus.Applied&&

@@ -1,0 +1,33 @@
+{
+  "direction": "wet-moss A selected by user 2026-10-13",
+  "source": "7d0acb8d:public/assets/terrain/families/highland/moss-ground.png",
+  "variants": {
+    "Moss": "docs/moss-highland/visual-options/source-textures/moss-ground.png",
+    "Moss-b": "/Users/eaafonasev/.codex/generated_images/01a135c5-fc40-7f11-bbe3-758579a00a76/exec-724ef667-ded8-4918-81f4-e5f5566fecf1.png",
+    "Moss-c": "/Users/eaafonasev/.codex/generated_images/01a135c5-fc40-7f11-bbe3-758579a00a76/exec-b21aae3d-af60-4f0b-977f-1ada17285143.png"
+  },
+  "generation": "Built-in imagegen; close sibling references, neutral tileable albedo",
+  "reused_families": [
+    "Environment/NaturalFrontier/Rock",
+    "Environment/NaturalFrontier/Earth"
+  ],
+  "linear_luminance": [
+    0.04803144489099138,
+    0.03974756687516029,
+    0.04749943165625407
+  ],
+  "actual_dimensions": [
+    [
+      1024,
+      1024
+    ],
+    [
+      1254,
+      1254
+    ],
+    [
+      1254,
+      1254
+    ]
+  ]
+}

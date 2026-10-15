@@ -43,7 +43,7 @@ def main():
                 'full_run_confirmed': args.confirm_full_run, 'fixtures': args.fixture, 'steps': []}
     failed = False
     for step in steps:
-        command = [str(ROOT / 'tools/unity.sh'), 'shared', '-batchmode']
+        command = [str(ROOT / 'tools/unity.sh'), 'shared', '-batchmode', '-noaudio', '-muted']
         if step == 'build':
             command += ['-executeMethod', 'Spacewars.Editor.PlayableProject.Build', '-quit']
         else:

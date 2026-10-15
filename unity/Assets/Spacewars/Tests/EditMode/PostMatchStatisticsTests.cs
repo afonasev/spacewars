@@ -20,6 +20,40 @@ namespace Spacewars.Tests.EditMode
         private PlayableCommandStatus Send(PlayableCommandKind kind,int[] ids=null,PlayableOwner owner=PlayableOwner.Player,long orderId=0)=> (PlayableCommandStatus)Call("Apply",new PlayableCommand(1,++sequence,owner==PlayableOwner.Player?"player-1":"enemy-1",kind,ids,productionOrderId:orderId,origin:PlayableOrderOrigin.Human),null);
         private int Factory(bool ready=true,int slot=1)
         {Call("AddCredits",PlayableOwner.Player,10000d);Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,slot,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));Call("AdvanceFoundations");if(ready)Call("AdvanceBuildings",(double)profile.FactoryBuildSeconds);return View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.Factory&&b.SlotId==slot).Id;}
+        [Test]public void OrdersAreRecordedBeforeCompletionAndSurviveCancellationAndRestore()
+        {
+            Call("Step",2d);int factory=Factory(false);
+            Send(PlayableCommandKind.CancelBuilding,new[]{factory});
+            factory=Factory();Call("Step",3d);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.QueueTank,new[]{factory}));
+            long id=View().Buildings.Single(b=>b.Id==factory).PrivateState.Orders.Single().Id;
+            Send(PlayableCommandKind.CancelProductionOrder,new[]{factory},orderId:id);
+            Assert.AreEqual(PlayableCommandStatus.InvalidEntity,Send(PlayableCommandKind.QueueTank,new[]{99999}));
+            Finish();var ordered=Result.Facts.Where(f=>f.Kind==MatchFactKind.BuildingOrdered||f.Kind==MatchFactKind.UnitOrdered).ToArray();
+            Assert.AreEqual(3,ordered.Length);Assert.AreEqual(2,ordered[0].Seconds);Assert.AreEqual(5,ordered[2].Seconds);
+            Assert.AreEqual(1,Result.Players[0].BuildingsBuilt);Assert.AreEqual(0,Result.Players[0].UnitsBuilt);
+            var bytes=(byte[])Call("CaptureWorldBytes",7,"statistics-test");
+            var restored=Domain.GetMethod("RestoreWorldBytes",BindingFlags.NonPublic|BindingFlags.Static).Invoke(null,new object[]{bytes,profile,7,"statistics-test"});
+            Assert.AreEqual(bytes,Domain.GetMethod("CaptureWorldBytes",F).Invoke(restored,new object[]{7,"statistics-test"}));
+        }
+        [Test]public void QueuedResearchAndRefineryUpgradeRecordOneOrderAtAdmission()
+        {
+            Call("AddCredits",PlayableOwner.Player,10000d);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,1,PlayableBuildingKind.Refinery,1,PlayableOwner.Player,null));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,2,PlayableBuildingKind.ScientificCenter,1,PlayableOwner.Player,null));
+            Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
+            int refinery=View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.Refinery).Id;
+            int center=View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.ScientificCenter).Id;
+            Call("Step",2d);Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UpgradeRefinery,new[]{refinery}));
+            Assert.AreEqual(PlayableCommandStatus.Rejected,Send(PlayableCommandKind.UpgradeRefinery,new[]{refinery}));
+            foreach(var kind in new[]{PlayableResearchKind.TankChassis,PlayableResearchKind.ExplorerAssaultGuns})
+                Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",new PlayableCommand(1,++sequence,"player-1",PlayableCommandKind.QueueResearch,new[]{center},researchKind:kind),null));
+            Assert.IsFalse(View().Buildings.Single(b=>b.Id==center).PrivateState.Research.Last().Active);
+            Call("AdvanceResearch",100d);Call("AdvanceResearch",100d);Call("AdvanceRefineryUpgrades",100d);Finish();
+            Assert.AreEqual(1,Result.Facts.Count(f=>f.Kind==MatchFactKind.RefineryUpgradeOrdered));
+            Assert.AreEqual(2,Result.Facts.Count(f=>f.Kind==MatchFactKind.ResearchOrdered));
+            Assert.That(Result.Facts.Where(f=>f.Kind==MatchFactKind.ResearchOrdered||f.Kind==MatchFactKind.RefineryUpgradeOrdered).All(f=>f.Seconds==2));
+        }
         [Test]public void InitialAssetsNeverScoreButStartingArmyAppears()
         {Finish();Assert.AreEqual(7,Result.Seed);Assert.IsTrue(Result.Manual);Assert.IsNull(Result.WinnerTeam);Assert.IsFalse(Result.TeamsVisible);Assert.That(Result.Players.All(p=>p.Score==0&&p.UnitsBuilt==0&&p.BuildingsBuilt==0));Assert.That(Result.Players.All(p=>Result.Army(p.Owner,0)==profile.ExplorerPopulationCost));Assert.That(Result.Facts.All(f=>f.Kind==MatchFactKind.Army));Assert.That(Result.Players.All(p=>!Result.IsMaximum(p,5)));}
         [Test]public void ActualIncomeIncludesZerosAndRefundsAreExcluded()
@@ -54,7 +88,7 @@ namespace Spacewars.Tests.EditMode
             Finish();Assert.AreEqual(3,Result.Facts.Count(f=>f.Kind==MatchFactKind.HumanAction));
         }
         [Test]public void AutomaticProductionAddsCompletionsWithoutHumanActions()
-        {int factory=Factory();Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.ToggleRepeatProduction,new[]{factory}));Call("AdvanceProduction",(double)profile.TankProductionSeconds+1);Call("AdvanceProduction",(double)profile.TankProductionSeconds+1);Finish();Assert.AreEqual(1,Result.Facts.Count(f=>f.Kind==MatchFactKind.HumanAction));Assert.AreEqual(2,Result.Players[0].UnitsBuilt);}
+        {int factory=Factory();Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.ToggleRepeatProduction,new[]{factory}));Call("AdvanceProduction",(double)profile.TankProductionSeconds+1);Call("AdvanceProduction",(double)profile.TankProductionSeconds+1);Finish();Assert.AreEqual(1,Result.Facts.Count(f=>f.Kind==MatchFactKind.HumanAction));Assert.AreEqual(2,Result.Players[0].UnitsBuilt);Assert.AreEqual(2,Result.Facts.Count(f=>f.Kind==MatchFactKind.UnitOrdered));}
         [Test]public void AcceptedRallyIsCountedOnceAtIngress()
         {int factory=Factory();Assert.AreEqual(PlayableCommandStatus.Accepted,Send(PlayableCommandKind.SetRally,new[]{factory}));Call("AdvanceRally");Finish();Assert.AreEqual(1,Result.Facts.Count(f=>f.Kind==MatchFactKind.HumanAction));}
         [TestCase(true)][TestCase(false)]public void CorruptHistoryNumbersAreRejected(bool eventTime)

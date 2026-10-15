@@ -28,6 +28,7 @@ namespace Spacewars.Runtime
             if(orders.Count(o=>!o.Complete)>=MaximumResearchOrders){message="Очередь исследований заполнена";return PlayableCommandStatus.Overflow;}
             if(Balance(owner)<ResearchCost(kind)){message="Недостаточно кредитов";return PlayableCommandStatus.InsufficientCredits;}
             orders.Add(new ResearchOrder{Id=nextResearchSequence++,Kind=kind,CenterId=centerId});
+            Fact(owner,MatchFactKind.ResearchOrdered,ResearchCost(kind),(int)kind,kind.ToString());
             Sound(PlayableSoundKind.ResearchQueued,center.Position,PlayableEntityKind.Tank,owner,true);
             StartResearchIfPossible(owner);
             message="Исследование добавлено в очередь";return PlayableCommandStatus.Applied;

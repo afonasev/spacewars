@@ -33,7 +33,7 @@ namespace Spacewars.Presentation
         {
             Result=result??throw new ArgumentNullException(nameof(result));this.apmWindow=apmWindow;this.showAiApm=showAiApm;
             this.playerName=playerName??(p=>p.Name!=p.Id?p.Name:(p.IsAi?"ИИ ":"Игрок ")+(p.Slot+1));this.playerColor=playerColor??(p=>Palette[p.Slot%Palette.Length]);
-            this.factName=factName??FactLabel;this.factIcon=factIcon??(f=>f.Kind==MatchFactKind.AiDecision?"◆":f.Kind==MatchFactKind.BuildingCompleted?"⬡":f.EntityKind==(int)PlayableEntityKind.Explorer?"◇":f.EntityKind==(int)PlayableEntityKind.Shkval?"△":"▣");
+            this.factName=factName??FactLabel;this.factIcon=factIcon??(f=>f.Kind==MatchFactKind.AiDecision?"◆":f.Kind==MatchFactKind.ResearchOrdered||f.Kind==MatchFactKind.RefineryUpgradeOrdered?"◆":f.Kind==MatchFactKind.BuildingOrdered?"⬡":f.EntityKind==(int)PlayableEntityKind.Explorer?"◇":f.EntityKind==(int)PlayableEntityKind.Shkval?"△":"▣");
             visible=new HashSet<PlayableOwner>(result.Players.Select(p=>p.Owner));logSlots[1]=Math.Min(1,result.Players.Count-1);
             Root=new VisualElement{name="post-match-results"};Root.style.position=Position.Absolute;Root.style.left=0;Root.style.right=0;Root.style.top=0;Root.style.bottom=0;Root.style.backgroundColor=OrbitalTheme.Background;Root.style.paddingLeft=22;Root.style.paddingRight=22;Root.style.paddingTop=14;Root.style.paddingBottom=14;
             var header=Row();header.style.flexShrink=0;header.style.justifyContent=Justify.SpaceBetween;header.style.alignItems=Align.Center;Root.Add(header);
@@ -113,13 +113,15 @@ namespace Spacewars.Presentation
             var player=Result.Players[logSlots[side]];selector.style.color=playerColor(player);
             var toggle=new Toggle("Решения ИИ"){value=aiLogs[side],name="result-ai-log-"+side};toggle.style.display=player.IsAi?DisplayStyle.Flex:DisplayStyle.None;column.Add(toggle);
             var scroll=OrbitalTheme.Scroll();scroll.style.flexGrow=1;scroll.style.minHeight=0;column.Add(scroll);
-            void Render(){scroll.Clear();foreach(var f in Result.Facts.Where(f=>f.Owner==player.Owner&&(f.Kind==MatchFactKind.UnitCompleted||f.Kind==MatchFactKind.BuildingCompleted||player.IsAi&&aiLogs[side]&&f.Kind==MatchFactKind.AiDecision)).OrderBy(f=>f.Tick).ThenBy(f=>f.Sequence)){var entry=Text(TimeLabel(f.Seconds)+"   "+factIcon(f)+"   "+factName(f),14,f.Kind==MatchFactKind.AiDecision?OrbitalTheme.Cyan:OrbitalTheme.Ink);entry.style.whiteSpace=WhiteSpace.Normal;entry.style.paddingTop=8;entry.style.paddingBottom=8;entry.style.borderBottomWidth=1;entry.style.borderBottomColor=OrbitalTheme.Line;scroll.Add(entry);}if(scroll.childCount==0)scroll.Add(Text("Нет завершённых действий",13,OrbitalTheme.Muted));}
+            void Render(){scroll.Clear();foreach(var f in Result.Facts.Where(f=>f.Owner==player.Owner&&(f.Kind==MatchFactKind.UnitOrdered||f.Kind==MatchFactKind.BuildingOrdered||f.Kind==MatchFactKind.RefineryUpgradeOrdered||f.Kind==MatchFactKind.ResearchOrdered||player.IsAi&&aiLogs[side]&&f.Kind==MatchFactKind.AiDecision)).OrderBy(f=>f.Tick).ThenBy(f=>f.Sequence)){var entry=Text(TimeLabel(f.Seconds)+"   "+factIcon(f)+"   "+factName(f),14,f.Kind==MatchFactKind.AiDecision?OrbitalTheme.Cyan:OrbitalTheme.Ink);entry.style.whiteSpace=WhiteSpace.Normal;entry.style.paddingTop=8;entry.style.paddingBottom=8;entry.style.borderBottomWidth=1;entry.style.borderBottomColor=OrbitalTheme.Line;scroll.Add(entry);}if(scroll.childCount==0)scroll.Add(Text("Нет заказанных действий",13,OrbitalTheme.Muted));}
             toggle.RegisterValueChangedCallback(e=>{aiLogs[side]=e.newValue;Render();});selector.RegisterValueChangedCallback(_=>{logSlots[side]=selector.index;ShowTab(2);});Render();
         }
         public static string FactLabel(MatchFact fact)
         {
-            if(fact.Kind==MatchFactKind.UnitCompleted)return OfflinePadWorldActions.Name((PlayableEntityKind)fact.EntityKind);
-            if(fact.Kind==MatchFactKind.BuildingCompleted)return OfflinePadWorldActions.Name((PlayableBuildingKind)fact.EntityKind);
+            if(fact.Kind==MatchFactKind.RefineryUpgradeOrdered)return "Улучшение завода";
+            if(fact.Kind==MatchFactKind.ResearchOrdered)return (PlayableResearchKind)fact.EntityKind==PlayableResearchKind.TankChassis?"Шасси":(PlayableResearchKind)fact.EntityKind==PlayableResearchKind.ExplorerAssaultGuns?"Штурмовые орудия":"Наведение";
+            if(fact.Kind==MatchFactKind.UnitCompleted||fact.Kind==MatchFactKind.UnitOrdered)return OfflinePadWorldActions.Name((PlayableEntityKind)fact.EntityKind);
+            if(fact.Kind==MatchFactKind.BuildingCompleted||fact.Kind==MatchFactKind.BuildingOrdered)return OfflinePadWorldActions.Name((PlayableBuildingKind)fact.EntityKind);
             if(fact.Kind!=MatchFactKind.AiDecision)return fact.Name;
             switch((MatchAiDecisionKind)fact.EntityKind){
                 case MatchAiDecisionKind.Opening:return "Стартовый план: "+new[]{"безопасное развитие","экономическое развитие","захват шахты","танковая атака","атака исследователями","две шахты и исследователи"}[(int)fact.Value];

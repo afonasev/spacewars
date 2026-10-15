@@ -103,7 +103,7 @@ namespace Spacewars.Runtime
         public static PlayableRuntime CreateLobbyMatch(PlayableProfile profile,long generation,NativeLobbyConfiguration setup,bool startPaused=false)
         {
             if(setup==null)throw new ArgumentNullException(nameof(setup));setup=setup.Copy();
-            if(profile.AuthoredMap is BasaltCrownMap)setup.InitializeParticipants();
+            if(profile.AuthoredMap is BasaltCrownMap||profile.AuthoredMap is MossHighlandMap)setup.InitializeParticipants();
             var error=setup.Validate(profile,true,true);
             if(error!=null)throw new ArgumentException(error,nameof(setup));
             PlayableRuntime runtime;
@@ -152,7 +152,7 @@ namespace Spacewars.Runtime
             seed=configuration.Seed;Generation=generation;paused=startPaused?1:0;domain=new PlayableDomain(configuration.Profile,generation,configuration);
             NativeAiProfile=AiProfile.Initial;NativeAiCatalog=AiRosterCatalog.Initial;EnemyAiConfig=new AiOwnerConfig(configuration.Roster.FirstOrDefault(p=>p.Control==OfflineControl.Ai)?.Id??"enemy-1",aiDifficulty,seed,NativeAiProfile);
             aiScheduler=new AiAuthorityScheduler(configuration.Roster.Where(p=>p.Control==OfflineControl.Ai).Select((p,i)=>new PlayableAiOwnerLoop(configuration.Profile,PlayableAiOpeningComposition.Initialize(seed,p.Id,aiProfile:NativeAiProfile),generation,null,NativeAiProfile,participantDifficulties==null?aiDifficulty:participantDifficulties[i])));
-            authorityTick=new PlayableAuthorityTick(domain,aiScheduler,seed,configuration);
+            authorityTick=new PlayableAuthorityTick(domain,aiScheduler,seed,configuration,asynchronousRoutes:true);
             PublishNavigationBinding();latest=domain.PlayerSnapshot(0,RuntimeStatus.Starting,false,Metrics(0,0),null,seed);PublishParticipantViews(RuntimeStatus.Starting,null);
             worker=new Thread(Loop){IsBackground=true,Name="Spacewars.Offline.SharedAuthority"};worker.Start();
         }
@@ -187,6 +187,8 @@ namespace Spacewars.Runtime
         public AiRosterCatalog NativeAiCatalog {get;}
         public AiOwnerConfig EnemyAiConfig {get;private set;}
         public long Generation{get;}
+        private int preparationComplete;
+        public bool IsPrepared=>Volatile.Read(ref preparationComplete)!=0;
         public bool IsStopRequested=>Volatile.Read(ref stopping)!=0;
         private Exception routeFailure;
         public void ReportRouteFailure(Exception failure){Volatile.Write(ref routeFailure,failure??throw new ArgumentNullException(nameof(failure)));Signal();}
@@ -233,6 +235,13 @@ namespace Spacewars.Runtime
             string failure=null;
             try
             {
+                // Crossings' first public route raster is pure derived work. Prepare it
+                // before the match clock and keep the lobby loading until it is ready.
+                if(domain.Tick==0&&domain.RoutingProfile.AuthoredMap is ThreeCrossingsMap){
+                    authorityTick.PrepareStartupExecution(()=>IsStopRequested);
+                    authorityTick.PrepareNavigationViews(()=>IsStopRequested);
+                }
+                Volatile.Write(ref preparationComplete,1);
                 var clock=Stopwatch.StartNew();double next=0,lastAt=0;
                 while(Volatile.Read(ref stopping)==0)
                 {

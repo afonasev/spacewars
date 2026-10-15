@@ -27,6 +27,10 @@ namespace Spacewars.Simulation
         {
             if(Participants != null)return;
             Participants=new List<NativeLobbyParticipant>();
+            if(MossHighland){
+                for(int i=0;i<4;i++)Participants.Add(new NativeLobbyParticipant{Name=i==0&&HumanPresent?HumanName:"ИИ "+(i+1),Human=i==0&&HumanPresent,Team=i+1,Color=i,Difficulty=Difficulty});
+                return;
+            }
             if(AiTestMap)
             {
                 for(int i=0;i<Spacewars.Simulation.AiTestMap.Capacity;i++)Participants.Add(new NativeLobbyParticipant{Name="ИИ "+(i+1),Team=i+1,Color=i,Difficulty=Difficulty});
@@ -49,6 +53,7 @@ namespace Spacewars.Simulation
         public bool Foundry;
         public bool AiTestMap;
         public bool BasaltCrown;
+        public bool MossHighland;
         public string HumanName = "Игрок 1";
         public string AiName = "ИИ";
         public int HumanTeam = 1, AiTeam = 2;

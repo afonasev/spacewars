@@ -136,7 +136,7 @@ namespace Spacewars.Simulation
                 int to = grid.Get(GridIndex(nx, nz)) - 1;
                 if (to < 0) return;
                 var start = locations[from]; var end = locations[to];
-                if (!provider.TryTrace(start, end.Position, clearance, out var reached, out var trace) ||
+                if (!provider.TryGraphTraceValidated(start, end.Position, clearance, out var reached, out var trace) ||
                     !reached.Equals(end)) return;
                 if (arcSlots.Count >= limits.MaxArcs) throw new ArgumentException("Graph arc capacity exceeded.");
                 int slot = from * 4 + dir;
@@ -192,6 +192,8 @@ namespace Spacewars.Simulation
                 x = saved.X, z = saved.Z, node = saved.Node, direction = saved.Direction,
                 componentCursor = saved.ComponentCursor, sampled = saved.Sampled, traceBytes = saved.TraceBytes
             };
+            // Restored locations must regain the exact certificates obtained by sampling.
+            foreach(var location in saved.Locations)if(!provider.TryLocate(location.Position,clearance,out var canonical)||!canonical.Equals(location))throw new ArgumentException("Invalid saved sample location.");
             work.locations.AddRange(saved.Locations);
             work.components.AddRange(saved.Components); work.arcSlots.AddRange(saved.ArcSlots);
             work.neighbors = NavPackedSlots.Restore(saved.Neighbors, limits.MaxNodes * 4);

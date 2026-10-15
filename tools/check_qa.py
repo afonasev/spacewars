@@ -174,7 +174,7 @@ def run():
             stem = platform.lower()
             xml = evidence / (stem + '.xml')
             log = evidence / (stem + '.log')
-            command = [str(ROOT / 'tools/unity.sh'), record['host_mode'], '-batchmode', '-runTests',
+            command = [str(ROOT / 'tools/unity.sh'), record['host_mode'], '-batchmode', '-noaudio', '-muted', '-runTests',
                        '-testPlatform', platform, '-testResults', str(xml), '-logFile', str(log)]
             if platform == 'EditMode': command.append('-nographics')
             if fixtures: command.extend(['-testFilter', ';'.join(fixtures)])

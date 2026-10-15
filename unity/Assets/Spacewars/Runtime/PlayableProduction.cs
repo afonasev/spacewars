@@ -30,7 +30,7 @@ namespace Spacewars.Runtime
             b.RepeatTank=false;
             if(b.Orders.Count>=MaximumProductionOrders){message="Production queue is full.";return PlayableCommandStatus.Overflow;}
             if(Balance(owner)<PlayableUnitRules.Cost(profile,kind)){message="Insufficient credits.";return PlayableCommandStatus.InsufficientCredits;}
-            var order=NewOrder(kind,false);AddCredits(owner,-order.PaidCost);b.Orders.Add(order);
+            var order=NewOrder(kind,false);AddCredits(owner,-order.PaidCost);b.Orders.Add(order);Fact(owner,MatchFactKind.UnitOrdered,order.PaidCost,(int)order.Kind,order.Kind.ToString());
             Sound(PlayableSoundKind.ProductionQueued,b.Position,kind,owner,true);message=kind+" ordered.";return PlayableCommandStatus.Applied;
         }
         private PlayableCommandStatus CancelProduction(int id,long orderId,PlayableOwner owner,out string message)
@@ -82,7 +82,7 @@ namespace Spacewars.Runtime
                 foreach(var b in factories)
                 {
                     if(b.Owner!=owner||!b.RepeatTank||b.Orders.Count!=0||usage+PlayableUnitRules.Population(profile,b.RepeatKind)>profile.ArmyCapacity||Balance(owner)<PlayableUnitRules.Cost(profile,b.RepeatKind))continue;
-                    var order=NewOrder(b.RepeatKind,true);AddCredits(owner,-order.PaidCost);b.Orders.Add(order);usage+=PlayableUnitRules.Population(profile,order.Kind);
+                    var order=NewOrder(b.RepeatKind,true);AddCredits(owner,-order.PaidCost);b.Orders.Add(order);Fact(owner,MatchFactKind.UnitOrdered,order.PaidCost,(int)order.Kind,order.Kind.ToString());usage+=PlayableUnitRules.Population(profile,order.Kind);
                     Sound(PlayableSoundKind.ProductionQueued,b.Position,order.Kind,owner,true);
                     Sound(PlayableSoundKind.ProductionStarted,b.Position,order.Kind,owner,true);
                 }

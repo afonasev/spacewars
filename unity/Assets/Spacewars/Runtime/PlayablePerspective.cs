@@ -8,6 +8,7 @@ namespace Spacewars.Runtime
 {
     internal sealed partial class PlayableDomain
     {
+        private static readonly bool routePerformanceTrace=Array.IndexOf(Environment.GetCommandLineArgs(),"-routePerformanceEvidence")>=0;
         private readonly Dictionary<int,PlayableVision> visions=new Dictionary<int,PlayableVision>();
         private PlayableVision Vision(PlayableOwner owner)
         {
@@ -110,29 +111,39 @@ namespace Spacewars.Runtime
         }
         // Reconstructible observer-only memoization. It carries no authority/proof state and
         // a restored domain starts cold. Each value is confined to its authority thread.
-        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PlayableDomain,Dictionary<PlayableOwner,ObservedRouteCache>> observedRouteCaches=new System.Runtime.CompilerServices.ConditionalWeakTable<PlayableDomain,Dictionary<PlayableOwner,ObservedRouteCache>>();
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PlayableDomain,Dictionary<PlayableOwner,List<ObservedRouteCache>>> observedRouteCaches=new System.Runtime.CompilerServices.ConditionalWeakTable<PlayableDomain,Dictionary<PlayableOwner,List<ObservedRouteCache>>>();
         private sealed class ObservedRouteCache
         {
             internal NavGeometry Geometry;internal NavigationProfile Profile;internal double Radius,Speed,Turn;internal SharedFlowRouter Router;
         }
         private const int ObservedRouteFieldLimit=8;
+        private const int ObservedRouteProfileLimit=8;
         private SharedFlowRouter ObservedRouter(PlayableOwner owner,NavGeometry observed,NavigationProfile basis,double radius,double speed,double turn)
         {
-            var caches=observedRouteCaches.GetValue(this,_=>new Dictionary<PlayableOwner,ObservedRouteCache>());
+            var caches=observedRouteCaches.GetValue(this,_=>new Dictionary<PlayableOwner,List<ObservedRouteCache>>());
+            if(!caches.TryGetValue(owner,out var pool))caches.Add(owner,pool=new List<ObservedRouteCache>());
             bool SameGeometry(NavGeometry a,NavGeometry b)=>a.HalfExtent==b.HalfExtent&&a.Obstacles.Count==b.Obstacles.Count&&a.Obstacles.Select((o,i)=>o.GeometryEquals(b.Obstacles[i])).All(x=>x);
-            if(!caches.TryGetValue(owner,out var cache)||!ReferenceEquals(cache.Profile,basis)||cache.Radius!=radius||cache.Speed!=speed||cache.Turn!=turn||!SameGeometry(cache.Geometry,observed)){
-                cache=new ObservedRouteCache{Geometry=observed,Profile=basis,Radius=radius,Speed=speed,Turn=turn};caches[owner]=cache;
+            // Mixed armies alternate footprints on every review. Retain independent exact
+            // predicates/fields instead of discarding the previous unit's whole router.
+            var cache=pool.Find(c=>ReferenceEquals(c.Profile,basis)&&c.Radius==radius&&c.Speed==speed&&c.Turn==turn);
+            if(cache==null){
+                if(pool.Count==ObservedRouteProfileLimit)pool.RemoveAt(0);
+                cache=new ObservedRouteCache{Geometry=observed,Profile=basis,Radius=radius,Speed=speed,Turn=turn};
+            }else{
+                pool.Remove(cache);
+                if(!SameGeometry(cache.Geometry,observed)){
+                    cache.Router=cache.Router?.ForGeometry(observed);cache.Geometry=observed;
+                }
             }
-            // FindPath can add a floor field and an attachment field. Reset between
-            // requests so each owner's single typed router retains at most eight fields.
-            if(cache.Router==null||cache.Router.CachedFieldCount>=ObservedRouteFieldLimit-1)cache.Router=new SharedFlowRouter(cache.Geometry,basis.ForUnit(radius,speed,turn));
+            pool.Add(cache); // Bounded least-recently-used profile ownership, never persisted.
+            // A request can add both floor and attachment fields. Evict old fields while
+            // retaining exact grid predicates for this unchanged observer geometry/profile.
+            if(cache.Router==null)cache.Router=new SharedFlowRouter(cache.Geometry,basis.ForUnit(radius,speed,turn));
+            else if(cache.Router.CachedFieldCount>=ObservedRouteFieldLimit-1)cache.Router.TrimFields(ObservedRouteFieldLimit-2);
             return cache.Router;
         }
-        private PlayableRouteProof[] ProjectRoutes(PlayableOwner owner,IReadOnlyList<PlayableRouteRequest> requests,PlayableVision vision,IReadOnlyList<PlayableEntitySnapshot> entities,IReadOnlyList<PlayableBuildingSnapshot> buildings,Spacewars.Runtime.AiArmyRegistryState armyState)
+        private NavGeometry ObservedGeometry(PlayableVision vision)
         {
-            if(requests==null||requests.Count==0)return Array.Empty<PlayableRouteProof>();
-            // The observer solves on visible solids with the production navigation solver, then
-            // checks every segment against authoritative solids. Hidden geometry can only remove proof.
             bool visibleObstacle(NavObstacle o)=>vision.IsVisible(new NavPoint(o.MinX,o.MinZ))&&vision.IsVisible(new NavPoint(o.MaxX,o.MinZ))&&vision.IsVisible(new NavPoint(o.MinX,o.MaxZ))&&vision.IsVisible(new NavPoint(o.MaxX,o.MaxZ));
             // Authored map blockers are public geography. Vision gates dynamic solids,
             // not the static map known equally to every participant.
@@ -141,7 +152,39 @@ namespace Spacewars.Runtime
             int observedRevision=1;
             unchecked{foreach(var obstacle in observed)observedRevision=observedRevision*31+obstacle.MinX.GetHashCode()+obstacle.MinZ.GetHashCode()+obstacle.MaxX.GetHashCode()+obstacle.MaxZ.GetHashCode();}
             observedRevision=observedRevision==int.MinValue?int.MaxValue:Math.Max(1,Math.Abs(observedRevision));
-            var safeGeometry=new NavGeometry(Geometry.HalfExtent,observed,observedRevision);
+            return new NavGeometry(Geometry.HalfExtent,observed,observedRevision);
+        }
+        internal void PreparePublicNavigation(PlayableOwner owner,Func<bool> stopping=null)
+        {
+            // No private observation projection: that lazily creates research ledgers.
+            // Warm only pure public route inputs and derived observer caches.
+            var vision=Vision(owner);var observed=ObservedGeometry(vision);var objectives=PublicObjectives(owner);
+            // Future produced units must not rasterize a new footprint in a live AI
+            // decision. Only immutable observer geometry/grid predicates are warmed.
+            foreach(PlayableEntityKind kind in Enum.GetValues(typeof(PlayableEntityKind))){
+                if(stopping?.Invoke()==true)return;
+                double radius=PlayableUnitRules.Radius(profile,kind),turn=PlayableUnitRules.Turn(profile,kind);
+                ObservedRouter(owner,observed,profile.Navigation,radius,PlayableUnitRules.Speed(profile,kind),turn).PrepareGridPredicates(stopping);
+                if(kind==PlayableEntityKind.Tank)
+                    ObservedRouter(owner,observed,profile.Navigation,radius,PlayableUnitRules.Speed(profile,kind,true),turn).PrepareGridPredicates(stopping);
+            }
+            foreach(var unit in units.Values.Where(u=>u.Owner==owner&&u.Kind==PlayableEntityKind.Explorer&&u.Health>0)){
+                if(stopping?.Invoke()==true)return;
+                if(!navigation.Crowd.TryGet(unit.Id,out var nav))continue;
+                foreach(var objective in objectives){
+                    if(stopping?.Invoke()==true)return;
+                    if(objective.Reachable)ObservedRouter(owner,observed,profile.Navigation,nav.Radius,nav.Speed,nav.TurnSpeed).FindPath(nav.Position,objective.Approach);
+                }
+            }
+        }
+        private PlayableRouteProof[] ProjectRoutes(PlayableOwner owner,IReadOnlyList<PlayableRouteRequest> requests,PlayableVision vision,IReadOnlyList<PlayableEntitySnapshot> entities,IReadOnlyList<PlayableBuildingSnapshot> buildings,Spacewars.Runtime.AiArmyRegistryState armyState)
+        {
+            if(requests==null||requests.Count==0)return Array.Empty<PlayableRouteProof>();
+            long projectionBegin=routePerformanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0;
+            // The observer solves on visible solids with the production navigation solver, then
+            // checks every segment against authoritative solids. Hidden geometry can only remove proof.
+            var safeGeometry=ObservedGeometry(vision);
+            int observedRevision=safeGeometry.Revision;
             var result=new List<PlayableRouteProof>();
             foreach(var request in requests)
             {
@@ -195,8 +238,17 @@ namespace Spacewars.Runtime
                 foreach(var candidate in goals)
                 {
                     if(request.Kind!=PlayableRouteTargetKind.PublicObjective&&!vision.IsVisible(candidate))continue;
+                    if(request.Kind!=PlayableRouteTargetKind.PublicObjective&&
+                        !PlayableVision.MayShareSampledVisiblePath(vision.Snapshot().Sources,nav.Position,candidate,profile.VisionCellSize/2))continue;
                     var router=ObservedRouter(owner,safeGeometry,profile.Navigation,radius,nav.Speed,nav.TurnSpeed);
+                    long pathBegin=routePerformanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0;
+                    long expanded=routePerformanceTrace?router.ExpandedCells:0,checks=routePerformanceTrace?router.GridGeometryChecks:0;
+                    int rebuilds=routePerformanceTrace?router.RebuildCount:0;
                     var path=router.FindPath(nav.Position,candidate);
+                    if(routePerformanceTrace){double ms=(System.Diagnostics.Stopwatch.GetTimestamp()-pathBegin)*1000d/System.Diagnostics.Stopwatch.Frequency;
+                        if(ms>=5)Console.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                            "OBS_PATH tick={0} owner={1} actor={2} kind={3} target={4} radius={5:R} candidates={6} ms={7:F4} expanded={8} checks={9} rebuilds={10} points={11}",
+                            Tick,owner,unit.Id,request.Kind,request.TargetId,radius,goals.Length,ms,router.ExpandedCells-expanded,router.GridGeometryChecks-checks,router.RebuildCount-rebuilds,path.Length));}
                     // A solver's empty route is not arrival evidence. Only the existing
                     // arrival tolerance plus a current free, visible native sweep certifies
                     // this tiny/degenerate friendly leg; unreachable legs still have no proof.
@@ -216,6 +268,8 @@ namespace Spacewars.Runtime
                     break;
                 }
             }
+            if(routePerformanceTrace){double ms=(System.Diagnostics.Stopwatch.GetTimestamp()-projectionBegin)*1000d/System.Diagnostics.Stopwatch.Frequency;
+                if(ms>=5)Console.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,"OBS_ROUTES tick={0} owner={1} requests={2} ms={3:F4}",Tick,owner,requests.Count,ms));}
             return result.ToArray();
         }
         // Only a due registry-owned tactical Move asks this question. The observer

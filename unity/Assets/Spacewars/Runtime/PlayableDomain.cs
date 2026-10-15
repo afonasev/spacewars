@@ -140,6 +140,19 @@ namespace Spacewars.Runtime
             message="Attack ordered.";return PlayableCommandStatus.Applied;
         }
         private PlayableCommandStatus Stop(int[] ids,PlayableOwner issuer,bool hold,out string message){if(ids.Length==0||ids.Distinct().Count()!=ids.Length||ids.Any(id=>!units.TryGetValue(id,out var unit)||unit.Owner!=issuer)){message="No selectable tanks.";return PlayableCommandStatus.InvalidEntity;}foreach(int id in ids){var u=units[id];InterruptBurst(u);u.ExplicitTarget=false;u.Target=0;u.HasAttackMove=false;u.CurrentOrder=null;navigation.Stop(id,hold);}message=hold?"HOLD.":"Stopped.";return PlayableCommandStatus.Applied;}
+        private readonly bool navigationPerformanceTrace=Array.IndexOf(Environment.GetCommandLineArgs(),"-routePerformanceEvidence")>=0;
+        private void StepNavigation(double dt)
+        {
+            if(!navigationPerformanceTrace){navigation.Step(dt);return;}
+            long begin=System.Diagnostics.Stopwatch.GetTimestamp();
+            double repair=navigation.Crowd.RepairCpuMs;int count=navigation.Crowd.RepairCount,failed=navigation.Crowd.RepairFailed,gc=GC.CollectionCount(0);
+            navigation.Step(dt);
+            double ms=(System.Diagnostics.Stopwatch.GetTimestamp()-begin)*1000d/System.Diagnostics.Stopwatch.Frequency;
+            int repairs=navigation.Crowd.RepairCount-count,failures=navigation.Crowd.RepairFailed-failed;
+            if(ms>=15||repairs!=0||failures!=0)Console.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "NAV_STAGE tick={0} ms={1:F4} repair_ms={2:F4} repairs={3} failed={4} gc0={5}",
+                Tick,ms,navigation.Crowd.RepairCpuMs-repair,repairs,failures,GC.CollectionCount(0)-gc));
+        }
         internal void Step(double dt)
         {
             if(Outcome!=PlayableMatchOutcome.Playing)return;
@@ -147,7 +160,7 @@ namespace Spacewars.Runtime
             Tick++;elapsed+=dt;incomeEvents.RemoveAll(e=>(Tick-e.Tick)/30d>=profile.IncomeMarkerDurationSeconds);impacts.RemoveAll(p=>(Tick-p.Tick)/30d>profile.ImpactEffectSec);
             // Pinned web ordering: movement/projectiles precede capture, foundations, construction and settlement.
             foreach(var u in units.Values)if(navigation.Crowd.TryGet(u.Id,out var before))u.PreviousPosition=before.Position;
-            AdvanceFollow();navigation.Step(dt);RefreshSpatialCompletions();foreach(var u in units.Values)if(navigation.Crowd.TryGet(u.Id,out var after)){u.Velocity=new NavPoint((after.Position.X-u.PreviousPosition.X)/dt,(after.Position.Z-u.PreviousPosition.Z)/dt);if(after.Held&&!navigation.IsPending(u.Id)){u.CurrentOrder=null;u.HasAttackMove=false;}if(!HasQueueExecution(u.Id)&&u.CurrentOrder!=null&&u.CurrentOrder.Kind!=PlayableTacticalOrderKind.Attack&&u.CurrentOrder.Kind!=PlayableTacticalOrderKind.Follow&&!navigation.IsPending(u.Id)&&!after.Moving&&(after.Outcome==NavigationOutcome.Arrived||after.Outcome==NavigationOutcome.Unreachable||after.Outcome==NavigationOutcome.Blocked||after.Outcome==NavigationOutcome.Rejected))u.CurrentOrder=null;}AdvanceFollow(false);RefreshVision();RefreshFormationContacts();AdvanceCombat(dt);AdvanceProjectiles(dt);RefreshTacticalQueues();
+            AdvanceFollow();StepNavigation(dt);RefreshSpatialCompletions();foreach(var u in units.Values)if(navigation.Crowd.TryGet(u.Id,out var after)){u.Velocity=new NavPoint((after.Position.X-u.PreviousPosition.X)/dt,(after.Position.Z-u.PreviousPosition.Z)/dt);if(after.Held&&!navigation.IsPending(u.Id)){u.CurrentOrder=null;u.HasAttackMove=false;}if(!HasQueueExecution(u.Id)&&u.CurrentOrder!=null&&u.CurrentOrder.Kind!=PlayableTacticalOrderKind.Attack&&u.CurrentOrder.Kind!=PlayableTacticalOrderKind.Follow&&!navigation.IsPending(u.Id)&&!after.Moving&&(after.Outcome==NavigationOutcome.Arrived||after.Outcome==NavigationOutcome.Unreachable||after.Outcome==NavigationOutcome.Blocked||after.Outcome==NavigationOutcome.Rejected))u.CurrentOrder=null;}AdvanceFollow(false);RefreshVision();RefreshFormationContacts();AdvanceCombat(dt);AdvanceProjectiles(dt);RefreshTacticalQueues();
             AdvanceCapture(dt);AdvanceFoundations();AdvanceBuildings(dt);AdvanceProduction(dt);AdvanceBuildingLifecycle(dt);AdvanceRefineryUpgrades(dt);AdvanceResearch(dt);
             incomeClock+=dt;
             while(incomeClock>=1d-1e-9){incomeClock-=1d;foreach(var owner in Owners)if(!eliminated.Contains(owner))SettleIncome(owner);}

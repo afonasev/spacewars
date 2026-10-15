@@ -18,6 +18,11 @@ public sealed class OrbitalMenuTests : InputTestFixture
     private PanelSettings panel;
     private VisualElement root;
     private NativeMenuNavigation navigation;
+    [TestCase("2026-10-13","v1.2.3 · 13.10.2026 · ")]
+    [TestCase(null,"v1.2.3 · ")]
+    [TestCase("bad date","v1.2.3 · ")]
+    public void FooterUsesReleaseMetadataAndOmitsUnknownDate(string date,string prefix)
+    {Assert.AreEqual(prefix+OrbitalTheme.Copyright,OrbitalTheme.FormatFooter("1.2.3",date));}
     [TestCase(800,620,1f)]
     [TestCase(1280,800,1f)]
     [TestCase(2560,1600,2f)]
@@ -194,7 +199,7 @@ public sealed class OrbitalMenuTests : InputTestFixture
             foreach(var key in new[]{"lab-save","lab-reset","lab-apply","lab-select","lab-back"}){var button=view.Page.Q<Button>(key);Assert.Greater(button.worldBound.width,0,key);Assert.LessOrEqual(button.worldBound.xMax,card.worldBound.xMax+.5f,key);Assert.LessOrEqual(button.worldBound.yMax,card.worldBound.yMax+.5f,key);}
             var editor=view.Page.Query<TextField>().ToList().First(t=>t.name!=null&&t.name.StartsWith("lab-field-"));Assert.Greater(editor.worldBound.width,150);Assert.LessOrEqual(editor.worldBound.xMax,card.worldBound.xMax);
             var scroll=view.Page.Q<ScrollView>("lab-parameters");Assert.AreEqual(ScrollerVisibility.Auto,scroll.verticalScrollerVisibility,"Laboratory retains its scrollbar exception");Assert.AreEqual(Visibility.Visible,scroll.verticalScroller.resolvedStyle.visibility);Assert.LessOrEqual(scroll.contentContainer.worldBound.xMax,scroll.worldBound.xMax+.5f);
-            var hints=view.Page.Q(className:"orbital-hints");Assert.LessOrEqual(hints.worldBound.yMax,card.worldBound.yMax+.5f);
+            Assert.IsNull(view.Page.Q(className:"orbital-hints"),"User removed the bottom navigation hints");Assert.IsNull(view.Page.Q("lab-help"),"Parameter explanations remain native tooltips without a bottom panel");
         }finally{Directory.Delete(directory,true);}
     }
     [Test] public void SavedNativeRevisionsAreImmutableAndCasProtectsOtherEditors()

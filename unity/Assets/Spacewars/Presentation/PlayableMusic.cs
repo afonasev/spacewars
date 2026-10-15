@@ -13,7 +13,7 @@ namespace Spacewars.Presentation
 
         private void InitializeMusic()
         {
-            if(localCoordinator!=null||music)return;
+            if(NativeSilentStartup.IsSilent||localCoordinator!=null||music)return;
             music=gameObject.AddComponent<AdaptiveMusicPlayer>();music.Initialize();
         }
 

@@ -8,9 +8,11 @@ namespace Spacewars.Runtime
     public struct NativeRouteFrameSample
     {
         public long Frame,Generation,Tick,Sequence,BarrierPolls,Reuses,Builds,Pumps,Retained,PeakRetained,QueueAge,Heap,MainAllocated,WorkerAllocated;
-        public int Units,Buildings,Pending,Ready,GC0;
+        public int Units,Buildings,Pending,Ready,GC0,MotionActor;
+        public double AuthorityX,AuthorityZ,DisplayX,DisplayY,DisplayZ;
+        public double RouteServiceMs,RenderMs,HudMs,MapsMs,AudioMs;
         public double Elapsed,FrameMs,UpdateMs,PrepareMs,ProviderMs,SolveMs,ProjectionMs,TransportWaitMs,TransportHoldMs,PublishMs;
-        internal string Csv()=>string.Join(",",new object[]{Elapsed,Frame,Generation,Tick,Sequence,FrameMs,UpdateMs,Units,Buildings,BarrierPolls,Reuses,Builds,Pumps,PrepareMs,ProviderMs,SolveMs,ProjectionMs,TransportWaitMs,TransportHoldMs,PublishMs,Pending,Ready,QueueAge,Retained,PeakRetained,Heap,GC0,MainAllocated,WorkerAllocated});
+        internal string Csv()=>string.Join(",",new object[]{Elapsed,Frame,Generation,Tick,Sequence,FrameMs,UpdateMs,Units,Buildings,BarrierPolls,Reuses,Builds,Pumps,PrepareMs,ProviderMs,SolveMs,ProjectionMs,TransportWaitMs,TransportHoldMs,PublishMs,Pending,Ready,QueueAge,Retained,PeakRetained,Heap,GC0,MainAllocated,WorkerAllocated,RouteServiceMs,RenderMs,HudMs,MapsMs,AudioMs,MotionActor,AuthorityX,AuthorityZ,DisplayX,DisplayY,DisplayZ});
     }
     // Optional diagnostics: single render producer, single IO consumer. Numeric
     // value samples own their data; overflow is counted explicitly, never waits.
@@ -45,7 +47,7 @@ namespace Spacewars.Runtime
             try{
                 Thread.CurrentThread.CurrentCulture=CultureInfo.InvariantCulture;beforeOpen?.Invoke();
                 using(var writer=new StreamWriter(path)){
-                    writer.WriteLine("elapsed,render_frame,generation,tick,sequence,frame_ms,main_update_ms,global_units,global_buildings,barrier_polls,barrier_reuses,barrier_builds,route_pumps,prepare_elapsed_ms,provider_elapsed_ms,solve_elapsed_ms,projection_elapsed_ms,transport_wait_ms,transport_hold_ms,publish_elapsed_ms,pending,ready,queue_age,retained_bytes,peak_retained_bytes,heap_bytes,gc0_count,main_allocated_bytes,route_worker_allocated_bytes");
+                    writer.WriteLine("elapsed,render_frame,generation,tick,sequence,frame_ms,main_update_ms,global_units,global_buildings,barrier_polls,barrier_reuses,barrier_builds,route_pumps,prepare_elapsed_ms,provider_elapsed_ms,solve_elapsed_ms,projection_elapsed_ms,transport_wait_ms,transport_hold_ms,publish_elapsed_ms,pending,ready,queue_age,retained_bytes,peak_retained_bytes,heap_bytes,gc0_count,main_allocated_bytes,route_worker_allocated_bytes,route_service_ms,render_ms,hud_ms,maps_ms,audio_ms,motion_actor,authority_x,authority_z,display_x,display_y,display_z");
                     while(true){
                         long next=Volatile.Read(ref consumed);
                         while(next<Volatile.Read(ref produced)){writer.WriteLine(samples[next%samples.Length].Csv());next++;Volatile.Write(ref consumed,next);}

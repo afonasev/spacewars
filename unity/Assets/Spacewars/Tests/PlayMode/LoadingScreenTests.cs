@@ -29,7 +29,7 @@ public sealed class LoadingScreenTests
         while(Get<GameObject>(game,"startupLoadingHost")!=null&&Time.realtimeSinceStartup<deadline)yield return null;
         Assert.IsNull(Get<GameObject>(game,"startupLoadingHost"),"Startup overlay must be removed.");
         var menu=Get<NativeMainMenu>(game,"nativeMainMenu");Assert.NotNull(menu.ScreenRoot);
-        Assert.AreEqual(OrbitalTheme.Copyright,menu.ScreenRoot.Q<Label>("menu-copyright").text);
+        Assert.AreEqual(OrbitalTheme.FooterText,menu.ScreenRoot.Q<Label>("menu-copyright").text);
         Call(game,"ShowLobby");var lobby=Get<VisualElement>(game,"lobbyScreen");Assert.NotNull(lobby.Q<Label>("menu-copyright"));
         Call(game,"LaunchLobbyMatch");var loading=Get<VisualElement>(game,"loadingScreen");
         Assert.IsTrue(Get<bool>(game,"preparing"));Assert.AreEqual(DisplayStyle.Flex,loading.style.display.value);

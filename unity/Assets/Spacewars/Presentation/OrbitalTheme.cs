@@ -51,9 +51,26 @@ namespace Spacewars.Presentation
             root.Add(screen);Footer(screen);return screen;
         }
         public const string Copyright = "© 2026 Evgeniy Afonasev · afonasev.tech · Made with Codex";
+        [Serializable] private sealed class ReleaseInfo { public string date; }
+        public static string FooterText
+        {
+            get
+            {
+                var metadata=Resources.Load<TextAsset>("NativeReleaseInfo");
+                var date=metadata==null?null:JsonUtility.FromJson<ReleaseInfo>(metadata.text)?.date;
+                return FormatFooter(Application.version,date);
+            }
+        }
+        public static string FormatFooter(string version,string date)
+        {
+            var info="v"+version;
+            if(DateTime.TryParseExact(date,"yyyy-MM-dd",System.Globalization.CultureInfo.InvariantCulture,System.Globalization.DateTimeStyles.None,out var released))
+                info+=" · "+released.ToString("dd.MM.yyyy",System.Globalization.CultureInfo.InvariantCulture);
+            return info+" · "+Copyright;
+        }
         public static Label Footer(VisualElement parent,bool inline=false)
         {
-            var footer=Text(Copyright,"orbital-copyright");footer.name="menu-copyright";
+            var footer=Text(FooterText,"orbital-copyright");footer.name="menu-copyright";
             footer.pickingMode=PickingMode.Ignore;
             if(inline){footer.style.position=Position.Relative;footer.style.left=footer.style.right=StyleKeyword.Auto;footer.style.bottom=StyleKeyword.Auto;footer.style.marginTop=12;}
             parent.Add(footer);return footer;

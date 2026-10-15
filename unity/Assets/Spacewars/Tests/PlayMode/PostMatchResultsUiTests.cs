@@ -52,6 +52,15 @@ public sealed class PostMatchResultsUiTests
         Assert.AreEqual(DisplayStyle.None,ui.Root.Q<Toggle>("result-ai-log-0").style.display.value);Assert.AreEqual(DisplayStyle.Flex,ui.Root.Q<Toggle>("result-ai-log-1").style.display.value);ui.Root.Q<Toggle>("result-ai-log-1").value=true;Assert.That(ui.Root.Query<Label>().ToList().Any(l=>l.text.StartsWith("01:20")&&l.text.Contains("Стартовый план:")));Assert.IsFalse(ui.Root.Q<Toggle>("result-ai-log-0").value);
         right.index=0;Assert.AreEqual(0,ui.Root.Q<DropdownField>("result-log-player-0").index);Assert.AreEqual(0,ui.Root.Q<DropdownField>("result-log-player-1").index);Assert.AreEqual(facts,result.Facts.Count);
     }
+    [Test]public void ActionLogUsesOrderTimeAndExcludesCompletionRows()
+    {
+        ui.ShowTab(2);
+        var labels=ui.Root.Query<Label>().ToList();
+        Assert.AreEqual(1,labels.Count(l=>l.text.StartsWith("00:00")&&l.text.Contains("Фабрика")));
+        Assert.IsFalse(labels.Any(l=>l.text.StartsWith("00:15")&&l.text.Contains("Фабрика")));
+        var expected=ui.Result.Facts.Count(f=>f.Owner==PlayableOwner.Player&&(f.Kind==MatchFactKind.BuildingOrdered||f.Kind==MatchFactKind.UnitOrdered));
+        Assert.AreEqual(expected,labels.Count(l=>System.Text.RegularExpressions.Regex.IsMatch(l.text,@"^\d{2}:\d{2}   ")));
+    }
     [Test]public void ApprovedRollingApmDefaultsToHumanLinesAndSharesPlayerFilter()
     {
         var candidate=new PostMatchResultsView(ui.Result,()=>{},()=>{},()=>{});ui.Root.RemoveFromHierarchy();host.GetComponent<UIDocument>().rootVisualElement.Add(candidate.Root);candidate.ShowTab(1);Assert.IsNotNull(candidate.Root.Q("result-graph-2"));candidate.InspectTime(20);Assert.That(candidate.Root.Q<Label>("result-graph-values").text,Does.Contain("9 APM"));Assert.AreEqual(1,candidate.Root.Q<Label>("result-graph-values").text.Split(new[]{"APM"},StringSplitOptions.None).Length-1);candidate.Root.Q<Toggle>("result-filter-0").value=false;candidate.InspectTime(20);Assert.IsFalse(candidate.Root.Q<Label>("result-graph-values").text.Contains("Игрок 1"));Assert.That(ui.Result.Facts.Count(f=>f.Kind==MatchFactKind.HumanAction),Is.EqualTo(3));

@@ -103,9 +103,19 @@ namespace Spacewars.Tests.EditMode
         internal static byte[] FactBytes(object value,bool authority=false,bool cachedNames=true)
         {
             var identities=new Dictionary<object,int>();
+            var active=new Dictionary<object,int>(ReferenceIdentityComparer.Instance);
             using(var memory=new MemoryStream())using(var writer=new BinaryWriter(memory)){
                 void Name(string name){if(cachedNames)writer.Write(NameBytes(name));else writer.Write(name);}
                 void Visit(object v){
+                    // Bound callbacks can point back to the domain being inspected. Read
+                    // every field on entry, then encode only the actual recursion edge.
+                    // Completed non-authoritative aliases remain independent values.
+                    if(v==null||v is string||v.GetType().IsValueType){Contents(v);return;}
+                    if(active.TryGetValue(v,out int depth)){writer.Write("active-reference");writer.Write(depth);return;}
+                    active.Add(v,active.Count);
+                    try{Contents(v);}finally{active.Remove(v);}
+                }
+                void Contents(object v){
                     if(v==null){writer.Write("null");return;}var t=v.GetType();if(cachedNames)writer.Write(TypeName(t));else Name(t.FullName);
                     if(v is string str){writer.Write(str);return;}if(v is double number){writer.Write(number);return;}
                     if(v is int integer){writer.Write(integer);return;}if(v is long wide){writer.Write(wide);return;}if(v is bool flag){writer.Write(flag);return;}if(v is byte octet){writer.Write(octet);return;}
@@ -141,6 +151,12 @@ namespace Spacewars.Tests.EditMode
                 }
                 Visit(value);writer.Flush();return memory.ToArray();
             }
+        }
+        private sealed class ReferenceIdentityComparer : IEqualityComparer<object>
+        {
+            internal static readonly ReferenceIdentityComparer Instance=new ReferenceIdentityComparer();
+            public new bool Equals(object a,object b)=>ReferenceEquals(a,b);
+            public int GetHashCode(object value)=>System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(value);
         }
         private static void Equal(object a,object b,int tick,bool projections=true)
         {

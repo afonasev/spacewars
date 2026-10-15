@@ -70,6 +70,9 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(PlayableCommandStatus.Applied,Apply(PlayableCommandKind.BuildAt,4,building:PlayableBuildingKind.Mine));
             int after=View().Credits;Assert.AreEqual(PlayableCommandStatus.InvalidTarget,Apply(PlayableCommandKind.BuildAt,4,building:PlayableBuildingKind.Mine));Assert.AreEqual(after,View().Credits);
             Assert.AreEqual(ConstructionPhase.Pending,View().Buildings.Last().Phase);
+            Call("FinishManually");var result=(MatchResult)T.GetProperty("Result",Flags).GetValue(d);
+            Assert.AreEqual(1,result.Facts.Count(f=>f.Kind==MatchFactKind.BuildingOrdered&&f.EntityKind==(int)PlayableBuildingKind.Mine));
+            Assert.AreEqual(0,result.Players[0].BuildingsBuilt);
         }
         [Test] public void FriendlyHoldEvacuatesBeforeSolidAndDoesNotReplacePendingRouteEachTick()
         {

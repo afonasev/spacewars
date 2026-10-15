@@ -9,6 +9,7 @@ namespace Spacewars.Runtime
     internal sealed partial class AiAuthorityScheduler
     {
         private readonly PlayableAiOwnerLoop[] owners;
+        private readonly bool performanceTrace=Array.IndexOf(Environment.GetCommandLineArgs(),"-routePerformanceEvidence")>=0;
         private long nextActionId;
         internal AiAuthorityScheduler(IEnumerable<PlayableAiOwnerLoop> loops)
         {
@@ -23,12 +24,29 @@ namespace Spacewars.Runtime
         {
             foreach(var owner in owners)
             {
+                long begin=performanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0;
                 owner.ReconcileBudget(domain);
                 if(!domain.Authorizes(owner.OwnerId)){owner.Stop(domain.Tick);continue;}
+                long budget=performanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0;
                 var snapshot=domain.PlayerSnapshotForArmyAi(sequence,status,paused,metrics,null,seed,domain.OwnerFor(owner.OwnerId),!paused&&owner.NeedsArmyRoutes(domain.Tick),owner.ArmyState);
                 if(!paused&&!owner.NeedsArmyRoutes(domain.Tick)&&owner.NeedsDefenseRoutes(snapshot))snapshot=domain.PlayerSnapshotForArmyAi(sequence,status,paused,metrics,null,seed,domain.OwnerFor(owner.OwnerId),true,owner.ArmyState);
+                long projection=performanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0;
                 owner.Review(snapshot,human(owner.OwnerId));
+                long review=performanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0;
                 domain.RecordAiState(owner.Checkpoint);
+                if(performanceTrace){
+                    long end=System.Diagnostics.Stopwatch.GetTimestamp();double scale=1000d/System.Diagnostics.Stopwatch.Frequency;
+                    if((end-begin)*scale>=20)Console.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "AI_STAGE tick={0} owner={1} budget_ms={2:F4} projection_ms={3:F4} review_ms={4:F4} record_ms={5:F4}",
+                        domain.Tick,owner.OwnerId,(budget-begin)*scale,(projection-budget)*scale,(review-projection)*scale,(end-review)*scale));
+                }
+            }
+        }
+        internal void PrepareNavigationViews(PlayableDomain domain,int seed,Func<bool> stopping=null)
+        {
+            foreach(var owner in owners){
+                if(stopping?.Invoke()==true)break;
+                if(domain.Authorizes(owner.OwnerId))domain.PreparePublicNavigation(domain.OwnerFor(owner.OwnerId),stopping);
             }
         }
         internal void Rebind(PlayableProfile profile){foreach(var owner in owners)owner.Rebind(profile);}

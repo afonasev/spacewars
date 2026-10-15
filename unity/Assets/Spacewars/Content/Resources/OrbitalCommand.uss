@@ -56,7 +56,7 @@
 
 /* Shared quiet signature, with reserved space on every menu page. */
 .orbital-screen { padding-bottom: 58px; }
-.orbital-copyright { position: absolute; left: 24px; right: 24px; bottom: 16px; color: rgb(135,163,179); font-size: 12px; white-space: normal; -unity-text-align: middle-center; flex-shrink: 0; margin: 0; }
+.orbital-copyright { position: absolute; left: 24px; right: 24px; bottom: 16px; color: rgb(227,240,247); background-color: rgba(4,10,15,0.9); padding: 6px 12px; border-radius: 2px; font-size: 13px; white-space: normal; -unity-text-align: middle-center; flex-shrink: 0; margin: 0; }
 .orbital-loading-shade { position: absolute; left: 0; right: 0; top: 0; bottom: 0; background-color: rgba(4,10,15,0.62); }
 .orbital-loading-stack { width: 520px; max-width: 90%; align-items: center; }
 .orbital-loading-stack .orbital-logo { font-size: 44px; margin-bottom: 18px; -unity-text-align: middle-center; }
@@ -69,3 +69,61 @@
 .settings-scroll .unity-scroller--vertical .unity-slider { width: 10px; min-width: 0; max-width: 10px; margin: 0; padding: 0; }
 .settings-scroll .unity-scroller--vertical .unity-base-field__input { width: 10px; min-width: 0; max-width: 10px; }
 .settings-scroll .unity-scroller--vertical .unity-base-slider__dragger { width: 6px; min-width: 6px; border-radius: 3px; }
+
+/* The lab uses the entire viewport; compact controls leave room for data. */
+#laboratory-screen { padding: 0 0 28px 0; }
+#laboratory-screen .orbital-lab-card { width: 100%; height: 100%; max-width: 100%; max-height: 100%; padding: 10px; border-width: 0; }
+#laboratory-screen .orbital-title { font-size: 22px; margin-bottom: 4px; }
+#laboratory-screen .orbital-muted { margin: 2px 0; }
+#laboratory-screen .unity-base-field { min-height: 30px; margin: 0 4px 4px 0; font-size: 14px; }
+#laboratory-screen .unity-base-field__label { min-width: 130px; }
+#laboratory-screen .unity-base-field__input { padding: 3px 6px; }
+.lab-profile-bar { flex-direction: row; }
+.lab-profile-bar .unity-base-field { flex-grow: 1; flex-basis: 0; min-width: 0; }
+#laboratory-screen .orbital-button { min-height: 30px; height: 32px; font-size: 14px; padding: 3px 10px; margin-bottom: 4px; }
+#laboratory-screen .orbital-lab-groups .orbital-button { flex-direction: row; align-items: center; height: 34px; min-height: 34px; padding: 3px 8px; }
+.lab-context { font-size: 14px; color: rgb(69,217,240); margin: 4px 0; }
+.lab-subheading { font-size: 13px; -unity-font-style: bold; color: rgb(135,163,179); padding: 5px 8px; background-color: rgb(16,29,36); margin-top: 5px; }
+.lab-parameter-row { flex-direction: row; align-items: center; min-height: 32px; border-bottom-width: 1px; border-bottom-color: rgb(28,43,51); }
+#laboratory-screen .lab-parameter { flex-grow: 1; flex-shrink: 1; flex-basis: 0; min-width: 0; margin: 0; }
+#laboratory-screen .lab-parameter .unity-base-field__label { width: 68%; min-width: 0; flex-shrink: 1; margin-right: 6px; }
+#laboratory-screen .lab-parameter .unity-base-field__input { min-width: 65px; }
+.lab-unit { width: 52px; color: rgb(135,163,179); font-size: 12px; padding-left: 6px; }
+#laboratory-screen .lab-adjust { width: 26px; height: 26px; min-height: 26px; padding: 0; margin: 0 0 0 3px; -unity-text-align: middle-center; }
+.lab-info { width: 22px; color: rgb(69,217,240); -unity-text-align: middle-center; font-size: 12px; }
+.lab-help { min-height: 44px; max-height: 62px; white-space: normal; font-size: 13px; color: rgb(164,190,203); margin-top: 5px; padding: 5px 8px; background-color: rgb(16,29,36); }
+#laboratory-screen .orbital-hints { margin-top: 4px; }
+#laboratory-screen .orbital-copyright { bottom: 7px; }
+
+#audio-laboratory-screen { padding: 0 0 28px 0; }
+#audio-laboratory-screen .orbital-lab-card { width: 100%; height: 100%; max-width: 100%; max-height: 100%; padding: 10px; border-width: 0; }
+#audio-laboratory-screen .orbital-title { font-size: 22px; margin-bottom: 4px; }
+#audio-laboratory-screen .unity-base-field { min-height: 30px; margin-bottom: 0; font-size: 14px; }
+#audio-laboratory-screen .unity-base-field__label { width: 280px; }
+#audio-laboratory-screen .orbital-button { height: 32px; min-height: 32px; font-size: 14px; }
+#audio-laboratory-screen .orbital-copyright { bottom: 7px; }
+
+.lab-tree-children { margin-left: 12px; padding-left: 5px; border-left-width: 1px; border-left-color: rgb(58,84,99); margin-bottom: 5px; }
+#laboratory-screen .orbital-lab-groups .lab-tree-section { height: auto; min-height: 34px; -unity-font-style: bold; }
+.lab-before { width: 94px; font-size: 12px; color: rgb(135,163,179); padding-left: 6px; }
+.lab-name-change { white-space: normal; padding: 6px; font-size: 14px; color: rgb(69,217,240); }
+
+/* Scrollbar controls must not inherit the compact editor input padding. */
+#laboratory-screen .unity-scroller--vertical { width: 10px; min-width: 10px; max-width: 10px; margin-left: 2px; margin-right: 0; }
+#laboratory-screen .unity-scroller .unity-base-field { width: 10px; min-width: 0; max-width: 10px; margin: 0; }
+#laboratory-screen .unity-scroller .unity-base-field__input { width: 10px; min-width: 0; max-width: 10px; padding: 0; border-width: 0; background-color: transparent; }
+
+/* Ordered profile/revision actions with space between controls and rows. */
+.lab-controls { flex-direction: row; flex-wrap: wrap; align-items: flex-start; margin-top: 8px; margin-bottom: 6px; }
+.lab-profile-controls { flex-direction: row; align-items: center; flex-shrink: 0; margin-right: 12px; margin-bottom: 6px; }
+.lab-revision-controls { flex-direction: row; flex-wrap: wrap; align-items: center; flex-grow: 1; flex-basis: 0; min-width: 600px; }
+#laboratory-screen .lab-controls .orbital-button { flex-grow: 0; margin: 0 8px 6px 0; }
+#laboratory-screen .lab-controls .unity-base-field { margin: 0 8px 6px 0; }
+#laboratory-screen .lab-controls .unity-base-field__label { width: 76px; min-width: 76px; margin-right: 6px; white-space: nowrap; }
+#lab-name { width: 225px; }
+#lab-revisions { width: 185px; }
+#lab-search { margin-top: 4px; margin-bottom: 10px; }
+#lab-search .unity-base-field__label { width: 60px; min-width: 60px; }
+#laboratory-screen .orbital-lab-groups .orbital-button.lab-dirty { color: rgb(255,197,104); }
+
+#laboratory-screen .orbital-lab-groups .lab-dirty .unity-label { color: rgb(255,197,104); }

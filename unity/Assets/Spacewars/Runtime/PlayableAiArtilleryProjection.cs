@@ -11,6 +11,15 @@ namespace Spacewars.Runtime
         private PlayableArtillerySupportSnapshot[] ProjectArtillery(PlayableOwner owner,PlayableVision vision,
             IReadOnlyList<PlayableEntitySnapshot> entities,IReadOnlyList<PlayableBuildingSnapshot> projectedBuildings,AiArmyRegistryState armyState=null)
         {
+            long begin=routePerformanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0;
+            var result=ProjectArtilleryCore(owner,vision,entities,projectedBuildings,armyState);
+            if(routePerformanceTrace){double ms=(System.Diagnostics.Stopwatch.GetTimestamp()-begin)*1000d/System.Diagnostics.Stopwatch.Frequency;
+                if(ms>=5)Console.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,"OBS_ARTILLERY tick={0} owner={1} ms={2:F4} supports={3}",Tick,owner,ms,result.Length));}
+            return result;
+        }
+        private PlayableArtillerySupportSnapshot[] ProjectArtilleryCore(PlayableOwner owner,PlayableVision vision,
+            IReadOnlyList<PlayableEntitySnapshot> entities,IReadOnlyList<PlayableBuildingSnapshot> projectedBuildings,AiArmyRegistryState armyState)
+        {
             if(Tick%45!=0)return Array.Empty<PlayableArtillerySupportSnapshot>();
             var guns=entities.Where(e=>e.Owner==owner&&e.Kind==PlayableEntityKind.Shkval&&e.Health>0).OrderBy(e=>e.Id).ToArray();
             if(guns.Length==0)return Array.Empty<PlayableArtillerySupportSnapshot>();

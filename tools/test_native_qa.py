@@ -1,5 +1,6 @@
 """Exercise native runner planning without launching Unity."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -21,6 +22,10 @@ class NativeQaRoutes(unittest.TestCase):
         self.assertEqual([r['step'] for r in rows], ['editmode', 'playmode'])
         for row, platform in zip(rows, ['EditMode', 'PlayMode']):
             command = row['command']
+            self.assertIn('-noaudio', command)
+            self.assertIn('-muted', command)
+            self.assertLess(command.index('-noaudio'), command.index('-runTests'))
+            self.assertLess(command.index('-muted'), command.index('-runTests'))
             self.assertIn('-runTests', command)
             self.assertEqual(command[command.index('-testPlatform')+1], platform)
             self.assertNotIn('-testFilter', command)
@@ -38,6 +43,41 @@ class NativeQaRoutes(unittest.TestCase):
     def test_build_and_combined_route_remain_explicit(self):
         self.assertEqual([r['step'] for r in self.plan('build')], ['build'])
         self.assertEqual([r['step'] for r in self.plan('player')], ['build','editmode','playmode'])
+        for suite in ('build', 'player'):
+            for row in self.plan(suite):
+                self.assertIn('-noaudio', row['command'])
+                self.assertIn('-muted', row['command'])
+                self.assertLess(row['command'].index('-noaudio'), row['command'].index('-executeMethod')
+                                if '-executeMethod' in row['command'] else len(row['command']))
+                self.assertLess(row['command'].index('-muted'), row['command'].index('-executeMethod')
+                                if '-executeMethod' in row['command'] else len(row['command']))
+
+
+class UnityLauncherForwardingTests(unittest.TestCase):
+    def invoke_with_fake_runner(self, arguments, mode='shared'):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner = root / 'fake-unity-runner'
+            capture = root / 'captured-argv.json'
+            runner.write_text('#!/usr/bin/env python3\nimport json, os, sys\n'
+                              'open(os.environ["CAPTURE_ARGV"], "w").write(json.dumps(sys.argv[1:]))\n')
+            runner.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update({'UNITY_RUNNER': str(runner), 'UNITY_RUN_MODE': mode,
+                                'UNITY_EDITOR': '/fake/Unity', 'CAPTURE_ARGV': str(capture)})
+            subprocess.run(['tools/unity.sh', *arguments], cwd=ROOT, env=environment, check=True)
+            return json.loads(capture.read_text())
+
+    def test_editor_launcher_forwards_both_silent_parameters_after_executable(self):
+        command = self.invoke_with_fake_runner(['shared', '-noaudio', '-muted', '-batchmode'])
+        editor_argv = command[command.index('--') + 1:]
+        self.assertEqual('/fake/Unity', editor_argv[0])
+        self.assertEqual(['-noaudio', '-muted', '-batchmode'], editor_argv[editor_argv.index('-noaudio'):])
+
+    def test_player_launcher_forwards_both_silent_parameters(self):
+        command = self.invoke_with_fake_runner(['player', '/fake/Spacewars', '-noaudio', '-muted'])
+        player_argv = command[command.index('--') + 1:]
+        self.assertEqual(['/fake/Spacewars', '-noaudio', '-muted'], player_argv)
 
 
 class FullRunApprovalTests(unittest.TestCase):

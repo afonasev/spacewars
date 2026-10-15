@@ -52,7 +52,7 @@ namespace Spacewars.Presentation
         private readonly Dictionary<int, Actor> actors = new Dictionary<int, Actor>();
         public IReadOnlyDictionary<int, Actor> Actors => actors;
         private static readonly Color Ally = new Color(.19f,.72f,.77f), Enemy = new Color(.93f,.34f,.23f), Dark = new Color(.09f,.13f,.16f);
-        public PlayableWorld(Transform parent, PlayableProfile profile)
+        public PlayableWorld(Transform parent, PlayableProfile profile, MossHighlandArtProfile mossArt=null)
         {
             this.profile=profile;WreckProfile.lifetimeSeconds=(float)profile.UnitWreckLifetimeSeconds;double extent=profile.ArenaHalfExtent;
             root = new GameObject("Battlefield").transform; root.SetParent(parent,false);
@@ -60,6 +60,7 @@ namespace Spacewars.Presentation
             if(!shader)throw new System.InvalidOperationException("Missing territory fog shader");
             material=new Material(shader);IndustrialLightingProfile.Load(profile.AuthoredMap?.Id).ApplyMaterial(material);Fog=new PlayableFogMask(profile);
             material.SetColor("_FogColor",new Color((float)profile.FogTintR,(float)profile.FogTintG,(float)profile.FogTintB));material.SetTexture("_FogMask",Fog.Texture);material.SetVector("_FogBounds",new Vector4((float)extent,(float)extent,0,0));
+            if(profile.AuthoredMap is MossHighlandMap moss){CreateMossHighland(moss,mossArt);return;}
             if(profile.AuthoredMap is BasaltCrownMap basalt){CreateBasaltCrown(basalt);return;}
             if(profile.AuthoredMap is FoundryMap foundry){CreateFoundry(foundry);return;}
             if(profile.AuthoredMap is ThreeCrossingsMap crossings)
@@ -260,7 +261,7 @@ namespace Spacewars.Presentation
         }
         public void Remove(int id){RemoveRallyFlag(id);if(actors.TryGetValue(id,out var a)){ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);actors.Remove(id);}}
         public void Clear(){ClearUnitWrecks();ClearRallyFlags();Fog.Reset();ClearMemories();ClearPads();foreach(var a in actors.Values){ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);}actors.Clear();}
-        public void Dispose(){Clear();wreckFlashVisuals.Dispose();Fog.Dispose();if(basaltPaintMask)ReleaseWorldObject(basaltPaintMask);if(basaltAccentMask)ReleaseWorldObject(basaltAccentMask);if(basaltTerrainMaterial)ReleaseWorldObject(basaltTerrainMaterial);surfaceMaterials?.Dispose();if(foundryRoadMask)ReleaseWorldObject(foundryRoadMask);if(foundryLavaHeat)ReleaseWorldObject(foundryLavaHeat);foreach(var mesh in terrainMeshes)ReleaseWorldObject(mesh);terrainMeshes.Clear();if(apronMaterial)ReleaseWorldObject(apronMaterial);ReleaseWorldObject(selectionMaterial);ReleaseWorldObject(selectionQuad);ReleaseWorldObject(material);if(root)ReleaseWorldObject(root.gameObject);}
+        public void Dispose(){Clear();wreckFlashVisuals.Dispose();Fog.Dispose();if(mossPaintMask)ReleaseWorldObject(mossPaintMask);if(mossAccentMask)ReleaseWorldObject(mossAccentMask);if(mossTerrainMaterial)ReleaseWorldObject(mossTerrainMaterial);if(basaltPaintMask)ReleaseWorldObject(basaltPaintMask);if(basaltAccentMask)ReleaseWorldObject(basaltAccentMask);if(basaltTerrainMaterial)ReleaseWorldObject(basaltTerrainMaterial);surfaceMaterials?.Dispose();if(foundryRoadMask)ReleaseWorldObject(foundryRoadMask);if(foundryLavaHeat)ReleaseWorldObject(foundryLavaHeat);foreach(var mesh in terrainMeshes)ReleaseWorldObject(mesh);terrainMeshes.Clear();if(apronMaterial)ReleaseWorldObject(apronMaterial);ReleaseWorldObject(selectionMaterial);ReleaseWorldObject(selectionQuad);ReleaseWorldObject(material);if(root)ReleaseWorldObject(root.gameObject);}
         public GameObject Part(string name,Transform parent,Vector3 position,Vector3 scale,Color color,PrimitiveType shape=PrimitiveType.Cube)
         {
             var g=GameObject.CreatePrimitive(shape);g.name=name;g.layer=presentationLayer;g.transform.SetParent(parent,false);g.transform.localPosition=position;g.transform.localScale=scale;

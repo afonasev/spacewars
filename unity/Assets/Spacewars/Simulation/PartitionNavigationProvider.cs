@@ -14,7 +14,7 @@ namespace Spacewars.Simulation
 
         public PartitionNavigationProvider(IPlayableTerrain terrain, NavGeometry movementGeometry, string holdBinding)
         {
-            if (!(terrain is ThreeCrossingsMap) && !(terrain is FoundryMap) && !(terrain is BasaltCrownMap))
+            if (!(terrain is ThreeCrossingsMap) && !(terrain is FoundryMap) && !(terrain is BasaltCrownMap) && !(terrain is MossHighlandMap))
                 throw new ArgumentException("No authored partition adapter for this terrain.", nameof(terrain));
             if (movementGeometry == null || movementGeometry.HalfExtent != terrain.HalfExtent)
                 throw new ArgumentException("Movement geometry does not match terrain extent.", nameof(movementGeometry));
@@ -59,7 +59,7 @@ namespace Spacewars.Simulation
             // retains vertices, triangulation and wrappers, not just one slot.
             long supportVertices = terrain.Supports.Sum(s => (long)(s.Bounds.Polygon?.Vertices.Count ?? 4));
             long polygonVertices = movementGeometry.Obstacles.Sum(o => (long)(o.Polygon?.Vertices.Count ?? 0));
-            EstimatedRetainedBytes = checked(4096L + 1024L * Surfaces.Count +
+            EstimatedRetainedBytes = checked(4096L + movementGeometry.SpatialIndexRetainedBytes + locations.FootprintCacheRetainedBytes + locations.RegionIndexRetainedBytes + 1024L * Surfaces.Count +
                 512L * supportVertices + 512L * Seams.Count +
                 256L * terrain.SurfaceTransitions.Count +
                 512L * movementGeometry.Obstacles.Count + 128L * polygonVertices);
@@ -79,13 +79,17 @@ namespace Spacewars.Simulation
             => locations.Valid(location, clearance.Radius);
         public bool CanSweep(NavLocation from, NavLocation to, NavClearanceProfile clearance)
             => from.SurfaceId == to.SurfaceId &&
-               locations.TryTrace(from, to.Position, clearance.Radius, out var reached, out var trace) &&
+               locations.TryGraphTrace(from, to.Position, clearance.Radius, out var reached, out var trace) &&
                reached.Equals(to) && trace.All(l => l.Kind == NavTypedLegKind.Surface);
         public bool TryTraverse(NavLocation from, NavPoint to, NavClearanceProfile clearance, out NavLocation reached)
             => locations.Traverse(from, to, clearance.Radius, out reached);
         public bool TryTrace(NavLocation from, NavPoint to, NavClearanceProfile clearance,
             out NavLocation reached, out IReadOnlyList<NavTypedLeg> trace)
             => locations.TryTrace(from, to, clearance.Radius, out reached, out trace);
+        internal bool TryGraphTrace(NavLocation from,NavPoint to,NavClearanceProfile clearance,out NavLocation reached,out IReadOnlyList<NavTypedLeg> trace)
+            =>locations.TryGraphTrace(from,to,clearance.Radius,out reached,out trace);
+        internal bool TryGraphTraceValidated(NavLocation from,NavPoint to,NavClearanceProfile clearance,out NavLocation reached,out IReadOnlyList<NavTypedLeg> trace)
+            =>locations.TryGraphTraceValidated(from,to,clearance.Radius,out reached,out trace);
         public NavConnectorResult QualifyPortal(string portalId, NavClearanceProfile clearance)
             => new NavConnectorResult(NavConnectorStatus.UnknownPortal, Binding, portalId, default, default, default, default, 0);
         public NavConnectorResult Connect(string portalId, NavLocation origin, NavLocation endpoint, NavClearanceProfile clearance)

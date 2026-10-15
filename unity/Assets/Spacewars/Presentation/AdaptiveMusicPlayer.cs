@@ -32,6 +32,7 @@ namespace Spacewars.Presentation
 
         public void Initialize()
         {
+            if(NativeSilentStartup.IsSilent)return;
             if(initialized)return;
             var config=Resources.Load<TextAsset>("AdaptiveMusicProfile");
             if(!config)throw new InvalidOperationException("Missing AdaptiveMusicProfile.");
@@ -46,7 +47,7 @@ namespace Spacewars.Presentation
             for(int bank=0;bank<2;bank++)for(int layer=0;layer<2;layer++)
             {
                 var child=new GameObject("Music "+bank+" / "+layer);child.transform.SetParent(transform,false);
-                var source=child.AddComponent<AudioSource>();source.playOnAwake=false;source.loop=true;
+                var source=NativeQuietStartup.AddSource(child);source.playOnAwake=false;source.loop=true;
                 source.spatialBlend=0;source.volume=1;source.pitch=1;source.priority=128;
                 sources[bank,layer]=source;envelopes[bank,layer]=child.AddComponent<MusicGainEnvelope>();
                 envelopes[bank,layer].SuppressOutput=DiagnosticSuppressOutput;
@@ -68,6 +69,7 @@ namespace Spacewars.Presentation
 
         public void Tick(GameMusicMode nextMode,long nextGeneration,int seed,int events,bool paused,double seconds)
         {
+            if(NativeSilentStartup.IsSilent)return;
             Initialize();double now=AudioSettings.dspTime;
             bool changed=mode!=nextMode||nextMode==GameMusicMode.Match&&generation!=nextGeneration;
             if(changed)

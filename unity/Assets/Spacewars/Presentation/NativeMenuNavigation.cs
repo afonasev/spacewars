@@ -51,9 +51,11 @@ namespace Spacewars.Presentation
             TickGamepad(gamepad(),Time.unscaledTime);
             if(keyboardAllowed?.Invoke()!=false&&Mouse.current?.delta.ReadValue().sqrMagnitude>0){UsingGamepad=false;UpdateHints();}
         }
+        private bool DropdownOpen=>root.panel?.visualTree.Q(className:"unity-base-dropdown")!=null;
         private void TickGamepad(Gamepad pad,float now)
         {
-            if(scope==null)return;
+            // Native popups live outside the menu scope and own their focus/input until closed.
+            if(scope==null||DropdownOpen)return;
             if(pad==null){armed=true;return;}
             Vector2 axis=pad.dpad.ReadValue();if(axis.sqrMagnitude<.1f)axis=pad.leftStick.ReadValue();
             axis=axis.magnitude<.55f?Vector2.zero:Mathf.Abs(axis.x)>Mathf.Abs(axis.y)?new Vector2(Mathf.Sign(axis.x),0):new Vector2(0,Mathf.Sign(axis.y));
@@ -71,7 +73,7 @@ namespace Spacewars.Presentation
             }
             if(pad.buttonSouth.wasPressedThisFrame)Activate();
             var focused=root.focusController?.focusedElement as VisualElement;
-            if(!Visible(focused)||!scope.Contains(focused))Focus(Controls().FirstOrDefault(x=>x.name==lastFocus)??Controls().FirstOrDefault());
+            if(UsingGamepad&&(!Visible(focused)||!scope.Contains(focused)))Focus(Controls().FirstOrDefault(x=>x.name==lastFocus)??Controls().FirstOrDefault());
         }
         public void Move(Vector2 direction)
         {
@@ -133,7 +135,7 @@ namespace Spacewars.Presentation
         }
         private void KeyDown(KeyDownEvent evt)
         {
-            if(scope==null||dispatching)return;if(keyboardAllowed?.Invoke()==false){evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);return;}UsingGamepad=false;UpdateHints();
+            if(scope==null||dispatching||DropdownOpen)return;if(keyboardAllowed?.Invoke()==false){evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);return;}UsingGamepad=false;UpdateHints();
             // Ordinary typing remains native; only escape/tab leave a text editor.
             bool typing=evt.target is VisualElement target&&(target is TextField||target.GetFirstAncestorOfType<TextField>()!=null);
             if(evt.keyCode==KeyCode.Escape)Back();
@@ -146,9 +148,9 @@ namespace Spacewars.Presentation
             else return;
             evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);
         }
-        private void BlockMove(NavigationMoveEvent evt){if((Active||worldOwnsInput?.Invoke()==true)&&!dispatching){evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);}}
-        private void BlockSubmit(NavigationSubmitEvent evt){if(ownedSubmits.Remove(evt))return;if(Active||worldOwnsInput?.Invoke()==true)evt.StopImmediatePropagation();}
-        private void BlockCancel(NavigationCancelEvent evt){if((Active||worldOwnsInput?.Invoke()==true)&&!dispatching)evt.StopImmediatePropagation();}
+        private void BlockMove(NavigationMoveEvent evt){if((Active||worldOwnsInput?.Invoke()==true)&&!dispatching&&!DropdownOpen){evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);}}
+        private void BlockSubmit(NavigationSubmitEvent evt){if(ownedSubmits.Remove(evt))return;if(!DropdownOpen&&(Active||worldOwnsInput?.Invoke()==true))evt.StopImmediatePropagation();}
+        private void BlockCancel(NavigationCancelEvent evt){if((Active||worldOwnsInput?.Invoke()==true)&&!dispatching&&!DropdownOpen)evt.StopImmediatePropagation();}
         private void PointerDown(PointerDownEvent evt){if(keyboardAllowed?.Invoke()==false)return;UsingGamepad=false;UpdateHints();}
         private void UpdateHints()
         {

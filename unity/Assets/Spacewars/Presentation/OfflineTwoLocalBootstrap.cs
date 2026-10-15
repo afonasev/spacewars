@@ -47,8 +47,9 @@ namespace Spacewars.Presentation
         private Light graphicsSun;
         private void Start()
         {
-            AudioListener.volume=NativeUserSettings.Volume;Application.runInBackground=true;QualitySettings.vSyncCount=0;
-            gameplayAudio=gameObject.AddComponent<GameplayAudioPlayer>();gameplayAudio.Initialize();
+            if(!NativeSilentStartup.IsSilent)AudioListener.volume=NativeUserSettings.Volume;
+            Application.runInBackground=true;QualitySettings.vSyncCount=0;
+            if(!NativeSilentStartup.IsSilent){gameplayAudio=gameObject.AddComponent<GameplayAudioPlayer>();gameplayAudio.Initialize();}
             profile=PlayableProfile.Create(JsonUtility.FromJson<PlayableProfileData>(Resources.Load<TextAsset>("PlayableProfile").text));
             Application.targetFrameRate=profile.RenderTargetFramesPerSecond;
             padProfile=JsonUtility.FromJson<NativeLocalInputProfile>(Resources.Load<TextAsset>("NativeLocalInputProfile").text);padProfile.Validate();
@@ -128,7 +129,7 @@ namespace Spacewars.Presentation
             if(session!=null||assignedPad==null||assignedKeyboard==null||assignedMouse==null)return;
             keyboard.AssignedKeyboard=assignedKeyboard;keyboard.AssignedMouse=assignedMouse;
             session=new OfflineLocalSession(runtime,new[]{OfflineLocalSession.Bind("local-keyboard","owner-11","keyboard+mouse:"+assignedKeyboard.deviceId+":"+assignedMouse.deviceId),OfflineLocalSession.Bind("local-gamepad","owner-28","gamepad:"+assignedPad.deviceId)});
-            session.CommandAttempted=(command,result)=>gameplayAudio.Command(command,result.Accepted);
+            session.CommandAttempted=(command,result)=>gameplayAudio?.Command(command,result.Accepted);
             session.CommandSubmitted=command=>{var v=views.Single(v=>v.View.OwnerId==command.PlayerId);v.Orders.Submitted(v.View,command);};
         }
         private static bool Neutral(UnityEngine.InputSystem.InputDevice device)

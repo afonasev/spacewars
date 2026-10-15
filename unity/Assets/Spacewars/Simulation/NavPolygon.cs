@@ -27,7 +27,7 @@ namespace Spacewars.Simulation
         public bool Contains(NavPoint p)
         {
             if(p.X<MinX||p.X>MaxX||p.Z<MinZ||p.Z>MaxZ)return false;bool inside=false;
-            for(int i=0,j=vertices.Length-1;i<vertices.Length;j=i++){var a=vertices[j];var b=vertices[i];if(PointSegmentSquared(p,a,b)<=Epsilon*Epsilon)return true;if((a.Z>p.Z)!=(b.Z>p.Z)&&p.X<(b.X-a.X)*(p.Z-a.Z)/(b.Z-a.Z)+a.X)inside=!inside;}return inside;
+            for(int i=0,j=vertices.Length-1;i<vertices.Length;j=i++){var a=vertices[j];var b=vertices[i];if(p.X>=Math.Min(a.X,b.X)-Epsilon&&p.X<=Math.Max(a.X,b.X)+Epsilon&&p.Z>=Math.Min(a.Z,b.Z)-Epsilon&&p.Z<=Math.Max(a.Z,b.Z)+Epsilon&&PointSegmentSquared(p,a,b)<=Epsilon*Epsilon)return true;if((a.Z>p.Z)!=(b.Z>p.Z)&&p.X<(b.X-a.X)*(p.Z-a.Z)/(b.Z-a.Z)+a.X)inside=!inside;}return inside;
         }
         public bool StrictlyContains(NavPolygon other)
         {
@@ -41,6 +41,29 @@ namespace Spacewars.Simulation
         {
             if(Contains(a)||Contains(b))return 0;double best=double.PositiveInfinity;
             for(int i=0;i<vertices.Length;i++){var c=vertices[i];var d=vertices[(i+1)%vertices.Length];if(Intersects(a,b,c,d))return 0;best=Math.Min(best,Math.Min(Math.Min(PointSegmentSquared(a,c,d),PointSegmentSquared(b,c,d)),Math.Min(PointSegmentSquared(c,a,b),PointSegmentSquared(d,a,b))));}return best;
+        }
+        // Threshold queries keep the original narrow predicates and arithmetic.
+        // Callers of the sweep have already certified both endpoint footprints.
+        internal bool BoundaryWithin(NavPoint p,double radius)
+        {
+            double r2=radius*radius;
+            for(int i=0;i<vertices.Length;i++){
+                var a=vertices[i];var b=vertices[(i+1)%vertices.Length];
+                if(p.X+radius<Math.Min(a.X,b.X)||p.X-radius>Math.Max(a.X,b.X)||p.Z+radius<Math.Min(a.Z,b.Z)||p.Z-radius>Math.Max(a.Z,b.Z))continue;
+                if(PointSegmentSquared(p,a,b)<=r2)return true;
+            }
+            return false;
+        }
+        internal bool SweepWithin(NavPoint a,NavPoint b,double radius)
+        {
+            double reach=Math.Max(radius,Epsilon),r2=radius*radius;
+            double minX=Math.Min(a.X,b.X)-reach,maxX=Math.Max(a.X,b.X)+reach,minZ=Math.Min(a.Z,b.Z)-reach,maxZ=Math.Max(a.Z,b.Z)+reach;
+            for(int i=0;i<vertices.Length;i++){
+                var c=vertices[i];var d=vertices[(i+1)%vertices.Length];
+                if(maxX<Math.Min(c.X,d.X)||minX>Math.Max(c.X,d.X)||maxZ<Math.Min(c.Z,d.Z)||minZ>Math.Max(c.Z,d.Z))continue;
+                if(Intersects(a,b,c,d)||Math.Min(Math.Min(PointSegmentSquared(a,c,d),PointSegmentSquared(b,c,d)),Math.Min(PointSegmentSquared(c,a,b),PointSegmentSquared(d,a,b)))<=r2)return true;
+            }
+            return false;
         }
         private static bool InTriangle(NavPoint p,NavPoint a,NavPoint b,NavPoint c)=>Cross(a,b,p)>=-Epsilon&&Cross(b,c,p)>=-Epsilon&&Cross(c,a,p)>=-Epsilon;
         private static double Cross(NavPoint a,NavPoint b,NavPoint c)=>(b.X-a.X)*(c.Z-a.Z)-(b.Z-a.Z)*(c.X-a.X);

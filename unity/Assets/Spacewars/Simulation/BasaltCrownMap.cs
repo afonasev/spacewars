@@ -12,7 +12,7 @@ namespace Spacewars.Simulation
     public sealed class BasaltCrownMap : IPlayableTerrain
     {
         public string Id=>"basalt-crown-native-v1";
-        public int Revision=>1;
+        public int Revision=>3;
         public double HalfExtent=>56;
         public double DirectFireHeight=>1;
         public int SurfaceSemanticsVersion=>1;
@@ -83,20 +83,20 @@ namespace Spacewars.Simulation
         public bool TryTraverse(NavLocation from,NavPoint to,double r,out NavLocation l)=>locations.Traverse(from,to,r,out l);
         public bool CompatibleCombatSurface(NavLocation a,NavLocation b)=>locations.Combat(a,b);
         public NavPoint Headquarters(PlayableOwner owner){if((int)owner<0||(int)owner>1)throw new ArgumentOutOfRangeException(nameof(owner));return owner==PlayableOwner.Player?new NavPoint(-40,-32):new NavPoint(40,32);}
-        // Preserve source site centers; native five-slot HQ rings use their validated
+        // Native flank mines sit outside the roads; five-slot HQ rings use their validated
         // native orientation, independent of the diagonal Explorer start heading.
         public TerritorySite[] Sites(PlayableProfile p)=>new[]{
             new TerritorySite(1,PlayableBuildingKind.Headquarters,Headquarters(PlayableOwner.Player),p),
             new TerritorySite(2,PlayableBuildingKind.Headquarters,Headquarters(PlayableOwner.Enemy),p,Math.PI),
-            new TerritorySite(3,PlayableBuildingKind.Outpost,new NavPoint(0,-12),p,Math.PI/2),
+            new TerritorySite(3,PlayableBuildingKind.Mine,new NavPoint(0,-12),p),
             new TerritorySite(4,PlayableBuildingKind.Mine,new NavPoint(0,14),p),
             new TerritorySite(5,PlayableBuildingKind.Outpost,new NavPoint(40,-32),p,3*Math.PI/4),
             new TerritorySite(6,PlayableBuildingKind.Outpost,new NavPoint(-40,32),p,7*Math.PI/4),
-            new TerritorySite(7,PlayableBuildingKind.Mine,new NavPoint(-38,0),p),
-            new TerritorySite(8,PlayableBuildingKind.Mine,new NavPoint(38,0),p)};
+            new TerritorySite(7,PlayableBuildingKind.Mine,new NavPoint(-48,0),p),
+            new TerritorySite(8,PlayableBuildingKind.Mine,new NavPoint(48,0),p)};
         public OfflineMatchConfiguration Configuration(PlayableProfile p,int seed,OfflineParticipant[] roster){
             var starts=new[]{new OfflineStart("start-west",1,Headquarters(PlayableOwner.Player),new NavPoint(-40+10/Math.Sqrt(2),-32+10/Math.Sqrt(2)),Math.PI/4,1),new OfflineStart("start-east",2,Headquarters(PlayableOwner.Enemy),new NavPoint(40-10/Math.Sqrt(2),32-10/Math.Sqrt(2)),5*Math.PI/4,2)};
-            return new OfflineMatchConfiguration(p,"native-basalt-crown-v1",Id,"native-authored-diagonal-v1",seed,roster,starts,Sites(p),MovementBlockers.ToArray(),new double[2,2],terrain:Id);
+            return new OfflineMatchConfiguration(p,"native-basalt-crown-v3",Id,"native-authored-diagonal-v1",seed,roster,starts,Sites(p),MovementBlockers.ToArray(),new double[2,2],terrain:Id);
         }
     }
 }

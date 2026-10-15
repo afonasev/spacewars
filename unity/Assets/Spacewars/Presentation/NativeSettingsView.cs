@@ -9,7 +9,7 @@ namespace Spacewars.Presentation
     public static class NativeUserSettings
     {
         public static bool AlwaysHealth { get=>PlayerPrefs.GetInt("spacewars.ui.alwaysHealth",1)!=0; set {PlayerPrefs.SetInt("spacewars.ui.alwaysHealth",value?1:0);PlayerPrefs.Save();} }
-        public static float Volume { get=>PlayerPrefs.GetFloat("spacewars.ui.volume",0); set {PlayerPrefs.SetFloat("spacewars.ui.volume",Mathf.Clamp01(value));PlayerPrefs.Save();AudioListener.volume=Mathf.Clamp01(value);} }
+        public static float Volume { get=>PlayerPrefs.GetFloat("spacewars.ui.volume",0); set {if(NativeSilentStartup.IsSilent)return;PlayerPrefs.SetFloat("spacewars.ui.volume",Mathf.Clamp01(value));PlayerPrefs.Save();AudioListener.volume=Mathf.Clamp01(value);} }
     }
     public static class NativeDisplaySettings
     {
@@ -46,7 +46,7 @@ namespace Spacewars.Presentation
             PlayerPrefs.SetInt(Prefix+"width",size.x);PlayerPrefs.SetInt(Prefix+"height",size.y);PlayerPrefs.Save();ApplyDisplay();
         }
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
-        private static void Initialize(){ApplyVSync();ApplyDisplay();AudioListener.volume=NativeUserSettings.Volume;}
+        private static void Initialize(){ApplyVSync();ApplyDisplay();if(!NativeSilentStartup.IsSilent)AudioListener.volume=NativeUserSettings.Volume;}
         public static void ApplyVSync()=>QualitySettings.vSyncCount=VSync?1:0;
         public static void ApplyDisplay()
         {
