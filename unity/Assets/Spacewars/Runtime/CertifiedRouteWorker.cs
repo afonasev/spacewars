@@ -65,14 +65,16 @@ namespace Spacewars.Runtime
                 Volatile.Write(ref waiting,1);
                 try{acquired=lane.Acquire(wake,()=>ShouldStop);}finally{Volatile.Write(ref waiting,0);}
                 if(!acquired)return;
+                kernel.Attach(binding.RoutePort);
                 while(!ShouldStop){
-                    if(!kernel.HasWork&&binding.RoutePort.QueuedRequestCount==0){WaitForChange();continue;}
-                    long before=kernel.ProgressSequence,at=Stopwatch.GetTimestamp();
+                    if(binding.RoutePort.TickQuantaEnabled&&!binding.RoutePort.QuantumRunnable){WaitForChange();continue;}
+                    if(!binding.RoutePort.QuantumRunnable&&!kernel.HasWork&&binding.RoutePort.QueuedRequestCount==0&&binding.RoutePort.AllocationCount==0&&!binding.RoutePort.ArrivalReconstructing){WaitForChange();continue;}
+                    long before=kernel.ProgressSequence,at=Stopwatch.GetTimestamp();var beforeFrontier=kernel.CapturePumpFrontier();
                     kernel.Pump(binding,Volatile.Read(ref budget));pumps++;
                     elapsed+=(Stopwatch.GetTimestamp()-at)*1000d/Stopwatch.Frequency;
                     Volatile.Write(ref publication,new CertifiedRoutePublication(kernel,pumps,elapsed,allocated:GC.GetAllocatedBytesForCurrentThread()-initialAllocated));
                     if(ShouldStop)break;
-                    if(kernel.ProgressSequence==before)WaitForChange();
+                    if(kernel.ProgressSequence==before&&kernel.CapturePumpFrontier().Same(beforeFrontier))WaitForChange();
                     else Thread.Yield();
                 }
             }catch(Exception ex){

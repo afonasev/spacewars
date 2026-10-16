@@ -59,6 +59,12 @@ namespace Spacewars.Presentation
             var coordinator=localCoordinator??this;
             if(coordinator.sharedMapFrame!=null)coordinator.sharedMapFrame.style.display=coordinator.paused||coordinator.ResultsVisible||coordinator.inLobby||coordinator.localPresentations.Any(seat=>seat.mapOpen)?DisplayStyle.None:DisplayStyle.Flex;
         }
+        private void PanMap(int kind,Vector2 screen)
+        {
+            if(view==null||cameraView==null)return;
+            var destination=MapGround(kind,screen);var center=Ground(SeatScreenCenter);
+            cameraView.transform.position+=new Vector3((float)(destination.X-center.X),0,(float)(destination.Z-center.Z));
+        }
         private void MapSelect(int kind,Vector2 a,Vector2 b,bool shift)
         {
             if(view==null)return;confirmSaleBuilding=0;root.Focus();

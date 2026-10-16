@@ -94,6 +94,7 @@ namespace Spacewars.Runtime
 
     [Serializable] public sealed class NavigationInstalledExecutionState
     {
+        internal NavigationInstalledExecutionOwner StorageOwner;
         public int Entity; public bool Detached; public NavCorridorDescriptor Corridor; public NavPoint[] InstalledRoute;
         public string ProfileId,HeldIdentity; public int ProfileRevision,GeometryIndex,BaseGeometryIndex;
         public double[] ProfileValues;

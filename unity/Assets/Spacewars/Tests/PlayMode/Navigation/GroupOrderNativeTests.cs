@@ -20,6 +20,7 @@ namespace Spacewars.Tests.PlayMode
             var domain=Activator.CreateInstance(type,flags,null,new object[]{p,1L,false},null);
             object Call(string name,params object[] args)=>type.GetMethod(name,flags).Invoke(domain,args);
             var nav=(NavigationSession)type.GetProperty("Navigation",flags).GetValue(domain);
+            try{
             var geometry=(NavGeometry)type.GetProperty("Geometry",flags).GetValue(domain);
             int id=(int)Call("SpawnUnit",new NavPoint(-12,-12),PlayableOwner.Player,PlayableEntityKind.Tank);
             var goal=new NavPoint(-10,-12);
@@ -27,16 +28,21 @@ namespace Spacewars.Tests.PlayMode
             Assert.Null(Call("SpatialCompletion",id,PlayableOwner.Player));
             using(var host=new UnityHostRouteService()){
                 for(int tick=0;tick<300&&Call("SpatialCompletion",id,PlayableOwner.Player)==null;tick++){
-                    host.Service(nav.Requests,nav.Answers,1,geometry,p,64);Call("Step",1d/30);yield return null;
+                    var binding=(PlayableRouteBinding)Activator.CreateInstance(typeof(PlayableRouteBinding),flags,null,new object[]{geometry,p,nav.Admission,nav.RoutePort},null);host.Service(binding,64);Call("Step",1d/30);yield return null;
                 }
-                Assert.Greater(host.NavMeshRequests+host.FlowRequests,0);
+                Assert.Greater(host.CertifiedRetainedBytes,0,"The current physical host must retain its prepared arrival/route state.");
             }
+            Assert.Greater((int)typeof(NavigationSession).GetProperty("OwnedReadyPublications",flags).GetValue(nav),0,"real Step must use the prepared Ready publication");
+            Assert.Zero((long)typeof(NavigationSession).GetProperty("LastOwnedReadyPublicationAllocatedBytes",flags).GetValue(nav),"Ready assignment block allocates nothing; movement has its separate contract");
+            Assert.Greater((int)typeof(NavigationSession).GetProperty("OwnedMovementPublications",flags).GetValue(nav),0,"real match Step must publish prepared movement");
+            Assert.Zero((long)typeof(NavigationSession).GetProperty("LastOwnedMovementPublicationAllocatedBytes",flags).GetValue(nav),"movement assignment block allocates nothing");
             var receipt=(PlayableSpatialCompletion)Call("SpatialCompletion",id,PlayableOwner.Player);
             Assert.NotNull(receipt);Assert.AreEqual(goal,receipt.OriginalTarget);Assert.AreEqual(1,receipt.Order.Sequence);
             Assert.AreEqual(PlayableSpatialCompletion.FlatSurface,receipt.SurfaceId);
             Assert.Null(Call("SpatialCompletion",id,PlayableOwner.Enemy));
             Assert.AreEqual(PlayableCommandStatus.Applied,(PlayableCommandStatus)Call("Apply",new PlayableCommand(1,2,"player-1",PlayableCommandKind.Stop,new[]{id}).AsHuman(),null));
             Call("Step",1d/30);Assert.Null(Call("SpatialCompletion",id,PlayableOwner.Player));
+            }finally{Call("DestroyOwnedNavigation");var budget=typeof(NavigationSession).GetProperty("PhysicalHostBudget",flags).GetValue(nav);foreach(var name in new[]{"PhysicalBytes","HeldBytes","ActiveScopes"})Assert.AreEqual(0,Convert.ToInt64(budget.GetType().GetProperty(name,flags|BindingFlags.Public).GetValue(budget)),name);}
         }
         [UnityTest] public IEnumerator AuthoredBridgeAndFoundryRampReceiptsUseActualUnityHostRoute()
         {

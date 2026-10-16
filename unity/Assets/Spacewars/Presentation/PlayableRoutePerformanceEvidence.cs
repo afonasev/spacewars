@@ -10,6 +10,7 @@ namespace Spacewars.Presentation
     {
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
         private float routePerformanceStarted=-1;
+        private bool fourPlayerPerformance;
         private int routePerformanceActor,routePerformanceOrder;
         private NavPoint routePerformanceHome,routePerformanceAway;
         private long routePerformanceMotionTick=-1;
@@ -22,6 +23,12 @@ namespace Spacewars.Presentation
             float now=Time.realtimeSinceStartup;
             if(routePerformanceStarted<0){
                 routePerformanceStarted=now;
+                fourPlayerPerformance=Array.IndexOf(Environment.GetCommandLineArgs(),"-fourPlayerPerformanceEvidence")>=0;
+                if(fourPlayerPerformance){
+                    if(!spectatorMode||view.Participants.Count!=4){Record("four-player FAIL invalid roster");Quit();return;}
+                    spectatorRate=4;runtime.SetSpectatorSpeed(Runtime.PlayableRuntime.LocalSpectatorId,4);UpdateSpectatorSpeed();
+                    Record("four-player SPEED 4 seed="+view.Seed);
+                }
                 var actor=view.Entities.FirstOrDefault(e=>e.Owner==LocalOwner&&e.Kind==PlayableEntityKind.Explorer&&e.Health>0);
                 if(actor==null){Record("route-performance FAIL no own explorer");Quit();return;}
                 routePerformanceActor=actor.Id;routePerformanceHome=actor.Position;
@@ -36,6 +43,10 @@ namespace Spacewars.Presentation
                 routePerformanceEvidence=false;Quit();return;
             }
             if(paused){Pause(false);return;}
+            if(fourPlayerPerformance){
+                if(now-routePerformanceStarted>=90&&spectatorRate!=1){spectatorRate=1;runtime.SetSpectatorSpeed(Runtime.PlayableRuntime.LocalSpectatorId,1);UpdateSpectatorSpeed();Record("four-player SPEED 1");}
+                return; // Observe ordinary AI decisions; do not inject human commands.
+            }
             var current=view.Entities.FirstOrDefault(e=>e.Id==routePerformanceActor&&e.Owner==LocalOwner);
             if(current==null)return; // Normal combat may kill the actor; keep measuring the world.
             if(now-routePerformanceStarted>=routePerformanceOrder*15){

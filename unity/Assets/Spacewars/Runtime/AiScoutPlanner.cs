@@ -66,7 +66,8 @@ namespace Spacewars.Runtime
                 var u=o.Entities.SingleOrDefault(e=>e.Id==a.LeaderId&&e.Health>0&&e.Owner==o.Owner);
                 bool covered=target!=null&&knowledge.Areas.Any(x=>x.AreaId==target.SiteId&&x.ActuallyCoveredTick>=a.CreatedTick);
                 bool holdingPreparation=target!=null&&IsPreparationObjective(a.Objective,target.SiteId)&&target.Reachable&&target.SiteId==preparationSite&&covered;
-                if(target==null||!target.Reachable||u==null||covered&&!holdingPreparation||
+                if(target==null||!target.Reachable||u==null||
+                    IsPreparationObjective(a.Objective,target.SiteId)&&target.SiteId!=preparationSite||covered&&!holdingPreparation||
                     !holdingPreparation&&o.Tick-a.ProgressTick>=AiProfile.SecondsToTicks(ai.Value("armies.stallSeconds"),30))
                 {registry.Disband(a.Id);continue;}
                 // Actual displacement, never an accepted order, advances the clock.

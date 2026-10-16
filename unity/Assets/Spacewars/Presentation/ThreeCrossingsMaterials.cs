@@ -42,7 +42,12 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Roads","Width","Painted road width; never affects navigation.","m",2,6,.1f)] public float roadWidth=4.2f;
         [SurfaceSetting("Roads","Arterial width","Primary roads widen into available clear support; narrow routes retain their validated core.","m",4.2f,12,.2f)] public float arterialWidth=8;
         [SurfaceSetting("Roads","Approach length","Smooth transition from arterial road to full bridge deck width.","m",4,20,.5f)] public float approachLength=12;
-        [SurfaceSetting("Roads","Soft edge","Feather width inside the road boundary.","m",.1f,2,.1f)] public float roadFeather=.9f;
+        [SurfaceSetting("Roads","Visual meander","Maximum visual drift of the dirt-road centerline; never changes route geometry.","m",0,1.75f,.05f)] public float roadMeander=1.25f;
+        [SurfaceSetting("Roads","Shoulder width","Feather width inside the painted road edge; preserves the compacted center.","m",.1f,1.5f,.05f)] public float roadFeather=.8f;
+        [SurfaceSetting("Roads","Center compaction","Darken the compressed road center against its softer shoulders.","ratio",0,.4f,.02f)] public float roadCoreShade=.22f;
+        [SurfaceSetting("Roads","Shoulder blend","Blend amount of road tint retained at the shoulder.","ratio",.35f,1,.05f)] public float roadShoulderTone=.78f;
+        [SurfaceSetting("Roads","Rut strength","Scale of existing wheel-path wear on road surfaces.","ratio",0,1,.05f)] public float roadRutStrength=.72f;
+        [SurfaceSetting("Roads","Edge variation","Natural variation of the dirt-road edges.","ratio",0,2.5f,.05f)] public float roadEdgeVariation=2.2f;
         [SurfaceSetting("Roads","Hue","Compacted earth hue.","turn",0,1,.01f)] public float roadHue=.10f;
         [SurfaceSetting("Roads","Saturation","Compacted earth saturation.","ratio",0,.6f,.01f)] public float roadSaturation=.28f;
         [SurfaceSetting("Roads","Brightness","Road contrast against surrounding ground.","ratio",.15f,.9f,.01f)] public float roadBrightness=.62f;
@@ -58,6 +63,18 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Metal","Brushed grain","Strength of fine brushed metal grain.","ratio",0,.3f,.01f)] public float metalGrain=.09f;
         [SurfaceSetting("Metal","Highlight strength","Intensity of steel reflections.","ratio",0,.7f,.01f)] public float metalHighlight=.28f;
         [SurfaceSetting("Metal","Highlight focus","Focus of steel reflections.","exponent",8,128,1)] public float metalShininess=48;
+        [SurfaceSetting("Ground finish","Open detail","Fraction of shared texture detail retained on open ground; preserves broad palette patches.","ratio",0,1,.05f)] public float groundOpenDetail=.8f;
+        [SurfaceSetting("Ground finish","Foot detail","Fraction of shared texture detail retained near cliff feet and existing scree.","ratio",0,1,.05f)] public float groundFootDetail=1;
+        [SurfaceSetting("Ground finish","Fine grain retention","Fraction of existing fine grain contrast retained on ground only.","ratio",0,1,.05f)] public float groundGrainRetention=.3f;
+        [SurfaceSetting("Rock foot","Contact width","Narrow grounding shade outside authoritative geological footprints.","m",.2f,2,.05f)] public float rockFootContactWidth=.65f;
+        [SurfaceSetting("Rock foot","Contact strength","Restrained contact shade at cliffs and existing fragments.","ratio",0,.5f,.02f)] public float rockFootContactStrength=.2f;
+        [SurfaceSetting("Rock foot","Dust reach","Maximum ground dust transition beyond geological feet; protected roads and yards stay clear.","m",.5f,4,.1f)] public float rockFootDustReach=2.2f;
+        [SurfaceSetting("Rock foot","Dust strength","Opacity of local mineral dust, independent of platform sand.","ratio",0,.6f,.02f)] public float rockFootDustStrength=.2f;
+        [SurfaceSetting("Rock foot","Patch scale","World-space extent of irregular foot dust patches.","m",1,12,.5f)] public float rockFootPatchScale=5;
+        [SurfaceSetting("Rock","Projection transition","Narrow blend between well-covered texture planes on cliff faces; wider softens axis changes. Rock material only, without changing ground or geometry.","ratio",.02f,.2f,.01f)] public float rockProjectionTransition=.06f;
+        [SurfaceSetting("Rock","Ledge wavelength","Broad connected roof relief, independent of texture detail.","m",4,30,1)] public float rockLedgeWavelength=14;
+        [SurfaceSetting("Rock","Passage reveal","Taper the rendered rear slope inside the original rock to expose supported ground at the gameplay camera angle. Does not change cover or navigation.","ratio",0,1,.05f)] public float rockPassageReveal=1;
+        [SurfaceSetting("Rock","Reveal margin","Inward screen-space ground margin at the rear rock edge.","m",0,2,.1f)] public float rockRevealMargin=.6f;
         [SurfaceSetting("Rock","Brightness multiplier","Preserve authored rock tier colors while scaling brightness.","ratio",.5f,1.5f,.01f)] public float rockBrightness=1;
         [SurfaceSetting("Frontier palette","Transition angle","Direction of the continuous graphite-to-quarry region.","deg",0,360,5)] public float paletteAngle=45;
         [SurfaceSetting("Frontier palette","Transition width","World width of the A-to-B palette transition.","m",16,120,2)] public float paletteWidth=64;
@@ -81,10 +98,18 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Truck traffic","Wear contrast","Contrast of worn truck tracks; roads and construction only.","ratio",0,.5f,.02f)] public float truckWear=.32f;
         [SurfaceSetting("Truck traffic","Sand removal","How much passing wheels expose concrete and steel under sand.","ratio",0,1,.05f)] public float truckSandRemoval=.9f;
         [SurfaceSetting("Truck traffic","Turning radius","Radius of old truck turning arcs on base platforms.","m",3,7,.25f)] public float truckTurnRadius=4.75f;
+        [SurfaceSetting("Platform steel","Service lane width","Width of straight tread zones in whole steel panels.","panels",1,4,1)] public float platformSteelLanePanels=2;
+        [SurfaceSetting("Platform steel","Finish contrast","Tonal separation of clean, tread and worn steel.","ratio",0,.6f,.05f)] public float platformSteelContrast=.4f;
+        [SurfaceSetting("Platform steel","Tread strength","Raised diamond tread contrast on the second steel texture.","ratio",0,.8f,.05f)] public float platformSteelTread=.55f;
+        [SurfaceSetting("Platform fence","Member width","Width of steel fence posts inside existing blockers.","m",.04f,.2f,.01f)] public float platformFenceWidth=.10f;
+        [SurfaceSetting("Platform fence","Panel spacing","Maximum spacing between platform fence posts.","m",1,3,.1f)] public float platformFenceSpacing=2;
         [SurfaceSetting("Industrial landmarks","Frame width","Visible steel perimeter band inside constructed platforms.","m",.3f,2,.1f)] public float platformFrameWidth=.9f;
         [SurfaceSetting("Industrial landmarks","Frame value","Brightness of exposed steel platform frames.","ratio",.2f,.6f,.01f)] public float platformFrameValue=.30f;
         [SurfaceSetting("Industrial landmarks","Sand opacity limit","Maximum sand opacity on construction; retains substrate identity.","ratio",.15f,.75f,.05f)] public float constructionSandLimit=.38f;
         [SurfaceSetting("Industrial landmarks","Mine yard radius","Industrial apron extent around the actual mine site.","m",3,6,.25f)] public float mineYardRadius=4.75f;
+        [SurfaceSetting("Industrial landmarks","Mine yard value","Surface value of the concrete mine apron, separate from base platforms.","ratio",.35f,.75f,.01f)] public float mineYardValue=.4f;
+        [SurfaceSetting("Industrial landmarks","Mine edge width","Width of the narrow contact band following the existing mine yard boundary.","m",.1f,.8f,.05f)] public float minePadContactWidth=.4f;
+        [SurfaceSetting("Industrial landmarks","Mine contact shade","Strength of the grounded contact shade at the mine yard edge.","ratio",0,.6f,.02f)] public float minePadContactStrength=.46f;
         [SurfaceSetting("Industrial landmarks","Mine access width","Painted mine approach width; no navigation change.","m",2,4.2f,.1f)] public float mineAccessWidth=3.2f;
         [SurfaceSetting("Industrial landmarks","Bridge deposit reach","Sand brought in from bridge approaches, never random deck islands.","m",1,5,.25f)] public float bridgeSandReach=3.25f;
         [SurfaceSetting("Industrial landmarks","Bridge deposit strength","Sand in sheltered entry shoulders and rail corners.","ratio",.2f,.8f,.05f)] public float bridgeSandStrength=.65f;
@@ -241,8 +266,9 @@ namespace Spacewars.Presentation
                     float along=(float)(dx*ax+dz*az),across=(float)(-dx*az+dz*ax);
                     // Chamfered loading apron aligns with the access, not with a random global patch.
                     float distance=Profile.mineYardRadius-Mathf.Max(Mathf.Max(Mathf.Abs(along),Mathf.Abs(across)),(Mathf.Abs(along)+Mathf.Abs(across))*.72f);
-                    float fill=Mathf.SmoothStep(0,1,Mathf.InverseLerp(0,.35f,distance));yard=Mathf.Max(yard,fill);
-                    edge=Mathf.Max(edge,fill*(1-Mathf.SmoothStep(0,1,Mathf.InverseLerp(.35f,.8f,distance))));
+                    float edgeWidth=Profile.minePadContactWidth;
+                    float fill=Mathf.SmoothStep(0,1,Mathf.InverseLerp(0,edgeWidth,distance));yard=Mathf.Max(yard,fill);
+                    edge=Mathf.Max(edge,fill*(1-Mathf.SmoothStep(0,1,Mathf.InverseLerp(edgeWidth,edgeWidth*2,distance))));
                     float wheel=Mathf.Exp(-Mathf.Pow((Mathf.Abs(across)-Profile.truckWheelSpacing*.5f)/Profile.truckTrackWidth,2));
                     traffic=Mathf.Max(traffic,wheel*fill*Mathf.SmoothStep(0,1,Mathf.InverseLerp((float)gameplay.MineFootprintRadius,(float)gameplay.MineFootprintRadius+1,along)));
                 }
@@ -271,7 +297,15 @@ namespace Spacewars.Presentation
                 {
                     double dx=s.B.X-s.A.X,dz=s.B.Z-s.A.Z,length=dx*dx+dz*dz;
                     double t=length>0?Math.Max(0,Math.Min(1,((wx-s.A.X)*dx+(wz-s.A.Z)*dz)/length)):0;
-                    double ax=wx-s.A.X-dx*t,az=wz-s.A.Z-dz*t;best=Math.Min(best,ax*ax+az*az);
+                    double centerX=s.A.X+dx*t,centerZ=s.A.Z+dz*t;
+                    float alongLength=(float)Math.Sqrt(length);
+                    float endFade=Mathf.SmoothStep(0,1,Mathf.InverseLerp(0,4,(float)Math.Min(t,1-t)*alongLength));
+                    float along=(float)(s.StartDistance+t*alongLength);
+                    float phase=(float)(s.A.X*.17+s.A.Z*.11);
+                    float meander=(Mathf.Sin(along/13+phase)*.65f+(Mathf.PerlinNoise((float)((centerX+143.7)/12),(float)((centerZ-87.2)/12))-.5f)*.7f)*p.roadMeander*endFade;
+                    double lateral=length>0?meander/Math.Sqrt(length):0;
+                    double axisX=centerX-dz*lateral,axisZ=centerZ+dx*lateral;
+                    double ax=wx-axisX,az=wz-axisZ;best=Math.Min(best,ax*ax+az*az);
                 }
                 // Expanded paint is clipped by the same authoritative movement geometry.
                 // This does not widen physical passages or paint a route through rock/water.
@@ -307,6 +341,8 @@ namespace Spacewars.Presentation
             material.SetTexture("_RoadMask",RoadMask);
             material.SetColor("_GroundTint",Color.HSVToRGB(p.groundHue,p.groundSaturation,p.groundBrightness));
             material.SetColor("_RoadTint",Color.HSVToRGB(p.roadHue,p.roadSaturation,p.roadBrightness));
+            material.SetVector("_CrossingsRoadFinish",new Vector4(p.roadCoreShade,p.roadShoulderTone,p.roadRutStrength,p.roadEdgeVariation));
+            material.SetVector("_CrossingsMinePad",new Vector4(Linear(p.mineYardValue),p.minePadContactStrength,p.minePadContactWidth,0));
             material.SetVector("_SurfaceNoise",new Vector4(p.broadScale,p.broadContrast,p.grainScale,p.grainContrast));
             // SetVector bypasses the sRGB conversion performed by color properties.
             float Linear(float value)=>QualitySettings.activeColorSpace==ColorSpace.Linear?Mathf.GammaToLinearSpace(value):value;
@@ -314,6 +350,10 @@ namespace Spacewars.Presentation
             material.SetVector("_Metal",new Vector4(Linear(p.metalBrightness),p.metalPanelLength,p.metalPanelWidth,p.metalSeamContrast));
             material.SetVector("_SurfaceExtras",new Vector4(p.metalGrain,p.rockBrightness,p.metalHighlight,p.metalShininess));
             Art=EnvironmentArtProfile.Load();EnvironmentArt.Apply(material,Art);
+            material.SetVector("_CrossingsRockProjection",new Vector4(1,p.rockProjectionTransition,0,0));
+            material.SetVector("_CrossingsGroundDetail",new Vector4(1,p.groundOpenDetail,p.groundFootDetail,p.groundGrainRetention));
+            material.SetVector("_CrossingsRockFoot",new Vector4(p.rockFootContactWidth,p.rockFootContactStrength,p.rockFootDustReach,p.rockFootDustStrength));
+            material.SetFloat("_CrossingsFootPatch",p.rockFootPatchScale);
             // Opt-in map adapter; the shared shader retains its original defaults elsewhere.
             float angle=p.paletteAngle*Mathf.Deg2Rad;
             material.SetVector("_CrossingsPalette",new Vector4(1,Mathf.Cos(angle),Mathf.Sin(angle),p.paletteWidth));

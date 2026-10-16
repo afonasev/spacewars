@@ -120,6 +120,70 @@ namespace Spacewars.Tests.EditMode
             var empty=new SharedFlowRouter(new NavGeometry(8,Array.Empty<NavObstacle>(),1),p);
             foreach(double z in new[]{0d,BitConverter.Int64BitsToDouble(long.MinValue),0d})Assert.AreEqual(BitConverter.DoubleToInt64Bits(z),BitConverter.DoubleToInt64Bits(empty.FindPath(new NavPoint(1,1),new NavPoint(0,z))[0].Z));
         }
+        [TestCase(false)][TestCase(true)] public void ObserverGeometryReuseKeepsExactPublicAndCurrentlyVisibleSolids(bool offline)
+        {
+            const System.Reflection.BindingFlags flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+            var type=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.PlayableDomain",true);
+            var p=PlayableProfile.ThreeCrossingsDefault;
+            var setup=new NativeLobbyConfiguration{HasExplicitSeed=true,ExplicitSeed=7};setup.InitializeParticipants();
+            var config=NativeLobbyMatch.Create(p,setup);
+            var domain=Activator.CreateInstance(type,flags,null,offline?new object[]{p,71L,config}:new object[]{p,71L},null);
+            var geometryProperty=type.GetProperty("Geometry",flags);var method=type.GetMethod("ObservedGeometry",flags);
+            var vision=new PlayableVision(0,64,64,1,.5);
+            var otherVision=new PlayableVision(1,64,64,1,.5);
+            NavGeometry View(PlayableVision v)=>(NavGeometry)method.Invoke(domain,new object[]{v});
+            var near=new NavObstacle(-1,-1,1,1);var far=new NavObstacle(40,40,42,42);
+            var authored=offline?config.Obstacles.ToArray():Array.Empty<NavObstacle>();
+            var solids=authored.Concat(new[]{near,far}).ToArray();
+            void Set(NavObstacle[] obstacles,int revision,double half=64)=>geometryProperty.SetValue(domain,new NavGeometry(half,obstacles,revision));
+            void Exact(NavGeometry actual,PlayableVision v){
+                var authority=(NavGeometry)geometryProperty.GetValue(domain);
+                var expected=authority.Obstacles.Where(o=>authored.Any(a=>a.GeometryEquals(o))||
+                    v.IsVisible(new NavPoint(o.MinX,o.MinZ))&&v.IsVisible(new NavPoint(o.MaxX,o.MinZ))&&
+                    v.IsVisible(new NavPoint(o.MinX,o.MaxZ))&&v.IsVisible(new NavPoint(o.MaxX,o.MaxZ))).ToArray();
+                Assert.AreEqual(expected.Length,actual.Obstacles.Count);
+                for(int i=0;i<expected.Length;i++)Assert.True(expected[i].GeometryEquals(actual.Obstacles[i]));
+                int revision=1;unchecked{foreach(var o in expected)revision=revision*31+o.MinX.GetHashCode()+o.MinZ.GetHashCode()+o.MaxX.GetHashCode()+o.MaxZ.GetHashCode();}
+                Assert.AreEqual(revision==int.MinValue?int.MaxValue:Math.Max(1,Math.Abs(revision)),actual.Revision);
+            }
+            Set(solids,1);vision.Refresh(new[]{new VisionSource(default(NavPoint),8)},Array.Empty<KnownBuilding>());
+            var first=View(vision);Exact(first,vision);Assert.AreSame(first,View(vision));
+            vision.Refresh(new[]{new VisionSource(new NavPoint(.1,.2),9)},Array.Empty<KnownBuilding>());
+            Assert.AreSame(first,View(vision),"Moving vision with unchanged exact solids must retain its spatial index.");
+            var hiddenChange=authored.Concat(new[]{near,new NavObstacle(43,43,44,44)}).ToArray();Set(hiddenChange,2);
+            Assert.AreSame(first,View(vision),"A hidden geometry revision must not leak through the observer cache.");
+            var other=View(otherVision);Exact(other,otherVision);Assert.AreSame(first,View(vision),"Team views remain independent.");
+            vision.Refresh(new[]{new VisionSource(default(NavPoint),100)},Array.Empty<KnownBuilding>());
+            var revealed=View(vision);Assert.AreNotSame(first,revealed);Exact(revealed,vision);
+            Set(hiddenChange.Reverse().ToArray(),3);var reordered=View(vision);Assert.AreNotSame(revealed,reordered);Exact(reordered,vision);
+            Set(hiddenChange,4,65);Assert.AreEqual(65,View(vision).HalfExtent);
+            vision.Refresh(Array.Empty<VisionSource>(),Array.Empty<KnownBuilding>());Exact(View(vision),vision);
+            Assert.AreEqual(authored.Length,View(vision).Obstacles.Count,"Explored dynamic solids are not currently visible solids.");
+            // Cache ownership is disposable; eviction must preserve the exact cold projection.
+            for(int i=0;i<10;i++)View(new PlayableVision(i,64,64,1,.5));
+            Exact(View(vision),vision);
+        }
+        [Test] public void ObserverWorkingSetRetainsRepeatedObjectivesAcrossMovingOrigins()
+        {
+            const System.Reflection.BindingFlags flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+            var type=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.PlayableDomain",true);
+            var p=PlayableProfile.Default;var domain=Activator.CreateInstance(type,flags,null,new object[]{p,71L},null);
+            var method=type.GetMethod("ObservedRouter",flags);
+            var geometry=new NavGeometry(16,new[]{new NavObstacle(-1,-9,1,9)},1);var profile=p.Navigation.ForUnit(.58,4,4.5);
+            var reference=new SharedFlowRouterReference(geometry,profile);SharedFlowRouter router=null;int builds=0;
+            for(int pass=0;pass<2;pass++){
+                for(int i=0;i<18;i++){
+                    router=(SharedFlowRouter)method.Invoke(domain,new object[]{PlayableOwner.Player,geometry,p.Navigation,.58,4d,4.5d});
+                    var start=new NavPoint(-10,pass*.1);var goal=new NavPoint(8,-12+i*1.4);
+                    CollectionAssert.AreEqual(reference.FindPath(start,goal),router.FindPath(start,goal),"objective "+i+" pass "+pass);
+                    Assert.LessOrEqual(router.CachedFieldCount,64);
+                }
+                if(pass==0)builds=router.RebuildCount;else Assert.AreEqual(builds,router.RebuildCount,"Moving starts must reuse all repeated objective fields.");
+            }
+            var changed=new NavGeometry(16,new[]{new NavObstacle(-1,-8,1,8)},2);
+            var invalidated=(SharedFlowRouter)method.Invoke(domain,new object[]{PlayableOwner.Player,changed,p.Navigation,.58,4d,4.5d});
+            Assert.Zero(invalidated.CachedFieldCount,"Never carry a field across geometry changes.");
+        }
         [Test] public void CrossingsPublicObjectivesKeepExactPathsWithWarmGeometryAfterFieldEviction()
         {
             var map=new ThreeCrossingsMap(new ThreeCrossingsProfileData());

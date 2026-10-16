@@ -9,7 +9,7 @@ using Spacewars.Runtime;
 namespace Spacewars.Tests.EditMode {
 public sealed class WorldCaptureEncodingTests {
 // Independent original envelope recipe: freeze byte ordering and section digests.
-static byte[] Original(PlayableWorldState s){
+internal static byte[] Original(PlayableWorldState s){
 byte[] payload;
 using(var m=new MemoryStream()){
 using(var w=new BinaryWriter(m,Encoding.UTF8,true)){

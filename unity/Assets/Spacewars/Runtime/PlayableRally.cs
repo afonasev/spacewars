@@ -17,7 +17,7 @@ namespace Spacewars.Runtime
         private sealed class RallyWork
         {
             public PlayableRallyIntentState Intent; public int Kind,Candidate;
-            public NavGeometry Geometry; public NavigationRequest Request;
+            public NavGeometry Geometry; public long RequestSequence;
             public NavPoint Target=>new NavPoint(Intent.TargetX,Intent.TargetZ);
         }
         private readonly AuthoritySlotMap<int,RallyWork> rallyWork=new AuthoritySlotMap<int,RallyWork>();
@@ -54,7 +54,7 @@ namespace Spacewars.Runtime
         internal void CancelAllRally(){foreach(var row in rallyWork.ToArray())FinishRally(row.Key,row.Value,PlayableCommandStatus.Cancelled,"Runtime stopped.");}
         internal void SetRallyPaused(bool paused)
         {
-            if(paused&&!rallyPaused)foreach(var row in rallyWork){navigation.CancelProbe(row.Key);row.Value.Request=null;row.Value.Geometry=null;row.Value.Kind=0;row.Value.Candidate=0;}
+            if(paused&&!rallyPaused)foreach(var row in rallyWork){navigation.CancelProbe(row.Key);row.Value.RequestSequence=0;row.Value.Geometry=null;row.Value.Kind=0;row.Value.Candidate=0;}
             rallyPaused=paused;
         }
         private static bool CompleteRallyRoute(NavigationRequest request,NavPoint[] route)
@@ -67,26 +67,41 @@ namespace Spacewars.Runtime
             foreach(var point in route){if(!request.Geometry.SegmentFree(previous,point,request.Profile.Radius))return false;previous=point;}
             return request.Geometry.SegmentFree(previous,request.Goal,request.Profile.Radius);
         }
+        // Consume owned facades within the existing transport read boundary.
+        // Rally progression keeps only values after receipt retirement.
+        private readonly struct RallyRouteResult
+        {
+            internal readonly long Session,Request,Order;internal readonly int Entity;
+            internal readonly NavSolveStatus Status;internal readonly bool Complete;
+            internal RallyRouteResult(NavigationAnswer answer)
+            {var request=answer.Request;Session=request.Session;Request=request.Request;Order=request.Order;Entity=request.Entity;Status=answer.Status;Complete=answer.Status==NavSolveStatus.Ready&&CompleteRallyRoute(request,answer.ReadOnlyRouteBacking);}
+        }
+        private bool TryTakeRallyResult(out RallyRouteResult result)
+        {
+            RallyRouteResult value=default;bool taken=false;
+            navigation.RunHostStep(()=>{if(navigation.TryProbeAnswer(out var answer)){value=new RallyRouteResult(answer);taken=true;}});
+            result=value;return taken;
+        }
         private void AdvanceRally()
         {
             if(rallyPaused)return;
-            var answers=new Dictionary<NavigationRequest,NavigationAnswer>();
-            while(navigation.TryProbeAnswer(out var answer))answers[answer.Request]=answer;
+            var answers=new Dictionary<long,RallyRouteResult>();
+            while(TryTakeRallyResult(out var answer))answers[answer.Request]=answer;
             foreach(var row in rallyWork.OrderBy(r=>r.Key).ToArray())
             {
                 int id=row.Key;var work=row.Value;var b=RallyProducer(id,work.Intent.Owner);
                 if(b==null||b.Health<=0||Outcome!=PlayableMatchOutcome.Playing||work.Intent.Generation!=navigation.Generation){FinishRally(id,work,PlayableCommandStatus.Cancelled,"Producer no longer live/ready/owned.");continue;}
                 if(!ReferenceEquals(work.Geometry,Geometry)){
-                    navigation.CancelProbe(id);work.Geometry=Geometry;work.Request=null;work.Kind=0;work.Candidate=0;
+                    navigation.CancelProbe(id);work.Geometry=Geometry;work.RequestSequence=0;work.Kind=0;work.Candidate=0;
                 }
-                if(work.Request!=null){
-                    if(!answers.TryGetValue(work.Request,out var answer))continue;
+                if(work.RequestSequence!=0){
+                    if(!answers.TryGetValue(work.RequestSequence,out var answer)||answer.Session!=navigation.Generation||answer.Entity!=-id||answer.Order!=work.Intent.Sequence)continue;
                     if(answer.Status==NavSolveStatus.CapacityExceeded){FinishRally(id,work,PlayableCommandStatus.Overflow,"Route capacity exceeded.");continue;}
                     if(answer.Status==NavSolveStatus.InvalidEndpoint){FinishRally(id,work,PlayableCommandStatus.InvalidTarget,"Invalid rally route endpoint.");continue;}
-                    if(answer.Status==NavSolveStatus.Stale){work.Request=null;continue;}
-                    if(answer.Status==NavSolveStatus.Ready&&CompleteRallyRoute(work.Request,answer.CopyRoute())){work.Kind++;work.Candidate=0;}
+                    if(answer.Status==NavSolveStatus.Stale){work.RequestSequence=0;continue;}
+                    if(answer.Status==NavSolveStatus.Ready&&answer.Complete){work.Kind++;work.Candidate=0;}
                     else work.Candidate++;
-                    work.Request=null;
+                    work.RequestSequence=0;
                 }
                 if(work.Kind==RallyKinds.Length){b.Rally=work.Target;b.HasRally=true;FinishRally(id,work,PlayableCommandStatus.Applied,"Rally updated.");continue;}
                 var kind=RallyKinds[work.Kind];double radius=PlayableUnitRules.Radius(profile,kind);
@@ -99,7 +114,7 @@ namespace Spacewars.Runtime
                 // Bodies/HOLD are temporary occupancy, never topology obstacles.
                 while(work.Candidate<exits.Length&&!Geometry.IsFree(exits[work.Candidate],radius))work.Candidate++;
                 if(work.Candidate==exits.Length){FinishRally(id,work,PlayableCommandStatus.InvalidTarget,"Unreachable rally point.");continue;}
-                work.Request=navigation.Probe(id,work.Intent.Sequence,profile.Navigation.ForUnit(radius,PlayableUnitRules.Speed(profile,kind,false),PlayableUnitRules.Turn(profile,kind)),exits[work.Candidate],work.Target);
+                work.RequestSequence=navigation.Probe(id,work.Intent.Sequence,profile.Navigation.ForUnit(radius,PlayableUnitRules.Speed(profile,kind,false),PlayableUnitRules.Turn(profile,kind)),exits[work.Candidate],work.Target)?.Request??0;
             }
         }
     }

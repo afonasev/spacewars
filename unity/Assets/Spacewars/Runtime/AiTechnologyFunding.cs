@@ -77,6 +77,8 @@ namespace Spacewars.Runtime
         private static bool PaidScience(Memo m,AiBudgetLedger b)=>b.Capture().Paid.Any(e=>ScienceEntry(m,e));
         public PlayableResearchKind? Preferred(AiDecisionArbiter a)=>Load(a)?.Branch;
         public bool HasHold(AiBudgetLedger b)=>b.HasReservationPurpose(Purpose);
+        internal bool HasAcceptedScience(AiBudgetLedger b,AiDecisionArbiter a)
+        {var m=Load(a);return m!=null&&!m.Expired&&AcceptedScience(m,b);}
         private static PlayableBuildingSnapshot Center(Memo m,PlayableAiObservation o)=>o.Buildings.FirstOrDefault(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.SiteId==m.Site&&b.SlotId==m.Slot&&b.ParentId==m.Parent&&(b.Health>0||b.Phase==ConstructionPhase.Pending||b.Phase==ConstructionPhase.Constructing&&b.Progress==0)&&b.PrivateState?.Lifecycle?.Selling!=true&&(m.Center==0||b.Id==m.Center));
         private PlayableAiAction Desired(Memo m,PlayableAiObservation o,PlayableProfile p)=>new PlayableAiAction(1,owner,p.ProfileId,p.Revision,generation,o.SnapshotSequence,
             m.Phase==Stage.Research?PlayableCommandKind.QueueResearch:PlayableCommandKind.BuildAt,m.Phase==Stage.Research?new[]{m.Center}:Array.Empty<int>(),

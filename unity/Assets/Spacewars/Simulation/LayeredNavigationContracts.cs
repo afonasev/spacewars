@@ -26,6 +26,16 @@ namespace Spacewars.Simulation
                 using (var hash = SHA256.Create()) return BitConverter.ToString(hash.ComputeHash(stream.ToArray())).Replace("-", "").ToLowerInvariant();
             }
         }
+        internal static string DigestAdmitted(Action<BinaryWriter> write,long wireBytes,Func<long,bool> reserve)
+        {using(var scratch=reserve?.Target is INavStorageAllocator?NavStorageScratch.Reserve(reserve,DigestScratchBytes(wireBytes)):null)return Digest(write);}
+        internal static long StringWireBytes(string value)
+        {int bytes=Encoding.UTF8.GetByteCount(value);int prefix=1;for(uint n=(uint)bytes;n>=128;n>>=7)prefix++;return (long)bytes+prefix;}
+        internal static long LocationWireBytes(NavLocation location)=>checked(16L+StringWireBytes(location.SurfaceId));
+        // Digest uses growing MemoryStream backing arrays, a ToArray copy and
+        // UTF8 encoding temporaries. All resize generations fit below 2*final
+        // power-of-two capacity; string bytes fit below the serialized length.
+        internal static long DigestScratchBytes(long wireBytes)
+        {if(wireBytes<0)throw new ArgumentOutOfRangeException(nameof(wireBytes));long capacity=256;while(capacity<wireBytes)capacity=checked(capacity*2);return checked(4096L+2L*capacity+2L*wireBytes);}
         internal static void Location(BinaryWriter writer, NavLocation location)
         { Text(location.SurfaceId); writer.Write(location.SurfaceId); Point(writer, location.Position); }
         internal static void Point(BinaryWriter writer, NavPoint point)
@@ -34,7 +44,7 @@ namespace Spacewars.Simulation
         { writer.Write(polygon.Vertices.Count); foreach (var point in polygon.Vertices) Point(writer, point); }
     }
 
-    public sealed class NavClearanceProfile
+    public sealed partial class NavClearanceProfile
     {
         public NavClearanceProfile(string id, int revision, string mobilityClass, int mobilityRevision, double radius)
         { Id = NavContract.Text(id); Revision = NavContract.Revision(revision); MobilityClass = NavContract.Text(mobilityClass);
@@ -47,7 +57,7 @@ namespace Spacewars.Simulation
 
     // Physical distance weights and portal traversal costs are authored data,
     // never inferred from display IDs or installed process hash codes.
-    public sealed class NavGraphProfile
+    public sealed partial class NavGraphProfile
     {
         public NavGraphProfile(string exactProfileBinding, string costId, int costRevision, double gridCell)
         { ExactProfileBinding = NavContract.Sha256(exactProfileBinding); CostId = NavContract.Text(costId); CostRevision = NavContract.Revision(costRevision); GridCell = NavContract.Number(gridCell, true); }
@@ -55,12 +65,18 @@ namespace Spacewars.Simulation
         internal void Write(BinaryWriter w) { w.Write(ExactProfileBinding); w.Write(CostId); w.Write(CostRevision); w.Write(GridCell); }
     }
 
-    public sealed class NavGraphBinding : IEquatable<NavGraphBinding>
+    public sealed partial class NavGraphBinding : IEquatable<NavGraphBinding>
     {
         internal NavGraphBinding(string providerBinding, NavClearanceProfile clearance, NavGraphProfile profile)
         {
             ProviderBinding = providerBinding; Clearance = clearance; Profile = profile;
             StableKey = NavContract.Digest(w => { w.Write("layered-graph-v1"); w.Write(providerBinding); clearance.Write(w); profile.Write(w); });
+        }
+        internal static NavGraphBinding CreateAdmitted(ILayeredNavigationProvider provider,NavClearanceProfile clearance,NavGraphProfile profile,Func<long,bool> reserve)
+        {
+            if(reserve?.Target is INavStorageReservation reservation)return CreatePhysical(provider,clearance,profile,reservation);
+            if(reserve?.Target is INavStorageAllocator allocator){using(var adapter=NavStorageScratch.Reserve(reserve,64))return CreatePhysical(provider,clearance,profile,new NavStorageReservation(reserve,allocator));}
+            return new NavGraphBinding(provider.Binding,clearance,profile);
         }
         public string ProviderBinding { get; } public NavClearanceProfile Clearance { get; } public NavGraphProfile Profile { get; } public string StableKey { get; }
         public bool Equals(NavGraphBinding other) => other != null && StableKey == other.StableKey;
@@ -70,17 +86,18 @@ namespace Spacewars.Simulation
     }
 
     public enum NavTerminalKind { Region, Portal }
-    public sealed class NavTerminalRegion
+    public sealed partial class NavTerminalRegion
     {
+        private NavLocation[] candidatesArray;
         public NavTerminalRegion(string id, int revision, NavLocation requested, IEnumerable<NavLocation> candidates)
         {
             Id = NavContract.Text(id); Revision = NavContract.Revision(revision); NavContract.Text(requested.SurfaceId); Requested = requested;
             var copy = (candidates ?? throw new ArgumentNullException(nameof(candidates))).Take(65).ToArray();
             if (copy.Length == 0 || copy.Length > 64 || copy.Any(c => c.SurfaceId != requested.SurfaceId) || copy.Distinct().Count() != copy.Length) throw new ArgumentException("Invalid finite terminal region.");
-            Candidates = Array.AsReadOnly(copy);
+            candidatesArray=copy;Candidates = Array.AsReadOnly(copy);
             StableKey = NavContract.Digest(w => { w.Write(Id); w.Write(Revision); NavContract.Location(w, Requested); w.Write(copy.Length); foreach (var c in copy) NavContract.Location(w, c); });
         }
-        public string Id { get; } public int Revision { get; } public NavLocation Requested { get; } public IReadOnlyList<NavLocation> Candidates { get; } public string StableKey { get; }
+        public string Id { get; } public int Revision { get; } public NavLocation Requested { get; private set; } public IReadOnlyList<NavLocation> Candidates { get; private set; } public string StableKey { get; }
     }
 
     // No authority group/member fields: independent commands can reuse this
@@ -103,7 +120,7 @@ namespace Spacewars.Simulation
     // membership revision can invalidate an unaffected member subscription.
     // Future authority adapters must compare every field before publication.
     public enum NavRouteProvenance { CommandMember, LegacySingleton, ProducerProbe }
-    public sealed class NavRouteSubscription
+    public sealed partial class NavRouteSubscription
     {
         public NavRouteSubscription(long worldGeneration, long groupId, long rootOrderRevision, long commandSequence,
             long issuedTick, long activationRevision, long entityId, long incarnation, long memberOrderRevision,
@@ -134,6 +151,6 @@ namespace Spacewars.Simulation
         public NavRouteProvenance Provenance { get; }
         public long WorldGeneration { get; } public long GroupId { get; } public long RootOrderRevision { get; } public long CommandSequence { get; } public long IssuedTick { get; }
         public long ActivationRevision { get; } public long EntityId { get; } public long Incarnation { get; } public long MemberOrderRevision { get; } public long MobilityRevision { get; } public long RequestSequence { get; }
-        public NavLocation Origin { get; } public NavLocation AssignedEndpoint { get; } public string HoldBinding { get; } public string StableKey { get; }
+        public NavLocation Origin { get; private set; } public NavLocation AssignedEndpoint { get; private set; } public string HoldBinding { get; } public string StableKey { get; }
     }
 }

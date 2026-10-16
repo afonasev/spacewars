@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace Spacewars.Simulation
 {
-    public sealed class NavGraphCompileLimits
+    public sealed partial class NavGraphCompileLimits
     {
         public NavGraphCompileLimits(int maxSamples, int maxNodes, int maxArcs)
         {
@@ -14,24 +14,37 @@ namespace Spacewars.Simulation
         }
         public int MaxSamples { get; } public int MaxNodes { get; } public int MaxArcs { get; }
     }
-    public readonly struct NavGraphNode
+    public readonly struct NavGraphNode : IEquatable<NavGraphNode>
     {
         internal NavGraphNode(int id, NavLocation location, int component) { Id = id; Location = location; Component = component; }
         public int Id { get; } public NavLocation Location { get; }
         // Weak connected component of THIS clearance graph. Equality is not
         // proof of directed reachability through a one-way portal.
         public int Component { get; }
+        public bool Equals(NavGraphNode other)=>Id==other.Id&&Component==other.Component&&Location.Equals(other.Location);
+        public override bool Equals(object other)=>other is NavGraphNode node&&Equals(node);
+        public override int GetHashCode()=>Id^Component^Location.GetHashCode();
     }
     public enum NavGraphArcKind { Surface, Portal }
-    public readonly struct NavGraphArc
+    public readonly struct NavGraphArc : IEquatable<NavGraphArc>
     {
         internal NavGraphArc(int from, int to, double cost, NavGraphArcKind kind, string portalId,
-            IReadOnlyList<NavTypedLeg> trace = null)
-        { From = from; To = to; Cost = NavContract.Number(cost); Kind = kind; PortalId = portalId; Trace = trace; }
+            IReadOnlyList<NavTypedLeg> trace = null, NavNameReference nameReference = default)
+        { From = from; To = to; Cost = NavContract.Number(cost); Kind = kind; PortalId = portalId; Trace = trace; NameReference = nameReference; }
+        internal NavNameReference NameReference { get; }
+        internal NavGraphArc Detached()=>new NavGraphArc(From,To,Cost,Kind,PortalId,Trace==null?null:Array.AsReadOnly(Trace.Select(leg=>leg.Detached()).ToArray()));
+        public bool Equals(NavGraphArc other)=>From==other.From&&To==other.To&&Cost.Equals(other.Cost)&&Kind==other.Kind&&PortalId==other.PortalId&&Equals(Trace,other.Trace);
+        public override bool Equals(object other)=>other is NavGraphArc arc&&Equals(arc);
+        public override int GetHashCode()=>From^To^Cost.GetHashCode()^(int)Kind^(PortalId?.GetHashCode()??0)^(Trace?.GetHashCode()??0);
         public int From { get; } public int To { get; } public double Cost { get; } public NavGraphArcKind Kind { get; } public string PortalId { get; }
         // Non-null only for a physically qualified partition edge. Its surface
         // and zero-cost seam legs are retained without inventing a portal.
         public IReadOnlyList<NavTypedLeg> Trace { get; }
+    }
+    internal sealed class NavGraphArcComparer : IComparer<NavGraphArc>
+    {
+        internal static readonly NavGraphArcComparer Instance=new NavGraphArcComparer();
+        public int Compare(NavGraphArc a,NavGraphArc b){int c=a.From.CompareTo(b.From);if(c!=0)return c;c=a.To.CompareTo(b.To);if(c!=0)return c;c=a.Kind.CompareTo(b.Kind);return c!=0?c:StringComparer.Ordinal.Compare(a.PortalId,b.PortalId);}
     }
     public sealed class NavGraphAttachment
     {
@@ -41,20 +54,25 @@ namespace Spacewars.Simulation
 
     // Derived immutable data only. Not authority state, a route solver, a cache,
     // or an every-tick Facts field. Compilation work is not budgeted in A2-a.
-    public sealed class LayeredNavigationGraph
+    public sealed partial class LayeredNavigationGraph : NavOwnedStorage
     {
         private readonly ILayeredNavigationProvider provider;
+        private NavOwnedStorage ownedProvider,ownedBinding,ownedClearance,ownedProfile;
+        private void RetainProvider(NavGraphBinding binding){if(provider is INavStorageFacade facade&&facade.StorageRoot!=null){ownedProvider=facade.StorageRoot;if(IsRegistered)RequireEdge(ownedProvider);ownedProvider.Retain();}if(binding.StorageRoot!=null){if(IsRegistered)RequireEdge(binding.StorageRoot);binding.StorageRoot.Retain();ownedBinding=binding.StorageRoot;}else{if(IsRegistered)throw new ArgumentException("Owned graph requires owned binding.");NavMetadataOwnership.RetainDistinct(this,binding.Clearance.MetadataOwner,binding.Profile.MetadataOwner,null,out ownedClearance,out ownedProfile,out _);}}
+        internal ILayeredNavigationProvider PhysicalProvider=>provider;
         private readonly IReadOnlyList<NavGraphArc>[] outgoing, incoming;
         private readonly IReadOnlyDictionary<int, IReadOnlyList<NavGraphArc>> sparseOutgoing, sparseIncoming;
-        private readonly Dictionary<string, double> surfaceCosts;
+        private readonly IReadOnlyDictionary<NavNameKey,double> surfaceCosts;
         private readonly IReadOnlyList<NavLocation> partitionLocations;
         private readonly IReadOnlyList<int> partitionComponents, partitionArcSlots;
         private readonly NavPackedSlots partitionNeighbors, partitionIncoming, partitionTraceSlots;
         private readonly IReadOnlyList<IReadOnlyList<NavTypedLeg>> partitionTraces;
-        internal LayeredNavigationGraph(ILayeredNavigationProvider provider, NavGraphBinding binding, NavGraphNode[] nodes, NavGraphArc[] arcs, NavConnectorResult[] connectors)
+        internal LayeredNavigationGraph(ILayeredNavigationProvider provider, NavGraphBinding binding, NavGraphNode[] nodes, NavGraphArc[] arcs, NavConnectorResult[] connectors):base(LayoutBase)
         {
-            this.provider = provider; Binding = binding; Nodes = Array.AsReadOnly(nodes); Arcs = Array.AsReadOnly(arcs); PortalQualifications = Array.AsReadOnly(connectors);
-            surfaceCosts = provider.Surfaces.ToDictionary(s => s.Id, s => s.DistanceCost, StringComparer.Ordinal);
+            using(var allocation=new NavStorageAllocation(null)){allocation.Register(this);Retain();}
+            this.provider = provider;RetainProvider(binding); Binding = binding; Nodes = Array.AsReadOnly(nodes); Arcs = Array.AsReadOnly(arcs); PortalQualifications = Array.AsReadOnly(connectors);
+            SupportsPackedField=PackedCapability(provider,Nodes);
+            surfaceCosts = provider.Surfaces.ToDictionary(s => NavNameKey.Surface(s), s => s.DistanceCost);
             var outLists = Enumerable.Range(0, nodes.Length).Select(_ => new List<NavGraphArc>()).ToArray();
             var inLists = Enumerable.Range(0, nodes.Length).Select(_ => new List<NavGraphArc>()).ToArray();
             foreach (var arc in arcs) { outLists[arc.From].Add(arc); inLists[arc.To].Add(arc); }
@@ -67,32 +85,65 @@ namespace Spacewars.Simulation
             IReadOnlyList<NavGraphNode> nodes, IReadOnlyList<NavGraphArc> arcs, IReadOnlyList<NavConnectorResult> connectors,
             IReadOnlyDictionary<int, IReadOnlyList<NavGraphArc>> preparedOutgoing,
             IReadOnlyDictionary<int, IReadOnlyList<NavGraphArc>> preparedIncoming,
-            Dictionary<string, double> preparedSurfaceCosts)
+            IReadOnlyDictionary<NavNameKey,double> preparedSurfaceCosts,Func<long,bool> reserve=null,bool alreadyReserved=false):base(LayoutBase)
         {
-            this.provider = provider; Binding = binding;
+            using(var allocation=new NavStorageAllocation(reserve)){
+                if(!alreadyReserved)allocation.Reserve(LayoutBase);allocation.Register(this);
+
+            this.provider = provider;RetainProvider(binding); Binding = binding;
             Nodes = nodes; Arcs = arcs; PortalQualifications = connectors;
             sparseOutgoing = preparedOutgoing; sparseIncoming = preparedIncoming;
             surfaceCosts = preparedSurfaceCosts;
+            OwnRoot(nodes,0);OwnRoot(arcs,1);OwnRoot(connectors,2);OwnRoot(preparedOutgoing,3);OwnRoot(preparedIncoming,4);OwnRoot(preparedSurfaceCosts,5);
+            SupportsPackedField=PackedCapability(provider,Nodes);
+                        Retain();
+            }
         }
         internal LayeredNavigationGraph(PartitionNavigationProvider provider, NavGraphBinding binding,
             IReadOnlyList<NavLocation> locations, IReadOnlyList<int> components, NavPackedSlots neighbors,
             NavPackedSlots incomingSlots, IReadOnlyList<int> arcSlots, NavPackedSlots traceSlots,
-            IReadOnlyList<IReadOnlyList<NavTypedLeg>> traces, long traceBytes)
+            IReadOnlyList<IReadOnlyList<NavTypedLeg>> traces,long traceBytes,Func<long,bool> reserve=null,bool alreadyReserved=false):base(LayoutBase)
         {
-            this.provider = provider; Binding = binding;
+            using(var allocation=new NavStorageAllocation(reserve)){
+                if(!alreadyReserved)allocation.Reserve(LayoutBase);allocation.Register(this);
+
+            this.provider = provider;RetainProvider(binding); Binding = binding;
             partitionLocations = locations; partitionComponents = components;
             partitionNeighbors = neighbors; partitionIncoming = incomingSlots;
             partitionArcSlots = arcSlots; partitionTraceSlots = traceSlots; partitionTraces = traces;
+            OwnRoot(locations,6);OwnRoot(components,7);OwnRoot(neighbors,8);OwnRoot(incomingSlots,9);OwnRoot(arcSlots,10);OwnRoot(traceSlots,11);OwnRoot(traces,12);
             Nodes = new PartitionNodes(locations, components);
             Arcs = new PartitionArcs(this);
             PortalQualifications = Array.AsReadOnly(Array.Empty<NavConnectorResult>());
-            surfaceCosts = provider.Surfaces.ToDictionary(s => s.Id, s => s.DistanceCost, StringComparer.Ordinal);
+            SupportsPackedField=PackedCapability(provider,Nodes);
+            surfaceCosts = null;
             EstimatedRetainedBytes = 4096L + 32L * ((NavPagedList<NavLocation>)locations).Capacity +
                 4L * ((NavPagedList<int>)components).Capacity +
                 neighbors.EstimatedRetainedBytes + incomingSlots.EstimatedRetainedBytes +
                 traceSlots.EstimatedRetainedBytes + 4L * ((NavPagedList<int>)arcSlots).Capacity +
-                8L * ((NavPagedList<IReadOnlyList<NavTypedLeg>>)traces).Capacity + traceBytes;
+                8L * ((NavPagedList<IReadOnlyList<NavTypedLeg>>)traces).Capacity + traceBytes +
+                ((NavPagedList<NavLocation>)locations).DirectoryRetainedBytes+((NavPagedList<int>)components).DirectoryRetainedBytes+
+                ((NavPagedList<int>)arcSlots).DirectoryRetainedBytes+((NavPagedList<IReadOnlyList<NavTypedLeg>>)traces).DirectoryRetainedBytes;
+                        Retain();
+            }
         }
+        internal static LayeredNavigationGraph FromPrepared(ILayeredNavigationProvider provider,NavGraphBinding binding,IReadOnlyList<NavGraphNode> nodes,IReadOnlyList<NavGraphArc> arcs,IReadOnlyList<NavConnectorResult> connectors,IReadOnlyDictionary<int,IReadOnlyList<NavGraphArc>> outgoing,IReadOnlyDictionary<int,IReadOnlyList<NavGraphArc>> incoming,IReadOnlyDictionary<NavNameKey,double> surfaceCosts,Func<long,bool> reserve=null)
+        {if(reserve?.Target is INavStorageAllocator)RequireSparseInputs(reserve.Target,provider,binding,nodes,arcs,connectors,outgoing,incoming,surfaceCosts);using(var allocation=new NavStorageAllocation(reserve)){allocation.Reserve(LayoutBase);return new LayeredNavigationGraph(provider,binding,nodes,arcs,connectors,outgoing,incoming,surfaceCosts,reserve,true);}}
+        internal static LayeredNavigationGraph FromPartition(PartitionNavigationProvider provider,NavGraphBinding binding,IReadOnlyList<NavLocation> locations,IReadOnlyList<int> components,NavPackedSlots neighbors,NavPackedSlots incoming,IReadOnlyList<int> arcs,NavPackedSlots traceSlots,IReadOnlyList<IReadOnlyList<NavTypedLeg>> traces,long traceBytes,Func<long,bool> reserve=null)
+        {if(reserve?.Target is INavStorageAllocator)RequirePackedInputs(reserve.Target,provider,binding,locations,components,neighbors,incoming,arcs,traceSlots,traces);using(var allocation=new NavStorageAllocation(reserve)){allocation.Reserve(LayoutBase);return new LayeredNavigationGraph(provider,binding,locations,components,neighbors,incoming,arcs,traceSlots,traces,traceBytes,reserve,true);}}
+        private bool released;private int ownedEdges;
+        private void OwnRoot(object root,int bit){if(root is NavOwnedStorage storage){if(IsRegistered)RequireEdge(storage);storage.Retain();ownedEdges|=1<<bit;}}
+        private static void ReleaseRoot(object root){if(root is NavOwnedStorage storage)storage.Release();}
+        internal void ReleaseStorage(){if(released)return;released=true;Release();}
+        internal override void ReleaseOwner()=>ReleaseStorage();
+        protected override void ReleaseEdges(){ownedBinding?.Release();ownedClearance?.Release();ownedProfile?.Release();ownedProvider?.Release();if((ownedEdges&(1<<0))!=0)ReleaseRoot(Nodes);if((ownedEdges&(1<<1))!=0)ReleaseRoot(Arcs);if((ownedEdges&(1<<2))!=0)ReleaseRoot(PortalQualifications);if((ownedEdges&(1<<3))!=0)ReleaseRoot(sparseOutgoing);if((ownedEdges&(1<<4))!=0)ReleaseRoot(sparseIncoming);if((ownedEdges&(1<<5))!=0)ReleaseRoot(surfaceCosts);if((ownedEdges&(1<<6))!=0)ReleaseRoot(partitionLocations);if((ownedEdges&(1<<7))!=0)ReleaseRoot(partitionComponents);if((ownedEdges&(1<<8))!=0)ReleaseRoot(partitionNeighbors);if((ownedEdges&(1<<9))!=0)ReleaseRoot(partitionIncoming);if((ownedEdges&(1<<10))!=0)ReleaseRoot(partitionArcSlots);if((ownedEdges&(1<<11))!=0)ReleaseRoot(partitionTraceSlots);if((ownedEdges&(1<<12))!=0)ReleaseRoot(partitionTraces);ownedEdges=0;}
+        internal NavOwnedStorage PhysicalRoot=>this;
+        internal bool SupportsPackedField {get;}
+        // Both internal flat constructors receive the compiler's dense IDs: each
+        // node is materialized with Id=nodes.Count. No additional publication scan.
+        private static bool PackedCapability(ILayeredNavigationProvider provider,IReadOnlyList<NavGraphNode> nodes)=>
+            provider is PartitionNavigationProvider||provider is LayeredNavigationProvider flat&&flat.Id=="flat"&&flat.SemanticsVersion==1&&
+            flat.Surfaces.Count==1&&flat.Surfaces[0].Id==NavLocation.FlatSurface&&flat.Portals.Count==0;
         public long EstimatedRetainedBytes { get; }
         private sealed class PartitionNodes : IReadOnlyList<NavGraphNode>
         {
@@ -146,14 +197,26 @@ namespace Spacewars.Simulation
         public NavGraphBinding Binding { get; } public IReadOnlyList<NavGraphNode> Nodes { get; } public IReadOnlyList<NavGraphArc> Arcs { get; } public IReadOnlyList<NavConnectorResult> PortalQualifications { get; }
         public bool IsValid(NavLocation location) => provider.IsValid(location, Binding.Clearance);
         public bool CanSweep(NavLocation from, NavLocation to) => provider.CanSweep(from, to, Binding.Clearance);
-        public double SurfaceCost(string surfaceId) => surfaceCosts[surfaceId];
+        public double SurfaceCost(string surfaceId) => provider is PartitionNavigationProvider partition?partition.SurfaceCost(surfaceId):surfaceCosts[new NavNameKey(surfaceId)];
         public IReadOnlyList<NavGraphArc> Outgoing(int nodeId)
         { Node(nodeId); return partitionNeighbors != null ? new PartitionArcView(this, nodeId, false) : outgoing != null ? outgoing[nodeId] : sparseOutgoing.TryGetValue(nodeId, out var arcs) ? arcs : Array.Empty<NavGraphArc>(); }
+        internal NavGraphArc ResolveCheckpointArc(NavGraphArc saved)
+        {
+            if(saved.From<0||saved.From>=Nodes.Count)throw new ArgumentException("Invalid successor node.");
+            foreach(var arc in Outgoing(saved.From)){
+                if(arc.To!=saved.To||arc.Cost!=saved.Cost||arc.Kind!=saved.Kind||arc.PortalId!=saved.PortalId||(arc.Trace==null)!=(saved.Trace==null))continue;
+                if(arc.Trace!=null){if(arc.Trace.Count!=saved.Trace.Count)continue;bool same=true;for(int n=0;n<arc.Trace.Count;n++){var a=arc.Trace[n];var b=saved.Trace[n];if(b==null||!a.From.Equals(b.From)||!a.To.Equals(b.To)||a.Cost!=b.Cost||a.Kind!=b.Kind||a.PortalId!=b.PortalId){same=false;break;}}if(!same)continue;}
+                return arc;
+            }
+            throw new ArgumentException("Successor is absent from the exact graph.");
+        }
         public IReadOnlyList<NavGraphArc> Incoming(int nodeId)
         { Node(nodeId); return partitionNeighbors != null ? new PartitionArcView(this, nodeId, true) : incoming != null ? incoming[nodeId] : sparseIncoming.TryGetValue(nodeId, out var arcs) ? arcs : Array.Empty<NavGraphArc>(); }
         // One node probe is one attachment work unit. Callers own the cursor.
+        internal Action BeforeAttachmentProbe;
         public bool TryAttach(NavLocation exactLocation, int nodeId, out NavGraphAttachment attachment)
         {
+            BeforeAttachmentProbe?.Invoke();
             var node = Node(nodeId); attachment = null;
             if (!CanSweep(exactLocation, node.Location)) return false;
             attachment = new NavGraphAttachment(exactLocation, nodeId,

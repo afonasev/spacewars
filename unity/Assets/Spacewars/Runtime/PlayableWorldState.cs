@@ -8,7 +8,7 @@ namespace Spacewars.Runtime
 {
     // Primitive envelope; each section has an explicit positional binary schema in
     // WorldWire/PlayableWorldRecords. There are no serialized engine objects/jobs.
-    public sealed class PlayableWorldState
+    public sealed class PlayableWorldState : IDisposable
     {
         public const int CurrentVersion=9;
         public int Version=CurrentVersion,Seed;
@@ -16,44 +16,119 @@ namespace Spacewars.Runtime
         public string SourceIdentity;
         public byte[] Binding,Domain,Navigation,Participants,AiAuthority=System.Array.Empty<byte>(),RuntimeTransport=System.Array.Empty<byte>();
         public byte[][] Vision;
+        internal NavigationSessionState CaptureNavigation;
+        internal NavigationCaptureBytes CaptureDomain,CaptureNavigationBytes,CaptureAi,CaptureTransport,CaptureBinding,CaptureParticipants;
+        internal NavigationCaptureVision CaptureVision;
+        private NavigationRetentionBudget CaptureBudget=>CaptureNavigation?.CaptureBudget;
+        internal void SetAiCapture(Action<BinaryWriter> write)
+        {var output=WorldWire.PackOwned(write,CaptureBudget);var old=CaptureAi;CaptureAi=output;AiAuthority=output.Bytes;old?.Dispose();}
+        internal void SetTransportCapture(Action<BinaryWriter> write)
+        {var output=WorldWire.PackOwned(write,CaptureBudget);var old=CaptureTransport;CaptureTransport=output;RuntimeTransport=output.Bytes;old?.Dispose();}
+        public void Dispose()
+        {
+            if(CaptureDomain!=null)Domain=null;if(CaptureNavigationBytes!=null)Navigation=null;
+            if(CaptureAi!=null)AiAuthority=null;if(CaptureTransport!=null)RuntimeTransport=null;
+            CaptureDomain?.Dispose();CaptureDomain=null;CaptureNavigationBytes?.Dispose();CaptureNavigationBytes=null;
+            CaptureAi?.Dispose();CaptureAi=null;CaptureTransport?.Dispose();CaptureTransport=null;
+            if(CaptureBinding!=null)Binding=null;if(CaptureParticipants!=null)Participants=null;if(CaptureVision!=null)Vision=null;
+            CaptureBinding?.Dispose();CaptureBinding=null;CaptureParticipants?.Dispose();CaptureParticipants=null;CaptureVision?.Dispose();CaptureVision=null;
+            CaptureNavigation?.Dispose();CaptureNavigation=null;
+        }
+        private void WriteEnvelope(BinaryWriter w)
+        {
+            w.Write(0x53575731);w.Write(Version);w.Write(Seed);w.Write(Generation);w.Write(Tick);String(w,SourceIdentity);
+            Bytes(w,Binding);Bytes(w,Participants??System.Array.Empty<byte>());Bytes(w,Domain);Bytes(w,Navigation);Bytes(w,AiAuthority);Bytes(w,RuntimeTransport);Array(w,Vision,x=>Bytes(w,x));
+        }
         public byte[] Encode()
         {
-            var payload=WorldWire.Pack(w=>{
-                w.Write(0x53575731);w.Write(Version);w.Write(Seed);w.Write(Generation);w.Write(Tick);String(w,SourceIdentity);
-                Bytes(w,Binding);Bytes(w,Participants??System.Array.Empty<byte>());Bytes(w,Domain);Bytes(w,Navigation);Bytes(w,AiAuthority);Bytes(w,RuntimeTransport);Array(w,Vision,x=>Bytes(w,x));
-            });
-            if(payload.Length>MaxBytes-32)throw new ArgumentException("World exceeds byte limit.");
-            var result=new byte[payload.Length+32];
-            Buffer.BlockCopy(payload,0,result,0,payload.Length);
-            using(var h=SHA256.Create())Buffer.BlockCopy(h.ComputeHash(payload),0,result,payload.Length,32);
-            return result;
+            if(CaptureBudget==null){
+                var payload=WorldWire.Pack(WriteEnvelope);
+                if(payload.Length>MaxBytes-32)throw new ArgumentException("World exceeds byte limit.");
+                var result=new byte[payload.Length+32];Buffer.BlockCopy(payload,0,result,0,payload.Length);
+                using(var h=SHA256.Create())Buffer.BlockCopy(h.ComputeHash(payload),0,result,payload.Length,32);
+                return result;
+            }
+            int payloadLength=EnvelopePayloadLength();
+            using(var result=NavigationCaptureBytes.CreateOwned(checked(payloadLength+32),CaptureBudget,reservation=>{
+                var bytes=new byte[payloadLength+32];
+                // The final owner has already paid for this backing. Keep the
+                // admitted stream type so String/section SHA scratch stays paid.
+                using(var stream=new NavigationCaptureStream(reservation,bytes,payloadLength))
+                using(var writer=new BinaryWriter(stream,System.Text.Encoding.UTF8,true)){
+                    WriteEnvelope(writer);writer.Flush();
+                    if(stream.Position!=payloadLength)throw new ArgumentException("World envelope length changed during encoding.");
+                }
+                using(NavStorageScratch.Reserve(reservation,512))using(var h=SHA256.Create())
+                    Buffer.BlockCopy(h.ComputeHash(bytes,0,payloadLength),0,bytes,payloadLength,32);
+                return bytes;
+            }))return result.TransferPublic();
         }
-        public static PlayableWorldState Decode(byte[] bytes)
+        // Exact positional v9 envelope size, over already captured primitives.
+        // This is not a second serialization pass and invokes no writer callbacks.
+        private int EnvelopePayloadLength()
+        {
+            int text=SourceIdentity==null?0:System.Text.Encoding.UTF8.GetByteCount(SourceIdentity);
+            if(text>MaxBytes||Vision==null||Vision.Length>MaxItems)throw new ArgumentException("Invalid world envelope fields.");
+            long Section(byte[] value){if(value==null||value.Length>MaxBytes)throw new ArgumentException("Invalid section.");return checked(4L+value.Length+32);}
+            long length=checked(4L+4+4+8+8+4+text+
+                Section(Binding)+Section(Participants??System.Array.Empty<byte>())+Section(Domain)+Section(Navigation)+Section(AiAuthority)+Section(RuntimeTransport)+4);
+            foreach(var section in Vision)length=checked(length+Section(section));
+            if(length>MaxBytes-32)throw new ArgumentException("World exceeds byte limit.");
+            return checked((int)length);
+        }
+
+        public static PlayableWorldState Decode(byte[] bytes)=>Decode(bytes,null);
+        internal static PlayableWorldState Decode(byte[] bytes,NavigationDecodeTransaction transaction)=>Decode(bytes,transaction,null);
+        // Only private world restoration may end Navigation-section input before
+        // BODY hydration. General admitted Decode keeps every section outer-owned.
+        internal static PlayableWorldState DecodeForRestore(byte[] bytes,NavigationDecodeTransaction transaction,NavigationDecodeTransaction navigationInput)
+        {
+            if(transaction==null||navigationInput==null||!ReferenceEquals(transaction.Budget,navigationInput.Budget))throw new ArgumentException("Private Navigation input requires the outer ledger.");
+            return Decode(bytes,transaction,navigationInput);
+        }
+        private static PlayableWorldState Decode(byte[] bytes,NavigationDecodeTransaction transaction,NavigationDecodeTransaction navigationInput)
         {
             if(bytes==null||bytes.Length<32||bytes.Length>MaxBytes)throw new ArgumentException("Invalid world envelope length.");
-            var payload=bytes.Take(bytes.Length-32).ToArray();
-            using(var h=SHA256.Create())if(!h.ComputeHash(payload).SequenceEqual(bytes.Skip(bytes.Length-32)))throw new ArgumentException("World envelope digest mismatch.");
-            return WorldWire.Unpack(payload,r=>{
+            // The defensive input is needed only until digest/parsing finishes.
+            // Sections/DTOs stay owned by the original outer transaction, so the
+            // complete envelope does not overlap later BODY reconstruction.
+            using var input=transaction==null?null:new NavigationDecodeTransaction(transaction.Budget);
+            var privateBytes=input==null?(byte[])bytes.Clone():input.Array(bytes.Length,()=>(byte[])bytes.Clone());
+            int payloadLength=privateBytes.Length-32;
+            using(var h=SHA256.Create()){
+                var digest=h.ComputeHash(privateBytes,0,payloadLength);
+                for(int i=0;i<digest.Length;i++)if(digest[i]!=privateBytes[payloadLength+i])
+                    throw new ArgumentException("World envelope digest mismatch.");
+            }
+            return WorldWire.UnpackPrivate(privateBytes,0,payloadLength,r=>{
                 if(r.ReadInt32()!=0x53575731)throw new ArgumentException("Invalid world magic.");
-                var s=new PlayableWorldState{Version=r.ReadInt32(),Seed=r.ReadInt32(),Generation=r.ReadInt64(),Tick=r.ReadInt64(),SourceIdentity=String(r),Binding=Bytes(r),Participants=Bytes(r),Domain=Bytes(r),Navigation=Bytes(r),AiAuthority=Bytes(r),RuntimeTransport=Bytes(r),Vision=Array(r,()=>Bytes(r))};
+                var s=Record(r,()=>new PlayableWorldState{Version=r.ReadInt32(),Seed=r.ReadInt32(),Generation=r.ReadInt64(),Tick=r.ReadInt64(),SourceIdentity=String(r),Binding=Bytes(r),Participants=Bytes(r),Domain=Bytes(r),Navigation=Bytes(r,navigationInput),AiAuthority=Bytes(r),RuntimeTransport=Bytes(r),Vision=Array(r,()=>Bytes(r))});
                 if(s.Version!=CurrentVersion||s.Generation<1||s.Tick<0||string.IsNullOrWhiteSpace(s.SourceIdentity)||s.Vision.Length>8)throw new ArgumentException("Unsupported world envelope.");return s;
-            });
+            },transaction);
         }
         // Each section includes SHA256 to reject accidental corruption before hydration.
-        private static void Bytes(BinaryWriter w,byte[] value){if(value==null||value.Length>MaxBytes)throw new ArgumentException("Invalid section.");w.Write(value.Length);w.Write(value);using(var h=SHA256.Create())w.Write(h.ComputeHash(value));}
-        private static byte[] Bytes(BinaryReader r){int n=r.ReadInt32();if(n<0||n>MaxBytes||n>r.BaseStream.Length-r.BaseStream.Position-32)throw new ArgumentException("Invalid section size.");var b=r.ReadBytes(n);var hash=r.ReadBytes(32);using(var h=SHA256.Create())if(!h.ComputeHash(b).SequenceEqual(hash))throw new ArgumentException("World section digest mismatch.");return b;}
+        private static void Bytes(BinaryWriter w,byte[] value){if(value==null||value.Length>MaxBytes)throw new ArgumentException("Invalid section.");w.Write(value.Length);w.Write(value);
+            var reservation=(w.BaseStream as NavigationCaptureStream)?.Reservation;
+            using(reservation==null?null:NavStorageScratch.Reserve(reservation,512))using(var h=SHA256.Create())w.Write(h.ComputeHash(value));}
+        private static byte[] Bytes(BinaryReader r)=>Bytes(r,null);
+        private static byte[] Bytes(BinaryReader r,NavigationDecodeTransaction byteOwner){int n=r.ReadInt32();if(n<0||n>MaxBytes||n>r.BaseStream.Length-r.BaseStream.Position-32)throw new ArgumentException("Invalid section size.");var b=byteOwner==null?WorldWire.PrivateBytes(r,n):byteOwner.Array(n,()=>r.ReadBytes(n));var hash=WorldWire.PrivateBytes(r,32);using(var h=SHA256.Create())if(!h.ComputeHash(b).SequenceEqual(hash))throw new ArgumentException("World section digest mismatch.");return b;}
     }
     internal sealed partial class PlayableDomain
     {
         // Caller owns authority and has returned externally executing routes to the
         // mailboxes. This technical barrier does not invoke SetRallyPaused/reset.
-        internal byte[] CaptureWorldBytes(int seed,string sourceIdentity)=>CaptureWorldState(seed,sourceIdentity).Encode();
+        internal byte[] CaptureWorldBytes(int seed,string sourceIdentity)
+        {using(var state=CaptureWorldState(seed,sourceIdentity))return state.Encode();}
         // Build detached sections once; callers append their sections before final encoding.
         internal PlayableWorldState CaptureWorldState(int seed,string sourceIdentity)
         {
-            var nav=navigation.CaptureState();
-            var domain=Pack(w=>{
-                w.Write(termProfiles.Count);foreach(var entry in termProfiles.OrderBy(x=>x.Key)){w.Write(entry.Key);String(w,entry.Value.DisplayName);var data=entry.Value.CopyData();foreach(var descriptor in PlayableProfileMetadata.Fields)Number(w,descriptor.Read(data));}
+            var nav=navigation.CaptureOwnedState();
+            var state=new PlayableWorldState{CaptureNavigation=nav};
+            try{
+            state.CaptureDomain=WorldWire.PackOwned(w=>{
+                bool crowdTerms=termProfiles.Values.Any(p=>!p.Navigation.HasCrowdV1Defaults);
+                if(crowdTerms){w.Write(-1);w.Write(1);}w.Write(termProfiles.Count);
+                foreach(var entry in termProfiles.OrderBy(x=>x.Key)){w.Write(entry.Key);String(w,entry.Value.DisplayName);var data=entry.Value.CopyData();foreach(var descriptor in PlayableProfileMetadata.PreCrowdFields)Number(w,descriptor.Read(data));if(crowdTerms)foreach(var descriptor in PlayableProfileMetadata.CrowdFields)Number(w,descriptor.Read(data));}
                 w.Write(scriptedEnemyPatrol);w.Write(WinnerTeam.HasValue);if(WinnerTeam.HasValue)w.Write(WinnerTeam.Value);Array(w,eliminated.OrderBy(x=>(int)x).ToArray(),x=>w.Write((int)x));w.Write(offlineSequences.Count);foreach(var pair in offlineSequences){w.Write((int)pair.Key);w.Write(pair.Value);}w.Write(ownerCredits.Count);foreach(var pair in ownerCredits){w.Write((int)pair.Key);Number(w,pair.Value);}
                 w.Write(nextAiSequence);w.Write(nextOrderRevision);w.Write(nextId);w.Write(nextProjectile);w.Write(nextProductionSequence);w.Write(nextResearchSequence);w.Write(Tick);
                 w.Write(settledIncome.Count);foreach(var row in settledIncome.OrderBy(x=>(int)x.Key)){w.Write((int)row.Key);Number(w,row.Value);}
@@ -63,35 +138,62 @@ namespace Spacewars.Runtime
                 w.Write(sites.Count);foreach(var row in sites){var s=row.Value;w.Write(row.Key);w.Write(s.Claimant.HasValue);if(s.Claimant.HasValue)w.Write((int)s.Claimant.Value);w.Write(s.Locked.HasValue);if(s.Locked.HasValue)w.Write((int)s.Locked.Value);Number(w,s.Progress);w.Write(s.Contested);w.Write(s.CenterId);}
                 Array(w,centerDamage.Values.ToArray(),x=>WorldWire.Write(w,x));Array(w,impacts.ToArray(),x=>WorldWire.Write(w,x));
                 w.Write(rallyPaused);w.Write(rallyWork.Count);
-                foreach(var row in rallyWork){var work=row.Value;WorldWire.Write(w,work.Intent);w.Write(work.Kind);w.Write(work.Candidate);w.Write(work.Geometry!=null);if(work.Geometry!=null&& !ReferenceEquals(work.Geometry,Geometry))throw new InvalidOperationException("Rally geometry is outside current boundary.");w.Write(work.Request==null?0:work.Request.Request);}
+                foreach(var row in rallyWork){var work=row.Value;WorldWire.Write(w,work.Intent);w.Write(work.Kind);w.Write(work.Candidate);w.Write(work.Geometry!=null);if(work.Geometry!=null&& !ReferenceEquals(work.Geometry,Geometry))throw new InvalidOperationException("Rally geometry is outside current boundary.");w.Write(work.RequestSequence);}
                 Array(w,rallyReceipts.ToArray(),x=>WorldWire.Write(w,x));
                 foreach(var layout in new[]{units.CaptureLayout(),buildings.CaptureLayout(),centerDamage.CaptureLayout(),rallyWork.CaptureLayout()})Array(w,layout,i=>w.Write(i));
                 WriteMatchHistory(w);WriteSpatialCompletionExtension(w);WriteTacticalQueueExtension(w);
                 w.Write(0x494E4331);Array(w,incomeEvents.ToArray(),e=>{w.Write(e.Tick);w.Write(e.BuildingId);w.Write((int)e.Owner);w.Write((int)e.Kind);Number(w,e.Position.X);Number(w,e.Position.Z);Number(w,e.Amount);});
-            });
-            return new PlayableWorldState{Seed=seed,Generation=navigation.Generation,Tick=Tick,SourceIdentity=sourceIdentity,Binding=WorldWire.Binding(profile),Participants=offline==null?System.Array.Empty<byte>():OfflineConfigurationWire.Binding(offline,profile),Domain=domain,Navigation=Pack(w=>WorldWire.Write(w,nav)),Vision=visions.Values.Select(v=>Pack(w=>WorldWire.Write(w,v.CaptureState()))).ToArray()};
+            },nav.CaptureBudget);
+            state.Domain=state.CaptureDomain.Bytes;
+            state.CaptureNavigationBytes=WorldWire.PackOwned(w=>{WorldWire.Write(w,nav);w.Flush();nav.ReleasePrivateSerializedOutputs();},nav.CaptureBudget);state.Navigation=state.CaptureNavigationBytes.Bytes;
+            state.Seed=seed;state.Generation=navigation.Generation;state.Tick=Tick;state.SourceIdentity=sourceIdentity;
+            state.CaptureBinding=WorldWire.BindingOwned(profile,nav.CaptureBudget);state.Binding=state.CaptureBinding.Bytes;
+            if(offline==null)state.Participants=System.Array.Empty<byte>();
+            else{state.CaptureParticipants=OfflineConfigurationWire.BindingOwned(offline,profile,nav.CaptureBudget);state.Participants=state.CaptureParticipants.Bytes;}
+            state.CaptureVision=NavigationCaptureVision.CreateOwned(visions.Count,nav.CaptureBudget,output=>{
+                int index=0;foreach(var vision in visions.Values){var bytes=WorldWire.PackOwned(w=>WorldWire.Write(w,vision.CaptureState()),nav.CaptureBudget);try{output.Set(index++,bytes);}catch{bytes.Dispose();throw;}}
+            });state.Vision=state.CaptureVision.Bytes;return state;
+            }catch{state.Dispose();throw;}
         }
         internal static PlayableDomain RestoreWorldBytes(byte[] bytes,PlayableProfile profile,int expectedSeed,string expectedSourceIdentity)=>RestoreConfiguredWorldBytes(bytes,profile,expectedSeed,expectedSourceIdentity,null);
-        internal static PlayableDomain RestoreConfiguredWorldBytes(byte[] bytes,PlayableProfile profile,int expectedSeed,string expectedSourceIdentity,OfflineMatchConfiguration configuration,bool allowAiAuthority=false)
+        internal static PlayableDomain RestoreWorldBytesAdmitted(byte[] bytes,PlayableProfile profile,int expectedSeed,string expectedSourceIdentity,NavigationRetentionBudget budget)
+            =>RestoreConfiguredWorldBytes(bytes,profile,expectedSeed,expectedSourceIdentity,null,false,budget);
+        internal static PlayableDomain RestoreConfiguredWorldBytes(byte[] bytes,PlayableProfile profile,int expectedSeed,string expectedSourceIdentity,OfflineMatchConfiguration configuration,bool allowAiAuthority=false,NavigationRetentionBudget navigationBudget=null)
+        =>RestoreWithNavigationFormat(bytes,profile,expectedSeed,expectedSourceIdentity,configuration,NavigationV8Format.Unspecified,allowAiAuthority,navigationBudget);
+        internal static PlayableDomain RestoreWithNavigationFormat(byte[] bytes,PlayableProfile profile,int expectedSeed,string expectedSourceIdentity,OfflineMatchConfiguration configuration,NavigationV8Format legacyFormat,bool allowAiAuthority=false,NavigationRetentionBudget navigationBudget=null,LegacyTransactionProfileFormat transactionFormat=LegacyTransactionProfileFormat.Current)
         {
+            if(transactionFormat!=LegacyTransactionProfileFormat.Current&&transactionFormat!=LegacyTransactionProfileFormat.Original254)throw new ArgumentException("Unknown transaction profile import format.",nameof(transactionFormat));
             // Decode independently and hydrate only a detached candidate. No worker,
             // starter units, genesis ticks, route calls or policy callbacks are started.
-            var state=PlayableWorldState.Decode(bytes);
+            using var transaction=new NavigationDecodeTransaction(navigationBudget);
+            using var navigationInput=new NavigationDecodeTransaction(transaction.Budget);
+            var state=PlayableWorldState.DecodeForRestore(bytes,transaction,navigationInput);
             if(state.AiAuthority.Length>0&&!allowAiAuthority)throw new ArgumentException("Live AI world requires the authority restore API.");
-            bool legacyQueue=state.Binding.SequenceEqual(WorldWire.Binding(profile,true));
-            bool legacyMarch=legacyQueue||state.Binding.SequenceEqual(WorldWire.BindingLegacyMarch(profile));
+            bool legacyQueue=profile.Navigation.HasCrowdV1Defaults&&state.Binding.SequenceEqual(WorldWire.Binding(profile,true));
+            bool legacyMarch=legacyQueue||profile.Navigation.HasCrowdV1Defaults&&state.Binding.SequenceEqual(WorldWire.BindingLegacyMarch(profile));
             if(legacyQueue&&profile.UnitOrderQueueLimit!=64)throw new ArgumentException("Legacy world requires default absent queue metadata.");
             if(state.Seed!=expectedSeed||state.SourceIdentity!=expectedSourceIdentity||!legacyMarch&&!state.Binding.SequenceEqual(WorldWire.Binding(profile)))throw new ArgumentException("World source/profile/map binding mismatch.");
             if(!state.Participants.SequenceEqual(configuration==null?System.Array.Empty<byte>():OfflineConfigurationWire.Binding(configuration,profile,legacyQueue,legacyMarch)))throw new ArgumentException("World roster/map assignment binding mismatch.");
-            var nav=Unpack(state.Navigation,ReadNavigationSessionState);
+            var nav=UnpackPrivate(state.Navigation,0,state.Navigation.Length,r=>ReadNavigationSessionState(r,legacyFormat),transaction);
+            // The section reader and trailing-data check have finished. Its DTO
+            // and private Host BODY owner belong to the original outer scope.
+            state.Navigation=null;navigationInput.Dispose();
+            nav.RestoreBudget=transaction.Budget;
             if(nav==null||nav.Generation!=state.Generation||nav.Geometry==null)throw new ArgumentException("Invalid world navigation binding.");
-            var geometry=new NavGeometry(nav.Geometry.HalfExtent,nav.Geometry.Obstacles,nav.Geometry.Revision);
-            var candidate=Unpack(state.Domain,r=>{
-                int termCount=r.ReadInt32();if(termCount<1||termCount>10000)throw new ArgumentException("Invalid term registry.");
+            PlayableDomain detached=null;bool complete=false;
+            try{
+            NavigationSession.DecodeDetachedHostAuthority(nav,transaction,out nav.PreparedHost,out nav.PreparedAuthority,out nav.AdmissionPublicationIdentity);nav.HostPrepared=true;
+            bool bodyValidatedPrivateNavigation=nav.PreparedAuthority?.HasCatalog==true;
+            var geometry=nav.PreparedAuthority?.Geometry.Facade??transaction.Record(()=>new NavGeometry(nav.Geometry.HalfExtent,nav.Geometry.Obstacles,nav.Geometry.Revision));
+            var candidate=UnpackPrivate(state.Domain,0,state.Domain.Length,r=>{
+                int termCount=r.ReadInt32();bool crowdTerms=termCount==-1;
+                if(crowdTerms){if(transactionFormat!=LegacyTransactionProfileFormat.Current||legacyQueue||legacyMarch||r.ReadInt32()!=1)throw new ArgumentException("Invalid crowd term registry version/format.");termCount=r.ReadInt32();}
+                if(termCount<1||termCount>10000)throw new ArgumentException("Invalid term registry.");
                 var termRows=new System.Collections.Generic.Dictionary<int,PlayableProfile>();
-                for(int i=0;i<termCount;i++){int revision=r.ReadInt32();string name=String(r);var data=profile.CopyData();data.revision=revision;if(legacyQueue)data.unitOrderQueueLimit=64;foreach(var descriptor in legacyQueue?LegacyQueueCodec.Fields:legacyMarch?LegacyMarchCodec.Fields:PlayableProfileMetadata.Fields)descriptor.Write(data,Number(r));var bound=PlayableProfile.Create(data,profile.AuthoredMap,name);if(termRows.ContainsKey(revision)||NativeBalanceFields.ValidateLiveDifference(profile,bound)!=null)throw new ArgumentException("Invalid transaction profile.");termRows.Add(revision,bound);}
+                for(int i=0;i<termCount;i++){int revision=r.ReadInt32();string name=String(r);var data=profile.CopyData();data.ResetCrowdMotionV1();data.revision=revision;if(legacyQueue)data.unitOrderQueueLimit=64;foreach(var descriptor in transactionFormat==LegacyTransactionProfileFormat.Original254?LegacyTransactionProfileCodec.Fields:legacyQueue?LegacyQueueCodec.Fields:legacyMarch?LegacyMarchCodec.Fields:PlayableProfileMetadata.PreCrowdFields)descriptor.Write(data,Number(r));if(crowdTerms)foreach(var descriptor in PlayableProfileMetadata.CrowdFields)descriptor.Write(data,Number(r));var bound=PlayableProfile.Create(data,profile.AuthoredMap,name);if(termRows.ContainsKey(revision)||NativeBalanceFields.ValidateLiveDifference(profile,bound)!=null)throw new ArgumentException("Invalid transaction profile.");termRows.Add(revision,bound);}
+                if(crowdTerms&&!termRows.Values.Any(p=>!p.Navigation.HasCrowdV1Defaults))throw new ArgumentException("Redundant default crowd term registry extension.");
                 if(!termRows.TryGetValue(profile.Revision,out var currentTerms)||!WorldWire.Binding(currentTerms).SequenceEqual(WorldWire.Binding(profile)))throw new ArgumentException("Current transaction profile mismatch.");
-                bool patrol=Boolean(r);var d=new PlayableDomain(profile,state.Generation,patrol,true,geometry,configuration){Tick=state.Tick};foreach(var term in termRows)d.termProfiles[term.Key]=term.Key==profile.Revision?profile:term.Value;
+                bool patrol=Boolean(r);var d=new PlayableDomain(profile,state.Generation,patrol,true,geometry,configuration,transaction.Budget,nav.PreparedAuthority){Tick=state.Tick};detached=d;foreach(var term in termRows)d.termProfiles[term.Key]=term.Key==profile.Revision?profile:term.Value;
                 if(configuration!=null&&patrol)throw new ArgumentException("Offline world cannot enable diagnostic patrol.");
                 d.WinnerTeam=Boolean(r)?(int?)r.ReadInt32():null;foreach(var owner in Array(r,()=>EnumValue<PlayableOwner>(r)))if(!d.HasOwner(owner)||!d.eliminated.Add(owner))throw new ArgumentException("Invalid eliminated roster.");int sequences=r.ReadInt32();if(sequences<0||sequences>d.ownerCredits.Count)throw new ArgumentException("Invalid command watermarks.");for(int i=0;i<sequences;i++){var owner=EnumValue<PlayableOwner>(r);long sequence=r.ReadInt64();if(configuration==null||!d.HasOwner(owner)||sequence<1||d.offlineSequences.ContainsKey(owner))throw new ArgumentException("Invalid owner command watermark.");d.offlineSequences.Add(owner,sequence);}int accounts=r.ReadInt32();if(accounts!=d.ownerCredits.Count)throw new ArgumentException("Invalid owner accounts.");d.ownerCredits.Clear();for(int i=0;i<accounts;i++){var owner=EnumValue<PlayableOwner>(r);if(!d.HasOwner(owner)||d.ownerCredits.ContainsKey(owner))throw new ArgumentException("Invalid account owner.");d.ownerCredits.Add(owner,Number(r));}
                 d.nextAiSequence=r.ReadInt64();if(d.nextAiSequence<1)throw new ArgumentException("Invalid AI sequence allocator.");d.nextOrderRevision=r.ReadInt64();d.nextId=r.ReadInt32();d.nextProjectile=r.ReadInt32();d.nextProductionSequence=r.ReadInt64();d.nextResearchSequence=r.ReadInt64();if(r.ReadInt64()!=state.Tick)throw new ArgumentException("Domain/envelope tick binding mismatch.");
@@ -110,23 +212,27 @@ namespace Spacewars.Runtime
                     var intent=ReadPlayableRallyIntentState(r);int kind=r.ReadInt32(),exit=r.ReadInt32();bool hasGeometry=Boolean(r);long request=r.ReadInt64();
                     if(intent==null||intent.Generation!=state.Generation||intent.Sequence<1||d.RallyProducer(intent.Building,intent.Owner)==null||kind<0||kind>=RallyKinds.Length||exit<0||exit>d.FactoryExitCandidates(d.buildings[intent.Building],RallyKinds[kind]).Length||d.rallyWork.ContainsKey(intent.Building))throw new ArgumentException("Invalid rally progress.");
                     NavigationRequest bound=null;if(request!=0){bound=restoredRequests.SingleOrDefault(x=>x.Request==request&&x.Session==state.Generation);if(bound==null||bound.Entity!=-intent.Building||bound.Order!=intent.Sequence||!hasGeometry)throw new ArgumentException("Invalid rally request binding.");}
-                    d.rallyWork.Add(intent.Building,new RallyWork{Intent=intent,Kind=kind,Candidate=exit,Geometry=hasGeometry?geometry:null,Request=bound});
+                    d.rallyWork.Add(intent.Building,new RallyWork{Intent=intent,Kind=kind,Candidate=exit,Geometry=hasGeometry?geometry:null,RequestSequence=bound?.Request??0});
                 }
                 d.rallyReceipts.AddRange(Array(r,()=>ReadPlayableCommandReceipt(r)));
                 d.units.RestoreLayout(Array(r,()=>r.ReadInt32()));d.buildings.RestoreLayout(Array(r,()=>r.ReadInt32()));d.centerDamage.RestoreLayout(Array(r,()=>r.ReadInt32()));d.rallyWork.RestoreLayout(Array(r,()=>r.ReadInt32()));d.ReadMatchHistory(r);d.ReadSpatialCompletionExtension(r);d.ReadTacticalQueueExtension(r,legacyQueue);
                 if(r.BaseStream.Position<r.BaseStream.Length)
                 {
                     if(r.ReadInt32()!=0x494E4331)throw new ArgumentException("Invalid income presentation extension.");
-                    d.incomeEvents.AddRange(Array(r,()=>new PlayableIncomeEvent(r.ReadInt64(),r.ReadInt32(),EnumValue<PlayableOwner>(r),EnumValue<PlayableBuildingKind>(r),new NavPoint(Number(r),Number(r)),Number(r))));
+                    d.incomeEvents.AddRange(Array(r,()=>Record(r,()=>new PlayableIncomeEvent(r.ReadInt64(),r.ReadInt32(),EnumValue<PlayableOwner>(r),EnumValue<PlayableBuildingKind>(r),new NavPoint(Number(r),Number(r)),Number(r)))));
                     foreach(var e in d.incomeEvents)if(e.Tick<0||e.Tick>d.Tick||e.BuildingId<=0||!d.HasOwner(e.Owner)||e.Amount<=0)throw new ArgumentException("Invalid income event.");
                 }
                 return d;
-            });
-            foreach(var section in state.Vision){var v=Unpack(section,ReadPlayableVisionState);if(v==null||!candidate.Owners.Any(x=>candidate.TeamOf(x)==v.Team)||candidate.visions.ContainsKey(v.Team))throw new ArgumentException("Invalid world vision binding.");var next=new PlayableVision(v.Team,profile.ArenaHalfExtent,profile.ArenaHalfExtent,profile.VisionCellSize,profile.FogEdgeFeather);next.RestoreState(v);candidate.visions.Add(v.Team,next);}
+            },transaction);
+            foreach(var section in state.Vision){var v=UnpackPrivate(section,0,section.Length,ReadPlayableVisionState,transaction);if(v==null||!candidate.Owners.Any(x=>candidate.TeamOf(x)==v.Team)||candidate.visions.ContainsKey(v.Team))throw new ArgumentException("Invalid world vision binding.");var next=new PlayableVision(v.Team,profile.ArenaHalfExtent,profile.ArenaHalfExtent,profile.VisionCellSize,profile.FogEdgeFeather);next.RestoreState(v);candidate.visions.Add(v.Team,next);}
             foreach(var v in candidate.visions.Values.Select(x=>x.CaptureState()))foreach(var known in v.KnownBuildings)if(!candidate.HasOwner(known.Owner)||known.Team!=candidate.TeamOf(known.Owner)||known.Team==v.Team||known.Id>=candidate.nextId)throw new ArgumentException("Invalid remembered building binding.");
-            candidate.ValidateWorld();candidate.ValidateGroupOrders();candidate.ValidateSpatialCompletions();candidate.ValidateTacticalQueues();return candidate;
+            // RestoreWorldState has authenticated every consumed catalog field and
+            // installed its exact maps before these cross-domain checks run.
+            var validationNavigation=bodyValidatedPrivateNavigation?nav:null;
+            candidate.ValidateWorld(validationNavigation);candidate.ValidateGroupOrders();candidate.ValidateSpatialCompletions(validationNavigation);candidate.ValidateTacticalQueues(validationNavigation);complete=true;return candidate;
+            }finally{nav.PreparedHost?.Release();nav.PreparedAuthority?.Release();nav.PreparedHost=null;nav.PreparedAuthority=null;if(!complete)detached?.DestroyOwnedNavigation();}
         }
-        private void ValidateWorld()
+        private void ValidateWorld(NavigationSessionState privateNavigation)
         {
             void Require(bool condition,string reason){if(!condition)throw new ArgumentException("Invalid world: "+reason);}
             bool Ref(int id)=>id>=0&&id<nextId;
@@ -170,12 +276,13 @@ namespace Spacewars.Runtime
                 }
             }
             foreach(PlayableOwner owner in Owners)Require(Population(owner).Living+Population(owner).Reserved<=profile.ArmyCapacity,"population capacity");
-            var navState=navigation.CaptureState();
+            using var validationCapture=privateNavigation==null?navigation.CaptureOwnedState():null;
+            var navState=privateNavigation??validationCapture;
             foreach(var order in navState.Orders)Require(order.Entity>0&&Ref(order.Entity),"navigation order reference");
-            foreach(var request in navState.Requests){Require(request.Entity!=0&&request.Entity!=int.MinValue&&Ref(Math.Abs(request.Entity)),"navigation request reference");for(int i=0;i<request.ProfileValues.Length;i++)if(i<7||i>9)Require(request.ProfileValues[i]==NavigationProfile.Metadata[i].Read(profile.Navigation),"navigation effective profile binding");}
+            foreach(var request in navState.Requests){Require(request.Entity!=0&&request.Entity!=int.MinValue&&Ref(Math.Abs(request.Entity)),"navigation request reference");Require(profile.Navigation.MatchesWireValues(request.ProfileValues,true),"navigation effective profile binding");}
             foreach(var point in navState.Reservations.Concat(navState.RetainedGoals))Require(units.ContainsKey(point.Entity),"navigation live intent binding");
             foreach(int index in navState.PendingRequestIndices)Require(units.ContainsKey(navState.Requests[index].Entity),"pending actor binding");
-            foreach(int index in navState.ProbeRequestIndices){var req=navState.Requests[index];Require(rallyWork.TryGetValue(-req.Entity,out var work)&&work.Request!=null&&work.Request.Request==req.Request,"rally probe binding");}
+            foreach(int index in navState.ProbeRequestIndices){var req=navState.Requests[index];Require(rallyWork.TryGetValue(-req.Entity,out var work)&&work.RequestSequence!=0&&work.RequestSequence==req.Request,"rally probe binding");}
             var shots=new System.Collections.Generic.HashSet<int>();foreach(var p in projectiles){Require(p!=null&&HasOwner(p.Faction)&&p.Id>0&&p.Id<nextProjectile&&shots.Add(p.Id)&&p.Owner>0&&Ref(p.Owner)&&Ref(p.Target)&&p.Damage>0,"projectile identity");if(p.Rocket!=null){var r=p.Rocket;Require(p.Kind==PlayableEntityKind.Shkval&&r.Flight!=null&&r.Elapsed>=0&&r.Elapsed<r.Flight.Duration&&r.Radius==Terms(p.TermsRevision).ShkvalProjectileRadius&&r.BlastRadius==Terms(p.TermsRevision).ShkvalBlastRadius&&r.MarkerStartRadius==Terms(p.TermsRevision).ShkvalMarkerStartRadius&&r.MarkerOpacity==Terms(p.TermsRevision).ShkvalMarkerOpacity&&r.BuildingHeight==Terms(p.TermsRevision).ShkvalBuildingCollisionHeight&&r.Predicted.Progress>=0&&r.Predicted.Progress<=1&&Ref(r.Predicted.BuildingId),"rocket flight");}else Require(p.Speed>0&&p.Radius>=0&&p.Remaining>0,"shell flight");}
             foreach(var d in centerDamage.Values)Require(d.Generation==navigation.Generation&&d.Tick>=0&&d.Tick<=Tick&&d.Damage>0&&d.AttackerId>0&&Ref(d.AttackerId)&&d.CenterId>0&&Ref(d.CenterId)&&(!buildings.TryGetValue(d.CenterId,out var b)||(b.Owner==d.Owner&&TerritoryRules.Center(b.Kind))),"center damage fact");
             foreach(var i in impacts)Require(i!=null&&HasOwner(i.Owner)&&i.Id>0&&i.Id<nextProjectile&&i.Tick>=0&&i.Tick<=Tick&&i.Radius>0&&i.VisibleMask>=0&&i.VisibleMask<=(1<<ownerCredits.Count)-1,"impact fact");

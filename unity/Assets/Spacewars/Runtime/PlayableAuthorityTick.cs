@@ -18,21 +18,27 @@ namespace Spacewars.Runtime
     // The caller owns this object; only navigation mailboxes cross threads.
     public sealed partial class PlayableAuthorityTick
     {
-        public const string RouteDeliveryPolicy = "native-fixed-before-step-v1";
-        public const string AsyncRouteDeliveryPolicy = "native-per-unit-before-step-v1";
+        public const string RouteDeliveryPolicy = "native-fixed-tick-quantum-v2";
+        internal const string LegacyRouteDeliveryPolicy = "native-fixed-before-step-v1";
+        internal const string LegacyAsyncRouteDeliveryPolicy = "native-per-unit-before-step-v1";
+        public const string AsyncRouteDeliveryPolicy = "native-per-unit-tick-quantum-v2";
         private readonly PlayableDomain domain;
         private readonly AiAuthorityScheduler scheduler;
         private readonly int seed;
         private readonly Dictionary<string,long> humans = new Dictionary<string,long>();
         private long sequence;
-        private bool prepared;
+        internal enum RouteBarrierPhase:byte{Idle,MaintenancePending,WaitingForRoutes}
+        private RouteBarrierPhase barrierPhase;
+        internal bool MaintenancePendingFor(NavigationSession navigation)=>!asynchronousRoutes&&barrierPhase==RouteBarrierPhase.MaintenancePending&&ReferenceEquals(domain.Navigation,navigation);
+        internal void CompleteMaintenanceNoThrow(){barrierPhase=RouteBarrierPhase.WaitingForRoutes;}
         private bool asynchronousRoutes;
+        private bool tickQuanta=true;
         private readonly bool performanceTrace=Array.IndexOf(Environment.GetCommandLineArgs(),"-routePerformanceEvidence")>=0;
-        public string EffectiveRouteDeliveryPolicy=>asynchronousRoutes?AsyncRouteDeliveryPolicy:RouteDeliveryPolicy;
+        public string EffectiveRouteDeliveryPolicy=>tickQuanta?(asynchronousRoutes?AsyncRouteDeliveryPolicy:RouteDeliveryPolicy):(asynchronousRoutes?LegacyAsyncRouteDeliveryPolicy:LegacyRouteDeliveryPolicy);
         internal PlayableAuthorityTick(PlayableDomain domain,AiAuthorityScheduler scheduler,int seed,OfflineMatchConfiguration configuration=null,bool asynchronousRoutes=false)
         {this.domain=domain;this.scheduler=scheduler;this.seed=seed;domain.BindMatchSeed(seed);savedConfiguration=configuration;SetRouteDeliveryPolicy(asynchronousRoutes);}
         private void SetRouteDeliveryPolicy(bool asynchronous)
-        {asynchronousRoutes=asynchronous;domain.Navigation.SuspendPendingMovement=asynchronous;}
+        {asynchronousRoutes=asynchronous;domain.Navigation.SuspendPendingMovement=asynchronous||tickQuanta;domain.Navigation.TickQuantaEnabled=tickQuanta;}
         public PlayableAuthorityTick(OfflineMatchConfiguration configuration,long generation,AiProfile aiProfile=null,AiDifficulty difficulty=AiDifficulty.Fighter,bool asynchronousRoutes=false)
         {
             if(configuration==null)throw new ArgumentNullException(nameof(configuration));
@@ -48,11 +54,14 @@ namespace Spacewars.Runtime
         {
             if(domain.Tick!=0||savedConfiguration==null||stopping?.Invoke()==true)return 0;
             var detachedDomain=new PlayableDomain(savedConfiguration.Profile,Generation,savedConfiguration);
+            PlayableAuthorityTick detached=null;
+            try{
             var detachedScheduler=new AiAuthorityScheduler(scheduler.Owners.Select(o=>o.CreateStartupWarmup()));
-            var detached=new PlayableAuthorityTick(detachedDomain,detachedScheduler,seed,savedConfiguration,asynchronousRoutes:true);
+            detached=new PlayableAuthorityTick(detachedDomain,detachedScheduler,seed,savedConfiguration,asynchronousRoutes:true);
             long horizon=Math.Max(1,scheduler.Owners.Select(o=>o.StartupReviewTick).DefaultIfEmpty(1).Max());
             while(detached.Tick<horizon&&stopping?.Invoke()!=true)detached.TryAdvance();
             return detached.Tick;
+            }finally{try{detached?.Stop();}finally{detachedDomain.Navigation.DestroyNavigationAuthority();}}
         }
         internal void PrepareNavigationViews(Func<bool> stopping=null)=>scheduler.PrepareNavigationViews(domain,seed,stopping);
         public NavMailbox<NavigationRequest> Requests=>domain.Navigation.Requests;
@@ -61,12 +70,12 @@ namespace Spacewars.Runtime
         public PlayableRouteBinding NavigationBinding=>new PlayableRouteBinding(domain.Geometry,domain.RoutingProfile,domain.Navigation.Admission,domain.Navigation.RoutePort);
         public long Generation=>domain.Navigation.Generation;
         public long Tick=>domain.Tick;
-        public bool AwaitingRoutes=>prepared;
+        public bool AwaitingRoutes=>barrierPhase!=RouteBarrierPhase.Idle;
         public PlayableSnapshot Latest{get;private set;}
         // Trusted worker ingress still uses ordinary domain admission and receipts.
         public PlayableCommandReceipt Apply(PlayableCommand command)
         {
-            if(prepared)throw new InvalidOperationException("Commands must enter before the fixed route barrier.");
+            if(AwaitingRoutes)throw new InvalidOperationException("Commands must enter before the fixed route barrier.");
             var status=domain.Apply(command,out var message);
             if(status==PlayableCommandStatus.Applied||status==PlayableCommandStatus.Accepted)
                 if(command.Origin!=PlayableOrderOrigin.Ai)humans[command.PlayerId]=command.Sequence;
@@ -84,18 +93,24 @@ namespace Spacewars.Runtime
             snapshot=null;domain.SetRallyPaused(paused);
             if(!paused)
             {
-                if(!prepared){scheduler.Deliver(domain,human,false);domain.Navigation.PrepareDeliveryBarrier();prepared=!asynchronousRoutes;}
+                bool maintenanceReady=true;
+                if(asynchronousRoutes){scheduler.Deliver(domain,human,false);domain.Navigation.PrepareDeliveryBarrier();}
+                else{
+                    if(barrierPhase==RouteBarrierPhase.Idle){scheduler.Deliver(domain,human,false);barrierPhase=RouteBarrierPhase.MaintenancePending;}
+                    maintenanceReady=barrierPhase!=RouteBarrierPhase.MaintenancePending||domain.Navigation.PrepareDeliveryBarrier(this);
+                }
                 delivered=performanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0;
-                // Fixed headless policy freezes clocks until all pre-step jobs deliver.
-                // Realtime offline policy installs available answers during Navigation.Step.
-                if(!asynchronousRoutes&&!domain.Navigation.DeliveryBarrierReady)
+                // V2 fixed waits only for this tick's bounded quantum; known V1
+                // checkpoints retain their all-routes barrier. Async never waits.
+                bool quantumReady=!tickQuanta||maintenanceReady&&domain.Navigation.PrepareTickQuantum(domain.Tick+1,domain.RoutingProfile.NavigationRequestsPerFrame,asynchronousRoutes);
+                if(!asynchronousRoutes&&(!maintenanceReady||!(tickQuanta?quantumReady:domain.Navigation.DeliveryBarrierReady)||tickQuanta&&!domain.Navigation.ConsumeFixedTickQuantum(domain.Tick+1)))
                 {
                     // Applied commands and terminal receipts are observable while routing;
                     // publishing does not step or review the scheduler again.
                     if(publishWaiting)Latest=snapshot=domain.PlayerSnapshot(publication,RuntimeStatus.Running,false,metrics(),null,seed);
                     return false;
                 }
-                domain.StepWithAiRepairAccounting(1d/30d,scheduler.Owners.Select(o=>o.Budget));prepared=false;
+                domain.StepWithAiRepairAccounting(1d/30d,scheduler.Owners.Select(o=>o.Budget));barrierPhase=RouteBarrierPhase.Idle;
                 stepped=performanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0;
             }
             if(paused)scheduler.Deliver(domain,human,true);

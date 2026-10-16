@@ -9,7 +9,7 @@ namespace Spacewars.Simulation
         public NavObstacle Bounds{get;} public string Material{get;}
     }
     // Immutable authored map content, not new global balance or camera tuning.
-    public sealed class BasaltCrownMap : IPlayableTerrain
+    public sealed class BasaltCrownMap : IPlayableTerrain, INavArrivalPointTerrain
     {
         public string Id=>"basalt-crown-native-v1";
         public int Revision=>3;
@@ -26,6 +26,7 @@ namespace Spacewars.Simulation
         public IReadOnlyList<NavSurfaceTransition> SurfaceTransitions=>locations.Transitions;
         private readonly NavGeometry geometry;
         private readonly TerrainLocations locations;
+        TerrainLocations INavArrivalPointTerrain.ArrivalLocations=>locations;
         public BasaltCrownMap()
         {
             var supports=new List<MapSupport>();var solids=new List<NavObstacle>();

@@ -51,7 +51,7 @@ public sealed class NativeMainMenuTests
         {
             var root=go.GetComponent<UIDocument>().rootVisualElement;
             var actions=root.Query<Button>().ToList();
-            CollectionAssert.AreEqual(new[]{"В бой!","Сетевая игра","Настройки","Управление","Лаборатория геймдизайна","Выйти","Обновить","Перезапустить"},actions.ConvertAll(b=>b.text));
+            CollectionAssert.AreEqual(new[]{"В бой!","Сетевая игра","Настройки","Управление","Что нового","Лаборатория геймдизайна","Выйти","Обновить","Отменить загрузку","Перезапустить"},actions.ConvertAll(b=>b.text));
             Assert.False(actions[1].enabledSelf);Assert.That(root.Q<Button>("main-restart").style.display.value,Is.EqualTo(DisplayStyle.None));Assert.IsNull(root.Q<Button>("main-check"));
             Assert.IsNull(root.Q(className:"orbital-hints"));
             Assert.AreEqual(DisplayStyle.Flex,root.Q("main-update-panel").style.display.value,"Panel is visible before startup status is received");
@@ -139,6 +139,38 @@ public sealed class NativeMainMenuTests
             while(!server.IsCompleted&&Time.realtimeSinceStartup<deadline)yield return null;
             Assert.True(server.IsCompleted,"HTTP fixture must finish within the original request deadline");Assert.False(server.IsFaulted);
         }finally{listener.Stop();UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",saved);}
+    }
+
+    [UnityTest] public IEnumerator HistoryLoadsInstalledAndRecentVersionsAndRestoresMainFocus()
+    {
+        var saved=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT");Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",null);
+        var go=new GameObject("release history HTTP UI fixture");var menu=go.AddComponent<NativeMainMenu>();yield return null;
+        var listener=new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);listener.Start();
+        string installed=Application.version;
+        var server=System.Threading.Tasks.Task.Run(()=>{
+            using(var client=listener.AcceptTcpClient())using(var stream=client.GetStream())
+            {
+                var reader=new System.IO.StreamReader(stream);var first=reader.ReadLine();Assert.IsTrue(first.StartsWith("GET /history "),first);while(!string.IsNullOrEmpty(reader.ReadLine())){}
+                var body="{\"releases\":[{\"version\":\"1.0.1\",\"date\":\"2026-10-15\",\"ru\":\"Улучшены настройки и обновления.\",\"en\":\"Settings and updates improved.\"},{\"version\":\""+installed+"\",\"date\":\"2026-10-01\",\"ru\":\"Предыдущая версия.\",\"en\":\"Previous version.\"}]}";
+                var data=System.Text.Encoding.UTF8.GetBytes(body);var header=System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: "+data.Length+"\r\nConnection: close\r\n\r\n");stream.Write(header,0,header.Length);stream.Write(data,0,data.Length);
+            }
+        });
+        RenderTexture target=null;
+        try
+        {
+            var type=typeof(NativeMainMenu);type.GetField("endpoint",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,"http://127.0.0.1:"+((System.Net.IPEndPoint)listener.LocalEndpoint).Port);
+            yield return menu.StartCoroutine((IEnumerator)type.GetMethod("OpenHistory",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(menu,null));
+            Assert.True(server.IsCompleted&&!server.IsFaulted,server.Exception?.ToString());
+            var root=go.GetComponent<UIDocument>().rootVisualElement;var page=root.Q("release-history");var choice=page.Q<DropdownField>("history-version");Assert.AreEqual(2,choice.choices.Count);StringAssert.Contains("установлена",choice.choices[1]);
+            choice.index=1;Assert.True(page.Query<Label>().ToList().Exists(l=>l.text.Contains("Предыдущая версия.")));choice.index=0;
+            var panel=go.GetComponent<UIDocument>().panelSettings;target=new RenderTexture(800,620,24);target.Create();panel.targetTexture=target;root.style.width=800;root.style.height=620;
+            for(int i=0;i<5;i++)yield return null;
+            Assert.LessOrEqual(page.Q<Button>("history-back").worldBound.yMax,620);
+            string output=Environment.GetEnvironmentVariable("LOBBY_LAYOUT_EVIDENCE");if(!string.IsNullOrEmpty(output)){
+                var prior=RenderTexture.active;RenderTexture.active=target;var png=new Texture2D(800,620,TextureFormat.RGB24,false);try{png.ReadPixels(new Rect(0,0,800,620),0,0);png.Apply();System.IO.Directory.CreateDirectory(output);System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,"history-fixture-800x620.png"),png.EncodeToPNG());}finally{RenderTexture.active=prior;UnityEngine.Object.Destroy(png);}}
+            menu.Navigation.Back();Assert.IsNull(root.Q("release-history"));Assert.AreSame(root.Q<Button>("main-history"),root.focusController.focusedElement);
+        }
+        finally {listener.Stop();if(target){go.GetComponent<UIDocument>().panelSettings.targetTexture=null;target.Release();UnityEngine.Object.Destroy(target);}UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",saved);}
     }
 
     [UnityTest] public IEnumerator StatusFailuresStopSpinnerAndRecoverAutomatically()

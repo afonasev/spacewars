@@ -16,6 +16,59 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(new NavPoint(-38,-38),m.Headquarters(PlayableOwner.Player));Assert.DoesNotThrow(()=>TerritoryRules.ValidateArena(p));
             foreach(var site in m.Sites(p)){Assert.True(m.SupportsFootprint(site.Position,TerritoryRules.Radius(p,site.Kind)),"site "+site.Id);foreach(var slot in site.Slots)Assert.True(m.SupportsFootprint(slot.Position,Math.Max(p.FactoryFootprintRadius,Math.Max(p.RefineryFootprintRadius,p.ScienceFootprintRadius))),"slot "+site.Id+"/"+slot.Id);}
         }
+        [Test] public void SideOutpostsMoveTogetherAndLeaveFullBuiltBypasses(){
+            var p=Profile();var map=(MossHighlandMap)p.AuthoredMap;var sites=map.Sites(p);
+            var field=MossHighlandMap.PlacementField;
+            foreach(double value in new[]{field.Minimum,field.Maximum}){var data=new MossHighlandProfileData();field.Write(data,value);Assert.DoesNotThrow(()=>PlayableProfile.Create(p.CopyData(),new MossHighlandMap(data)));}
+            foreach(double bad in new[]{double.NaN,double.PositiveInfinity,-1,7})Assert.Throws<ArgumentOutOfRangeException>(()=>field.Write(new MossHighlandProfileData(),bad));
+            var zero=new MossHighlandProfileData();field.Write(zero,0);var oldMap=new MossHighlandMap(zero);var old=oldMap.Sites(p);
+            foreach(var site in sites){var before=old.Single(x=>x.Id==site.Id);bool side=site.Id>=9&&site.Id<=12;
+                var delta=new NavPoint(site.Position.X-before.Position.X,site.Position.Z-before.Position.Z);
+                Assert.That(Math.Abs(delta.X)+Math.Abs(delta.Z),Is.EqualTo(side?6:0).Within(1e-9));
+                foreach(var slot in site.Slots){var a=before.Slots.Single(x=>x.Id==slot.Id);Assert.That(slot.Position.X-a.Position.X,Is.EqualTo(delta.X).Within(1e-9));Assert.That(slot.Position.Z-a.Position.Z,Is.EqualTo(delta.Z).Within(1e-9));}
+            }
+            var obstacles=map.MovementBlockers.ToList();
+            foreach(var site in sites){double r=TerritoryRules.Radius(p,site.Kind);obstacles.Add(new NavObstacle(site.Position.X-r,site.Position.Z-r,site.Position.X+r,site.Position.Z+r));
+                foreach(var slot in site.Slots){r=Math.Max(p.FactoryFootprintRadius,Math.Max(p.RefineryFootprintRadius,p.ScienceFootprintRadius));obstacles.Add(new NavObstacle(slot.Position.X-r,slot.Position.Z-r,slot.Position.X+r,slot.Position.Z+r));}}
+            var geometry=new NavGeometry(map.HalfExtent,obstacles.ToArray(),map.Revision);
+            foreach(int sign in new[]{-1,1}){
+                var a=new NavPoint(sign*36,-12);var b=new NavPoint(sign*36,12);
+                Assert.True(geometry.SegmentFree(a,b,1.5));Assert.True(map.SupportsSweep(a,b,1.5));
+                a=new NavPoint(-12,sign*36);b=new NavPoint(12,sign*36);
+                Assert.True(geometry.SegmentFree(a,b,1.5));Assert.True(map.SupportsSweep(a,b,1.5));
+            }
+        }
+        [Test] public void NewMountainsAndRiversBlockTheirExactFootprintsInsideTheSquare(){
+            var p=Profile();var m=(MossHighlandMap)p.AuthoredMap;
+            Assert.AreEqual(4,m.BorderMountains.Count);Assert.AreEqual(2,m.BorderRivers.Count);
+            foreach(var b in m.BorderMountains.Concat(m.BorderRivers)){
+                Assert.GreaterOrEqual(b.MinX,-64);Assert.GreaterOrEqual(b.MinZ,-64);Assert.LessOrEqual(b.MaxX,64);Assert.LessOrEqual(b.MaxZ,64);
+                Assert.True(m.MovementBlockers.Any(o=>o.GeometryEquals(b)));
+                var v=b.Footprint.Vertices;var t=b.Footprint.Triangles;
+                for(int i=0;i<t.Count;i+=3){var q=new NavPoint((v[t[i]].X+v[t[i+1]].X+v[t[i+2]].X)/3,(v[t[i]].Z+v[t[i+1]].Z+v[t[i+2]].Z)/3);Assert.False(m.SupportsFootprint(q,p.TankCollisionRadius));}
+            }
+            foreach(int sign in new[]{-1,1}){
+                Assert.False(m.SupportsSweep(new NavPoint(sign*50,sign*50),new NavPoint(sign*60,sign*60),p.TankCollisionRadius));
+                Assert.False(m.SupportsSweep(new NavPoint(sign*50,-sign*30),new NavPoint(sign*62,-sign*30),p.TankCollisionRadius));
+            }
+            foreach(int sx in new[]{-1,1})foreach(int sz in new[]{-1,1}){
+                Assert.True(m.SupportsSweep(new NavPoint(sx*50,sz*16),new NavPoint(sx*50,sz*50),1.5));
+                Assert.True(m.SupportsSweep(new NavPoint(sx*16,sz*50),new NavPoint(sx*50,sz*50),1.5));
+            }
+            Assert.That(m.OriginalRidges.Count,Is.GreaterThan(100));
+            Assert.AreEqual(m.OriginalRidges.Count+4,m.Solids.Count);
+            foreach(var ridge in m.OriginalRidges)Assert.True(m.Solids.Any(solid=>solid.GeometryEquals(ridge)));
+        }
+        [Test] public void OutpostSlotsHaveOneRearAndTwoSymmetricFrontBuildings(){
+            var p=Profile();var map=(MossHighlandMap)p.AuthoredMap;Assert.AreEqual(4,map.Revision);
+            foreach(var site in map.Sites(p).Where(s=>s.Kind==PlayableBuildingKind.Outpost)){
+                Assert.AreEqual(3,site.Slots.Count);
+                foreach(var slot in site.Slots){double dx=slot.Position.X-site.Position.X,dz=slot.Position.Z-site.Position.Z;Assert.That(Math.Sqrt(dx*dx+dz*dz),Is.EqualTo(p.SlotRingRadius).Within(1e-9));}
+                var rear=site.Slots.Single(s=>s.Position.Z>site.Position.Z);Assert.That(rear.Position.X,Is.EqualTo(site.Position.X).Within(1e-9));
+                var front=site.Slots.Where(s=>s.Position.Z<site.Position.Z).OrderBy(s=>s.Position.X).ToArray();Assert.AreEqual(2,front.Length);
+                Assert.That(front[0].Position.Z,Is.EqualTo(front[1].Position.Z).Within(1e-9));Assert.That(front[0].Position.X+front[1].Position.X,Is.EqualTo(2*site.Position.X).Within(1e-9));
+            }
+        }
         [TestCase(PlayableEntityKind.Explorer)][TestCase(PlayableEntityKind.Tank)][TestCase(PlayableEntityKind.Shkval)]
         public void FourContinuousRampsPermitUnitsAndOtherCliffEdgesRemainClosed(PlayableEntityKind kind){
             var p=Profile();var m=(MossHighlandMap)p.AuthoredMap;double r=PlayableUnitRules.Radius(p,kind);
@@ -50,7 +103,9 @@ namespace Spacewars.Tests.EditMode
             var graph=LayeredNavigationGraphCompiler.Compile(provider,clear,new NavGraphProfile(new string('a',64),"distance",1,p.Navigation.GridCell),new NavGraphCompileLimits(300000,150000,600000));
             var exits=m.Sites(p).SelectMany(s=>s.Slots).Select(s=>new NavPoint(s.Position.X+Math.Cos(s.Heading)*p.FactoryExitDistance,s.Position.Z+Math.Sin(s.Heading)*p.FactoryExitDistance));
             Assert.True(provider.TryLocate(new NavPoint(-38,-48),clear,out var start));
-            foreach(var goal in exits){
+            // Include every outside corner in the same connected full-build component.
+            var corners=new[]{new NavPoint(-50,-50),new NavPoint(-50,50),new NavPoint(50,-50),new NavPoint(50,50)};
+            foreach(var goal in exits.Concat(corners)){
                 Assert.True(provider.TryLocate(goal,clear,out var end),goal.ToString());var field=new NavSharedTerminalField(graph,new NavTerminalRegion("exit",1,end,new[]{end}),300000);int budget=1000000;
                 while(field.Status==NavSolveStatus.Pending&&budget>0)budget-=field.Advance(Math.Min(10000,budget)).Consumed;Assert.Greater(budget,0);Assert.AreEqual(NavSolveStatus.Ready,field.Status);
                 var subscription=new NavRouteSubscription(1,1,1,0,0,0,0,1,1,0,1,start,end,"",NavRouteProvenance.CommandMember);var route=new NavIncrementalSharedRoute(field,subscription);budget=1000000;

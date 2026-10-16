@@ -33,6 +33,8 @@ namespace Spacewars.Runtime
         private readonly long generation;
         private AiArmyMissionState state=new AiArmyMissionState{Phase=AiArmyPhase.Disbanded,Reason="no mission"};
         private long nextId=1,pendingId,pendingGeneration;
+        internal AiTeamAssignment TeamAssignment{get;set;}
+        private AiProfile AiProfileForReason;
         private double distance=double.MaxValue,targetHealth=-1;
         private bool applied;
         private Dictionary<string,long> completed=new Dictionary<string,long>(StringComparer.Ordinal);
@@ -112,6 +114,15 @@ namespace Spacewars.Runtime
             }
             if(AiTacticalExecutor.Withdraw(o,army,oProfile,profile))
             {state.Reason="withdrawal";SetPhase(registry,AiArmyPhase.Regrouping,o.Tick);return;}
+            if(pendingId==0&&o.Participants.Count>2&&state.TargetKind==PlayableRouteTargetKind.VisibleEnemy&&
+                o.Tick-state.LastInitiativeTick>=AiProfile.SecondsToTicks(profile.Value("strategy.commitmentSeconds"),30))
+            {
+                var assessments=AiOpponentSelector.Assess(o,oProfile,profile,state.TargetId);
+                var current=assessments.FirstOrDefault(a=>a.TargetId==state.TargetId);
+                var best=assessments.FirstOrDefault();
+                if(current!=null&&best!=null&&best.TargetId!=state.TargetId&&best.Score-current.Score>=profile.Value("strategy.switchMargin"))
+                {Release(registry,o.Tick,"observed opponent advantage after commitment");return;}
+            }
             if(state.TargetKind==PlayableRouteTargetKind.VisibleEnemy&&Health(o,state)<0)
             {
                 state.TargetVisible=false;
@@ -172,7 +183,7 @@ namespace Spacewars.Runtime
             =>ProposeWithRecords(o,opening,gameplay,profile,registry,null);
         internal PlayableAiAction ProposeWithRecords(PlayableAiObservation o,PlayableAiOpeningCompositionState opening,PlayableProfile gameplay,AiProfile profile,AiArmyRegistry registry,IEnumerable<PlayableAiTraceRecord> records)
         {
-            Bind(o);if(opening==null||opening.OwnerId!=owner||opening.MatchSeed!=o.Seed)throw new ArgumentException("Opening binding");
+            Bind(o);AiProfileForReason=profile;if(opening==null||opening.OwnerId!=owner||opening.MatchSeed!=o.Seed)throw new ArgumentException("Opening binding");
             if(pendingId!=0)return null;
             AiArmyMissionState plan=state;
             int[] ids;
@@ -201,6 +212,12 @@ namespace Spacewars.Runtime
                 if(opening.Phase==PlayableAiOpeningPhase.Active&&opening.Opening==PlayableAiOpening.Safe&&(!Ready(o,PlayableBuildingKind.Factory,1)||!Ready(o,PlayableBuildingKind.Refinery,1)))return null;
                 if(registry.Capture().Armies.Count(a=>a.Major&&a.Phase!=AiArmyPhase.Disbanded)>=registry.MajorCap)return null;
                 var free=Fighters(o).Where(u=>registry.ArmyFor(u.Id)==0).ToArray();
+                if(TeamAssignment?.Helping==true)
+                {
+                    // Reserve real owner-local bodies; defense retains first arbitration priority.
+                    int reserve=(int)Math.Ceiling(Fighters(o).Length*profile.Value("team.minimumHomeReserveShare"));
+                    free=free.Take(Math.Max(0,free.Length-reserve)).ToArray();
+                }
                 if(free.Length<profile.Value("armies.minimumUnits")||!Viable(free,gameplay,profile))return null;
                 var candidates=o.RouteProofs.Where(r=>free.Any(u=>u.Id==r.UnitId)&&
                     (r.Kind==PlayableRouteTargetKind.VisibleEnemy||r.Kind==PlayableRouteTargetKind.PublicObjective&&o.PublicScoutObjectives.Any(g=>g.SiteId==r.TargetId&&g.Role==PlayablePublicScoutObjectiveRole.PossibleEnemyStart&&g.Reachable)))
@@ -208,7 +225,11 @@ namespace Spacewars.Runtime
                     .GroupBy(r=>Key(r.Kind,r.TargetId)).Select(g=>new{Route=g.OrderBy(r=>r.UnitId).First(),Units=free.Where(u=>g.Any(r=>r.UnitId==u.Id)).Select(u=>u.Id).ToArray()})
                     .Where(g=>g.Units.Length>=profile.Value("armies.minimumUnits")&&Viable(free.Where(u=>g.Units.Contains(u.Id)),gameplay,profile))
                     .OrderBy(g=>g.Route.Kind).ThenBy(g=>g.Route.TargetId).ToArray();
-                var choice=candidates.FirstOrDefault();if(choice==null)return null;
+                var assessments=AiOpponentSelector.Assess(o,gameplay,profile);
+                var choice=o.Participants.Count<=2?candidates.FirstOrDefault():candidates.OrderByDescending(g=>TeamAssignment!=null&&TeamAssignment.TargetId==g.Route.TargetId&&g.Route.Kind==PlayableRouteTargetKind.VisibleEnemy)
+                    .ThenByDescending(g=>assessments.FirstOrDefault(a=>a.TargetId==g.Route.TargetId&&g.Route.Kind==a.Kind)?.Score??double.MinValue)
+                    .ThenBy(g=>g.Route.Kind).ThenBy(g=>g.Route.TargetId).FirstOrDefault();if(choice==null)return null;
+                if(TeamAssignment!=null&&TeamAssignment.TargetId==choice.Route.TargetId&&TeamAssignment.WaitUntilTick>o.Tick)return null;
                 ids=choice.Units;plan=new AiArmyMissionState{TargetKind=choice.Route.Kind,TargetId=choice.Route.TargetId,Target=choice.Route.Target};
             }
             var recipients=o.Entities.Where(u=>ids.Contains(u.Id)).ToArray();
@@ -224,8 +245,10 @@ namespace Spacewars.Runtime
             Bind(o);if(action==null||pendingId!=0||action.ActionId!=nextId||action.PlayerId!=owner||action.Generation!=generation||action.SnapshotSequence!=o.SnapshotSequence)throw new InvalidOperationException("Selected mission binding");
             if(!Active)
             {
-                if(!registry.TryCreate(o,AiArmyRole.Attack,Policy,action.EntityIds,out var id))throw new InvalidOperationException("Selected mission lost atomic membership admission");
+                if(!registry.TryCreate(o,TeamAssignment?.Helping==true?AiArmyRole.AlliedSupport:AiArmyRole.Attack,Policy,action.EntityIds,out var id))throw new InvalidOperationException("Selected mission lost atomic membership admission");
                 state=new AiArmyMissionState{ArmyId=id,TargetKind=action.TargetId>0?PlayableRouteTargetKind.VisibleEnemy:PlayableRouteTargetKind.PublicObjective,TargetId=action.TargetId>0?action.TargetId:action.SiteId,Target=action.Target,StartedTick=o.Tick,ProgressTick=o.Tick,PhaseTick=o.Tick,LastInitiativeTick=o.Tick,LastSeenTick=o.Tick,TargetVisible=action.TargetId>0,Phase=AiArmyPhase.Forming,Reason="selected useful pressure"};
+                var assessment=AiOpponentSelector.Assess(o,oProfile,AiProfileForReason??Spacewars.Simulation.Ai.AiProfile.Initial).FirstOrDefault(a=>a.TargetId==state.TargetId&&state.TargetKind==PlayableRouteTargetKind.VisibleEnemy);
+                if(assessment!=null)state.Reason=string.Format(System.Globalization.CultureInfo.InvariantCulture,"observed team={0} tick={1} T={2:F4} E={3:F4} R={4:F4} O={5:F4} F={6:F4} score={7:F4}; {8}",assessment.Team,assessment.SourceTick,assessment.Threat,assessment.EconomicValue,assessment.Reachability,assessment.Opportunity,assessment.NewFrontCost,assessment.Score,TeamAssignment?.Reason??"independent pressure");
                 distance=o.Entities.Where(u=>action.EntityIds.Contains(u.Id)).Average(u=>Distance(u.Position,state.Target));targetHealth=Health(o,state);applied=false;
                 registry.UpdateMission(id,Policy,state.Phase,o.Tick,Key(state.TargetKind,state.TargetId),rally:state.Target);
             }

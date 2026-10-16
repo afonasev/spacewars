@@ -129,6 +129,18 @@ namespace Spacewars.Tests.EditMode
             var p=PlayableProfile.Default;var d=New(p);var data=p.CopyData();data.revision=2;data.tankCollisionRadius+=.1;
             Assert.IsNotNull(Call(d,"ValidateBalance",PlayableProfile.Create(data)));Assert.AreEqual(p.Revision,View(d).ProfileRevision);
         }
+        [Test] public void PreparationRefusalPublishesRetryStatusAndKeepsActualRuntimeWorkerAlive()
+        {
+            var p=PlayableProfile.Default;var data=p.CopyData();data.revision++;data.tankSpeed*=1.1;var next=PlayableProfile.Create(data);var runtime=new PlayableRuntime(p,1,7,autonomousOwnerAi:false,startPaused:true);var kernel=new CertifiedRouteKernel();var actual=typeof(PlayableRuntime).GetField("domain",F).GetValue(runtime);var nav=(NavigationSession)Domain.GetProperty("Navigation",F).GetValue(actual);var budget=nav.PhysicalHostBudget;var authority=(PlayableAuthorityTick)typeof(PlayableRuntime).GetField("authorityTick",F).GetValue(runtime);int denied=0;
+            bool Until(Func<bool> done)=>SpinWait.SpinUntil(()=>{if(authority.AwaitingRoutes)kernel.Pump(runtime.NavigationBinding,4);return done();},3000);
+            try{
+                Assert.True(Until(()=>runtime.Latest?.Paused==true));Assert.Null(Call(actual,"ValidateBalance",next));
+                budget.AllocationAdmission=_=>{var frames=new System.Diagnostics.StackTrace().GetFrames();if(frames.Any(f=>f.GetMethod().DeclaringType==Domain&&f.GetMethod().Name=="TryApplyBalance")&&frames.Any(f=>f.GetMethod().DeclaringType==typeof(NavigationAdmissionStorage))){Interlocked.Increment(ref denied);return false;}return true;};
+                Assert.Null(runtime.RequestBalance(next,1,p.Revision));runtime.RequestPause(false);Assert.True(Until(()=>runtime.BalanceApplyStatus==PlayableDomain.BalancePreparationRefusedMessage));Assert.AreEqual(1,Volatile.Read(ref denied));Assert.False(runtime.IsStopped);Assert.AreEqual(RuntimeStatus.Running,runtime.Latest.Status);Assert.Null(runtime.Latest.Failure);Assert.AreEqual(p.Revision,runtime.Latest.ProfileRevision);Assert.AreEqual(p.Revision,nav.Admission.Profile.Revision);Assert.Zero(nav.OwnedRebindPublications);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+                budget.AllocationAdmission=null;Assert.Null(runtime.RequestBalance(next,1,p.Revision));Assert.True(Until(()=>runtime.Latest?.ProfileRevision==next.Revision));Assert.AreSame(next,runtime.Latest.ActiveProfile);Assert.AreEqual(next.Revision,nav.Admission.Profile.Revision);Assert.AreEqual(1,nav.OwnedRebindPublications);Assert.Null(runtime.Latest.Failure);Assert.False(runtime.IsStopped);
+            }finally{budget.AllocationAdmission=null;runtime.RequestStop();Assert.True(SpinWait.SpinUntil(()=>runtime.IsStopped,3000));kernel.Clear();nav.ReleaseCommittedHostRoot();Call(actual,"DestroyOwnedNavigation");Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);runtime.Dispose();}
+        }
+
         [Test] public void PausedRequestWaitsForResumeAndPublishesMatchingProfile()
         {
             var p=PlayableProfile.Default;var data=p.CopyData();data.revision=2;data.tankWeaponDamage+=1;var next=PlayableProfile.Create(data);

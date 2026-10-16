@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -63,13 +64,20 @@ func regular(p string) error {
 	return nil
 }
 func fetch(url string, limit int64) ([]byte, error) {
+	return fetchContext(context.Background(), url, limit)
+}
+func fetchContext(ctx context.Context, url string, limit int64) ([]byte, error) {
 	c := &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error {
 		if len(via) > 3 || r.URL.Scheme != "https" && r.URL.Host != via[0].URL.Host || r.URL.Host != via[0].URL.Host {
 			return errors.New("redirect rejected")
 		}
 		return nil
 	}}
-	r, e := c.Get(url)
+	req, e := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if e != nil {
+		return nil, e
+	}
+	r, e := c.Do(req)
 	if e != nil {
 		return nil, e
 	}
@@ -121,9 +129,15 @@ func copyVerified(from, to string, f File) error {
 	return e
 }
 func stageUpdate(root, cache string, m Manifest, raw []byte, progress func(int64, int64)) (string, error) {
+	return stageUpdateContext(context.Background(), root, cache, m, raw, progress)
+}
+func stageUpdateContext(ctx context.Context, root, cache string, m Manifest, raw []byte, progress func(int64, int64)) (string, error) {
 	stage := filepath.Join(cache, "staged", m.ID)
 	if e := os.MkdirAll(stage, 0700); e != nil {
 		return "", e
+	}
+	if err := requireSpace(cache, requiredStageSpace(m)); err != nil {
+		return "", err
 	}
 	objects := filepath.Join(cache, "objects")
 	if e := os.MkdirAll(objects, 0700); e != nil {
@@ -183,6 +197,10 @@ func stageUpdate(root, cache string, m Manifest, raw []byte, progress func(int64
 			return "", e
 		}
 		for _, c := range f.Chunks {
+			if err := ctx.Err(); err != nil {
+				out.Close()
+				return "", err
+			}
 			op := filepath.Join(objects, c.Hash)
 			b, e := os.ReadFile(op)
 			if e != nil || int64(len(b)) != c.Size || digest(b) != c.Hash {
@@ -194,9 +212,9 @@ func stageUpdate(root, cache string, m Manifest, raw []byte, progress func(int64
 							break
 						}
 					}
-					b, e = fetchRange(packageURL(m.Transport), pc, m.Transport.Size)
+					b, e = fetchRangeContext(ctx, packageURL(m.Transport), pc, m.Transport.Size)
 				} else {
-					b, e = fetch(origin+"/objects/"+c.Hash, c.Size)
+					b, e = fetchContext(ctx, origin+"/objects/"+c.Hash, c.Size)
 				}
 				if e != nil {
 					out.Close()
@@ -277,6 +295,9 @@ func applyStage(root, stage, platform string) error {
 	}
 	if m.Sequence <= old.Sequence || !newerVersion(m.Version, old.Version) {
 		return errors.New("release rollback rejected")
+	}
+	if err := requireSpace(root, requiredStageSpace(m)); err != nil {
+		return err
 	}
 	releases := filepath.Join(root, "releases")
 	st, e := os.Lstat(releases)

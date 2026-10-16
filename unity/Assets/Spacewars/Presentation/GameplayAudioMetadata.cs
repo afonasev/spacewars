@@ -13,7 +13,7 @@ namespace Spacewars.Presentation
         public double Read(GameplayAudioProfile p)=>Convert.ToDouble(field.GetValue(p));
         public void Write(GameplayAudioProfile p,double value)
         {
-            Validate(value);value=Minimum+Math.Round((Math.Max(Minimum,Math.Min(Maximum,value))-Minimum)/Step)*Step;
+            Validate(value);
             field.SetValue(p,Convert.ChangeType(value,field.FieldType));
         }
         public void Validate(double v)

@@ -57,7 +57,7 @@ namespace Spacewars.Runtime
                 aiScheduler.Rebind(requested);NativeAiProfile=requested;EnemyAiConfig=new AiOwnerConfig(EnemyAiConfig.OwnerId,EnemyAiConfig.Difficulty,seed,requested);
                 completedBalanceStatus="Применена AI ревизия "+requested.Revision;return;}
             var error=expected!=domain.CurrentBalanceRevision?"Ревизия матча изменилась; повторите применение.":domain.ValidateBalance(next);
-            if(error==null){foreach(var owner in aiScheduler.Owners)owner.ReconcileBudget(domain);domain.ApplyBalance(next);aiScheduler.Rebind(next);}
+            if(error==null){foreach(var owner in aiScheduler.Owners)owner.ReconcileBudget(domain);if(domain.TryApplyBalance(next))aiScheduler.Rebind(next);else error=PlayableDomain.BalancePreparationRefusedMessage;}
             completedBalanceStatus=error??("Применена ревизия "+next.DisplayName+" · "+next.Revision);
         }
         private NavGeometry navigationGeometry;
@@ -171,7 +171,7 @@ namespace Spacewars.Runtime
         {
             bool framePaused=publicationPaused??(Volatile.Read(ref paused)!=0);
             PublishSpectatorFrame(status,failure,framePaused);
-            if(offlineConfiguration==null)return;var frameMetrics=Metrics(lastCpu,0);var views=new Dictionary<string,PlayableSnapshot>();foreach(var p in offlineConfiguration.Roster)views.Add(p.Id,domain.PlayerSnapshot(snapshotSequence,status,framePaused,frameMetrics,failure,seed,domain.OwnerFor(p.Id)));OfflineReceipt[] history;long ordinal;lock(gate){history=offlineReceipts.ToArray();ordinal=receiptOrdinal;}Volatile.Write(ref offlineFrame,new OfflinePresentationFrame(views,history,ordinal));
+            if(offlineConfiguration==null)return;var frameMetrics=Metrics(lastCpu,0);var views=new Dictionary<string,PlayableSnapshot>();foreach(var p in offlineConfiguration.Roster)views.Add(p.Id,spectatorFrame!=null?spectatorFrame.Perspective(domain.OwnerFor(p.Id)):domain.PlayerSnapshot(snapshotSequence,status,framePaused,frameMetrics,failure,seed,domain.OwnerFor(p.Id)));OfflineReceipt[] history;long ordinal;lock(gate){history=offlineReceipts.ToArray();ordinal=receiptOrdinal;}Volatile.Write(ref offlineFrame,new OfflinePresentationFrame(views,history,ordinal));
         }
         // Trusted local route service only; never a map/HUD or network view.
         public NavGeometry NavigationGeometry=>Volatile.Read(ref navigationGeometry);
@@ -242,13 +242,15 @@ namespace Spacewars.Runtime
                     authorityTick.PrepareNavigationViews(()=>IsStopRequested);
                 }
                 Volatile.Write(ref preparationComplete,1);
-                var clock=Stopwatch.StartNew();double next=0,lastAt=0;
+                var clock=Stopwatch.StartNew();var pacing=new PlayableRuntimePacing(TickSeconds,localSpectator);double lastAt=0;
                 while(Volatile.Read(ref stopping)==0)
                 {
                     if(Volatile.Read(ref routeFailure) is Exception routeError)throw new InvalidOperationException("Certified route worker failed.",routeError);
                     double now=clock.Elapsed.TotalSeconds;
-                    if(now<next){wake.WaitOne((int)Math.Min(20,Math.Ceiling((next-now)*1000)));continue;}
-                    var timer=Stopwatch.StartNew();bool isPaused=Volatile.Read(ref paused)!=0;
+                    bool isPaused=Volatile.Read(ref paused)!=0;
+                    double wait=pacing.WaitSeconds(now,Volatile.Read(ref spectatorSpeed),isPaused);
+                    if(wait>0){wake.WaitOne((int)Math.Min(20,Math.Ceiling(wait*1000)));continue;}
+                    var timer=Stopwatch.StartNew();
                     if(!authorityTick.AwaitingRoutes){ApplyRequestedBalance(isPaused);domain.SetRallyPaused(isPaused);ApplyCommands(isPaused);}
                     ApplyMatchActions(isPaused);
                     // Publish command-generated geometry before main-thread service admission.
@@ -275,7 +277,7 @@ namespace Spacewars.Runtime
                     if(ownerAi!=null)Volatile.Write(ref aiCheckpoint,ownerAi.Checkpoint);
                     if(enemyAi!=null)Volatile.Write(ref enemyAiCheckpoint,enemyAi.Checkpoint);
                     PublishParticipantViews(snapshot.Status,null,isPaused);lastPublishedRevision=revision;lastPublishedPause=isPaused;PublishNavigationBinding();Volatile.Write(ref latest,snapshot);if(completedBalanceStatus!=null){lock(gate){balanceApplyStatus=completedBalanceStatus;requestedBalance=null;requestedAiProfile=null;completedBalanceStatus=null;}}lastCpu=timer.Elapsed.TotalMilliseconds;maxCpu=Math.Max(maxCpu,lastCpu);if(lastCpu>TickSeconds*1000)missedDeadlines++;lastAt=now;CompleteCapture();
-                    next+=TickSeconds/Volatile.Read(ref spectatorSpeed);if(next<clock.Elapsed.TotalSeconds)next=clock.Elapsed.TotalSeconds;
+                    pacing.Complete(clock.Elapsed.TotalSeconds);
                 }
             }
             catch(Exception ex){failure=ex.ToString();Interlocked.Increment(ref errors);}

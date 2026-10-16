@@ -5,7 +5,7 @@ namespace Spacewars.Input
 {
     [Serializable] public sealed class NativeLocalInputProfile
     {
-        public float deadzone,cursorSpeed,cameraSpeed,zoomSpeed,holdMs,selectAllHoldMs,selectionGrowth,cursorRadius,cursorWidth,doubleTapMs,cameraDefaultZoom,cameraMinZoom,cameraMaxZoom,radialDeadzone,radialRadius,basePageSize,controlGroupFocusRadius;
+        public float deadzone,cursorSpeed,cameraSpeed,zoomSpeed,holdMs,selectAllHoldMs,selectionGrowth,cursorRadius,cursorWidth,doubleTapMs,cameraDefaultZoom,cameraMinZoom,cameraMaxZoom,radialDeadzone,radialRadius,basePageSize,controlGroupFocusRadius,cursorRecenterIdleMs;
         public Field[] metadata;
         [Serializable] public sealed class Field {public string path,label,description,unit;public float min,max,step,value;}
         public void Validate()
@@ -14,6 +14,7 @@ namespace Spacewars.Input
             foreach(var field in metadata)if(string.IsNullOrEmpty(field.path)||string.IsNullOrEmpty(field.label)||string.IsNullOrEmpty(field.description)||string.IsNullOrEmpty(field.unit)||field.step<=0||field.value<field.min||field.value>field.max)throw new ArgumentException("Invalid source input metadata.");
             foreach(var field in metadata){var key=field.path.Substring(field.path.LastIndexOf('.')+1);if(key=="controlGroupDoubleTapMs")key="doubleTapMs";var member=GetType().GetField(key);if(member!=null&&member.FieldType==typeof(float)){float value=(float)member.GetValue(this);if(value!=field.value||Math.Abs((value-field.min)/field.step-Math.Round((value-field.min)/field.step))>.001)throw new ArgumentException("Input differs from source metadata: "+field.path);}}
             if(cameraMinZoom<=0||cameraMaxZoom<=cameraMinZoom||cameraDefaultZoom<cameraMinZoom||cameraDefaultZoom>cameraMaxZoom)throw new ArgumentException("Invalid source camera metadata.");
+            if((float.IsNaN(cursorRecenterIdleMs)||float.IsInfinity(cursorRecenterIdleMs))||cursorRecenterIdleMs<0||!Array.Exists(metadata,f=>f.path=="system.gamepad.cursorRecenterIdleMs"))throw new ArgumentException("Missing cursor recenter timing metadata.");
             if(doubleTapMs<=0)throw new ArgumentException("Missing source double-tap timing.");
             if(deadzone<=0||deadzone>=1||holdMs<=0||selectAllHoldMs<=holdMs||cursorSpeed<=0||cameraSpeed<=0)throw new ArgumentException("Invalid source input values.");
         }

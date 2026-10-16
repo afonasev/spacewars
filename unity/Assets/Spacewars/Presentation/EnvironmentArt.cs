@@ -9,7 +9,11 @@ namespace Spacewars.Presentation
     [Serializable] public sealed class EnvironmentArtProfile
     {
         public string id="natural-frontier-v1";
-        public int revision=9;
+        public int revision=11;
+        [SurfaceSetting("Маркеры приказов","Радиус","Радиус контурного маркера в игровом поле; миникарта использует тот же относительный масштаб.","px",4,16,.5f)] public float orderMarkerRadius=8;
+        [SurfaceSetting("Маркеры приказов","Толщина контура","Толщина красного/зелёного кольца без заливки.","px",.5f,3,.25f)] public float orderMarkerWidth=1.25f;
+        [SurfaceSetting("Маркеры приказов","Размер номера","Размер цифры внутри контурного маркера.","px",8,18,.5f)] public float orderMarkerFontSize=11;
+        [SurfaceSetting("Construction aprons","Запас площадки форта","Дополнительное пространство вокруг нижнего основания форта; только внешний вид.","m",.1f,2,.05f)] public float outpostApronMargin=.75f;
         [SurfaceSetting("Construction aprons","Building margin","Optional margin beyond the built-in lower foundation platform; visual only.","m",0,1.5f,.05f)] public float apronMargin=0;
         [SurfaceSetting("Construction aprons","Marking width","Width of perimeter dashes and corner brackets.","m",.03f,.2f,.01f)] public float apronMarkWidth=.07f;
         [SurfaceSetting("Construction aprons","Concrete value","Neutral apron concrete brightness before scene lighting.","ratio",.2f,.8f,.01f)] public float apronConcreteValue=.43f;

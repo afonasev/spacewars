@@ -67,17 +67,9 @@ namespace Spacewars.Presentation
             long tick=runtime.Latest.Tick;yield return Frame("05-pause.png");
             OpenPauseSettings();yield return Frame("06-pause-settings.png");menuNavigation.Back();
             if(!paused||runtime.Latest.Tick!=tick)throw new InvalidOperationException("Settings resumed the match.");
-            OpenLaboratory();yield return new WaitForSecondsRealtime(.2f);
-            var page=childMenu;page.Q<TextField>("lab-name").value="Проверка Orbital";
-            var numeric=page.Query<TextField>().ToList().First(t=>t.name!=null&&t.name.StartsWith("lab-field-"));((Action<int>)numeric.userData)(1);
-            Activate(page,"lab-save");int before=runtime.Latest.ProfileRevision;
-            Activate(page,"lab-apply");yield return Frame("07-laboratory-pending.png");
-            if(runtime.Latest.ProfileRevision!=before||runtime.Latest.Tick!=tick)throw new InvalidOperationException("Apply ran while paused.");
-            menuNavigation.Back();if(!paused)throw new InvalidOperationException("Lab Back resumed the match.");
-            Pause(false);deadline=Time.realtimeSinceStartup+10;while(runtime.Latest.ProfileRevision==before&&Time.realtimeSinceStartup<deadline)yield return null;
-            if(runtime.Latest.ProfileRevision==before||runtime.Latest.Failure!=null)throw new InvalidOperationException("Saved revision not applied: "+runtime.BalanceApplyStatus);
-            yield return new WaitForSecondsRealtime(2);Pause(true);yield return Frame("08-applied-pause.png");
-            int applied=runtime.Latest.ProfileRevision;
+            int applied=runtime.Latest.ProfileRevision;OpenLaboratory();
+            if(childMenu!=null||runtime.Latest.ProfileRevision!=applied||runtime.Latest.Tick!=tick)throw new InvalidOperationException("Lab must be unavailable during a paused match.");
+            yield return Frame("07-match-lab-blocked.png");
             Pause(false);int headquarters=runtime.Latest.Buildings.Single(b=>b.Owner==Spacewars.Simulation.PlayableOwner.Player&&b.Kind==Spacewars.Simulation.PlayableBuildingKind.Headquarters).Id;
             Submit(Spacewars.Simulation.PlayableCommandKind.SellBuilding,new[]{headquarters});
             deadline=Time.realtimeSinceStartup+15;while(runtime.Latest.Outcome==Spacewars.Simulation.PlayableMatchOutcome.Playing&&Time.realtimeSinceStartup<deadline)yield return null;
@@ -87,7 +79,7 @@ namespace Spacewars.Presentation
             if(generation==oldGeneration||runtime.Latest.Outcome!=Spacewars.Simulation.PlayableMatchOutcome.Playing)throw new InvalidOperationException("Result restart did not create a new match.");
             yield return Frame("10-restarted-match.png");Pause(true);ReturnToMainMenu();yield return new WaitForSecondsRealtime(1);yield return Frame("11-return-main.png");
             if(runtime!=null||nativeMainMenu==null||!inLobby)throw new InvalidOperationException("Return to main failed.");
-            File.WriteAllText(Path.Combine(orbitalEvidence,"smoke.json"),"{\"result\":\"passed\",\"applied_revision\":"+applied+",\"physical_gamepad\":false,\"scope\":\"main/settings/lab/lobby/match/pause/settings/live saved revision/pause preservation/result/restart/return main\"}");
+            File.WriteAllText(Path.Combine(orbitalEvidence,"smoke.json"),"{\"result\":\"passed\",\"applied_revision\":"+applied+",\"physical_gamepad\":false,\"scope\":\"main/settings/lab/lobby/match/pause/settings/lab blocked during match/pause preservation/result/restart/return main\"}");
             Debug.Log("ORBITAL_PLAYER_SMOKE_PASS");Application.Quit();
         }
     }

@@ -26,7 +26,8 @@ namespace Spacewars.Runtime
         private void PublishSpectatorFrame(RuntimeStatus status,string failure,bool? framePaused=null)
         {
             if(!localSpectator&&(offlineConfiguration==null||offlineConfiguration.Spectators.Count==0))return;
-            Volatile.Write(ref spectatorFrame,domain.SpectatorSnapshot(snapshotSequence,status,framePaused??(Volatile.Read(ref paused)!=0),Metrics(lastCpu,0),failure,seed));
+            var current=domain.SpectatorSnapshot(snapshotSequence,status,framePaused??(Volatile.Read(ref paused)!=0),Metrics(lastCpu,0),failure,seed);
+            Volatile.Write(ref spectatorFrame,new PlayableSpectatorFrame(current,spectatorFrame));
         }
     }
 }

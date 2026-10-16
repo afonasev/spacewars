@@ -169,16 +169,11 @@ public sealed class OrbitalMenuTests : InputTestFixture
         var keyboard=root.Q(className:"orbital-keyboard");var done=keyboard.Query<Button>().ToList().Single(b=>b.text=="Готово");done.Focus();navigation.Activate();
         Assert.IsNull(root.Q(className:"orbital-keyboard"));Assert.AreSame(text,root.focusController.focusedElement);Assert.AreEqual("А",text.value);
     }
-    [UnityTest] public IEnumerator LaboratoryOpensCurrentMatchRevisionIndependentlyOfNextMatchSelection()
+    [Test] public void LaboratoryCannotOpenAnActiveMatch()
     {
-        var directory=Path.Combine(Path.GetTempPath(),"spacewars-orbital-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
-        try{
-            var baseline=PlayableProfile.Default;var store=new NativeBalanceStore(baseline,Path.Combine(directory,"balance.json"));var data=baseline.CopyData();data.tankWeaponDamage++;
-            var active=store.Save("Текущий бой",data);Assert.AreEqual(baseline.Revision,store.Selected.Revision);
-            var view=new NativeBalanceView(root,navigation,store,()=>{},_=>null,active);yield return null;
-            Assert.AreEqual(active.DisplayName,view.Page.Q<TextField>("lab-name").value);
-            Assert.AreEqual(baseline.Revision,store.Selected.Revision,"Opening the active revision must not change the next-match choice.");
-        }finally{Directory.Delete(directory,true);}
+        var directory=Path.Combine(Path.GetTempPath(),"spacewars-lab-match-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
+        try{var store=new NativeBalanceStore(PlayableProfile.Default,Path.Combine(directory,"balance.json"));Assert.Throws<InvalidOperationException>(()=>new NativeBalanceView(root,navigation,store,()=>{},PlayableProfile.Default));}
+        finally{Directory.Delete(directory,true);}
     }
     [UnityTest] public IEnumerator ControlsHelpKeepsScrollingWithoutScrollbarControls()
     {
@@ -193,13 +188,13 @@ public sealed class OrbitalMenuTests : InputTestFixture
         var directory=Path.Combine(Path.GetTempPath(),"spacewars-orbital-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
         try{
             root.style.width=800;root.style.height=620;
-            var view=new NativeBalanceView(root,navigation,new NativeBalanceStore(PlayableProfile.Default,Path.Combine(directory,"balance.json")),()=>{},null);
+            var view=new NativeBalanceView(root,navigation,new NativeBalanceStore(PlayableProfile.Default,Path.Combine(directory,"balance.json")),()=>{});
             yield return null;yield return null;
             var card=view.Page.Q(className:"orbital-lab-card");Assert.LessOrEqual(card.worldBound.yMax,root.worldBound.yMax+.5f);
-            foreach(var key in new[]{"lab-save","lab-reset","lab-apply","lab-select","lab-back"}){var button=view.Page.Q<Button>(key);Assert.Greater(button.worldBound.width,0,key);Assert.LessOrEqual(button.worldBound.xMax,card.worldBound.xMax+.5f,key);Assert.LessOrEqual(button.worldBound.yMax,card.worldBound.yMax+.5f,key);}
+            foreach(var key in new[]{"lab-save","lab-reset","lab-back"}){var button=view.Page.Q<Button>(key);Assert.Greater(button.worldBound.width,0,key);Assert.LessOrEqual(button.worldBound.xMax,card.worldBound.xMax+.5f,key);Assert.LessOrEqual(button.worldBound.yMax,card.worldBound.yMax+.5f,key);}
             var editor=view.Page.Query<TextField>().ToList().First(t=>t.name!=null&&t.name.StartsWith("lab-field-"));Assert.Greater(editor.worldBound.width,150);Assert.LessOrEqual(editor.worldBound.xMax,card.worldBound.xMax);
             var scroll=view.Page.Q<ScrollView>("lab-parameters");Assert.AreEqual(ScrollerVisibility.Auto,scroll.verticalScrollerVisibility,"Laboratory retains its scrollbar exception");Assert.AreEqual(Visibility.Visible,scroll.verticalScroller.resolvedStyle.visibility);Assert.LessOrEqual(scroll.contentContainer.worldBound.xMax,scroll.worldBound.xMax+.5f);
-            Assert.IsNull(view.Page.Q(className:"orbital-hints"),"User removed the bottom navigation hints");Assert.IsNull(view.Page.Q("lab-help"),"Parameter explanations remain native tooltips without a bottom panel");
+            Assert.IsNull(view.Page.Q(className:"orbital-hints"),"User removed the bottom navigation hints");Assert.IsNull(view.Page.Q(className:"lab-help"),"No permanent bottom explanation panel");editor.Focus();Assert.NotNull(view.Page.Q("lab-focus-help"),"Template requires inline descriptions at focus without hover");
         }finally{Directory.Delete(directory,true);}
     }
     [Test] public void SavedNativeRevisionsAreImmutableAndCasProtectsOtherEditors()
@@ -210,7 +205,7 @@ public sealed class OrbitalMenuTests : InputTestFixture
             var data=baseline.CopyData();data.tankWeaponDamage+=1;var saved=a.Save("Тест",data);data.tankWeaponDamage+=50;
             Assert.AreEqual(baseline.TankWeaponDamage+1,a.Resolve(saved.Revision).TankWeaponDamage);
             Assert.Throws<Spacewars.BalanceLab.StoreConflictException>(()=>b.Save("Другой",baseline.CopyData()));
-            a.Select(saved.Revision);var reopened=new NativeBalanceStore(baseline,path);Assert.AreEqual(saved.Revision,reopened.Selected.Revision);
+            a.Select(saved.Revision);var reopened=new NativeBalanceStore(baseline,path);Assert.AreEqual(1,reopened.Selected.Revision,"Startup uses the released Default");reopened.SelectProfile(a.SelectedId);Assert.AreEqual(saved.Revision,reopened.Selected.Revision);
         }finally{Directory.Delete(directory,true);}
     }
 }

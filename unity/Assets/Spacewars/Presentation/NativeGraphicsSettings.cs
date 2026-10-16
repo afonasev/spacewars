@@ -20,8 +20,8 @@ namespace Spacewars.Presentation
             .Concat(Raw<ContactOcclusionProfile>("ContactOcclusionProfile").Parameters()).Concat(Raw<ActorMaterialProfile>("ActorMaterialProfile").Parameters())
             .Concat(Raw<IndustrialLightingProfile>("IndustrialLightingProfile").Parameters()).Concat(Raw<IndustrialLightingProfile>("ThreeCrossingsLightingProfile").Parameters()).ToArray());
         public static IEnumerable<string> PreferenceKeys=>Parameters.Select(p=>Key(p.Path)).Concat(new[]{Key("bloomEnabled"),Key("occlusionEnabled")});
-        public static bool BloomEnabled{get=>PlayerPrefs.GetInt(Key("bloomEnabled"),1)!=0;set{PlayerPrefs.SetInt(Key("bloomEnabled"),value?1:0);PlayerPrefs.Save();Changed?.Invoke("visual.actorFinish.bloomEnabled");}}
-        public static bool OcclusionEnabled{get=>PlayerPrefs.GetInt(Key("occlusionEnabled"),1)!=0;set{PlayerPrefs.SetInt(Key("occlusionEnabled"),value?1:0);PlayerPrefs.Save();Changed?.Invoke("visual.contactOcclusion.enabled");}}
+        public static bool BloomEnabled{get=>PlayerPrefs.GetInt(Key("bloomEnabled"),1)!=0;set{NativePreferenceWriter.SetInt(Key("bloomEnabled"),value?1:0);Changed?.Invoke("visual.actorFinish.bloomEnabled");}}
+        public static bool OcclusionEnabled{get=>PlayerPrefs.GetInt(Key("occlusionEnabled"),1)!=0;set{NativePreferenceWriter.SetInt(Key("occlusionEnabled"),value?1:0);Changed?.Invoke("visual.contactOcclusion.enabled");}}
         public static float Read(SurfaceParameter p)
         {
             // Art tuning belongs to authored Balance Lab profiles. Ignore legacy player sliders.
@@ -34,10 +34,11 @@ namespace Spacewars.Presentation
         {
             if(path!=AaPath)throw new ArgumentException("Developer graphics controls belong to Balance Lab",nameof(path));
             var p=Parameters.Single(x=>x.Path==path);if(!Valid(p,value))throw new ArgumentOutOfRangeException(nameof(value),"Invalid graphics value: "+path);
-            PlayerPrefs.SetFloat(Key(path),value);PlayerPrefs.Save();Changed?.Invoke(path);
+            NativePreferenceWriter.SetFloat(Key(path),value);Changed?.Invoke(path);
         }
         public static void Apply(IEnumerable<SurfaceParameter> parameters){foreach(var p in parameters)p.Write(Read(p));}
-        public static void Reset(){foreach(var key in PreferenceKeys)PlayerPrefs.DeleteKey(key);PlayerPrefs.Save();Changed?.Invoke("*");}
+        public static void Refresh()=>Changed?.Invoke("*");
+        public static void Reset(){NativePreferenceWriter.Apply(()=>{foreach(var key in PreferenceKeys)PlayerPrefs.DeleteKey(key);});Refresh();}
         public static string Group(SurfaceParameter p)
         {
             if(p.Path==AaPath)return "Сглаживание";

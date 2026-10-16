@@ -21,6 +21,7 @@ public sealed class PlayableSpectatorHudTests
     [TearDown] public void Cleanup(){UnityEngine.Object.DestroyImmediate(host);}
     PlayableSpectatorFrame Fixture(int count)
     {
+        Set("matchSetup",new NativeLobbyConfiguration{Participants=Enumerable.Range(0,count).Select(i=>new NativeLobbyParticipant{Name="Игрок "+(i+1),Team=i%2,Color=i,Human=false}).ToList()});
         var players=Enumerable.Range(0,count).Select(i=>{
             var owner=(PlayableOwner)i;var units=new[]{new PlayableEntitySnapshot(100+i,owner,PlayableEntityKind.Tank,new NavPoint(i*4,0),150,false,0,0,0)};
             var research=new[]{new PlayableResearchOrderSnapshot(1,PlayableResearchKind.TankChassis,10+i,300,30,30,false,true),new PlayableResearchOrderSnapshot(2,PlayableResearchKind.ExplorerAssaultGuns,10+i,300,12,30,true,false),new PlayableResearchOrderSnapshot(3,PlayableResearchKind.ShkvalGuidance,10+i,0,0,30,false,false)};
@@ -28,7 +29,7 @@ public sealed class PlayableSpectatorHudTests
             var orders=new[]{new PlayableProductionOrderSnapshot(1,PlayableEntityKind.Tank,150,3,20,10,true),new PlayableProductionOrderSnapshot(2,PlayableEntityKind.Explorer,100,2,20,20,false)};
             var buildings=new[]{new PlayableBuildingSnapshot(50+i,owner,PlayableBuildingKind.Headquarters,new NavPoint(i*4,12),1000,1,0,0,default),new PlayableBuildingSnapshot(10+i,owner,PlayableBuildingKind.Factory,new NavPoint(i*4,4),250,1,2,.5,default,orders:orders,repeat:true),new PlayableBuildingSnapshot(30+i,owner,PlayableBuildingKind.Refinery,new NavPoint(i*4,8),250,.4,0,0,default,phase:ConstructionPhase.Constructing),new PlayableBuildingSnapshot(70+i,owner,PlayableBuildingKind.ScientificCenter,new NavPoint(i*4,16),250,1,0,0,default,research:research)};
             var vision=new PlayableVision(i%2,64,64,4,PlayableProfile.Default.FogEdgeFeather);vision.Refresh(new[]{new VisionSource(new NavPoint(i*4,0),12)},Array.Empty<KnownBuilding>());
-            return new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,15660,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,840+i*100,null,units,buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,incomePerSecond:12,population:new PlayablePopulationSnapshot(3,3,100),ownerResearch:i==1?Array.Empty<PlayableResearchOrderSnapshot>():research,owner:owner,ownerId:"Игрок "+(i+1),team:i%2,ownerEliminated:i==7,vision:vision.Snapshot());
+            return new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,15660,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,840+i*100,null,units,buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,incomePerSecond:12,population:new PlayablePopulationSnapshot(3,3,100),ownerResearch:i==1?Array.Empty<PlayableResearchOrderSnapshot>():research,owner:owner,ownerId:"Игрок "+(i+1),team:i%2,ownerEliminated:i==7,vision:vision.Snapshot(),activeProfile:PlayableProfile.Default);
         }).ToArray();
         return (PlayableSpectatorFrame)Activator.CreateInstance(typeof(PlayableSpectatorFrame),Flags,null,new object[]{players[0],players},null);
     }
@@ -44,6 +45,71 @@ public sealed class PlayableSpectatorHudTests
         Call("ResearchClick",PlayableResearchKind.TankChassis);Call("ExecuteBattleAction","tank",false,false);Assert.AreEqual(0,Get<long>("sequence"));
         Call("SetSpectatorPerspective",PlayableOwner.Enemy);Assert.IsNull(Get<PlayableOwner?>("spectatorPerspective"));
         Assert.AreEqual(0,Get<System.Collections.Generic.HashSet<int>>("selection").Count);
+    }
+    [UnityTest] public IEnumerator SpeedButtonsDriveActualRuntimeAndKeepPlayerPaint()
+    {
+        using(var runtime=new PlayableRuntime(PlayableProfile.Default,91,7,autonomousOwnerAi:false,autonomousEnemyAi:false,spectator:true))
+        {
+            Set("runtime",runtime);var root=Get<VisualElement>("root");Show(Fixture(2));root.style.width=1280;root.style.height=720;Call("ApplyResponsiveHud",1280f);
+            try
+            {
+                yield return null;yield return null;
+                long slow=0,fast=0;
+                foreach(double rate in new[]{.5,4d,1d,2d})
+                {
+                    var button=root.Query<Button>().ToList().Single(b=>b.userData is double value&&value==rate);button.Focus();
+                    if(rate==4)
+                    {
+                        var point=button.worldBound.center;Assert.AreSame(button,root.panel.Pick(point),"Speed button must receive pointer input at its visible centre");
+                        using(var down=PointerDownEvent.GetPooled(new Event{type=EventType.MouseDown,button=0,mousePosition=point})){down.target=button;button.SendEvent(down);}
+                        using(var up=PointerUpEvent.GetPooled(new Event{type=EventType.MouseUp,button=0,mousePosition=point})){up.target=button;button.SendEvent(up);}
+                    }
+                    else using(var submit=NavigationSubmitEvent.GetPooled()){submit.target=button;button.SendEvent(submit);}
+                    Assert.AreEqual(rate,Get<double>("spectatorRate"));
+                    long start=runtime.Latest.Tick;double deadline=Time.realtimeSinceStartupAsDouble+.5;
+                    while(Time.realtimeSinceStartupAsDouble<deadline)yield return null;
+                    long ticks=runtime.Latest.Tick-start;TestContext.WriteLine(rate+"x: "+ticks+" ticks");if(rate==.5)slow=ticks;if(rate==4)fast=ticks;
+                }
+                Assert.Greater(slow,0);Assert.Greater(fast,slow*3,"Speed buttons must change actual fixed-tick progress, not just button colour");
+                Call("SetSpectatorPerspective",PlayableOwner.Enemy);Call("UpdateHud");yield return null;yield return null;
+                var credits=Get<Label>("creditsLabel");Assert.True(credits.text.StartsWith("940"));Assert.AreEqual(DisplayStyle.None,Get<Label>("objective").style.display.value);Assert.LessOrEqual(credits.worldBound.xMax,root.worldBound.xMax);Assert.GreaterOrEqual(credits.worldBound.xMin,0);
+                Call("ApplyResponsiveHud",800f);root.style.width=800;yield return null;yield return null;Call("UpdateHud");yield return null;
+                Assert.False(Get<VisualElement>("spectatorPanel").worldBound.Overlaps(Get<VisualElement>("top").worldBound),"Perspective resources must remain clear of the table on narrow screens");
+                foreach(var row in Get<VisualElement>("spectatorRows").Children())
+                {var name=(Button)row[0];Assert.AreEqual(name.style.borderLeftColor.value,name.style.color.value);}
+            }
+            finally{runtime.RequestStop();Assert.True(System.Threading.SpinWait.SpinUntil(()=>runtime.IsStopped,5000));Set("runtime",null);}
+        }
+    }
+    // Wall-clock diagnostic: run this exact method through tools/unity.sh exclusive.
+    // Shared-host workload can mask the target cadence; retain failures as evidence.
+    [UnityTest] public IEnumerator LobbySpectatorSpeedAdvancesTheAuthoredMatchWithBots()
+    {
+        var profile=PlayableProfile.ThreeCrossingsDefault;var setup=new NativeLobbyConfiguration{HasExplicitSeed=true,ExplicitSeed=7};setup.InitializeParticipants();foreach(var player in setup.Participants)player.Human=false;
+        using(var runtime=PlayableRuntime.CreateLobbyMatch(profile,92,setup))using(var routes=new UnityHostRouteService())
+        {
+            Set("runtime",runtime);Set("matchSetup",setup);var root=Get<VisualElement>("root");
+            try
+            {
+                double ready=Time.realtimeSinceStartupAsDouble+45;
+                while(runtime.Latest.Tick<3&&Time.realtimeSinceStartupAsDouble<ready){routes.Service(runtime,profile.NavigationRequestsPerFrame);yield return null;}
+                Assert.IsNull(runtime.Latest.Failure);Assert.GreaterOrEqual(runtime.Latest.Tick,3,"Actual lobby must finish startup and run");
+                long slow=0,fast=0;
+                foreach(double rate in new[]{.5,4d,1d,2d})
+                {
+                    var button=root.Query<Button>().ToList().Single(b=>b.userData is double value&&value==rate);button.Focus();
+                    using(var submit=NavigationSubmitEvent.GetPooled()){submit.target=button;button.SendEvent(submit);}
+                    double warm=Time.realtimeSinceStartupAsDouble+.25;
+                    while(Time.realtimeSinceStartupAsDouble<warm){routes.Service(runtime,profile.NavigationRequestsPerFrame);yield return null;}
+                    long start=runtime.Latest.Tick;double deadline=Time.realtimeSinceStartupAsDouble+1;
+                    while(Time.realtimeSinceStartupAsDouble<deadline){routes.Service(runtime,profile.NavigationRequestsPerFrame);yield return null;}
+                    long ticks=runtime.Latest.Tick-start;TestContext.WriteLine("lobby "+rate+"x: "+ticks+" ticks; cpu="+runtime.Latest.Metrics.TickCpuMilliseconds+"ms; interval="+runtime.Latest.Metrics.TickIntervalMilliseconds+"ms; tick="+runtime.Latest.Tick+"; status="+runtime.Latest.Status+"; outcome="+runtime.Latest.Outcome+"; paused="+runtime.Latest.Paused+"; stopped="+runtime.IsStopped);
+                    Assert.IsNull(runtime.Latest.Failure);Assert.AreEqual(PlayableMatchOutcome.Playing,runtime.Latest.Outcome);Assert.Greater(ticks,0,"Every speed switch must keep the actual match ticking");if(rate==.5)slow=ticks;if(rate==4)fast=ticks;
+                }
+                Assert.Greater(slow,0);Assert.Greater(fast,slow*3,"Actual bot match must respond to spectator speed");
+            }
+            finally{runtime.RequestStop();Assert.True(System.Threading.SpinWait.SpinUntil(()=>runtime.IsStopped,5000));Set("runtime",null);}
+        }
     }
     [Test] public void FogPerspectiveRefreshesEvenWhenTeamsShareRevisionNumber()
     {

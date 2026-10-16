@@ -42,6 +42,54 @@ namespace Spacewars.Tests.EditMode
             Assert.True(order.Active);Assert.Less(order.Remaining,order.Duration,"Production must advance while path calculation is withheld.");
             a.Stop();
         }
+        [Test] public void PhysicalHostPendingRoutePreservesIndependentDisplacementAndEconomy(){
+            var a=Authority();var n=a.Domain.Navigation;var actor=Actor(a);var other=n.Crowd.Units.First(u=>u.Id!=actor.Id);
+            var kernel=new CertifiedRouteKernel();
+            try{
+                kernel.Attach(n.RoutePort);
+                // Establish the physical ownership lane before withholding A's work.
+                kernel.Pump(a.NavigationBinding,1);
+                Assert.True(n.Crowd.SetRoute(other.Id,Goal(n,other),new[]{Goal(n,other)}));
+                var otherStart=other.Position;var start=actor.Position;
+                Assert.True(n.Move(actor.Id,Goal(n,actor)));long publications=n.OwnedMovementPublications;
+                for(int i=0;i<30;i++)Assert.True(a.TryAdvance());
+                Assert.AreEqual(30,a.Tick);Assert.True(n.IsPending(actor.Id));Assert.AreEqual(start,actor.Position);
+                Assert.AreNotEqual(otherStart,other.Position,"Installed B must physically move while A remains pending in the owned Host lane.");
+                Assert.Greater(n.OwnedMovementPublications,publications,"Movement must use the paid immutable carrier.");
+            }finally{kernel.Clear();a.Stop();n.DestroyNavigationAuthority();}
+        }
+        [TestCase(PlayableCommandKind.Move)][TestCase(PlayableCommandKind.AttackMove)]
+        public void ActualGroupPendingKeepsInstalledBAndProductionMovingThenCurrentAReachesArrival(PlayableCommandKind kind){
+            var config=OfflineParticipantAuthorityTests.Config(2);var a=Authority();var n=a.Domain.Navigation;var actor=Actor(a);var other=n.Crowd.Units.First(u=>u.Id!=actor.Id);var kernel=new CertifiedRouteKernel();
+            try{
+                var hq=a.Latest.Buildings.First(b=>b.Owner==PlayableOwner.Player&&b.Kind==PlayableBuildingKind.Headquarters);
+                Call(a,"AddCredits",PlayableOwner.Player,10000d);
+                Assert.AreEqual(PlayableCommandStatus.Applied,Call(a,"BuildAt",hq.SiteId,1,PlayableBuildingKind.Factory,hq.Id,PlayableOwner.Player,null));
+                Call(a,"AdvanceFoundations");Call(a,"AdvanceBuildings",config.Profile.FactoryBuildSeconds+1d);
+                var view=a.Domain.PlayerSnapshot(1,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,config.Seed);
+                var factory=view.Buildings.First(b=>b.Owner==PlayableOwner.Player&&b.Kind==PlayableBuildingKind.Factory);
+                Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,1,config.Roster[0].Id,PlayableCommandKind.QueueTank,new[]{factory.Id}).AsHuman()).Status);
+                Assert.True(n.Move(other.Id,Goal(n,other,6)));
+                for(int i=0;i<4096&&n.IsPending(other.Id);i++){Assert.True(a.TryAdvance());kernel.Pump(a.NavigationBinding,4);}
+                Assert.False(n.IsPending(other.Id));Assert.True(other.Moving);var bStart=other.Position;
+                var goal=Goal(n,actor);Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,2,config.Roster[0].Id,kind,new[]{actor.Id},goal).AsHuman()).Status);
+                var start=actor.Position;long tick=a.Tick;double remaining=a.Latest.Buildings.Single(b=>b.Id==factory.Id).PrivateState.Orders.Single().Remaining;
+                for(int i=0;i<15;i++)Assert.True(a.TryAdvance());
+                Assert.AreEqual(tick+15,a.Tick);Assert.True(n.IsPending(actor.Id));Assert.AreEqual(start,actor.Position);Assert.AreNotEqual(bStart,other.Position);
+                Assert.Less(a.Latest.Buildings.Single(b=>b.Id==factory.Id).PrivateState.Orders.Single().Remaining,remaining);
+                using(var before=new QuantumPin(n.PinCommittedHostRoot())){
+                    long serial=before.Value.QuantumSerial;for(int i=0;i<5;i++)Assert.True(a.TryAdvance(true));Assert.AreEqual(tick+15,a.Tick);
+                    using(var after=new QuantumPin(n.PinCommittedHostRoot()))Assert.AreEqual(serial,after.Value.QuantumSerial);
+                }
+                Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,3,config.Roster[0].Id,kind,new[]{actor.Id},Goal(n,actor,2)).AsHuman()).Status);
+                Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,4,config.Roster[0].Id,PlayableCommandKind.Stop,new[]{actor.Id}).AsHuman()).Status);
+                Assert.True(a.TryAdvance());Assert.False(n.IsPending(actor.Id));Assert.AreEqual(start,actor.Position);
+                Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,5,config.Roster[0].Id,kind,new[]{actor.Id},goal).AsHuman()).Status);
+                for(int i=0;i<4096&&(n.IsPending(actor.Id)||actor.Outcome!=NavigationOutcome.Arrived);i++){Assert.True(a.TryAdvance());kernel.Pump(a.NavigationBinding,4);}
+                Assert.False(n.IsPending(actor.Id));Assert.AreEqual(NavigationOutcome.Arrived,actor.Outcome,"current A must install and physically arrive");Assert.AreNotEqual(start,actor.Position);
+            }finally{kernel.Clear();a.Stop();n.DestroyNavigationAuthority();Assert.Zero(n.PhysicalHostBudget.PhysicalBytes);}
+        }
+        private sealed class QuantumPin:IDisposable{internal readonly NavigationHostRoot Value;internal QuantumPin(NavigationHostRoot value){Value=value;}public void Dispose()=>Value.Release();}
         [Test] public void CombatContinuesWhileAnotherActorsRouteIsWithheld(){
             var a=Authority();var n=a.Domain.Navigation;
             Call(a,"SpawnUnit",new NavPoint(-3,0),PlayableOwner.Player,PlayableEntityKind.Tank);
@@ -101,12 +149,14 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void SolverAllocationReservationNeverFreezesAsyncTicksOrCancellation(){
             var a=Authority();var n=a.Domain.Navigation;var actor=Actor(a);Assert.True(n.Move(actor.Id,Goal(n,actor)));
+            Assert.True(a.TryAdvance());long issuedTick=a.Tick;
             using(var entered=new ManualResetEventSlim())using(var release=new ManualResetEventSlim()){
                 var kernel=new CertifiedRouteKernel();kernel.BeforePrepare=()=>{entered.Set();Assert.True(release.Wait(TimeSpan.FromSeconds(10)));};
                 var task=System.Threading.Tasks.Task.Run(()=>kernel.Pump(a.NavigationBinding,4));
                 try{
                     Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));var start=actor.Position;
-                    for(int i=0;i<30;i++)Assert.True(a.TryAdvance());Assert.AreEqual(30,a.Tick);Assert.AreEqual(start,actor.Position);
+                    var other=n.Crowd.Units.First(u=>u.Id!=actor.Id);var otherStart=other.Position;Assert.True(n.Crowd.SetRoute(other.Id,Goal(n,other),new[]{Goal(n,other)}));
+                    for(int i=0;i<30;i++)Assert.True(a.TryAdvance());Assert.AreEqual(issuedTick+30,a.Tick);Assert.AreEqual(start,actor.Position);Assert.AreNotEqual(otherStart,other.Position,"B displacement while physical Host allocation is blocked");
                     n.Stop(actor.Id,true);Assert.True(a.TryAdvance());Assert.False(n.IsPending(actor.Id));
                 }finally{release.Set();Assert.True(task.Wait(TimeSpan.FromSeconds(5)));kernel.Clear();a.Stop();}
             }

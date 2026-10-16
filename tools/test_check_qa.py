@@ -72,10 +72,29 @@ class QaContractTests(unittest.TestCase):
             file.write_text('<broken')
             with self.assertRaises(ET.ParseError): validate_results(file)
 
+    def test_exact_method_filter_accepts_all_parameterized_cases_and_rejects_siblings(self):
+        root = ET.Element('test-run', result='Passed', total='2', passed='2', failed='0', skipped='0', inconclusive='0')
+        for value in ('False', 'True'):
+            ET.SubElement(root, 'test-case', fullname='A.Fixture.Method(' + value + ')', result='Passed')
+        self.assertEqual(2, self.validate(root, False, ('A.Fixture.Method',))['passed'])
+        with self.assertRaises(ValueError):
+            self.validate(root, False, ('A.Fixture.Other',))
+        root.find('test-case').set('fullname', 'A.Fixture.Sibling')
+        with self.assertRaises(ValueError):
+            self.validate(root, False, ('A.Fixture.Method',))
+
     def test_focused_requires_every_exact_fixture(self):
         root = self.document()
         with self.assertRaises(ValueError): self.validate(root, False, ('MissingFixture',))
         self.assertEqual(18, self.validate(root, False)['passed'])
+
+    def test_focused_exact_method_accepts_only_that_method(self):
+        root = ET.Element('test-run', result='Passed', total='1', passed='1', failed='0', skipped='0')
+        method = 'Spacewars.Tests.EditMode.NavigationSessionTests.StopRejectsLateResult'
+        ET.SubElement(root, 'test-case', fullname=method, result='Passed')
+        self.assertEqual(1, self.validate(root, False, (method,))['passed'])
+        root[0].set('fullname', method.replace('StopRejectsLateResult', 'NewOrderAndSessionRejectOldResult'))
+        with self.assertRaises(ValueError): self.validate(root, False, (method,))
 
     def test_routes_and_filters(self):
         self.assertEqual([('PlayMode', ('PlayableUiShellTests',))], plan('ui'))

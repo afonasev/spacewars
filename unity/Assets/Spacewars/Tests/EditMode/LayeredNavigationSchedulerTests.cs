@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
+using System.Reflection;
+using Spacewars.Runtime;
 using NUnit.Framework;
 using Spacewars.Simulation;
 
@@ -53,6 +56,16 @@ namespace Spacewars.Tests.EditMode
                 if (scheduler.TryTake(_ => true, out result)) return epoch;
             }
             Assert.Fail("Route did not finish under finite logical quotas."); result = null; return -1;
+        }
+        [Test] public void ActualSchedulerMetadataIndicesPreserveCancelReinsertSlotOrderAndRecipePins()
+        {
+            var scheduler=new LayeredNavigationScheduler();var provider=Provider();var requests=Enumerable.Range(0,6).Select(n=>Request(provider,n,n)).ToArray();var epochs=new Dictionary<string,long>(StringComparer.Ordinal);
+            foreach(var request in requests){Assert.True(scheduler.Submit(request));epochs.Add(request.Subscription.StableKey,0);}
+            foreach(int n in new[]{1,4,2}){Assert.True(scheduler.Cancel(requests[n].Subscription.StableKey));epochs.Remove(requests[n].Subscription.StableKey);}
+            foreach(int n in new[]{4,1,2}){Assert.True(scheduler.Submit(requests[n]));epochs.Add(requests[n].Subscription.StableKey,0);}
+            CollectionAssert.AreEqual(epochs.ToArray(),scheduler.Save().SubmittedEpoch);
+            foreach(string name in new[]{"jobsByKey","subscribers","submittedEpoch","cachedFields"})Assert.IsInstanceOf<NavOwnedStorage>(typeof(LayeredNavigationScheduler).GetField(name,BindingFlags.Instance|BindingFlags.NonPublic).GetValue(scheduler));
+            var restored=LayeredNavigationScheduler.Restore(scheduler.Save(),requests);CollectionAssert.AreEqual(epochs.ToArray(),restored.Save().SubmittedEpoch);scheduler.ClearWorld();restored.ClearWorld();Assert.Zero(scheduler.PendingCount);Assert.Zero(restored.PendingCount);
         }
         [Test] public void SameEpochRetryCannotRefillAnyQuotaAndPendingIsNotUnreachable()
         {
@@ -421,6 +434,112 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(1, scheduler.Counters.ConnectorWork);
             var restored = LayeredNavigationScheduler.Restore(scheduler.Save(), Array.Empty<NavScheduledRequest>());
             Assert.AreEqual(0, restored.PendingCount);
+        }
+        private static LayeredNavigationScheduler PrimitiveRoundtrip(LayeredNavigationScheduler scheduler, NavScheduledRequest[] pending)
+        {
+            var recipes=new List<NavScheduledRequest>();
+            int Id(NavScheduledRequest value){int id=recipes.IndexOf(value);if(id<0){id=recipes.Count;recipes.Add(value);}return id;}
+            byte[] bytes;
+            using(var stream=new MemoryStream()){
+                using(var writer=new BinaryWriter(stream,System.Text.Encoding.UTF8,true)){
+                    var codec=new NavigationPrimitiveWire.Writer(writer,Id,_=>throw new InvalidOperationException("Unexpected route in this partial checkpoint."));
+                    codec.Scheduler(scheduler.Save());
+                }
+                bytes=stream.ToArray();
+            }
+            LayeredNavigationScheduler.Checkpoint checkpoint;
+            using(var stream=new MemoryStream(bytes))using(var reader=new BinaryReader(stream)){
+                var codec=new NavigationPrimitiveWire.Reader(reader,id=>id>=0&&id<recipes.Count?recipes[id]:throw new ArgumentException("Unknown recipe."),_=>throw new ArgumentException("Unknown route."),bytes.Length);
+                checkpoint=codec.Scheduler();Assert.AreEqual(stream.Length,stream.Position);
+            }
+            return LayeredNavigationScheduler.Restore(checkpoint,pending);
+        }
+        private static NavOwnedStorage FirstJob(LayeredNavigationScheduler scheduler)
+        {
+            var jobs=(System.Collections.IEnumerable)typeof(LayeredNavigationScheduler).GetField("jobs",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(scheduler);
+            return jobs.Cast<NavOwnedStorage>().First();
+        }
+        private static T JobPart<T>(NavOwnedStorage job,string name)=>(T)job.GetType().GetProperty(name,BindingFlags.Instance|BindingFlags.NonPublic).GetValue(job);
+        private static byte[] CompileBytes(LayeredNavigationCompileWork work)
+        {using(var stream=new MemoryStream()){using(var writer=new BinaryWriter(stream,System.Text.Encoding.UTF8,true))new NavigationPrimitiveWire.Writer(writer,_=>throw new AssertionException("Unexpected request."),_=>throw new AssertionException("Unexpected route.")).Compile(work.Save());return stream.ToArray();}}
+        [Test] public void ActualSchedulerPinsImmutableJobAcrossPreparationAndLastSubscriberCancellation()
+        {
+            var scheduler=new LayeredNavigationScheduler();var provider=Provider();var first=Request(provider,0,0);var second=Request(provider,0,1);
+            Assert.True(scheduler.Submit(first));Assert.True(scheduler.Submit(second));var quota=new NavEpochQuota(100,100,100);
+            Assert.AreEqual(3,scheduler.Advance(0,quota,_=>true,3));var pin=FirstJob(scheduler);pin.Retain();var compiler=JobPart<LayeredNavigationCompileWork>(pin,"Compiler");Assert.NotNull(compiler);var before=CompileBytes(compiler);
+            Assert.AreEqual(1,scheduler.Advance(0,quota,_=>true,1));Assert.AreNotSame(pin,FirstJob(scheduler));Assert.AreNotSame(compiler,JobPart<LayeredNavigationCompileWork>(FirstJob(scheduler),"Compiler"));CollectionAssert.AreEqual(before,CompileBytes(compiler));
+            Assert.True(scheduler.Cancel(first.Subscription.StableKey));Assert.True(scheduler.Cancel(second.Subscription.StableKey));Assert.Zero(scheduler.PendingCount);
+            Assert.Greater(compiler.References,0);CollectionAssert.AreEqual(before,CompileBytes(compiler));pin.Release();Assert.Zero(compiler.References);scheduler.ClearWorld();
+        }
+        [Test] public void ActualWarmCacheOwnsFieldAndGraphAfterJobDropAndReleasesOnNormalEviction()
+        {
+            var scheduler=new LayeredNavigationScheduler();var provider=Provider();var request=Request(provider,0,0);
+            Assert.True(scheduler.Submit(request));FinishEpoch(scheduler,0,new NavEpochQuota(10000,10000,10000),request,false,out var answer);answer.Release();
+            var graph=(LayeredNavigationGraph)typeof(LayeredNavigationScheduler).GetProperty("cachedGraph",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(scheduler);
+            var lru=(System.Collections.IEnumerable)typeof(LayeredNavigationScheduler).GetField("lru",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(scheduler);var entry=lru.Cast<NavOwnedStorage>().Single();
+            var field=(NavSharedTerminalField)entry.GetType().GetField("Field",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(entry);
+            Assert.Zero(scheduler.PendingCount);Assert.Greater(graph.References,0);Assert.AreEqual(1,field.References);entry.Retain();
+            var evict=typeof(LayeredNavigationScheduler).GetMethod("EvictOne",BindingFlags.Instance|BindingFlags.NonPublic);
+            Assert.True((bool)evict.Invoke(scheduler,null));Assert.Zero(scheduler.Counters.CacheFields);Assert.Greater(field.References,0);
+            entry.Release();Assert.Zero(field.References);Assert.True((bool)evict.Invoke(scheduler,null));Assert.Zero(graph.References);scheduler.ClearWorld();
+        }
+        [Test] public void PrimitiveWarmCacheWithoutSubscribersPreservesLruAndNextHitCharges()
+        {
+            var provider=Provider();var scheduler=new LayeredNavigationScheduler();var quota=new NavEpochQuota(10000,10000,10000);
+            for(int n=0;n<3;n++){
+                var request=Request(provider,n,n);Assert.True(scheduler.Submit(request));
+                FinishEpoch(scheduler,n*10,quota,request,false,out var answer);Assert.AreEqual(NavSolveStatus.Ready,answer.Status);
+            }
+            Assert.Zero(scheduler.PendingCount);Assert.Zero(scheduler.ReadyCount);Assert.AreEqual(3,scheduler.Counters.CacheFields);
+            var restored=PrimitiveRoundtrip(scheduler,Array.Empty<NavScheduledRequest>());
+            Assert.AreEqual(scheduler.Counters.CacheFields,restored.Counters.CacheFields);
+            Assert.AreEqual(scheduler.Counters.CacheBytes,restored.Counters.CacheBytes);
+            Assert.AreEqual(scheduler.RetainedBytes,restored.RetainedBytes);
+            var next=Request(provider,1,100);Assert.True(scheduler.Submit(next));Assert.True(restored.Submit(next));
+            var limited=new NavEpochQuota(1,1,1,1,1);
+            for(int epoch=100;epoch<110;epoch++){
+                Assert.AreEqual(scheduler.Advance(epoch,limited,_=>true,1),restored.Advance(epoch,limited,_=>true,1));
+                Assert.AreEqual(scheduler.Counters.CacheHits,restored.Counters.CacheHits);
+                Assert.AreEqual(scheduler.Counters.LogicalGraphWork,restored.Counters.LogicalGraphWork);
+                Assert.AreEqual(scheduler.Counters.LogicalFieldWork,restored.Counters.LogicalFieldWork);
+                Assert.AreEqual(scheduler.RetainedBytes,restored.RetainedBytes);
+                if(restored.ReadyCount==0)restored=PrimitiveRoundtrip(restored,new[]{next});
+            }
+        }
+        [Test] public void PrimitiveWarmLruWithActiveAliasedJobPreservesNextEvictionAndCharge()
+        {
+            var provider=Provider();var hot=new LayeredNavigationScheduler();var quota=new NavEpochQuota(10000,10000,10000);
+            for(int n=0;n<3;n++){var request=Request(provider,n,n);Assert.True(hot.Submit(request));FinishEpoch(hot,n*10,quota,request,false,out var answer);answer.Release();}
+            Assert.Zero(hot.PendingCount);Assert.Zero(hot.ReadyCount);Assert.AreEqual(3,hot.Counters.CacheFields);
+            hot=PrimitiveRoundtrip(hot,Array.Empty<NavScheduledRequest>());
+            var requests=new[]{Request(provider,1,100),Request(provider,1,101)};foreach(var r in requests)Assert.True(hot.Submit(r));
+            for(int work=0;JobPart<NavSharedTerminalField>(FirstJob(hot),"Field")==null;work++){Assert.Less(work,2000);Assert.AreEqual(1,hot.Advance(100,quota,_=>true,1));}
+            Assert.AreEqual(2,hot.PendingCount);Assert.Zero(hot.ReadyCount);
+            var cold=PrimitiveRoundtrip(hot,requests);
+            LayeredNavigationScheduler.CacheField[] Entries(LayeredNavigationScheduler value)=>((System.Collections.IEnumerable)typeof(LayeredNavigationScheduler).GetField("lru",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(value)).Cast<LayeredNavigationScheduler.CacheField>().ToArray();
+            foreach(var value in new[]{hot,cold})Assert.AreSame(Entries(value).Single(e=>e.Key==requests[0].ArtifactKey).Field,JobPart<NavSharedTerminalField>(FirstJob(value),"Field"),"Active aliased job uses the restored cache field");
+            var before=Entries(hot).Select(e=>e.Key).ToArray();CollectionAssert.AreEqual(before,Entries(cold).Select(e=>e.Key));Assert.AreEqual(hot.LogicalContinuationBinding,cold.LogicalContinuationBinding);
+            var evict=typeof(LayeredNavigationScheduler).GetMethod("EvictOne",BindingFlags.Instance|BindingFlags.NonPublic);
+            Assert.True((bool)evict.Invoke(hot,null));Assert.True((bool)evict.Invoke(cold,null));
+            CollectionAssert.AreEqual(before.Skip(1),Entries(hot).Select(e=>e.Key));CollectionAssert.AreEqual(Entries(hot).Select(e=>e.Key),Entries(cold).Select(e=>e.Key));Assert.AreEqual(hot.Counters.Evictions,cold.Counters.Evictions);Assert.AreEqual(hot.RetainedBytes,cold.RetainedBytes);Assert.AreEqual(hot.Counters.CacheBytes,cold.Counters.CacheBytes);
+            Assert.AreEqual(hot.Advance(101,new NavEpochQuota(1,1,1,1,1),_=>true,1),cold.Advance(101,new NavEpochQuota(1,1,1,1,1),_=>true,1));Assert.AreEqual(hot.LogicalContinuationBinding,cold.LogicalContinuationBinding);Assert.AreEqual(hot.RetainedBytes,cold.RetainedBytes);
+            hot.ClearWorld();cold.ClearWorld();
+        }
+        [Test] public void PrimitivePartialCompilerPreservesConsumedWorkAndRejectsTruncation()
+        {
+            var provider=Provider();var scheduler=new LayeredNavigationScheduler();var request=Request(provider,0,0);Assert.True(scheduler.Submit(request));
+            var quota=new NavEpochQuota(100,100,100);
+            for(int n=0;n<25;n++){
+                Assert.AreEqual(1,scheduler.Advance(0,quota,_=>true,1));
+                long work=scheduler.Counters.PhysicalGraphWork;var restored=PrimitiveRoundtrip(scheduler,new[]{request});
+                Assert.AreEqual(work,restored.Counters.PhysicalGraphWork);Assert.AreEqual(scheduler.RetainedBytes,restored.RetainedBytes);
+                scheduler=restored;
+            }
+            var bytes=new byte[]{1,3,0,0};
+            using(var stream=new MemoryStream(bytes))using(var reader=new BinaryReader(stream)){
+                var codec=new NavigationPrimitiveWire.Reader(reader,_=>request,_=>null,bytes.Length);
+                Assert.Throws<EndOfStreamException>(()=>codec.Scheduler());
+            }
         }
     }
 }

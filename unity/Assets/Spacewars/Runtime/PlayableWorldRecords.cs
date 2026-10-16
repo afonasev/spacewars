@@ -11,7 +11,7 @@ namespace Spacewars.Runtime
     internal sealed partial class PlayableDomain
     {
         private static void WriteOrderStamp(BinaryWriter w,PlayableOrderStamp o){w.Write(o!=null);if(o==null)return;w.Write(PlayableOrderStamp.Version);w.Write(o.UnitId);w.Write((int)o.Owner);w.Write(o.Generation);w.Write(o.Revision);w.Write(o.Sequence);w.Write(o.Tick);w.Write((int)o.Origin);w.Write((int)o.Kind);String(w,o.Source);w.Write(o.JobId);w.Write(o.ActionId);}
-        private static PlayableOrderStamp ReadOrderStamp(BinaryReader r){if(!Boolean(r))return null;if(r.ReadInt32()!=PlayableOrderStamp.Version)throw new ArgumentException("Unsupported order stamp.");return new PlayableOrderStamp(r.ReadInt32(),EnumValue<PlayableOwner>(r),r.ReadInt64(),r.ReadInt64(),r.ReadInt64(),r.ReadInt64(),EnumValue<PlayableOrderOrigin>(r),EnumValue<PlayableCommandKind>(r),String(r),r.ReadInt64(),r.ReadInt64());}
+        private static PlayableOrderStamp ReadOrderStamp(BinaryReader r){if(!Boolean(r))return null;if(r.ReadInt32()!=PlayableOrderStamp.Version)throw new ArgumentException("Unsupported order stamp.");return Record(r,()=>new PlayableOrderStamp(r.ReadInt32(),EnumValue<PlayableOwner>(r),r.ReadInt64(),r.ReadInt64(),r.ReadInt64(),r.ReadInt64(),EnumValue<PlayableOrderOrigin>(r),EnumValue<PlayableCommandKind>(r),String(r),r.ReadInt64(),r.ReadInt64()));}
         private static void WriteRecord(BinaryWriter w,Unit v) {w.Write(v!=null);
             if(v==null)return;
             w.Write((int)v.Kind);w.Write(v.ScenarioIndex);w.Write(v.AuthoredUpgrade.HasValue);if(v.AuthoredUpgrade.HasValue)w.Write(v.AuthoredUpgrade.Value);
@@ -38,7 +38,7 @@ namespace Spacewars.Runtime
             WorldWire.Write(w,v.CurrentOrder);WriteOrderStamp(w,v.LastOrder);
             }
         private static Unit ReadUnit(BinaryReader r) {if(!Boolean(r))return null;
-            var v=new Unit();
+            var v=Record(r,()=>new Unit());
             v.Kind=EnumValue<PlayableEntityKind>(r);v.ScenarioIndex=r.ReadInt32();v.AuthoredUpgrade=Boolean(r)?(bool?)Boolean(r):null;
             v.BurstRemaining=r.ReadInt32();
             v.BurstTarget=r.ReadInt32();
@@ -96,7 +96,7 @@ namespace Spacewars.Runtime
             w.Write((int)v.RepeatKind);
             }
         private static Building ReadBuilding(BinaryReader r) {if(!Boolean(r))return null;
-            var v=new Building();v.TermsRevision=r.ReadInt32();
+            var v=Record(r,()=>new Building());v.TermsRevision=r.ReadInt32();
             v.Upgrade=ReadRefineryUpgrade(r);
             v.LastDamageTime=Boolean(r)?(double?)Number(r):null;
             v.Sale=ReadSaleState(r);
@@ -144,7 +144,7 @@ namespace Spacewars.Runtime
             w.Write((int)v.Faction);
             }
         private static Projectile ReadProjectile(BinaryReader r) {if(!Boolean(r))return null;
-            var v=new Projectile();v.TermsRevision=r.ReadInt32();
+            var v=Record(r,()=>new Projectile());v.TermsRevision=r.ReadInt32();
             v.Rocket=ReadRocket(r);
             v.Id=r.ReadInt32();
             v.Owner=r.ReadInt32();
@@ -174,7 +174,7 @@ namespace Spacewars.Runtime
             w.Write(v.Active);
             }
         private static ProductionOrder ReadProductionOrder(BinaryReader r) {if(!Boolean(r))return null;
-            var v=new ProductionOrder();v.TermsRevision=r.ReadInt32();
+            var v=Record(r,()=>new ProductionOrder());v.TermsRevision=r.ReadInt32();
             v.Id=r.ReadInt64();
             v.Kind=EnumValue<PlayableEntityKind>(r);
             v.PaidCost=r.ReadInt32();
@@ -196,7 +196,7 @@ namespace Spacewars.Runtime
             w.Write(v.Complete);
             }
         private static ResearchOrder ReadResearchOrder(BinaryReader r) {if(!Boolean(r))return null;
-            var v=new ResearchOrder();
+            var v=Record(r,()=>new ResearchOrder());
             v.Id=r.ReadInt64();
             v.Kind=EnumValue<PlayableResearchKind>(r);
             v.CenterId=r.ReadInt32();
@@ -216,7 +216,7 @@ namespace Spacewars.Runtime
             w.Write(v.Complete);
             }
         private static RefineryUpgrade ReadRefineryUpgrade(BinaryReader r) {if(!Boolean(r))return null;
-            var v=new RefineryUpgrade();v.TermsRevision=r.ReadInt32();
+            var v=Record(r,()=>new RefineryUpgrade());v.TermsRevision=r.ReadInt32();
             v.PaidCost=Number(r);
             v.Duration=Number(r);
             v.Elapsed=Number(r);
@@ -230,7 +230,7 @@ namespace Spacewars.Runtime
             Number(w,v.Duration);
             }
         private static SaleState ReadSaleState(BinaryReader r) {if(!Boolean(r))return null;
-            var v=new SaleState();v.TermsRevision=r.ReadInt32();
+            var v=Record(r,()=>new SaleState());v.TermsRevision=r.ReadInt32();
             v.Elapsed=Number(r);
             v.Duration=Number(r);
             return v;
@@ -246,7 +246,7 @@ namespace Spacewars.Runtime
             w.Write(v.Waiting);
             }
         private static RepairState ReadRepairState(BinaryReader r) {if(!Boolean(r))return null;
-            var v=new RepairState();v.TermsRevision=r.ReadInt32();
+            var v=Record(r,()=>new RepairState());v.TermsRevision=r.ReadInt32();
             v.AllocationReceipt=String(r);v.MissingHealth=Number(r);
             v.TotalCost=Number(r);
             v.Duration=Number(r);
@@ -267,7 +267,7 @@ namespace Spacewars.Runtime
             Number(w,v.BuildingHeight);
             }
         private static Rocket ReadRocket(BinaryReader r) {if(!Boolean(r))return null;
-            var v=new Rocket();
+            var v=Record(r,()=>new Rocket());
             v.Flight=ReadFlight(r);
             v.Predicted=ReadBallisticContact(r);
             v.Elapsed=Number(r);

@@ -1,6 +1,8 @@
 Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
+!include "x64.nsh"
+!include "WinVer.nsh"
 !ifndef APPNAME
 !define APPNAME "Spacewars"
 !endif
@@ -41,14 +43,15 @@ SetCompressor /SOLID lzma
 Section "Spacewars (обязательно)" SEC_GAME
  SectionIn RO
  SetRegView 64
- SetOutPath "$INSTDIR"
- File /r /x active.json /x "._*" /x ".DS_Store" "${PAYLOAD}/*"
- !insertmacro RemoveLegacyPackagingMetadata
- ExecWait '"$INSTDIR\Spacewars.exe" --activate ${RELEASE}' $0
+ InitPluginsDir
+ SetOutPath "$PLUGINSDIR\payload"
+ File /r /x "._*" /x ".DS_Store" "${PAYLOAD}/*"
+ ExecWait '$\"$PLUGINSDIR\payload\Spacewars.exe$\" --install-payload $\"$INSTDIR$\" $\"$PLUGINSDIR\payload$\" ${RELEASE}' $0
  ${If} $0 != 0
-  MessageBox MB_ICONSTOP "Не удалось активировать установленную версию. Закройте игру и повторите установку. Рабочая версия сохранена."
+  MessageBox MB_ICONSTOP "Не удалось установить игру. Закройте работающую Spacewars, проверьте свободное место и повторите установку. Прежняя установка и данные сохранены."
   Abort
  ${EndIf}
+ !insertmacro RemoveLegacyPackagingMetadata
  WriteRegStr HKLM "Software\${APPNAME}" "InstallDir" "$INSTDIR"
  WriteUninstaller "$INSTDIR\Uninstall.exe"
  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayName" "${APPNAME}"
@@ -68,6 +71,16 @@ Function CreateDesktopShortcut
  ${Else}
   IfFileExists "$DESKTOP\${APPNAME}.lnk" +2 0
   MessageBox MB_ICONEXCLAMATION "Ярлык не найден на рабочем столе Windows. Spacewars доступен в меню «Пуск»."
+ ${EndIf}
+FunctionEnd
+Function .onInit
+ ${IfNot} ${RunningX64}
+  MessageBox MB_ICONSTOP "Требуется 64-разрядная Windows."
+  Abort
+ ${EndIf}
+ ${IfNot} ${AtLeastWin10}
+  MessageBox MB_ICONSTOP "Требуется Windows 10 или новее."
+  Abort
  ${EndIf}
 FunctionEnd
 Function .onInstSuccess

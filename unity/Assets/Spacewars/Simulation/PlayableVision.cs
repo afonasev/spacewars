@@ -98,7 +98,7 @@ namespace Spacewars.Simulation
             var next=nextSources.OrderBy(s=>s.Position.X).ThenBy(s=>s.Position.Z).ThenBy(s=>s.Radius).ToArray();
             bool changed=next.Length!=sources.Length;
             for(int i=0;!changed&&i<next.Length;i++)changed=next[i].Position.X!=sources[i].Position.X||next[i].Position.Z!=sources[i].Position.Z||next[i].Radius!=sources[i].Radius;
-            if(changed){sources=next;Explore();}
+            if(changed){var previous=sources;sources=next;Explore(previous);}
             bool memoryChanged=false;
             var confirmed=new HashSet<int>();
             foreach(var b in actualBuildings)
@@ -112,11 +112,16 @@ namespace Spacewars.Simulation
             if(changed||memoryChanged){revision++;cached=null;}
         }
         private static bool Same(KnownBuilding a,KnownBuilding b)=>a.Id==b.Id&&a.Team==b.Team&&a.Owner==b.Owner&&a.Kind==b.Kind&&a.Position.X==b.Position.X&&a.Position.Z==b.Position.Z&&a.Heading==b.Heading&&a.RefineryUpgraded==b.RefineryUpgraded;
-        private void Explore()
+        private void Explore(VisionSource[] previous)
         {
             CoverageUpdates++;
+            int old=0;
             foreach(var s in sources)
             {
+                // History is a monotone union/max. Unchanged circles contributed their
+                // exact cells and coverage already; only current visibility uses all sources.
+                while(old<previous.Length&&Compare(previous[old],s)<0)old++;
+                if(old<previous.Length&&Compare(previous[old],s)==0)continue;
                 int minX=Math.Max((int)Math.Floor(-halfWidth/cellSize),(int)Math.Floor((s.Position.X-s.Radius)/cellSize));
                 int maxX=Math.Min((int)Math.Ceiling(halfWidth/cellSize)-1,(int)Math.Floor((s.Position.X+s.Radius)/cellSize));
                 int minZ=Math.Max((int)Math.Floor(-halfDepth/cellSize),(int)Math.Floor((s.Position.Z-s.Radius)/cellSize));
@@ -131,11 +136,17 @@ namespace Spacewars.Simulation
                 int bottom=Pixel(s.Position.Z-s.Radius-feather,halfDepth),top=Pixel(s.Position.Z+s.Radius+feather,halfDepth);
                 for(int y=bottom;y<=top;y++)for(int x=left;x<=right;x++)
                 {
+                    int i=y*RasterResolution+x;if(coverage[i]==255)continue;
                     double dx=((x+.5)/RasterResolution*2-1)*halfWidth-s.Position.X,dz=((y+.5)/RasterResolution*2-1)*halfDepth-s.Position.Z;
                     double amount=Math.Max(0,Math.Min(1,(s.Radius+feather-Math.Sqrt(dx*dx+dz*dz))/feather));
-                    int i=y*RasterResolution+x;coverage[i]=Math.Max(coverage[i],(byte)Math.Round(amount*255));
+                    coverage[i]=Math.Max(coverage[i],(byte)Math.Round(amount*255));
                 }
             }
+        }
+        private static int Compare(VisionSource a,VisionSource b)
+        {
+            int c=a.Position.X.CompareTo(b.Position.X);if(c!=0)return c;
+            c=a.Position.Z.CompareTo(b.Position.Z);return c!=0?c:a.Radius.CompareTo(b.Radius);
         }
         private static int Pixel(double n,double half)=>Math.Max(0,Math.Min(RasterResolution-1,(int)Math.Floor((n+half)/(2*half)*RasterResolution)));
         public TeamVisionSnapshot Snapshot()

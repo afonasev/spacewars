@@ -47,8 +47,18 @@ namespace Spacewars.Simulation
             if(Participants.Count>=capacity)return "Все места заняты. Удалите участника, чтобы освободить место.";
             if(human&&Participants.Count(p=>p.Human)>=4)return "Доступно до четырёх локальных игроков.";
             int color=Enumerable.Range(0,ColorHex.Length).First(c=>Participants.All(p=>p.Color!=c));
-            Participants.Add(new NativeLobbyParticipant{Name=human?"Игрок "+(Participants.Count(p=>p.Human)+1):"ИИ "+(Participants.Count(p=>!p.Human)+1),Human=human,DeviceId=deviceId,Color=color,Team=Participants.Count==0?1:Participants.Count%2+1,Difficulty=Difficulty});
+            int team=NextParticipantTeam(capacity);
+            Participants.Add(new NativeLobbyParticipant{Name=human?"Игрок "+(Participants.Count(p=>p.Human)+1):"ИИ "+(Participants.Count(p=>!p.Human)+1),Human=human,DeviceId=deviceId,Color=color,Team=team,Difficulty=Difficulty});
             return null;
+        }
+        private int NextParticipantTeam(int capacity)
+        {
+            if(!Foundry)return Enumerable.Range(1,8).First(team=>Participants.All(p=>p.Team!=team));
+            int previous=Participants.Count==0?0:Participants[Participants.Count-1].Team;
+            // Foundry is authored for two teams. Fill an available opposing team first,
+            // without rewriting manual choices or exceeding a team's share of the map.
+            return Enumerable.Range(1,2).Where(team=>Participants.Count(p=>p.Team==team)<capacity/2)
+                .OrderBy(team=>team==previous).ThenBy(team=>Participants.Count(p=>p.Team==team)).ThenBy(team=>team).First();
         }
         public bool Foundry;
         public bool AiTestMap;

@@ -43,7 +43,13 @@
 
 .orbital-lab-groups .orbital-button { height: auto; min-height: 44px; padding: 10px 12px; font-size: 15px; }
 
-.orbital-settings-card { height: 94%; max-height: 740px; }
+.orbital-settings-card { width: 1000px; height: 94%; max-height: 740px; }
+#settings-body { flex-direction: row; flex-grow: 1; min-height: 0; }
+#settings-tabs { width: 146px; min-width: 146px; flex-shrink: 0; margin-right: 20px; }
+#settings-tabs .settings-tab { padding-left: 12px; padding-right: 12px; border-left-width: 4px; }
+#settings-tabs .settings-tab-selected { border-left-color: rgb(69,217,240); background-color: rgb(20,49,61); -unity-font-style: bold; }
+#settings-tabs .settings-tab:focus { border-color: white; }
+#settings-scroll { flex-basis: 0; min-width: 0; }
 #settings-scroll { flex-grow: 1; }
 #settings-scroll { margin-bottom: 12px; }
 #settings-scroll .unity-base-field__label { width: 220px; min-width: 220px; max-width: 220px; flex-grow: 0; flex-shrink: 0; margin-left: 0; margin-right: 12px; }
@@ -114,16 +120,33 @@
 #laboratory-screen .unity-scroller .unity-base-field__input { width: 10px; min-width: 0; max-width: 10px; padding: 0; border-width: 0; background-color: transparent; }
 
 /* Ordered profile/revision actions with space between controls and rows. */
-.lab-controls { flex-direction: row; flex-wrap: wrap; align-items: flex-start; margin-top: 8px; margin-bottom: 6px; }
-.lab-profile-controls { flex-direction: row; align-items: center; flex-shrink: 0; margin-right: 12px; margin-bottom: 6px; }
-.lab-revision-controls { flex-direction: row; flex-wrap: wrap; align-items: center; flex-grow: 1; flex-basis: 0; min-width: 600px; }
+.lab-controls { flex-direction: column; flex-wrap: wrap; align-items: flex-start; margin-top: 8px; margin-bottom: 6px; }
+.lab-profile-controls { flex-direction: row; flex-wrap: wrap; align-items: center; flex-shrink: 0; margin-right: 12px; margin-bottom: 6px; }
+.lab-revision-controls { flex-direction: row; flex-wrap: wrap; align-items: center; flex-grow: 1; min-width: 0; }
 #laboratory-screen .lab-controls .orbital-button { flex-grow: 0; margin: 0 8px 6px 0; }
 #laboratory-screen .lab-controls .unity-base-field { margin: 0 8px 6px 0; }
 #laboratory-screen .lab-controls .unity-base-field__label { width: 76px; min-width: 76px; margin-right: 6px; white-space: nowrap; }
 #lab-name { width: 225px; }
 #lab-revisions { width: 185px; }
-#lab-search { margin-top: 4px; margin-bottom: 10px; }
-#lab-search .unity-base-field__label { width: 60px; min-width: 60px; }
+#lab-search { margin-left: 0; margin-right: 8px; margin-top: 4px; margin-bottom: 10px; }
+#lab-search .unity-base-field__label { width: 76px; min-width: 76px; margin-right: 6px; }
 #laboratory-screen .orbital-lab-groups .orbital-button.lab-dirty { color: rgb(255,197,104); }
 
 #laboratory-screen .orbital-lab-groups .lab-dirty .unity-label { color: rgb(255,197,104); }
+
+.high-contrast Label { color: white; }
+.high-contrast Button { color: white; background-color: rgb(8,18,25); border-color: white; }
+.high-contrast .orbital-card { background-color: rgb(4,10,14); }
+
+#lab-profiles { width: 330px; }
+#lab-revisions { width: 330px; }
+#lab-confirm .orbital-card { width: 740px; }
+#lab-confirm-diff { max-height: 360px; }
+#lab-focus-help { flex-shrink: 0; }
+
+.lab-inline-help { white-space: normal; font-size: 13px; color: rgb(164,190,203); background-color: rgb(16,29,36); padding: 6px 8px; margin: 4px 0; border-left-width: 2px; border-left-color: rgb(69,217,240); }
+
+#laboratory-screen .lab-release-selected { border-color: rgb(45, 211, 235); background-color: rgb(18, 57, 68); }
+
+#lab-profiles > .unity-base-field__label, #lab-revisions > .unity-base-field__label, #lab-search > .unity-base-field__label { width: 76px; min-width: 76px; max-width: 76px; flex-shrink: 0; margin-left: 0; margin-right: 6px; padding-left: 0; padding-right: 0; }
+#lab-profiles > .unity-base-field__input, #lab-revisions > .unity-base-field__input, #lab-search > .unity-base-field__input { margin-left: 0; margin-right: 0; }

@@ -8,14 +8,14 @@ namespace Spacewars.Runtime
 {
     // One bounded host adapter for ordinary and headless entrypoints. Epochs are
     // solver allotments under the existing frozen gameplay barrier, not ticks.
-    public sealed class CertifiedRouteKernel
+    public sealed partial class CertifiedRouteKernel
     {
         private sealed class ProviderEntry
         {
             internal ILayeredNavigationProvider Provider;
             internal int References;
         }
-        private sealed class Registered
+        internal sealed class Registered
         {
             internal NavigationRequest Request;
             internal string SurfaceProviderId;
@@ -25,7 +25,8 @@ namespace Spacewars.Runtime
             internal int LegCursor, ReplayCursor;
             internal NavLocation Expected, At;
             internal List<NavPoint> Points;
-            internal List<string> TypedPortals, ObservedPortals;
+            internal List<string> TypedPortals, ObservedPortals; internal bool Arrival;
+            internal NavigationRoutePort ArrivalOwnerPort;internal ArrivalProviderLease ArrivalOwner;
         }
         private readonly LayeredNavigationScheduler scheduler = new LayeredNavigationScheduler();
         private readonly Dictionary<Tuple<NavGeometry,string>,ProviderEntry> providers =
@@ -38,23 +39,67 @@ namespace Spacewars.Runtime
         private readonly Queue<string> completionQueue = new Queue<string>();
         private long epoch;
         private NavigationRoutePort currentPort;
+        internal enum PumpStage {Idle,Retirement,ArrivalAdvance,PreFlush,Allocation,Scan,Transfer,Solve,Ready,Projection,EndAllocation,PostFlush}
+        // Phase arithmetic only. The durable host checkpoint must also retain
+        // the scheduler, rows, queues and in-flight operation ownership.
+        internal readonly struct PumpFrontier
+        {
+            internal readonly PumpStage Stage;
+            internal readonly int OriginalBudget,ScansUsed,TransfersUsed,ReadyUsed,ProjectionUsed,ProjectionAllowance,SolveWorkLimit,SolveConsumed;
+            internal readonly long AllocationFloor;
+            internal readonly int PhaseUsed,ScanAllowance;
+            internal bool Same(PumpFrontier other)=>Stage==other.Stage&&OriginalBudget==other.OriginalBudget&&ScansUsed==other.ScansUsed&&TransfersUsed==other.TransfersUsed&&ReadyUsed==other.ReadyUsed&&ProjectionUsed==other.ProjectionUsed&&ProjectionAllowance==other.ProjectionAllowance&&SolveWorkLimit==other.SolveWorkLimit&&SolveConsumed==other.SolveConsumed&&AllocationFloor==other.AllocationFloor&&PhaseUsed==other.PhaseUsed&&ScanAllowance==other.ScanAllowance;
+            internal PumpFrontier(PumpStage stage,int originalBudget,int scansUsed,int transfersUsed,int readyUsed,int projectionUsed,int projectionAllowance,int solveWorkLimit,int solveConsumed,long allocationFloor,int phaseUsed=0,int scanAllowance=0)
+            {Stage=stage;OriginalBudget=originalBudget;ScansUsed=scansUsed;TransfersUsed=transfersUsed;ReadyUsed=readyUsed;ProjectionUsed=projectionUsed;ProjectionAllowance=projectionAllowance;SolveWorkLimit=solveWorkLimit;SolveConsumed=solveConsumed;AllocationFloor=allocationFloor;PhaseUsed=phaseUsed;ScanAllowance=scanAllowance;}
+        }
+        private readonly object pumpFrameGate=new object();
+        private PumpStage pumpStage;
+        private int pumpBudget,scansUsed,transfersUsed,readyUsed,projectionUsed,projectionAllowance,solveWorkLimit,solveConsumed;
+        private long pumpAllocationFloor;
+        private int phaseUsed,scanAllowance;
+        internal PumpFrontier CapturePumpFrontier(){lock(pumpFrameGate)return new PumpFrontier(pumpStage,pumpBudget,scansUsed,transfersUsed,readyUsed,projectionUsed,projectionAllowance,solveWorkLimit,solveConsumed,pumpAllocationFloor,phaseUsed,scanAllowance);}
+        private void SetPumpStage(PumpStage value){lock(pumpFrameGate)pumpStage=value;}
         private long reservedCorridorBytes;
         private bool allocating;
         internal Action BeforePrepare;
+        internal Action<ArrivalProjectionDelta,ArrivalProjection> BeforeArrivalProjectionCommit;
         internal Func<bool> Continue;
         public long ProgressSequence {get;private set;}
-        public bool HasWork => registered.Count!=0 || (currentPort?.QueuedRequestCount??0)!=0;
+        private readonly Dictionary<long,Registered> arrivalOwnedRows=new Dictionary<long,Registered>();
+        internal static Registered CreateArrivalProjection(NavigationRequest request,NavScheduledRequest scheduled,NavTypedRoute route,ArrivalProjection saved,ArrivalProviderLease lease,NavigationRoutePort port,string surface,
+            int pointsCapacity=-1,int typedCapacity=-1,int observedCapacity=-1)
+        {
+            var row=new Registered{Request=request,Scheduled=scheduled,SurfaceProviderId=surface,Arrival=true,ArrivalOwnerPort=port,ArrivalOwner=lease,
+                Solved=new NavScheduledCompletion(scheduled,NavSolveStatus.Ready,route,0,0),LegCursor=saved.Leg,ReplayCursor=saved.Replay,Expected=saved.Expected,At=saved.At,
+                Points=new List<NavPoint>(pointsCapacity<0?saved.Points.Length:pointsCapacity),TypedPortals=new List<string>(typedCapacity<0?saved.Typed.Length:typedCapacity),ObservedPortals=new List<string>(observedCapacity<0?saved.Observed.Length:observedCapacity)};
+            row.Points.AddRange(saved.Points);row.TypedPortals.AddRange(saved.Typed);row.ObservedPortals.AddRange(saved.Observed);
+            lease.PointsCapacity=row.Points.Capacity;lease.TypedCapacity=row.TypedPortals.Capacity;lease.ObservedCapacity=row.ObservedPortals.Capacity;return row;
+        }
+        private void RetireArrivalOwners(NavigationRoutePort port,int budget)
+        {
+            for(int n=0;n<budget;n++){
+                var lease=port.NextRetiringArrivalProjection();
+                if(lease==null){if(port.RetireRestoredArrivalProjection()){ProgressSequence++;continue;}break;}
+                if(lease.Attached){
+                    if(!arrivalOwnedRows.TryGetValue(lease.Token,out var row))break;
+                    registered.Remove(row.Scheduled.Subscription.StableKey);row.Solved?.Release();row.Solved=null;row.Scheduled=null;row.Points=null;row.TypedPortals=null;row.ObservedPortals=null;
+                    ReleaseArrivalOwner(row,"retirement");ProgressSequence++;UpdateReservation();
+                }else{if(!port.RetireRestoredArrivalProjection())break;ProgressSequence++;}
+            }
+        }
+        private bool PhysicalHasWork {get{var root=currentPort?.PinCommittedHostRoot();try{return root!=null&&(root.Rows.Count!=0||root.Frontier.Stage!=PumpStage.Idle);}finally{root?.Release();}}}
+        public bool HasWork => PhysicalHasWork || registered.Count!=0 || (currentPort?.QueuedRequestCount??0)!=0 || (currentPort?.AllocationCount??0)!=0 || (currentPort?.ArrivalReconstructing??false);
         private const int WorkAllotment = 16384;
         private const int WorkUnitsPerRequestBudget = 1024;
         private static readonly NavEpochQuota Quota = new NavEpochQuota(WorkAllotment, WorkAllotment,
             WorkAllotment, WorkAllotment * 3, 256);
         private static readonly NavGraphCompileLimits Limits = new NavGraphCompileLimits(1048576, 300000, 1200000);
-        public NavSchedulerCounters Counters => scheduler.Counters;
+        public NavSchedulerCounters Counters {get{var root=currentPort?.PinCommittedHostRoot();try{return root?.Scheduler.Counters??scheduler.Counters;}finally{root?.Release();}}}
         public long SolverEpoch => epoch;
         public string LastProjectionFailure { get; private set; }
         private long OwnedRetainedBytes=>scheduler.Counters.RetainedBytes+OwnedExternalBytes();
         private long ReservedRetainedBytes=>scheduler.Counters.RetainedBytes+ExternalBytes();
-        public long RetainedBytes => OwnedRetainedBytes+(currentPort?.CorridorRetainedBytes??0);
+        public long RetainedBytes => currentPort?.PhysicalRetainedBytes??(OwnedRetainedBytes+(currentPort?.CorridorRetainedBytes??0));
         public double TransportWaitMilliseconds=>currentPort?.TransportWaitMilliseconds??0;
         public double TransportHoldMilliseconds=>currentPort?.TransportHoldMilliseconds??0;
         public double PreparationElapsedMilliseconds {get;private set;}
@@ -75,10 +120,10 @@ namespace Spacewars.Runtime
         private Timing Measure(Phase phase)=>new Timing(this,phase);
         public long PeakRetainedBytes => peakRetainedBytes;
         private long OwnedExternalBytes()=>providerBytes-scheduler.ProviderRetainedBytes+
-            heldProjectionBytes+hostAnswerBytes+128L*registered.Count;
+            heldProjectionBytes+hostAnswerBytes+128L*registered.Values.Count(r=>!r.Arrival);
         private long ExternalBytes()=>OwnedExternalBytes()+Math.Max(reservedCorridorBytes,currentPort?.CorridorRetainedBytes??0);
         private void UpdateReservation(long nextRegistration=0)
-        {scheduler.ReserveExternalBytes(ExternalBytes()+nextRegistration);
+        {if(ExternalBytes()+nextRegistration>LayeredNavigationScheduler.MaxRetainedBytes)throw new InvalidOperationException("Route retention components owned="+OwnedExternalBytes()+" corridor="+(currentPort?.CorridorRetainedBytes??0)+" reserved="+reservedCorridorBytes+" ownsolver="+scheduler.Counters.RetainedBytes+" arrival="+currentPort?.ArrivalRetentionDiagnostic);scheduler.ReserveExternalBytes(ExternalBytes()+nextRegistration);
             peakRetainedBytes=Math.Max(peakRetainedBytes,RetainedBytes);
             if(!allocating)currentPort?.SetHostRetainedBytes(OwnedRetainedBytes);}
         public void ReleaseForWorldCheckpoint(NavigationRoutePort port)
@@ -94,50 +139,90 @@ namespace Spacewars.Runtime
         {
             var oldPort=currentPort;
             if(oldPort==null){ClearOwned();return;}
-            ClearOwned();oldPort.SetHostRetainedBytes(0);
+            if(allocating){var retained=oldPort.PhysicalRetainedBytes??OwnedRetainedBytes;allocating=false;reservedCorridorBytes=0;oldPort.EndHostAllocation(retained);}
+            ClearOwned();oldPort.SetHostRetainedBytes(0);oldPort.DetachHost(this);
         }
         // Scheduler ClearWorld retains epoch and quota history across authority ports.
+        private void ReleaseArrivalOwner(Registered row,string reason)
+        {var owner=row.ArrivalOwner;var port=row.ArrivalOwnerPort;row.ArrivalOwner=null;row.ArrivalOwnerPort=null;if(owner!=null){arrivalOwnedRows.Remove(owner.Token);port.ReleaseArrivalProjection(owner,reason);}}
+        private void ClearProjectionOwnership(Registered row,string reason)
+        {
+            void Clear(){row.Scheduled=null;row.Solved?.Release();row.Solved=null;row.Points=null;row.TypedPortals=null;row.ObservedPortals=null;ReleaseArrivalOwner(row,reason);}
+            if(row.ArrivalOwnerPort!=null)row.ArrivalOwnerPort.RunHostStep(Clear);else Clear();
+        }
         private void ClearOwned()
-        {scheduler.ClearWorld();registered.Clear();providers.Clear();providerBytes=heldProjectionBytes=hostAnswerBytes=peakRetainedBytes=0;scanQueue.Clear();projectionQueue.Clear();completionQueue.Clear();currentPort=null;}
+        {foreach(var row in registered.Values.OrderBy(r=>r.ArrivalOwner?.Retiring==true?0:1).ThenBy(r=>r.ArrivalOwner?.Retiring==true?r.ArrivalOwner.Retirement:r.ArrivalOwner?.Acquisition??long.MaxValue).ThenBy(r=>r.ArrivalOwner?.Token??long.MaxValue)){ClearProjectionOwnership(row,"Clear");}scheduler.ClearWorld();registered.Clear();arrivalOwnedRows.Clear();providers.Clear();providerBytes=heldProjectionBytes=hostAnswerBytes=peakRetainedBytes=0;scanQueue.Clear();projectionQueue.Clear();completionQueue.Clear();currentPort=null;lock(pumpFrameGate){pumpStage=PumpStage.Idle;pumpAllocationFloor=0;}}
 
-        public void Pump(PlayableRouteBinding binding, int budget)
+        // The lane owner attaches before inspecting work. A restored host may
+        // contain only a saved suffix and no ingress mailbox item to wake it.
+        internal void Attach(NavigationRoutePort port)
+        {
+            if(port==null)throw new ArgumentNullException(nameof(port));
+            if(ReferenceEquals(currentPort,port))return;
+            Clear();port.AttachHost(this);currentPort=port;
+        }
+
+        private void PumpLegacy(PlayableRouteBinding binding, int budget)
         {
             var port = binding.RoutePort;
             if(port == null)throw new ArgumentException("Missing route authority facade.");
-            if(!ReferenceEquals(currentPort, port)) {
-                Clear();currentPort=port;
-            }
+            Attach(port);
+            lock(pumpFrameGate){pumpBudget=budget;scansUsed=transfersUsed=readyUsed=projectionUsed=solveWorkLimit=solveConsumed=0;
+                projectionAllowance=checked(budget*16);pumpAllocationFloor=0;pumpStage=PumpStage.Retirement;}
+            port.RunHostStep(()=>RetireArrivalOwners(port,budget));
+            SetPumpStage(PumpStage.ArrivalAdvance);
+            if(port.AdvanceArrivals(budget))ProgressSequence++;
             // Commit queued answers before reserving solver growth. No provider/solve/
             // projection operation executes under the authority gate.
+            SetPumpStage(PumpStage.PreFlush);
             port.RunHostStep(()=>{UpdateReservation();Flush(port,budget);});
+            SetPumpStage(PumpStage.Allocation);
             reservedCorridorBytes=port.BeginHostAllocation();allocating=true;
+            lock(pumpFrameGate)pumpAllocationFloor=reservedCorridorBytes;
             try {ServiceOwned(port,budget);}
             finally {
+                SetPumpStage(PumpStage.EndAllocation);
                 try{port.EndHostAllocation(OwnedRetainedBytes);}
                 finally{allocating=false;reservedCorridorBytes=0;}
             }
+            SetPumpStage(PumpStage.PostFlush);
             if(Continue?.Invoke()!=false)port.RunHostStep(()=>{UpdateReservation();Flush(port,budget);});
+            SetPumpStage(PumpStage.Idle);
         }
 
         private void ServiceOwned(NavigationRoutePort port,int budget)
         {
             UpdateReservation();
-            var admission=port.Admission;
+            using var admissionPin=port.PinAdmission();
+            var admission=admissionPin.Value;
             if(admission==null)return;
             // Old accepted inputs are kept until their answer can enter the
             // mailbox. Discharge stale ownership before asking the solver to work.
             int scans=Math.Min(budget,scanQueue.Count);
+            SetPumpStage(PumpStage.Scan);
             for(int i=0;i<scans;i++) {
+                lock(pumpFrameGate)scansUsed=i;
                 var key=scanQueue.Dequeue();
                 if(!registered.TryGetValue(key,out var row))continue;
-                if(port.Admission.Contains(row.Request)){scanQueue.Enqueue(key);continue;}
+                if(port.ContainsCurrent(row.Request)){scanQueue.Enqueue(key);continue;}
                 scheduler.Cancel(key);
                 SetCompletion(key,row,new NavigationAnswer(row.Request,Array.Empty<NavPoint>(),NavSolveStatus.Stale));
             }
+            lock(pumpFrameGate){scansUsed=scans;pumpStage=PumpStage.Transfer;}
             for(int i=0;i<budget && Continue?.Invoke()!=false && registered.Count<LayeredNavigationScheduler.MaxQueue;i++) {
+                lock(pumpFrameGate)transfersUsed=i;
                 if(ReservedRetainedBytes+128>LayeredNavigationScheduler.MaxRetainedBytes)break;
                 UpdateReservation(128);
                 if(port.TryDropStale(out _)){ProgressSequence++;continue;}
+                if(port.TryTransferArrival(out var arrival,out var arrivalScheduled,out var arrivalRoute,out var restoredProjection,out var arrivalOwner)) {
+                    var arrivalKey=arrivalScheduled.Subscription.StableKey;
+
+                    var row=arrivalOwner.Projection;
+                    arrivalOwnedRows.Add(arrivalOwner.Token,row);
+                    registered.Add(arrivalKey,row);scanQueue.Enqueue(arrivalKey);projectionQueue.Enqueue(arrivalKey);
+                    ProgressSequence++;UpdateReservation();continue;
+                }
+                if(port.QueuedArrivalHead)break;
                 NavScheduledRequest prepared=null;
                 NavigationRequest preparedInput=null;
                 bool oversized=false;
@@ -156,11 +241,13 @@ namespace Spacewars.Runtime
                 }catch{if(preparedInput!=null)DropUnusedProvider(preparedInput,prepared?.Provider);
                     UpdateReservation();throw;}
             }
+            SetPumpStage(PumpStage.Solve);
             UpdateReservation();
-            int workLimit=checked(budget*WorkUnitsPerRequestBudget);
+            int workLimit=checked(budget*WorkUnitsPerRequestBudget);lock(pumpFrameGate)solveWorkLimit=workLimit;
             bool Current(NavScheduledIdentity id)
             {
-                var latest=port.Admission;
+                using var latestPin=port.PinAdmission();
+                var latest=latestPin.Value;
                 return latest!=null&&registered.TryGetValue(id.StableKey,out var row)&&latest.Contains(row.Request);
             }
             int consumed;
@@ -171,23 +258,27 @@ namespace Spacewars.Runtime
             }
             }
             if(consumed>0)ProgressSequence++;
+            lock(pumpFrameGate){solveConsumed=consumed;pumpStage=PumpStage.Ready;}
             for(int i=0;i<budget&&scheduler.ReadyCount>0;i++) {
+                lock(pumpFrameGate)readyUsed=i;
                 if(ReservedRetainedBytes+scheduler.ReadyHeadProjectionReserve>LayeredNavigationScheduler.MaxRetainedBytes)break;
                 if(!scheduler.TryTake(_=>true,out var completed))continue;
                 ProgressSequence++; // Removing even a stale ready item releases capacity.
-                if(!registered.TryGetValue(completed.Identity.StableKey,out var row))continue;
-                if(!port.Admission.Contains(row.Request))
+                if(!registered.TryGetValue(completed.Identity.StableKey,out var row)){completed.Release();continue;}
+                if(!port.ContainsCurrent(row.Request))
                     SetCompletion(completed.Identity.StableKey,row,new NavigationAnswer(row.Request,Array.Empty<NavPoint>(),NavSolveStatus.Stale));
                 else if(completed.Status!=NavSolveStatus.Ready)
                     SetCompletion(completed.Identity.StableKey,row,new NavigationAnswer(row.Request,Array.Empty<NavPoint>(),completed.Status));
                 else {row.Solved=completed;heldProjectionBytes+=1024L+288L*completed.Route.Legs.Count;
                     projectionQueue.Enqueue(completed.Identity.StableKey);UpdateReservation();}
+                if(!ReferenceEquals(row.Solved,completed))completed.Release();
             }
-            Project(budget*16);
+            SetPumpStage(PumpStage.Projection);
+            Project(projectionAllowance);
         }
 
         private void SetCompletion(string key,Registered row,NavigationAnswer answer)
-        {long released=row.Solved==null?0:1024L+288L*row.Solved.Route.Legs.Count;
+        {long released=row.Solved==null||row.Arrival?0:1024L+288L*row.Solved.Route.Legs.Count;
             long prior=row.Completion==null?0:AnswerBytes(row.Completion);
             if(answer.Corridor!=null&&ReservedRetainedBytes-released-prior+AnswerBytes(answer)>
                 LayeredNavigationScheduler.MaxRetainedBytes)
@@ -195,9 +286,9 @@ namespace Spacewars.Runtime
             if(row.Completion==null)completionQueue.Enqueue(key);
             else hostAnswerBytes-=prior;
             row.Completion=answer;hostAnswerBytes+=AnswerBytes(answer);
-            if(row.Solved!=null)heldProjectionBytes-=1024L+288L*row.Solved.Route.Legs.Count;
-            if(row.Scheduled!=null)ReleaseProvider(row.Request,row.Scheduled.Provider);
-            row.Scheduled=null;row.Solved=null;row.Points=null;row.TypedPortals=null;row.ObservedPortals=null;UpdateReservation();}
+            if(row.Solved!=null&&!row.Arrival)heldProjectionBytes-=1024L+288L*row.Solved.Route.Legs.Count;
+            if(row.Scheduled!=null){if(!row.Arrival)ReleaseProvider(row.Request,row.Scheduled.Provider);}
+            ClearProjectionOwnership(row,"completion");UpdateReservation();}
 
         private static long AnswerBytes(NavigationAnswer answer)
             =>checked(1024L+16L*answer.RouteLength+(answer.Corridor?.EstimatedRetainedBytes??0));
@@ -235,6 +326,350 @@ namespace Spacewars.Runtime
             ILayeredNavigationProvider provider;
             using(Measure(Phase.Provider))provider=Provider(admission,request,out oversized);
             if(provider==null)return null; // bounded backpressure, original FIFO head stays queued
+            var scheduled=BuildScheduled(admission,request,provider);
+            // Submit will take over the scheduler's first reference. Exclude the
+            // same provider from the external reservation for that atomic handoff.
+            long transferring=scheduler.HasProviderReference(provider)?0:provider.EstimatedRetainedBytes;
+            scheduler.ReserveExternalBytes(ExternalBytes()+128-transferring);
+            long admissionBytes=4096L+(scheduled.Region==null?0:128L*scheduled.Region.Candidates.Count)+
+                transferring+(scheduler.PendingCount==0?2048:0);
+            if(!scheduler.TryMakeRoomForExternal(admissionBytes,1))return null;
+            return scheduled;
+        }
+
+        // The physical registration caller prepares the same certified recipe
+        // outside transportGate, then publishes the owned scheduler/row/queue
+        // and the mailbox transfer at one Session boundary. Pump switches to
+        // this caller only when its solve/projection/flush stages use this root.
+        internal bool TryRegisterPhysicalOrdinary(PlayableRouteBinding binding)
+        {
+            var port=binding.RoutePort;
+            if(port==null)throw new ArgumentException("Missing route authority facade.");
+            Attach(port);
+            if(!port.TryObservePhysicalIngress(out var ingress,out var admissionPin))return false;
+            using var observedPin=admissionPin;var observed=observedPin.Value;
+            var source=port.PinCommittedHostRoot();
+            NavigationRetentionBudget.Scope scope=null;
+            NavigationHostRoot candidate=null;
+            try{
+                if(!port.TryOpenPhysicalHostScope(NavigationPreparationKind.Admission,epoch,
+                    observed.PublicationIdentity,out scope))return false;
+                var reservation=scope.OwnedReservation();
+                candidate=source==null?NavigationHostRoot.CreateOwned(reservation):
+                    source.ForkOwned(reservation);
+                if(source==null)port.StageRetainedPhysicalArrivals(candidate,reservation);
+                BeforePrepare?.Invoke();
+                if(Continue?.Invoke()==false)return false;
+                // Account for the temporary provider while its physical copy
+                // is admitted. The authored arrangement bound is the same
+                // conservative construction reservation used by arrivals.
+                long construction=ProspectiveProviderConstruction(observed,ingress.Geometry);
+                NavNameKey key;
+                using(NavStorageScratch.Reserve(reservation,construction)){
+                    ILayeredNavigationProvider provider=observed.AuthoredTerrain==null?
+                        NavigationAdmission.CertifiedFlatProvider(ingress.Geometry):
+                        new PartitionNavigationProvider(observed.AuthoredTerrain,
+                            ingress.Geometry,ingress.HeldIdentity);
+                    if(provider.EstimatedRetainedBytes>construction)
+                        throw new InvalidOperationException("Physical provider exceeded construction reserve.");
+                    var prepared=BuildScheduled(observed,ingress,provider);
+                    key=candidate.RegisterOrdinary(ingress,prepared,observed.SurfaceProviderId,reservation,observed.Geometry);
+                }
+                var registrationFrame=CapturePumpFrontier();
+                candidate.SetFrontier(WithCounters(registrationFrame,transfers:registrationFrame.TransfersUsed+1),epoch,checked(ProgressSequence+1));
+                candidate.SetOperation(new NavigationHostRoot.OperationDescriptor(
+                    PumpStage.Transfer,transfersUsed,true,false,key.Reference));
+                candidate.SealPrepared();
+                port.PublishRegisteredPhysicalHost(scope,source,candidate,observed,ingress,key);
+                ProgressSequence++;return true;
+            }catch(NavigationSession.PhysicalIngressRefused){return false;}
+            finally{
+                candidate?.ReleaseStorage();
+                scope?.Discard();
+                source?.Release();
+            }
+        }
+
+        internal int AdvancePhysicalOrdinary(PlayableRouteBinding binding,int workLimit)
+        {
+            var port=binding.RoutePort;
+            if(port==null||workLimit<0)throw new ArgumentException("Invalid physical solver allotment.");
+            Attach(port);
+            var source=port.PinCommittedHostRoot();
+            if(source==null)return 0;
+            NavigationRetentionBudget.Scope scope=null;
+            NavigationHostRoot candidate=null;
+            try{
+                if(!port.TryOpenPhysicalHostScope(NavigationPreparationKind.Solve,epoch,
+                    port.Admission.PublicationIdentity,out scope))return 0;
+                var reservation=scope.OwnedReservation();
+                candidate=source.ForkOwned(reservation);
+                bool Current(NavScheduledIdentity id)
+                {
+                    // The paid host scan owns ordinary admission cancellation.
+                    // Cancelling here can drop the scheduler owner between scan
+                    // and solve while leaving its live host row behind.
+                    return candidate.Rows.TryGetValue(id.StableKey,out var entry)&&
+                        entry is NavigationHostRow row&&row.Answer==null&&row.Solved==null;
+                }
+                long nextEpoch=source.Epoch;
+                int consumed=candidate.Scheduler.Advance(nextEpoch,Quota,Current,workLimit);
+                if(consumed==0&&candidate.Scheduler.NeedsNextEpoch){
+                    nextEpoch++;
+                    consumed=candidate.Scheduler.Advance(nextEpoch,Quota,Current,workLimit);
+                }
+                if(consumed==0&&nextEpoch==source.Epoch)return 0;
+                var frame=CapturePumpFrontier();
+                bool inPump=frame.Stage==PumpStage.Solve&&frame.OriginalBudget>0;
+                int budget=inPump?frame.OriginalBudget:
+                    Math.Max(1,checked((workLimit+1023)/1024));
+                var solveFrame=inPump?WithCounters(frame,PumpStage.Ready,
+                    consumed:checked(frame.SolveConsumed+consumed)):
+                    new PumpFrontier(PumpStage.Ready,budget,0,0,0,0,checked(budget*16),workLimit,consumed,source.Frontier.AllocationFloor);
+                candidate.SetFrontier(solveFrame,nextEpoch,checked(source.Progress+(consumed>0?1:0)));
+                candidate.SetOperation(new NavigationHostRoot.OperationDescriptor(
+                    PumpStage.Solve,0,true,consumed>0,default));
+                candidate.SealPrepared();scope.Attach(candidate);
+                port.PublishPhysicalHostRoot(scope,source,candidate);
+                epoch=nextEpoch;ProgressSequence=checked(source.Progress+(consumed>0?1:0));return consumed;
+            }finally{
+                candidate?.ReleaseStorage();scope?.Discard();source.Release();
+            }
+        }
+
+        internal int TransferPhysicalReady(PlayableRouteBinding binding,int limit)
+        {
+            var port=binding.RoutePort;
+            if(port==null||limit<0)throw new ArgumentException("Invalid physical Ready allotment.");
+            Attach(port);
+            var source=port.PinCommittedHostRoot();
+            if(source==null)return 0;
+            NavigationRetentionBudget.Scope scope=null;
+            NavigationHostRoot candidate=null;
+            try{
+                if(source.Scheduler.ReadyCount==0||limit==0||
+                    !port.TryOpenPhysicalHostScope(NavigationPreparationKind.Projection,
+                        source.Epoch,port.Admission.PublicationIdentity,out scope))return 0;
+                var reservation=scope.OwnedReservation();
+                candidate=source.ForkOwned(reservation);
+                int moved=0;
+                while(moved<limit&&candidate.Scheduler.ReadyCount>0&&
+                    candidate.StageTakeReady(reservation))moved++;
+                if(moved==0)return 0;
+                var frame=CapturePumpFrontier();
+                bool inPump=frame.Stage==PumpStage.Ready&&frame.OriginalBudget>0;
+                int budget=inPump?frame.OriginalBudget:Math.Max(1,limit);
+                candidate.SetFrontier(inPump?WithCounters(frame,PumpStage.Projection,ready:checked(frame.ReadyUsed+moved)):
+                    new PumpFrontier(PumpStage.Projection,budget,0,0,moved,0,checked(budget*16),0,0,source.Frontier.AllocationFloor),
+                    source.Epoch,checked(source.Progress+moved));
+                candidate.SetOperation(new NavigationHostRoot.OperationDescriptor(
+                    PumpStage.Ready,moved,true,true,default));
+                candidate.SealPrepared();scope.Attach(candidate);
+                port.PublishPhysicalHostRoot(scope,source,candidate);
+                ProgressSequence=checked(ProgressSequence+moved);return moved;
+            }finally{
+                candidate?.ReleaseStorage();scope?.Discard();source.Release();
+            }
+        }
+
+        internal int ProjectPhysicalOrdinary(PlayableRouteBinding binding,int allowance)
+        {
+            var port=binding.RoutePort;
+            if(port==null||allowance<0)throw new ArgumentException("Invalid physical projection allotment.");
+            Attach(port);
+            var source=port.PinCommittedHostRoot();
+            if(source==null)return 0;
+            NavigationRetentionBudget.Scope scope=null;
+            NavigationHostRoot candidate=null;
+            try{
+                if(source.Projection.Count==0||allowance==0||
+                    !port.TryOpenPhysicalHostScope(NavigationPreparationKind.Projection,
+                        source.Epoch,port.Admission.PublicationIdentity,out scope))return 0;
+                var reservation=scope.OwnedReservation();
+                candidate=source.ForkOwned(reservation);
+                var key=candidate.Projection.First;
+                if(candidate.Rows.TryGetValue(key,out var entry)&&
+                    entry is NavigationHostRow row&&row.Answer==null&&row.Solved?.Route!=null){
+                    var route=row.Solved.Route;var state=row.ProjectionOwner;
+                    if(state==null)throw new InvalidOperationException("Physical Ready row has no projection cursor.");
+                    if(state.LegCursor<route.Legs.Count){
+                        var leg=route.Legs[state.LegCursor];
+                        bool valid=leg.From.Equals(state.Expected);
+                        NavNameReference portalName=default;
+                        if(valid&&leg.Kind==NavTypedLegKind.Surface)
+                            valid=row.Provider is PartitionNavigationProvider?
+                                row.Provider.IsValid(leg.From,row.Scheduled.Clearance)&&
+                                row.Provider.IsValid(leg.To,row.Scheduled.Clearance)&&
+                                row.Request.Geometry.SegmentFree(leg.From.Position,leg.To.Position,
+                                    row.Scheduled.Clearance.Radius):
+                                row.Provider.CanSweep(leg.From,leg.To,row.Scheduled.Clearance);
+                        else if(valid&&leg.Kind==NavTypedLegKind.Portal&&
+                            row.Provider is PartitionNavigationProvider partition){
+                            var seam=partition.Seams.FirstOrDefault(s=>s.Allowed&&s.Id==leg.PortalId&&
+                                ((s.FromSurface==leg.From.SurfaceId&&s.ToSurface==leg.To.SurfaceId)||
+                                 (s.ToSurface==leg.From.SurfaceId&&s.FromSurface==leg.To.SurfaceId))&&
+                                OnSegment(leg.From.Position,s.From,s.To));
+                            valid=leg.From.Position.Equals(leg.To.Position)&&seam!=null;
+                            if(valid){leg.RequireCanonicalProviderBinding(row.Provider,reservation);portalName=leg.CanonicalPortalName(row.Provider);}
+                        }else valid=false;
+                        if(valid){
+                            var step=state.ForkOwned(reservation);
+                            try{
+                                step.AdvanceLeg(leg,portalName);step.SealPrepared();
+                                candidate.StageProjectionStep(key,step,reservation);
+                            }finally{step.ReleaseStorage();}
+                        }else{
+                            LastProjectionFailure="physical leg qualification";
+                            candidate.StageProjectionFailure(key,reservation);
+                        }
+                    }else if(row.Provider is PartitionNavigationProvider actual&&
+                        state.ReplayCursor<state.PointCount){
+                        using(NavStorageScratch.Reserve(reservation,checked(512L+
+                            actual.TraceScratchBound+8L*actual.TracePortalBound))){
+                            if(actual.TryTrace(state.At,state.Point(state.ReplayCursor),
+                                row.Scheduled.Clearance,out var reached,out var trace)){
+                                var names=trace.Where(leg=>leg.Kind==NavTypedLegKind.Portal)
+                                    .Select(leg=>PhysicalSeamName(actual,leg.PortalId)).ToArray();
+                                var step=state.ForkOwned(reservation);
+                                try{
+                                    step.AdvanceReplay(reached,names);step.SealPrepared();
+                                    candidate.StageProjectionStep(key,step,reservation);
+                                }finally{step.ReleaseStorage();}
+                            }else{
+                                LastProjectionFailure="physical XZ replay trace";
+                                candidate.StageProjectionFailure(key,reservation);
+                            }
+                        }
+                    }else if(state.LegCursor==route.Legs.Count&&state.PointCount>0&&
+                        state.Expected.Equals(row.Scheduled.Subscription.AssignedEndpoint)&&
+                        state.Point(state.PointCount-1).Equals(state.Expected.Position)&&
+                        (!(row.Provider is PartitionNavigationProvider)||
+                            state.ReplayCursor==state.PointCount&&state.At.Equals(state.Expected)&&
+                            state.PortalsMatch()))candidate.StageReady(key,reservation);
+                    else{
+                        LastProjectionFailure="physical XZ replay sequence/end";
+                        candidate.StageProjectionFailure(key,reservation);
+                    }
+                }else if(!candidate.SkipCompletedProjection(reservation))return 0;
+                var frame=CapturePumpFrontier();
+                bool inPump=frame.Stage==PumpStage.Projection&&frame.OriginalBudget>0;
+                int budget=inPump?frame.OriginalBudget:
+                    Math.Max(1,checked((allowance+15)/16));
+                candidate.SetFrontier(new PumpFrontier(PumpStage.Projection,budget,
+                    inPump?frame.ScansUsed:0,inPump?frame.TransfersUsed:0,
+                    inPump?frame.ReadyUsed:0,inPump?frame.ProjectionUsed+1:1,
+                    checked(budget*16),
+                    inPump?frame.SolveWorkLimit:0,inPump?frame.SolveConsumed:0,
+                    inPump?frame.AllocationFloor:source.Frontier.AllocationFloor,
+                    inPump?frame.PhaseUsed:0,inPump?frame.ScanAllowance:0),
+                    source.Epoch,checked(source.Progress+1));
+                candidate.SetOperation(new NavigationHostRoot.OperationDescriptor(
+                    PumpStage.Projection,inPump?frame.ProjectionUsed:0,true,true,key.Reference));
+                candidate.SealPrepared();scope.Attach(candidate);
+                port.PublishPhysicalHostRoot(scope,source,candidate);
+                ProgressSequence++;return 1;
+            }finally{
+                candidate?.ReleaseStorage();scope?.Discard();source.Release();
+            }
+        }
+
+        internal bool FlushPhysicalOrdinary(PlayableRouteBinding binding)
+        {
+            var port=binding.RoutePort;
+            if(port==null)throw new ArgumentException("Missing route authority facade.");
+            Attach(port);
+            var source=port.PinCommittedHostRoot();
+            if(source==null)return false;
+            NavigationRetentionBudget.Scope scope=null;
+            NavigationHostRoot candidate=null;
+            try{
+                if(source.Completion.Count==0||
+                    !port.TryOpenPhysicalHostScope(NavigationPreparationKind.Projection,
+                        source.Epoch,port.Admission.PublicationIdentity,out scope))return false;
+                var reservation=scope.OwnedReservation();
+                candidate=source.ForkOwned(reservation);
+                var key=candidate.Completion.First;
+                bool tombstone=!candidate.Rows.ContainsKey(key);
+                if(tombstone)candidate.StageDiscardCompletionTombstone(reservation);else candidate.StageFlushCompletion(key,reservation);
+                var frame=CapturePumpFrontier();
+                bool inPump=frame.Stage==PumpStage.PreFlush||frame.Stage==PumpStage.PostFlush;
+                int budget=inPump&&frame.OriginalBudget>0?frame.OriginalBudget:1;
+                candidate.SetFrontier(new PumpFrontier(inPump?frame.Stage:PumpStage.Idle,
+                    budget,inPump?frame.ScansUsed:0,inPump?frame.TransfersUsed:0,
+                    inPump?frame.ReadyUsed:0,inPump?frame.ProjectionUsed:0,
+                    checked(budget*16),inPump?frame.SolveWorkLimit:0,
+                    inPump?frame.SolveConsumed:0,
+                    inPump?frame.AllocationFloor:source.Frontier.AllocationFloor,
+                    inPump?frame.PhaseUsed+1:0,inPump?frame.ScanAllowance:0),
+                    source.Epoch,checked(source.Progress+(tombstone?0:1)));
+                candidate.SetOperation(new NavigationHostRoot.OperationDescriptor(
+                    inPump?frame.Stage:PumpStage.PostFlush,0,true,!tombstone,key.Reference));
+                candidate.SealPrepared();
+                if(tombstone){scope.Attach(candidate);port.PublishPhysicalHostRoot(scope,source,candidate);}else if(!port.PublishCompletedPhysicalHost(scope,source,candidate,key))return false;
+                if(!tombstone)ProgressSequence++;return true;
+            }finally{
+                candidate?.ReleaseStorage();scope?.Discard();source.Release();
+            }
+        }
+
+        internal bool RetirePhysicalDelivered(PlayableRouteBinding binding)
+        {
+            var port=binding.RoutePort;
+            if(port==null)throw new ArgumentException("Missing route authority facade.");
+            Attach(port);
+            var source=port.PinCommittedHostRoot();
+            if(source==null)return false;
+            NavigationRetentionBudget.Scope scope=null;
+            NavigationHostRoot candidate=null;
+            try{
+                NavNameKey key=default;
+                bool found=false;
+                foreach(var entry in source.Delivered){
+                    if(entry.Value is NavigationHostRow row&&
+                        port.CanRetireDeliveredPhysicalAnswer(row.Answer)){
+                        key=entry.Key;found=true;break;
+                    }
+                }
+                if(!found||!port.TryOpenPhysicalHostScope(NavigationPreparationKind.Projection,
+                    source.Epoch,port.Admission.PublicationIdentity,out scope))return false;
+                var reservation=scope.OwnedReservation();
+                candidate=source.ForkOwned(reservation);
+                candidate.StageRetireDelivered(key,reservation);
+                candidate.SetFrontier(source.Frontier,source.Epoch,checked(source.Progress+1));
+                candidate.SetOperation(new NavigationHostRoot.OperationDescriptor(
+                    PumpStage.Retirement,0,true,true,key.Reference));
+                candidate.SealPrepared();scope.Attach(candidate);
+                port.PublishPhysicalHostRoot(scope,source,candidate);
+                ProgressSequence++;return true;
+            }finally{
+                candidate?.ReleaseStorage();scope?.Discard();source.Release();
+            }
+        }
+
+        private static NavNameReference PhysicalSeamName(PartitionNavigationProvider provider,
+            string portalId)
+        {
+            var seam=provider.Seams.FirstOrDefault(value=>value.Id==portalId);
+            if(seam?.StorageRoot==null||!ReferenceEquals(seam.Id,portalId))
+                throw new ArgumentException("Physical replay portal is not the provider seam owner.");
+            return new NavNameReference(seam.StorageRoot,NavNameRole.SeamId);
+        }
+
+        private static long ProspectiveProviderConstruction(NavigationAdmission admission,NavGeometry geometry)
+        {
+            if(admission.AuthoredTerrain==null)
+                return checked(4096L+1024+2048+512+
+                    geometry.Obstacles.Sum(o=>512L+128L*(o.Polygon?.Vertices.Count??4))+4096);
+            var terrain=admission.AuthoredTerrain;
+            long edges=terrain.Supports.Sum(v=>(long)(v.Bounds.Polygon?.Vertices.Count??4));
+            return checked(8192L+1024L*terrain.Supports.Count+512L*edges+
+                512L*edges*(2*edges+1)+256L*terrain.SurfaceTransitions.Count+
+                geometry.Obstacles.Sum(o=>512L+128L*(o.Polygon?.Vertices.Count??0)));
+        }
+
+        private static NavScheduledRequest BuildScheduled(NavigationAdmission admission,
+            NavigationRequest request,ILayeredNavigationProvider provider)
+        {
             var identity=request.MemberIdentity;
             NavigationAdmissionGroup group=null;
             if(identity!=null&&identity.GroupId!=0)
@@ -258,13 +693,6 @@ namespace Spacewars.Runtime
                     scheduled=new NavScheduledRequest(provider,clearance,profile,Limits,region,subscription,1048576);
                 }else scheduled=NavScheduledRequest.ForSingleton(provider,clearance,profile,Limits,subscription,1048576);
             }else scheduled=NavScheduledRequest.ForSingleton(provider,clearance,profile,Limits,subscription,1048576);
-            // Submit will take over the scheduler's first reference. Exclude the
-            // same provider from the external reservation for that atomic handoff.
-            long transferring=scheduler.HasProviderReference(provider)?0:provider.EstimatedRetainedBytes;
-            scheduler.ReserveExternalBytes(ExternalBytes()+128-transferring);
-            long admissionBytes=4096L+(scheduled.Region==null?0:128L*scheduled.Region.Candidates.Count)+
-                transferring+(scheduler.PendingCount==0?2048:0);
-            if(!scheduler.TryMakeRoomForExternal(admissionBytes,1))return null;
             return scheduled;
         }
 
@@ -300,6 +728,7 @@ namespace Spacewars.Runtime
         private void ProjectCore(int work)
         {
             for(int used=0;used<work&&Continue?.Invoke()!=false&&projectionQueue.Count>0;used++) {
+                lock(pumpFrameGate)projectionUsed=used;
                 ProgressSequence++;
                 var key=projectionQueue.Peek();
                 if(!registered.TryGetValue(key,out var row)||row.Completion!=null||row.Solved==null){projectionQueue.Dequeue();continue;}
@@ -307,8 +736,16 @@ namespace Spacewars.Runtime
                 if(route==null||route.Subscription.StableKey!=key||route.Legs.Count==0){Fail("route identity/legs");continue;}
                 if(row.Points==null){row.Points=new List<NavPoint>();row.TypedPortals=new List<string>();
                     row.ObservedPortals=new List<string>();row.Expected=request.Subscription.Origin;row.At=row.Expected;}
+                if(row.Arrival&&(row.LegCursor<route.Legs.Count||row.ReplayCursor<row.Points.Count&&request.Provider is PartitionNavigationProvider)){
+                    if(!ProjectArrivalStep(row,out var reason)){if(reason!=null)Fail(reason);else break;}continue;
+                }
                 if(row.LegCursor<route.Legs.Count){
-                    var leg=route.Legs[row.LegCursor++];
+                    var leg=route.Legs[row.LegCursor];
+                    if(row.Arrival){
+                        long growth=leg.Kind==NavTypedLegKind.Surface?ListGrowth(row.Points.Count,row.Points.Capacity,1,16):ListGrowth(row.TypedPortals.Count,row.TypedPortals.Capacity,1,8);
+                        if(ReservedRetainedBytes+growth>LayeredNavigationScheduler.MaxRetainedBytes)break;
+                    }
+                    row.LegCursor++;
                     if(!leg.From.Equals(row.Expected)){Fail("leg continuity");continue;}
                     if(leg.Kind==NavTypedLegKind.Surface){
                         bool qualified=request.Provider is PartitionNavigationProvider
@@ -326,12 +763,14 @@ namespace Spacewars.Runtime
                                 OnSegment(leg.From.Position,s.From,s.To))){Fail("portal qualification");continue;}
                         row.TypedPortals.Add(leg.PortalId);
                     }else{Fail("overlapping surface");continue;} // overlapping-floor XZ projection is unsupported
-                    row.Expected=leg.To;continue;
+                    row.Expected=leg.To;SaveArrivalProgress(row);continue;
                 }
                 if(row.ReplayCursor<row.Points.Count&&request.Provider is PartitionNavigationProvider actual){
                     if(!actual.TryTrace(row.At,row.Points[row.ReplayCursor++],request.Clearance,out var reached,out var trace)){Fail("XZ replay trace");continue;}
-                    foreach(var leg in trace)if(leg.Kind==NavTypedLegKind.Portal)row.ObservedPortals.Add(leg.PortalId);
-                    row.At=reached;continue;
+                    var portals=trace.Where(leg=>leg.Kind==NavTypedLegKind.Portal).Select(leg=>leg.PortalId).ToArray();
+                    if(row.Arrival&&ReservedRetainedBytes+ListGrowth(row.ObservedPortals.Count,row.ObservedPortals.Capacity,portals.Length,8)>LayeredNavigationScheduler.MaxRetainedBytes){row.ReplayCursor--;break;}
+                    row.ObservedPortals.AddRange(portals);
+                    row.At=reached;SaveArrivalProgress(row);continue;
                 }
                 bool valid=row.Expected.Equals(request.Subscription.AssignedEndpoint)&&row.Points.Count>0&&
                     row.Points.Last().Equals(row.Expected.Position)&&
@@ -356,6 +795,43 @@ namespace Spacewars.Runtime
                 void Fail(string reason){LastProjectionFailure=reason;SetCompletion(key,row,new NavigationAnswer(row.Request,Array.Empty<NavPoint>(),NavSolveStatus.BlockedConnector));projectionQueue.Dequeue();}
             }
         }
+        private bool ProjectArrivalStep(Registered row,out string failure)
+        {
+            failure=null;var request=row.Scheduled;var route=row.Solved.Route;bool legStep=row.LegCursor<route.Legs.Count;
+            var leg=legStep?route.Legs[row.LegCursor]:null;bool point=legStep&&leg.Kind==NavTypedLegKind.Surface,typed=legStep&&!point;
+            int observedExtra=legStep?0:((PartitionNavigationProvider)request.Provider).TracePortalBound;
+            long traceScratch=legStep?0:((PartitionNavigationProvider)request.Provider).TraceScratchBound;
+            var port=row.ArrivalOwnerPort;
+            if(!port.TryPrepareArrivalProjectionDelta(row.ArrivalOwner,point,typed,observedExtra,traceScratch,out var delta))return false;
+            using(delta){
+                var p=delta.Prefix;var next=new ArrivalProjection{Leg=p.Leg,Replay=p.Replay,Expected=p.Expected,At=p.At,Points=p.Points,Typed=p.Typed,Observed=p.Observed};
+                if(legStep){
+                    if(!leg.From.Equals(p.Expected)){failure="leg continuity";return false;}
+                    if(point){
+                        bool qualified=request.Provider is PartitionNavigationProvider?request.Provider.IsValid(leg.From,request.Clearance)&&request.Provider.IsValid(leg.To,request.Clearance)&&row.Request.Geometry.SegmentFree(leg.From.Position,leg.To.Position,request.Clearance.Radius):request.Provider.CanSweep(leg.From,leg.To,request.Clearance);
+                        if(!qualified){failure="surface qualification";return false;}
+                        next.Points=p.Points.Concat(new[]{leg.To.Position}).ToArray();
+                    }else if(request.Provider is PartitionNavigationProvider partition){
+                        if(!leg.From.Position.Equals(leg.To.Position)||!partition.Seams.Any(s=>s.Allowed&&s.Id==leg.PortalId&&((s.FromSurface==leg.From.SurfaceId&&s.ToSurface==leg.To.SurfaceId)||(s.ToSurface==leg.From.SurfaceId&&s.FromSurface==leg.To.SurfaceId))&&OnSegment(leg.From.Position,s.From,s.To))){failure="portal qualification";return false;}
+                        next.Typed=p.Typed.Concat(new[]{leg.PortalId}).ToArray();
+                    }else{failure="overlapping surface";return false;}
+                    next.Leg++;next.Expected=leg.To;
+                }else{
+                    var actual=(PartitionNavigationProvider)request.Provider;
+                    if(!actual.TryTrace(p.At,p.Points[p.Replay],request.Clearance,out var reached,out var trace)){failure="XZ replay trace";return false;}
+                    next.Observed=p.Observed.Concat(trace.Where(l=>l.Kind==NavTypedLegKind.Portal).Select(l=>l.PortalId)).ToArray();next.Replay++;next.At=reached;
+                }
+                BeforeArrivalProjectionCommit?.Invoke(delta,next);return port.CommitArrivalProjectionDelta(delta,next);
+            }
+        }
+        private void SaveArrivalProgress(Registered row)
+        {
+            if(!row.Arrival)return;
+            currentPort.SaveArrivalProjection(row.Request,new ArrivalProjection{Leg=row.LegCursor,Replay=row.ReplayCursor,
+                Expected=row.Expected,At=row.At,Points=row.Points.ToArray(),Typed=row.TypedPortals.ToArray(),Observed=row.ObservedPortals.ToArray()});
+        }
+        private static long ListGrowth(int count,int capacity,int extra,int bytes)
+        {if(count+extra<=capacity)return 0;int next=Math.Max(count+extra,capacity==0?4:capacity*2);return (long)(next-capacity)*bytes;}
         private static bool OnSegment(NavPoint point,NavPoint a,NavPoint b)
         {
             double x=b.X-a.X,z=b.Z-a.Z,length=x*x+z*z;

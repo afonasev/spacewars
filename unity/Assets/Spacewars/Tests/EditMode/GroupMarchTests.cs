@@ -187,7 +187,7 @@ namespace Spacewars.Tests.EditMode
             world.Binding=WorldWire.BindingLegacyMarch(profile);
             using(var input=new MemoryStream(world.Domain))using(var r=new BinaryReader(input))
             using(var output=new MemoryStream())using(var w=new BinaryWriter(output)){
-                var currentFields=PlayableProfileMetadata.Fields.ToArray();
+                var currentFields=PlayableProfileMetadata.PreCrowdFields.ToArray();
                 var legacyFields=LegacyMarchCodec.Fields;
                 Assert.AreEqual("science.scienceHealth",legacyFields[0].Path);
                 int terms=r.ReadInt32();w.Write(terms);

@@ -80,31 +80,44 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(progress,plan.Branches.Single(x=>x.Descriptor.Kind==order.Kind).Progress);Assert.IsNull(plan.Action);Assert.AreEqual(progress==AiResearchProgress.Waiting,plan.Infrastructure!=null);
             var lost=View(p,center:false);Assert.NotNull(new AiTechnologyPlanner().Plan(lost,p,AiProfile.Initial,Budget(lost).Capture()).Infrastructure,"Lost active order can be replanned; completed order cannot.");
         }
-        private static OfflineMatchConfiguration Config(bool sustainedOpponent=false)
+        private static OfflineMatchConfiguration Config(bool sustainedOpponent=false,bool readyTechnologyEconomy=false)
         {
             var data=PlayableProfile.Default.CopyData();data.startingCredits=20000;var p=PlayableProfile.Create(data);
             var starts=new[]{new OfflineStart("west",1,new NavPoint(-24,0),new NavPoint(-24,8),pin:1),new OfflineStart("east",2,new NavPoint(24,0),new NavPoint(24,8),pin:2)};
             var slots=new[]{new TerritorySlot(1,new NavPoint(-24,-9),0),new TerritorySlot(2,new NavPoint(-14,0),0),new TerritorySlot(3,new NavPoint(-14,-9),0),new TerritorySlot(4,new NavPoint(-24,-18),0),new TerritorySlot(5,new NavPoint(-14,-18),0)};
             var sites=new[]{new TerritorySite(1,PlayableBuildingKind.Headquarters,starts[0].Position,slots),new TerritorySite(2,PlayableBuildingKind.Headquarters,starts[1].Position,Array.Empty<TerritorySlot>())}
                 .Concat(sustainedOpponent?new[]{new TerritorySite(3,PlayableBuildingKind.Outpost,new NavPoint(24,-24),Array.Empty<TerritorySlot>())}:Array.Empty<TerritorySite>()).ToArray();
-            return new OfflineMatchConfiguration(p,"o5-diagnostic-funded",sustainedOpponent?"o5-flat-two-starts-ordinary-outpost":"o5-flat-two-starts","UnityHostRouteService",19092026,new[]{new OfflineParticipant("west-owner",1,1,OfflineControl.Ai),new OfflineParticipant("east-owner",2,2,OfflineControl.Human)},starts,sites,Array.Empty<NavObstacle>(),new double[,]{{0,48},{48,0}},scenarioBuildings:sustainedOpponent?new[]{new OfflineScenarioBuilding(2,PlayableBuildingKind.Outpost,3,0,new NavPoint(24,-24))}:Array.Empty<OfflineScenarioBuilding>());
+            return new OfflineMatchConfiguration(p,"o5-diagnostic-funded",sustainedOpponent?"o5-flat-two-starts-ordinary-outpost":"o5-flat-two-starts","UnityHostRouteService",19092026,new[]{new OfflineParticipant("west-owner",1,1,OfflineControl.Ai),new OfflineParticipant("east-owner",2,2,OfflineControl.Human)},starts,sites,readyTechnologyEconomy?new[]{new NavObstacle(-64,-14,64,-12)}:Array.Empty<NavObstacle>(),new double[,]{{0,48},{48,0}},
+                scenarioBuildings:(sustainedOpponent?new[]{new OfflineScenarioBuilding(2,PlayableBuildingKind.Outpost,3,0,new NavPoint(24,-24))}:Array.Empty<OfflineScenarioBuilding>())
+                    .Concat(readyTechnologyEconomy?new[]{new OfflineScenarioBuilding(1,PlayableBuildingKind.Factory,1,1,slots[0].Position),new OfflineScenarioBuilding(1,PlayableBuildingKind.Refinery,1,2,slots[1].Position)}:Array.Empty<OfflineScenarioBuilding>()).ToArray());
         }
         private static void Step(PlayableAuthorityTick a,UnityHostRouteService host)
         {for(int i=0;i<512;i++){if(a.TryAdvance())return;host.Service(a,64);}Assert.Fail("native route barrier at tick "+a.Tick);}
         [Test] public void AutonomousResearch_BuildsPaysCompletesAndConsumesWithExactRestore()
         {
-            var config=Config(sustainedOpponent:true);var a=new PlayableAuthorityTick(config,71);var owner=Owner(a);
+            // This is a science lifecycle fixture, not a cold-start macro deadline.
+            // Prepare Safe's actual home/force prerequisites so technology can compete
+            // while the next paid income build proceeds, before growth fills every pad.
+            // The barrier keeps the authored enemy outpost alive through research.
+            // Science itself is still autonomously built, paid and researched below.
+            var config=Config(sustainedOpponent:true,readyTechnologyEconomy:true);var a=new PlayableAuthorityTick(config,71);var owner=Owner(a);
             var opening=PlayableAiOpeningComposition.Initialize(config.Seed,"west-owner",forcedOpening:PlayableAiOpening.Safe);
             owner.GetType().GetField("opening",F).SetValue(owner,opening);owner.GetType().GetField("openingExecutor",F).SetValue(owner,new AiOpeningExecutor(opening,71));
             PlayableAiObservation O()=>PlayableAiObservation.From(a.ParticipantView("west-owner"));
+            // Spawn ordinary units through the domain. Authored scenario units pin
+            // their upgrade variant forever and therefore cannot test owner research.
+            var preparedDomain=Get(a,"domain");
+            for(int i=0;i<(int)AiProfile.Initial.Value("opening.forceUnits");i++)
+                preparedDomain.GetType().GetMethod("SpawnUnit",F).Invoke(preparedDomain,new object[]{new NavPoint(-20+4*i,8),O().Owner,PlayableEntityKind.Tank});
             Assert.False(O().Buildings.Any(b=>b.Kind==PlayableBuildingKind.ScientificCenter));
             var budget=(AiBudgetLedger)Get(owner,"budget");bool sawActive=false,sawPending=false;PlayableAuthorityTick restored=null;
             using(var host=new UnityHostRouteService())
             {
                 for(int i=0;i<4800&&!O().OwnerResearch.Any(r=>r.Kind==PlayableResearchKind.TankChassis&&r.Complete);i++)
                 {
+                    Assert.AreEqual(PlayableMatchOutcome.Playing,a.Latest.Outcome,"science lifecycle fixture requires a living opponent until research completes");
                     Step(a,host);var o=O();var checkpoint=a.CaptureDiagnosticCheckpoints().Single();
-                    if(restored!=null){Step(restored,host);CollectionAssert.AreEqual(a.CaptureBytes(),restored.CaptureBytes(),"research suffix tick "+a.Tick);}
+                    if(restored!=null){Step(restored,host);Assert.True(a.CaptureBytes().AsSpan().SequenceEqual(restored.CaptureBytes()),"research suffix tick "+a.Tick);}
                     if(!sawPending&&budget.Capture().Unpaid.Any(e=>e.Action.Kind==PlayableCommandKind.QueueResearch&&!e.AwaitingPayment))
                     {sawPending=true;var bytes=a.CaptureBytes();restored=PlayableAuthorityTick.RestoreBytes(bytes,config);CollectionAssert.AreEqual(bytes,restored.CaptureBytes());}
                     sawActive|=o.OwnerResearch.Any(r=>r.Kind==PlayableResearchKind.TankChassis&&r.Active&&r.PaidCost==config.Profile.TankChassisCost);

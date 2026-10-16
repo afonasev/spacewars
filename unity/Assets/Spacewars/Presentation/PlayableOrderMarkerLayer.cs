@@ -10,24 +10,25 @@ namespace Spacewars.Presentation
     public sealed class PlayableOrderMarkerLayer : VisualElement
     {
         IReadOnlyList<PlayableQueueMarker> markers=Array.Empty<PlayableQueueMarker>();
-        readonly Func<NavLocation,Vector2?> project;readonly bool compact;
+        readonly Func<NavLocation,Vector2?> project;readonly bool compact;readonly EnvironmentArtProfile art;
         public int VisibleCount=>markers.Count;
-        public PlayableOrderMarkerLayer(Func<NavLocation,Vector2?> project,bool compact=false)
+        public PlayableOrderMarkerLayer(Func<NavLocation,Vector2?> project,bool compact=false,EnvironmentArtProfile art=null)
         {
-            this.project=project;this.compact=compact;pickingMode=PickingMode.Ignore;name="tactical-order-markers";
+            this.project=project;this.compact=compact;this.art=art??EnvironmentArtProfile.Load();this.art.Validate();pickingMode=PickingMode.Ignore;name="tactical-order-markers";
             style.position=Position.Absolute;style.left=0;style.right=0;style.top=0;style.bottom=0;generateVisualContent+=Draw;
         }
         public void Set(IReadOnlyList<PlayableQueueMarker> next){markers=next??Array.Empty<PlayableQueueMarker>();MarkDirtyRepaint();}
         void Draw(MeshGenerationContext ctx)
         {
-            var p=ctx.painter2D;float radius=compact?6:12,font=compact?10:16;
+            var p=ctx.painter2D;// Preserve the established map-to-field proportions while tuning the shared visual profile.
+            float radius=art.orderMarkerRadius*(compact?.5f:1),font=art.orderMarkerFontSize*(compact?.625f:1);
             foreach(var marker in markers)
             {
                 if(!marker.Location.HasValue)continue;var point=project(marker.Location.Value);if(!point.HasValue)continue;
                 var at=point.Value;if(at.x<0||at.y<0||at.x>contentRect.width||at.y>contentRect.height)continue;
-                var color=marker.Attack?Color.red:Color.green;bool active=(marker.Phase&QueueMarkerPhase.Active)!=0;
-                p.lineWidth=2;p.strokeColor=color;p.fillColor=active?color:new Color(.05f,.08f,.1f,.9f);p.BeginPath();p.Arc(at,radius,0,360);p.Fill();p.Stroke();
-                var text=marker.Number.ToString();ctx.DrawText(text,at-new Vector2(text.Length*font*.28f,font*.55f),font,active?Color.black:color,null);
+                var color=marker.Attack?Color.red:Color.green;
+                p.lineWidth=art.orderMarkerWidth;p.strokeColor=color;p.BeginPath();p.Arc(at,radius,0,360);p.Stroke();
+                var text=marker.Number.ToString();ctx.DrawText(text,at-new Vector2(text.Length*font*.28f,font*.55f),font,color,null);
             }
         }
         public static Vector2? WorldPoint(VisualElement root,Camera camera,PlayableProfile profile,NavLocation location,bool mirrored=false)

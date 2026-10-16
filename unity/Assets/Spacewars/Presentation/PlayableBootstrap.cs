@@ -97,7 +97,7 @@ namespace Spacewars.Presentation
                 }
 #endif
                 // Render cadence belongs to this prototype profile; the domain remains 30 Hz.
-                QualitySettings.vSyncCount=0;Application.targetFrameRate=profile.RenderTargetFramesPerSecond;
+                NativeDisplaySettings.ApplyFrameRate(profile.RenderTargetFramesPerSecond);
                 if(!NativeSilentStartup.IsSilent)AudioListener.volume=NativeUserSettings.Volume;
                 Application.runInBackground=true;
                 var args=Environment.GetCommandLineArgs();for(int i=0;i+1<args.Length;i++)if(args[i]=="-playableEvidence")evidence=args[i+1];
@@ -120,7 +120,7 @@ namespace Spacewars.Presentation
                 input.Select=Select;input.Order=Order;input.Stop=()=>Submit(PlayableCommandKind.Stop);input.Hold=()=>Submit(PlayableCommandKind.Hold);
                 input.CancelContext=()=>{if(mapOpen){CloseMap();return true;}return CloseBattleContext();};input.TogglePause=()=>Pause(!paused);input.Restart=Restart;input.FocusLost=()=>{if(!battleHudUnattended&&!routePerformanceEvidence)Pause(true);};
                 input.IsPointerOverUi=OverUi;input.IsKeyboardInUi=()=>MenuOwnsInput||spectatorMode&&root?.focusController?.focusedElement is VisualElement focus&&focus!=root||root?.focusController?.focusedElement is Button||root?.focusController?.focusedElement is TextField;
-                input.MapAt=MapAt;input.MapSelect=MapSelect;input.MapOrder=MapOrder;input.ToggleMap=ToggleMap;input.CloseMap=CloseMap;
+                input.MapAt=MapAt;input.MapSelect=MapSelect;input.MapPan=PanMap;input.MapOrder=MapOrder;input.ToggleMap=ToggleMap;input.CloseMap=CloseMap;
                 input.Pan=Pan;input.Zoom=Zoom;input.Drag=DrawDrag;
                 BindKeyboardCommands();
                 input.AttackModeChanged=active=>{commandCursor?.Set(false);notice="";};
@@ -161,7 +161,7 @@ namespace Spacewars.Presentation
         {
             var panel=ScriptableObject.CreateInstance<PanelSettings>();panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");panel.scaleMode=PanelScaleMode.ConstantPixelSize;
             var doc=localCoordinator==null?gameObject.AddComponent<UIDocument>():localCoordinator.GetComponent<UIDocument>();if(localCoordinator==null){doc.panelSettings=panel;ownedPanelSettings=panel;}else{Destroy(panel);panel=doc.panelSettings;}
-            panelRoot=doc.rootVisualElement;root=new VisualElement{name="local-seat-hud"};root.style.position=Position.Absolute;root.style.left=root.style.right=root.style.top=root.style.bottom=0;panelRoot.Add(root);if(localCoordinator==null)OrbitalTheme.ConfigurePanel(panel,panelRoot);root.pickingMode=PickingMode.Ignore;root.focusable=true;root.tabIndex=-1;OrbitalTheme.Install(root);menuNavigation=new NativeMenuNavigation(root,()=>SeatPad,()=>WorldPadOwnsToolkit,()=>SeatUsesKeyboard){Focused=()=>localInputFocused};
+            panelRoot=doc.rootVisualElement;root=new VisualElement{name="local-seat-hud"};root.style.position=Position.Absolute;root.style.left=root.style.right=root.style.top=root.style.bottom=0;panelRoot.Add(root);if(localCoordinator==null)OrbitalTheme.ConfigurePanel(panel,panelRoot);root.pickingMode=PickingMode.Ignore;root.focusable=true;root.tabIndex=-1;OrbitalTheme.Install(root);menuNavigation=new NativeMenuNavigation(root,()=>SeatPad,()=>WorldPadOwnsToolkit||WorldKeyboardOwnsToolkit,()=>SeatUsesKeyboard){Focused=()=>localInputFocused,WorldOwnsNavigation=()=>WorldCameraOwnsToolkit};
             orderMarkerLayer=new PlayableOrderMarkerLayer(location=>PlayableOrderMarkerLayer.WorldPoint(root,cameraView,profile,location));root.Insert(0,orderMarkerLayer);
             root.style.unityFont=Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");root.style.fontSize=16;root.style.color=Ink;
             top=Panel();top.name="match-header";top.style.right=20;top.style.top=16;top.style.minHeight=48;top.style.flexDirection=FlexDirection.Row;top.style.flexWrap=Wrap.Wrap;top.style.alignItems=Align.Center;StyleRegion(top);root.Add(top);
@@ -199,6 +199,7 @@ namespace Spacewars.Presentation
             modalCard=new VisualElement{name="match-menu-card"};modalCard.AddToClassList("orbital-match-menu");modalCard.style.width=540;modalCard.style.maxWidth=Length.Percent(100);modalCard.style.paddingLeft=30;modalCard.style.paddingRight=30;modalCard.style.paddingTop=28;modalCard.style.paddingBottom=28;StyleRegion(modalCard);modal.Add(modalCard);
             var modalEyebrow=Section("SPACEWARS  /  КОМАНДОВАНИЕ");modalEyebrow.name="match-menu-eyebrow";modalCard.Add(modalEyebrow);modalTitle=new Label();modalTitle.style.fontSize=32;modalTitle.style.unityFontStyleAndWeight=FontStyle.Bold;modalTitle.style.color=Cyan;modalTitle.style.unityTextAlign=TextAnchor.MiddleCenter;modalTitle.style.marginTop=16;modalTitle.style.marginBottom=8;modalCard.Add(modalTitle);
             modalCaption=new Label("Бой приостановлен");modalCaption.style.unityTextAlign=TextAnchor.MiddleCenter;modalCaption.style.color=Muted;modalCaption.style.marginBottom=20;modalCard.Add(modalCaption);
+            var labIdentity=OrbitalTheme.Text("","orbital-muted");labIdentity.name="match-lab-identity";modalCard.Add(labIdentity);
             resumeButton=Button("Продолжить",()=>Pause(false));modalCard.Add(resumeButton);
             modalCard.Add(OrbitalTheme.Action("Управление",OpenPauseHelp,"pause-controls"));
             modalCard.Add(pauseSettings=OrbitalTheme.Action("Настройки",OpenPauseSettings,"pause-settings"));
@@ -388,7 +389,7 @@ namespace Spacewars.Presentation
         private void Render()
         {
             using(FogMarker.Auto())world.Fog.Update(view.Vision,Time.unscaledDeltaTime);world.RenderMemories(view,cameraView);world.RenderSites(view,cameraView);
-            unitMotion.BeginFrame(view,paused||preparing||restarting||inLobby);
+            unitMotion.BeginFrame(view,paused||preparing||restarting||inLobby,spectatorMode?spectatorRate:1,spectatorMode?spectatorFrame?.PreviousPerspective(spectatorPerspective):null,spectatorMode?(spectatorFrame?.AgeSeconds??0):0);
             double poseTime=Time.realtimeSinceStartup;
             var alive=new HashSet<int>();
             foreach(var e in view.Entities){alive.Add(e.Id);if(!world.Actors.TryGetValue(e.Id,out var a))a=world.Tank(e.Id,e.Owner==LocalOwner,e.Kind);world.UpdateResearchModel(a,e);var pose=unitMotion.Sample(e,poseTime);a.Root.position=world.Point(pose.Position);var slope=profile.AuthoredMap?.SurfaceGradient(pose.Position)??default(NavPoint);a.Root.rotation=Quaternion.FromToRotation(Vector3.up,new Vector3((float)-slope.X,1,(float)-slope.Z).normalized);a.Hull.localRotation=Quaternion.Euler(0,90-(float)pose.Hull*Mathf.Rad2Deg,0);a.Turret.localRotation=Quaternion.Euler(0,(float)(pose.Hull-pose.Turret)*Mathf.Rad2Deg,0);a.Selection.SetActive(selection.Contains(e.Id));if(matchSetup!=null)PlayableWorld.PaintOwner(a,LobbyPaint(e.Owner));PlayableWorld.UpdateHealth(a,cameraView,(float)e.Health/PlayableUnitRules.Health(profile,e.Kind),selection.Contains(e.Id));}
@@ -404,7 +405,7 @@ namespace Spacewars.Presentation
             bool spectator=matchSetup?.Spectator==true;
             if(spectator)objective.text="ЗРИТЕЛЬ";
             else if(matchSetup?.Foundry==true)objective.text="ЧЁРНАЯ ПЛАВИЛЬНЯ · A1–A3 против B1–B3";else if(matchSetup!=null)objective.text=matchSetup.MatchHumanName+" · Команда "+matchSetup.HumanTeam+"  /  "+matchSetup.MatchAiName+" · Команда "+matchSetup.AiTeam;
-            creditsLabel.text=view.Credits+"   +"+view.IncomePerSecond.ToString("0.#")+"/с";
+            creditsLabel.text=view.Credits+" <color=#A9BCC3>+"+view.IncomePerSecond.ToString("0.#")+"/с</color>";
             UpdateSiteHud();
             var factory=view.Buildings.FirstOrDefault(b=>(spectatorMode?b.Id==inspectionEntityId:selection.Contains(b.Id)&&b.Owner==LocalOwner)&&b.Kind==PlayableBuildingKind.Factory);
             var building=view.Buildings.FirstOrDefault(b=>spectatorMode?b.Id==inspectionEntityId:selection.Contains(b.Id));
@@ -427,6 +428,7 @@ namespace Spacewars.Presentation
             modalCard.Q("match-menu-eyebrow").style.display=plainPause?DisplayStyle.None:DisplayStyle.Flex;
             modalCaption.style.display=plainPause?DisplayStyle.None:DisplayStyle.Flex;modalTitle.style.marginBottom=plainPause?20:8;
             modalTitle.text=!string.IsNullOrEmpty(view.Failure)?"ОШИБКА СИМУЛЯЦИИ":restarting?"НОВЫЙ БОЙ…":view.Outcome==PlayableMatchOutcome.PlayerWon||view.Outcome==PlayableMatchOutcome.TeamWon?"ПОБЕДА":view.Outcome==PlayableMatchOutcome.PlayerLost?"ЦЕНТРЫ ПОТЕРЯНЫ":"Пауза";
+            if(root.Q<Label>("match-lab-identity") is Label labIdentity)labIdentity.text="Конфигурация: "+view.ActiveProfile.DisplayName;
             modalCaption.text=plainPause?"":(!string.IsNullOrEmpty(view.Failure)?"Матч остановлен":restarting?"Подготовка нового матча":view.Outcome==PlayableMatchOutcome.PlayerWon?"Противник побеждён":view.Outcome==PlayableMatchOutcome.PlayerLost?"Ваши центры уничтожены":"Бой приостановлен")+"\nПрофиль: "+profile.DisplayName+" · "+view.ProfileRevision;modalCaption.style.whiteSpace=WhiteSpace.Normal;
             if(!plainPause&&!string.IsNullOrEmpty(runtime?.BalanceApplyStatus))modalCaption.text+="\n"+runtime.BalanceApplyStatus;
             if(!plainPause&&matchSetup!=null)modalCaption.text+="\n"+matchSetup.MatchHumanName+"  /  "+matchSetup.MatchAiName;
@@ -436,7 +438,7 @@ namespace Spacewars.Presentation
             UpdateResponsiveVisibility();
             if(spectator)
             {
-                objective.style.display=DisplayStyle.Flex;creditsLabel.style.display=spectatorPerspective.HasValue?DisplayStyle.Flex:DisplayStyle.None;hudFocusButton.style.display=DisplayStyle.None;
+                objective.style.display=DisplayStyle.None;creditsLabel.style.display=spectatorPerspective.HasValue?DisplayStyle.Flex:DisplayStyle.None;hudFocusButton.style.display=DisplayStyle.Flex;
                 armyComposition.style.display=buildRegion.style.display=commandRegion.style.display=DisplayStyle.None;armyRegion.style.display=inspectionEntityId!=0?DisplayStyle.Flex:DisplayStyle.None;battleRing.style.display=DisplayStyle.None;
                 noticeLabel.text="";noticeLabel.style.display=DisplayStyle.None;
                 UpdateSpectatorHud();

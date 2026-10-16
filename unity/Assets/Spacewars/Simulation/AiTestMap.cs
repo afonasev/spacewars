@@ -5,7 +5,7 @@ using System.Linq;
 namespace Spacewars.Simulation
 {
     // Authored diagnostic content: identical open-ground opportunities for eight seats.
-    public sealed class AiTestMap : IPlayableTerrain
+    public sealed class AiTestMap : IPlayableTerrain, INavArrivalPointTerrain
     {
         public const int Capacity = 8;
         public string Id => "ai-eight-player-test-map-v1";
@@ -19,6 +19,7 @@ namespace Spacewars.Simulation
         public IReadOnlyList<NavSurfaceTransition> SurfaceTransitions => Array.Empty<NavSurfaceTransition>();
         private readonly NavGeometry geometry;
         private readonly TerrainLocations locations;
+        TerrainLocations INavArrivalPointTerrain.ArrivalLocations=>locations;
 
         public AiTestMap()
         {

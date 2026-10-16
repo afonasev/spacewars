@@ -26,3 +26,9 @@ func acquireApplyLock(root string) (func(), error) {
 }
 
 func acquireHostLock(root, cache string) (func(), error) { return acquireApplyLock(cache) }
+
+func freeBytes(path string) (uint64, error) {
+	var stat syscall.Statfs_t
+	err := syscall.Statfs(path, &stat)
+	return uint64(stat.Bavail) * uint64(stat.Bsize), err
+}

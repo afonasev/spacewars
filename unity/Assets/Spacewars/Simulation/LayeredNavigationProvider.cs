@@ -27,7 +27,7 @@ namespace Spacewars.Simulation
 
     // A closed walkable polygon plus exact obstacles. Sweeps use the whole
     // footprint, including concave boundaries; endpoint containment is insufficient.
-    public sealed class NavTraversalArea
+    public sealed partial class NavTraversalArea : INavStorageFacade
     {
         private readonly NavGeometry geometry;
         public NavTraversalArea(NavPolygon boundary, double halfExtent, IEnumerable<NavObstacle> blockers)
@@ -87,7 +87,7 @@ namespace Spacewars.Simulation
         }
     }
 
-    public sealed class NavLayerSurface
+    public sealed partial class NavLayerSurface : INavStorageFacade
     {
         public NavLayerSurface(string id, string combatFamily, double height, double distanceCost, NavTraversalArea area)
         {
@@ -100,7 +100,7 @@ namespace Spacewars.Simulation
     }
 
     public enum NavPortalDirection { Forward, Both }
-    public sealed class NavLayerPortal
+    public sealed partial class NavLayerPortal : INavStorageFacade
     {
         public NavLayerPortal(string id, NavLocation entry, NavLocation exit, NavPortalDirection direction, bool open,
             double traversalCost, NavTraversalArea corridor, IEnumerable<string> mobilityClasses)
@@ -113,25 +113,39 @@ namespace Spacewars.Simulation
             if (copy.Length == 0 || copy.Distinct(StringComparer.Ordinal).Count() != copy.Length) throw new ArgumentException("Invalid portal mobility metadata.");
             MobilityClasses = Array.AsReadOnly(copy);
         }
-        public string Id { get; } public NavLocation Entry { get; } public NavLocation Exit { get; } public NavPortalDirection Direction { get; } public bool Open { get; }
-        public double TraversalCost { get; } public NavTraversalArea Corridor { get; } public IReadOnlyList<string> MobilityClasses { get; }
+        public string Id { get; } public NavLocation Entry { get; private set; } public NavLocation Exit { get; private set; } public NavPortalDirection Direction { get; } public bool Open { get; }
+        public double TraversalCost { get; } public NavTraversalArea Corridor { get; } public IReadOnlyList<string> MobilityClasses { get; private set; }
         internal void Write(BinaryWriter w)
         { w.Write(Id); NavContract.Location(w, Entry); NavContract.Location(w, Exit); w.Write((int)Direction); w.Write(Open); w.Write(TraversalCost); Corridor.Write(w); w.Write(MobilityClasses.Count); foreach (var c in MobilityClasses) w.Write(c); }
     }
 
     public enum NavConnectorStatus { Ready, Blocked, Closed, WrongDirection, InvalidLocation, UnknownPortal }
-    public sealed class NavConnectorResult
+    public sealed partial class NavConnectorResult : NavOwnedStorage
     {
-        internal NavConnectorResult(NavConnectorStatus status, string binding, string portalId, NavLocation origin, NavLocation entry, NavLocation exit, NavLocation endpoint, double cost)
+        internal NavConnectorResult(NavConnectorStatus status, string binding, string portalId, NavLocation origin, NavLocation entry, NavLocation exit, NavLocation endpoint, double cost):base(StorageCharge)
         { Status = status; ProviderBinding = binding; PortalId = portalId; Origin = origin; Entry = entry; Exit = exit; Endpoint = endpoint; Cost = cost; }
+        internal const long StorageCharge=384;
+        internal NavConnectorResult Detached()=>new NavConnectorResult(Status,ProviderBinding,PortalId,Origin.Detached(),Entry.Detached(),Exit.Detached(),Endpoint.Detached(),Cost);
+        internal static NavConnectorResult CreateOwned(NavConnectorStatus status,string binding,string portalId,NavLocation origin,NavLocation entry,NavLocation exit,NavLocation endpoint,double cost,Func<long,bool> reserve,ILayeredNavigationProvider provider=null)
+        {
+            if(!(reserve?.Target is INavStorageAllocator))return new NavConnectorResult(status,binding,portalId,origin,entry,exit,endpoint,cost);
+            if(reserve.Target is INavStorageReservation reservation)return CreatePhysical(status,binding,portalId,origin,entry,exit,endpoint,cost,reservation,provider);
+            using(var scratch=NavStorageScratch.Reserve(reserve,64))return CreatePhysical(status,binding,portalId,origin,entry,exit,endpoint,cost,new NavStorageReservation(reserve,(INavStorageAllocator)reserve.Target),provider);
+        }
+        internal static NavConnectorResult CopyOwned(NavConnectorResult source,Func<long,bool> reserve,ILayeredNavigationProvider provider=null)
+        {
+            if(source==null)throw new ArgumentNullException(nameof(source));
+            if(source.IsRegistered){if(!(reserve?.Target is INavStorageReservation reservation))throw new ArgumentException("Missing connector destination ledger.");NavStorageAdmission.RequireOwned(reservation,source);}
+            return CreateOwned(source.Status,source.ProviderBinding,source.PortalId,source.Origin,source.Entry,source.Exit,source.Endpoint,source.Cost,reserve,provider);
+        }
         public NavConnectorStatus Status { get; } public string ProviderBinding { get; } public string PortalId { get; }
-        public NavLocation Origin { get; } public NavLocation Entry { get; } public NavLocation Exit { get; } public NavLocation Endpoint { get; } public double Cost { get; }
+        public NavLocation Origin { get; private set; } public NavLocation Entry { get; private set; } public NavLocation Exit { get; private set; } public NavLocation Endpoint { get; private set; } public double Cost { get; }
     }
 
-    public sealed class LayeredNavigationProvider : ILayeredNavigationProvider
+    public sealed partial class LayeredNavigationProvider : ILayeredNavigationProvider, INavStorageFacade
     {
-        private readonly Dictionary<string, NavLayerSurface> surfaces;
-        private readonly Dictionary<string, NavLayerPortal> portals;
+        private IReadOnlyDictionary<string, NavLayerSurface> surfaces;
+        private IReadOnlyDictionary<string, NavLayerPortal> portals;
         public LayeredNavigationProvider(string id, int revision, int semanticsVersion, int topologyRevision, string exactMapBinding,
             IEnumerable<NavLayerSurface> authoredSurfaces, IEnumerable<NavLayerPortal> authoredPortals)
         {
@@ -159,7 +173,7 @@ namespace Spacewars.Simulation
         }
         public string Id { get; } public int Revision { get; } public int SemanticsVersion { get; } public int TopologyRevision { get; } public string ExactMapBinding { get; } public string Binding { get; }
         public long EstimatedRetainedBytes { get; }
-        public IReadOnlyList<NavLayerSurface> Surfaces { get; } public IReadOnlyList<NavLayerPortal> Portals { get; }
+        public IReadOnlyList<NavLayerSurface> Surfaces { get; private set; } public IReadOnlyList<NavLayerPortal> Portals { get; private set; }
         public double SurfaceCost(string surfaceId) => surfaces[surfaceId].DistanceCost;
         public bool IsValid(NavLocation location, NavClearanceProfile clearance) => clearance != null && location.SurfaceId != null && surfaces.TryGetValue(location.SurfaceId, out var s) && s.Area.Contains(location.Position, clearance.Radius);
         public bool CanSweep(NavLocation from, NavLocation to, NavClearanceProfile clearance) => from.SurfaceId == to.SurfaceId && IsValid(from, clearance) && IsValid(to, clearance) && surfaces[from.SurfaceId].Area.Sweep(from.Position, to.Position, clearance.Radius);
@@ -167,16 +181,24 @@ namespace Spacewars.Simulation
         {
             location = default; if (clearance == null) return false;
             var matches = Surfaces.Where(s => s.Area.Contains(point, clearance.Radius)).ToArray();
-            if (matches.Length != 1) return false; location = new NavLocation(point, matches[0].Id); return true;
+            if (matches.Length != 1) return false; location = matches[0].OwnedLocation(point); return true;
+        }
+        internal bool TryLocatePoint(NavPoint point,out NavLocation location)
+        {
+            location=default;NavLayerSurface match=null;
+            foreach(var surface in Surfaces){if(!surface.Area.Contains(point,0))continue;if(match!=null)return false;match=surface;}
+            if(match==null)return false;location=match.OwnedLocation(point);return true;
         }
         public bool CompatibleCombatSurface(NavLocation a, NavLocation b) => a.SurfaceId != null && b.SurfaceId != null && surfaces.TryGetValue(a.SurfaceId, out var aa) && surfaces.TryGetValue(b.SurfaceId, out var bb) && aa.Area.Contains(a.Position, 0) && bb.Area.Contains(b.Position, 0) && aa.CombatFamily == bb.CombatFamily;
-        public NavConnectorResult QualifyPortal(string portalId, NavClearanceProfile clearance)
+        public NavConnectorResult QualifyPortal(string portalId, NavClearanceProfile clearance)=>QualifyPortalOwned(portalId,clearance,null);
+        internal NavConnectorResult QualifyPortalOwned(string portalId,NavClearanceProfile clearance,Func<long,bool> reserve)
         {
-            if (portalId == null || !portals.TryGetValue(portalId, out var p)) return new NavConnectorResult(NavConnectorStatus.UnknownPortal, Binding, portalId, default, default, default, default, 0);
-            var status = !p.Open ? NavConnectorStatus.Closed : clearance == null || !p.MobilityClasses.Contains(clearance.MobilityClass) ||
-                !IsValid(p.Entry, clearance) || !IsValid(p.Exit, clearance) || !p.Corridor.Sweep(p.Entry.Position, p.Exit.Position, clearance.Radius) ? NavConnectorStatus.Blocked : NavConnectorStatus.Ready;
-            return new NavConnectorResult(status, Binding, portalId, p.Entry, p.Entry, p.Exit, p.Exit, status == NavConnectorStatus.Ready ? p.TraversalCost : 0);
+            if(reserve?.Target is INavStorageReservation reservation){if(StorageRoot!=null)NavStorageAdmission.RequireOwned(reservation,StorageRoot);if(clearance?.MetadataOwner!=null)NavMetadataOwnership.Require(clearance,reservation);}
+            if (portalId == null || !portals.TryGetValue(portalId, out var p)) return NavConnectorResult.CreateOwned(NavConnectorStatus.UnknownPortal, Binding, portalId, default, default, default, default, 0,reserve,this);
+            var status = QualificationStatus(p,clearance);
+            return NavConnectorResult.CreateOwned(status, Binding, portalId, p.Entry, p.Entry, p.Exit, p.Exit, status == NavConnectorStatus.Ready ? p.TraversalCost : 0,reserve,this);
         }
+        internal NavConnectorStatus QualificationStatus(NavLayerPortal p,NavClearanceProfile clearance)=>!p.Open?NavConnectorStatus.Closed:clearance==null||!p.MobilityClasses.Contains(clearance.MobilityClass)||!IsValid(p.Entry,clearance)||!IsValid(p.Exit,clearance)||!p.Corridor.Sweep(p.Entry.Position,p.Exit.Position,clearance.Radius)?NavConnectorStatus.Blocked:NavConnectorStatus.Ready;
         public NavConnectorResult Connect(string portalId, NavLocation origin, NavLocation endpoint, NavClearanceProfile clearance)
         {
             NavLocation entry = default, exit = default;

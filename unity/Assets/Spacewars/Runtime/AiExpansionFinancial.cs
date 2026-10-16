@@ -16,6 +16,7 @@ namespace Spacewars.Runtime
         internal const string Purpose="expansion-financial",MemoKey="expansion-financial-lifecycle-v1";
         private const int Magic=0x45464d31;
         private const int DormantMagic=0x45464431;
+        private const int SelectionMagic=0x45465331; // Optional memo tail; legacy clocks/payload remain readable.
         // Technical state versions, not balance knobs. Version 1 tracks Q4 first income;
         // version 2 was an interim home-only gate; version 3 keeps both facts independently.
         private const int LegacyFirstIncomeVersion=1,InterimHomeVersion=2,BootstrapVersion=3;
@@ -57,7 +58,7 @@ namespace Spacewars.Runtime
             internal bool Same(Fingerprint f)=>f!=null&&Site==f.Site&&Kind==f.Kind&&Owner==f.Owner&&Claimant==f.Claimant&&Center==f.Center&&Contested==f.Contested&&Progress==f.Progress;
         }
         private sealed class Memo
-        {internal string Owner,Metadata;internal long Generation;internal int PolicyVersion,HomeSite;internal bool FirstIncomeHistoryKnown,FirstIncomeReady,HomeEconomyReady;internal Fingerprint Active;internal SortedDictionary<int,Fingerprint> Expired=new SortedDictionary<int,Fingerprint>();internal SortedDictionary<int,DormantTarget> Dormant=new SortedDictionary<int,DormantTarget>();}
+        {internal string Owner,Metadata;internal long Generation;internal int PolicyVersion,HomeSite;internal long NextSelectionOrdinal;internal bool HasSelection,PreferRemote;internal bool FirstIncomeHistoryKnown,FirstIncomeReady,HomeEconomyReady;internal Fingerprint Active;internal SortedDictionary<int,Fingerprint> Expired=new SortedDictionary<int,Fingerprint>();internal SortedDictionary<int,DormantTarget> Dormant=new SortedDictionary<int,DormantTarget>();}
         private sealed class DormantTarget
         {internal Fingerprint Target;internal long Created,Expires;}
         private readonly string owner;private readonly long generation;
@@ -72,6 +73,7 @@ namespace Spacewars.Runtime
         private static Fingerprint Read(BinaryReader r)=>new Fingerprint{Site=r.ReadInt32(),Kind=r.ReadInt32(),Owner=r.ReadInt32(),Claimant=r.ReadInt32(),Center=r.ReadInt32(),Contested=WorldWire.Boolean(r),Progress=r.ReadDouble()};
         private static void WriteDormant(BinaryWriter w,DormantTarget d){Write(w,d.Target);w.Write(d.Created);w.Write(d.Expires);}
         private static DormantTarget ReadDormant(BinaryReader r)=>new DormantTarget{Target=Read(r),Created=r.ReadInt64(),Expires=r.ReadInt64()};
+        private static int PeekMarker(BinaryReader r){long position=r.BaseStream.Position;int marker=r.ReadInt32();r.BaseStream.Position=position;return marker;}
         private static Memo Decode(string payload)
         {
             try
@@ -86,7 +88,7 @@ namespace Spacewars.Runtime
                     if(stream.Position<stream.Length&&stream.Length-stream.Position>=4)
                     {
                         long tail=stream.Position;int marker=r.ReadInt32();stream.Position=tail;
-                        if(marker!=DormantMagic)
+                        if(marker!=DormantMagic&&marker!=SelectionMagic)
                         {
                             int version=r.ReadInt32();m.HomeSite=r.ReadInt32();AiStateWire.Require(m.HomeSite>=0,"site finance bootstrap home binding");m.PolicyVersion=version;
                             if(version==LegacyFirstIncomeVersion){m.FirstIncomeHistoryKnown=true;m.FirstIncomeReady=WorldWire.Boolean(r);}
@@ -96,11 +98,17 @@ namespace Spacewars.Runtime
                             AiStateWire.Require(!m.FirstIncomeReady||m.FirstIncomeHistoryKnown,"known sticky first-income milestone");
                         }
                     }
-                    if(stream.Position<stream.Length)
+                    if(stream.Position<stream.Length&&PeekMarker(r)==DormantMagic)
                     {
                         AiStateWire.Require(r.ReadInt32()==DormantMagic,"site finance dormant extension version");int dormantCount=r.ReadInt32();
                         AiStateWire.Require(dormantCount>=0&&dormantCount<=(stream.Length-stream.Position)/45,"site finance dormant target payload bound");
                         previous=0;for(int i=0;i<dormantCount;i++){var d=ReadDormant(r);AiStateWire.Require(d.Target.Site>previous,"sorted unique dormant site targets");m.Dormant.Add(d.Target.Site,d);previous=d.Target.Site;}
+                    }
+                    if(stream.Position<stream.Length)
+                    {
+                        AiStateWire.Require(r.ReadInt32()==SelectionMagic,"site selection memo version");
+                        m.NextSelectionOrdinal=r.ReadInt64();m.PreferRemote=WorldWire.Boolean(r);m.HasSelection=true;
+                        AiStateWire.Require(m.NextSelectionOrdinal>0,"site selection ordinal");
                     }
                     AiStateWire.Require(stream.Position==stream.Length,"trailing site finance memo");return m;
                 }
@@ -110,7 +118,7 @@ namespace Spacewars.Runtime
         private static Memo Load(AiDecisionArbiter a){var payload=a.SiteFundingMemory();return payload==null?null:Decode(payload);}
         private static void Save(AiDecisionArbiter a,Memo m)
         {
-            using(var stream=new MemoryStream()){using(var w=new BinaryWriter(stream,Encoding.UTF8,true)){w.Write(Magic);w.Write(m.Owner);w.Write(m.Generation);w.Write(m.Metadata);w.Write(m.Active!=null);if(m.Active!=null)Write(w,m.Active);w.Write(m.Expired.Count);foreach(var f in m.Expired.Values)Write(w,f);if(m.PolicyVersion!=0){w.Write(m.PolicyVersion);w.Write(m.HomeSite);if(m.PolicyVersion==LegacyFirstIncomeVersion)w.Write(m.FirstIncomeReady);else if(m.PolicyVersion==InterimHomeVersion)w.Write(m.HomeEconomyReady);else{w.Write(m.FirstIncomeHistoryKnown);w.Write(m.FirstIncomeReady);w.Write(m.HomeEconomyReady);}}if(m.Dormant.Count>0){w.Write(DormantMagic);w.Write(m.Dormant.Count);foreach(var d in m.Dormant.Values)WriteDormant(w,d);}}a.SaveSiteFundingMemory(Convert.ToBase64String(stream.ToArray()));}
+            using(var stream=new MemoryStream()){using(var w=new BinaryWriter(stream,Encoding.UTF8,true)){w.Write(Magic);w.Write(m.Owner);w.Write(m.Generation);w.Write(m.Metadata);w.Write(m.Active!=null);if(m.Active!=null)Write(w,m.Active);w.Write(m.Expired.Count);foreach(var f in m.Expired.Values)Write(w,f);if(m.PolicyVersion!=0){w.Write(m.PolicyVersion);w.Write(m.HomeSite);if(m.PolicyVersion==LegacyFirstIncomeVersion)w.Write(m.FirstIncomeReady);else if(m.PolicyVersion==InterimHomeVersion)w.Write(m.HomeEconomyReady);else{w.Write(m.FirstIncomeHistoryKnown);w.Write(m.FirstIncomeReady);w.Write(m.HomeEconomyReady);}}if(m.Dormant.Count>0){w.Write(DormantMagic);w.Write(m.Dormant.Count);foreach(var d in m.Dormant.Values)WriteDormant(w,d);}if(m.HasSelection){w.Write(SelectionMagic);w.Write(m.NextSelectionOrdinal);w.Write(m.PreferRemote);}}a.SaveSiteFundingMemory(Convert.ToBase64String(stream.ToArray()));}
         }
         internal void InitializeNewMatch(PlayableProfile p,AiProfile ai,AiDecisionArbiter a)
         {
@@ -139,20 +147,31 @@ namespace Spacewars.Runtime
         private static TerritorySiteSnapshot Best(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiExpansionPlanner expansion,Memo m,string caller,Fingerprint justExpired=null,ISet<int> excludedSites=null)
         {
 #if UNITY_INCLUDE_TESTS
-            var selected=o.Sites.Where(s=>(excludedSites==null||!excludedSites.Contains(s.Site.Id))&&(justExpired==null||!justExpired.Same(Finger(s)))&&TerritoryRules.Cost(p,s.Site.Kind)>0&&Witness(o,p,ai,s,expansion,caller)&&(!m.Expired.TryGetValue(s.Site.Id,out var expired)||!expired.Same(Finger(s))))
-                .OrderBy(s=>TerritoryRules.Cost(p,s.Site.Kind)/(TerritoryRules.Income(p,s.Site.Kind)/p.IncomePeriodSeconds))
-                .ThenBy(s=>o.RouteProofs.Where(r=>r.TargetId==s.Site.Id&&r.Kind==PlayableRouteTargetKind.PublicObjective).Select(AiExpansionPlanner.RouteLength).DefaultIfEmpty(double.MaxValue).Min()).ThenBy(s=>s.Site.Id).FirstOrDefault();
+            var selected=SelectBest(o,p,ai,expansion,m,caller,justExpired,excludedSites);
             var observer=ActualBestSearchReadbackForTests;
             if(observer!=null&&(ActualBestSearchOwnerFilterForTests==null||ActualBestSearchOwnerFilterForTests==o.OwnerId))
                 observer(new{Owner=o.OwnerId,Tick=o.Tick,Caller=caller,RequestedJustExpiredSite=justExpired?.Site??0,
                     DynamicSites=o.Sites.ToArray(),DiscoveredObjectives=o.PublicScoutObjectives.ToArray(),SelectedSite=selected?.Site.Id??0});
             return selected;
 #else
-            return o.Sites.Where(s=>(excludedSites==null||!excludedSites.Contains(s.Site.Id))&&(justExpired==null||!justExpired.Same(Finger(s)))&&TerritoryRules.Cost(p,s.Site.Kind)>0&&Witness(o,p,ai,s,expansion,caller)&&(!m.Expired.TryGetValue(s.Site.Id,out var expired)||!expired.Same(Finger(s))))
-                .OrderBy(s=>TerritoryRules.Cost(p,s.Site.Kind)/(TerritoryRules.Income(p,s.Site.Kind)/p.IncomePeriodSeconds))
-                .ThenBy(s=>o.RouteProofs.Where(r=>r.TargetId==s.Site.Id&&r.Kind==PlayableRouteTargetKind.PublicObjective).Select(AiExpansionPlanner.RouteLength).DefaultIfEmpty(double.MaxValue).Min()).ThenBy(s=>s.Site.Id).FirstOrDefault();
+            return SelectBest(o,p,ai,expansion,m,caller,justExpired,excludedSites);
 #endif
         }
+        private static TerritorySiteSnapshot SelectBest(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiExpansionPlanner expansion,Memo m,string caller,Fingerprint justExpired,ISet<int> excludedSites)
+            =>AiIncomeSiteSelection.Select(o,p,ai,expansion.Knowledge,
+                o.Sites.Where(s=>(excludedSites==null||!excludedSites.Contains(s.Site.Id))&&(justExpired==null||!justExpired.Same(Finger(s)))&&
+                    TerritoryRules.Cost(p,s.Site.Kind)>0&&Witness(o,p,ai,s,expansion,caller)&&(!m.Expired.TryGetValue(s.Site.Id,out var expired)||!expired.Same(Finger(s)))),
+                AiIncomeSiteSelection.DrawRemote(o,ai,m.NextSelectionOrdinal));
+        internal int LocalSite(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiDecisionArbiter a,AiExpansionPlanner expansion)
+        {
+            var m=Load(a);
+            return AiIncomeSiteSelection.Select(o,p,ai,expansion.Knowledge,o.Sites.Where(s=>Witness(o,p,ai,s,expansion,"LocalSite")&&
+                (m==null||!m.Expired.TryGetValue(s.Site.Id,out var expired)||!expired.Same(Finger(s)))),false)?.Site.Id??0;
+        }
+        private static void RecordSelection(Memo m,PlayableAiObservation o,AiProfile ai)
+        {m.PreferRemote=AiIncomeSiteSelection.DrawRemote(o,ai,m.NextSelectionOrdinal);m.NextSelectionOrdinal=checked(m.NextSelectionOrdinal+1);m.HasSelection=true;}
+        internal bool RemotePreference(PlayableAiObservation o,AiProfile ai,AiDecisionArbiter a)
+        {var m=Load(a);return m?.Active!=null&&m.HasSelection?m.PreferRemote:AiIncomeSiteSelection.DrawRemote(o,ai,m?.NextSelectionOrdinal??0);}
         private static ISet<int> UnexpiredDormantTargets(PlayableAiObservation o,Memo m)
         {
             var excluded=new HashSet<int>();
@@ -196,11 +215,12 @@ namespace Spacewars.Runtime
         private static bool Legal(TerritorySiteSnapshot s,PlayableAiObservation o,PlayableProfile p)=>s!=null&&IncomeKind(s.Site.Kind)&&TerritoryRules.Income(p,s.Site.Kind)>0&&s.CenterId==0&&!s.Contested&&(!s.Owner.HasValue||s.Owner==o.Owner)&&(!s.Claimant.HasValue||s.Claimant==o.Owner);
         private static bool Witness(PlayableAiObservation o,PlayableProfile p,AiProfile ai,TerritorySiteSnapshot s,AiExpansionPlanner expansion,string caller,int requestedSiteId=0)
         {
+            if(s!=null&&!expansion.TeamAllowsSite(s.Site.Id))return false;
             bool legal=Legal(s,o,p);
 #if UNITY_INCLUDE_TESTS
             WitnessStageReadback(o,caller,requestedSiteId,s,null,null,"legal-site",legal);
 #endif
-            if(!legal)return false;
+            if(!legal||!AiIncomeSiteSelection.TerritoryAllowed(o,p,ai,expansion.Knowledge,s))return false;
             bool objective=o.PublicScoutObjectives.Any(g=>g.SiteId==s.Site.Id&&g.Reachable&&g.Role!=PlayablePublicScoutObjectiveRole.PossibleEnemyStart);
 #if UNITY_INCLUDE_TESTS
             WitnessStageReadback(o,caller,requestedSiteId,s,null,null,"reachable-public-objective",objective);
@@ -218,7 +238,7 @@ namespace Spacewars.Runtime
                 bool routeSafe=o.RouteProofs.Any(r=>
                 {
                     if(r.UnitId!=u.Id||r.TargetId!=s.Site.Id||r.Kind!=PlayableRouteTargetKind.PublicObjective)return false;
-                    bool safe=AiExpansionPlanner.Safe(o,p,ai,s,u,r);
+                    bool safe=AiExpansionPlanner.Safe(o,p,ai,s,u,r,expansion.Knowledge);
 #if UNITY_INCLUDE_TESTS
                     routeReached=true;routeSafetyReached=true;routeSafety=safe;if(safe)matchingRoute=r;
                     WitnessStageReadback(o,caller,requestedSiteId,s,u,r,"typed-route-safety",safe);
@@ -342,14 +362,14 @@ namespace Spacewars.Runtime
                     {
                         if(!m.Dormant.TryGetValue(m.Active.Site,out var oldDormant)||!oldDormant.Target.Same(m.Active))
                             m.Dormant[m.Active.Site]=new DormantTarget{Target=m.Active,Created=previous.CreatedTick,Expires=previous.ExpiresTick};
-                        m.Active=Finger(alternative);targetChanged=true;
+                        RecordSelection(m,o,ai);m.Active=Finger(alternative);targetChanged=true;
                     }
                 }
             }
             if(m.Active==null&&allowed&&!bootstrapActive)
             {
                 var best=BestCurrent(o,p,ai,expansion,m,"Observe.Best");
-                if(best!=null){m.Active=Finger(best);targetChanged=true;}
+                if(best!=null){RecordSelection(m,o,ai);m.Active=Finger(best);targetChanged=true;}
             }
             if(m.Active!=null)
             {
@@ -382,7 +402,9 @@ namespace Spacewars.Runtime
         internal int PreparationSite(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiBudgetLedger b,AiDecisionArbiter a,AiExpansionPlanner expansion,bool openingAllows)
         {
             var m=Load(a);if(m?.Active==null||!openingAllows||BootstrapActive(a)||expansion.ClaimsSite(m.Active.Site)||AiDefensePlanner.Threats(o,p).Length>0)return 0;
-            var funding=b.ReservationEntry(Id(m.Active));if(funding==null||o.Tick>=funding.ExpiresTick)return 0;
+            // Preparation consumes Explorer time only when the ordinary construction quote is fully protected.
+            // An accepted expansion has its own obligation/fund and is retained by the owner loop.
+            if(!Ready(p,b,a,o.Tick))return 0;
             var site=o.Sites.FirstOrDefault(s=>s.Site.Id==m.Active.Site);
             if(site==null||(m.Expired.TryGetValue(site.Site.Id,out var expired)&&expired.Same(Finger(site)))||!Witness(o,p,ai,site,expansion,"PreparationSite",m.Active.Site))return 0;
             return site.Site.Id;
@@ -439,7 +461,7 @@ namespace Spacewars.Runtime
             var payload=a.SiteFundingMemory();var held=b.Capture().Reserved.Where(IsFunding).ToArray();
             if(payload==null){AiStateWire.Require(held.Length==0,"orphan site finance hold");return;}
             var income=catalog.Where(s=>IncomeKind(s.Kind)).ToDictionary(s=>s.Id,s=>s.Kind);
-            int bound=checked(64+Encoding.UTF8.GetByteCount(owner)+Encoding.UTF8.GetByteCount(Metadata(p,ai))+(income.Count+1)*29+11+8+income.Count*45);
+            int bound=checked(64+Encoding.UTF8.GetByteCount(owner)+Encoding.UTF8.GetByteCount(Metadata(p,ai))+(income.Count+1)*29+11+8+income.Count*45+13);
             AiStateWire.Require(payload.Length<=checked(4*((bound+2)/3)),"catalog-bounded site finance memo");var m=Decode(payload);
             AiStateWire.Require(m.HomeSite==0||catalog.Any(s=>s.Id==m.HomeSite),"bootstrap home catalog binding");
             AiStateWire.Require(m.PolicyVersion>=0&&m.PolicyVersion<=BootstrapVersion&&(!m.FirstIncomeReady||m.FirstIncomeHistoryKnown)&&(!m.FirstIncomeReady||m.HomeSite>0)&&(!m.HomeEconomyReady||m.HomeSite>0),"home and first-income milestone state");

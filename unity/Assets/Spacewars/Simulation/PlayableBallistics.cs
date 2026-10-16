@@ -107,7 +107,22 @@ namespace Spacewars.Simulation
             double distance=Math.Sqrt(Math.Pow(to.X-from.X,2)+Math.Pow(to.Z-from.Z,2)+Math.Pow(to.Y-from.Y,2));
             // Same geometric sample tolerance as the native ballistic solver, independent of gameplay tuning.
             int steps=Math.Max(1,(int)Math.Ceiling(distance/.025));
-            for(int i=0;i<=steps;i++){double t=(double)i/steps;var p=new BallisticPoint(from.X+(to.X-from.X)*t,from.Y+(to.Y-from.Y)*t,from.Z+(to.Z-from.Z)*t);if(p.Y-radius<terrain(p.Ground)-Eps)return false;foreach(var s in solids)if(p.Y+radius>=s.Bottom&&p.Y-radius<=(double.IsNaN(s.Top)?wallHeight:s.Top)&&Overlap(s,p,radius))return false;}
+            // Conservative broad phase only: retain the original sample positions,
+            // height/footprint predicates and obstacle order. Rounded interpolation
+            // can lie just outside endpoint bounds, so widen by the existing epsilon.
+            double minX=Math.Min(from.X,to.X)-radius-Eps,maxX=Math.Max(from.X,to.X)+radius+Eps;
+            double minZ=Math.Min(from.Z,to.Z)-radius-Eps,maxZ=Math.Max(from.Z,to.Z)+radius+Eps;
+            var candidates=new List<NavObstacle>();
+            for(int j=0;j<solids.Count;j++){var solid=solids[j];
+                if(solid.MaxX>=minX&&solid.MinX<=maxX&&solid.MaxZ>=minZ&&solid.MinZ<=maxZ)candidates.Add(solid);
+            }
+            for(int i=0;i<=steps;i++){
+                double t=(double)i/steps;var p=new BallisticPoint(from.X+(to.X-from.X)*t,from.Y+(to.Y-from.Y)*t,from.Z+(to.Z-from.Z)*t);
+                if(p.Y-radius<terrain(p.Ground)-Eps)return false;
+                for(int j=0;j<candidates.Count;j++){var solid=candidates[j];
+                    if(p.Y+radius>=solid.Bottom&&p.Y-radius<=(double.IsNaN(solid.Top)?wallHeight:solid.Top)&&Overlap(solid,p,radius))return false;
+                }
+            }
             return true;
         }
         public static bool BlastHits(BallisticPoint impact,double radius,BallisticBody target,IReadOnlyList<NavObstacle> solids,double wallHeight,IReadOnlyList<BallisticBody> bodies,Func<NavPoint,double> terrain=null)

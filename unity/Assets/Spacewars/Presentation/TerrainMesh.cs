@@ -18,7 +18,7 @@ namespace Spacewars.Presentation
             }
         }
         public static Mesh ErodedRock(NavObstacle shape,double bottom,double top,float erosion)=>ErodedRock(shape,bottom,top,erosion,out _);
-        public static Mesh ErodedRock(NavObstacle shape,double bottom,double top,float erosion,out RockCap cap)
+        public static Mesh ErodedRock(NavObstacle shape,double bottom,double top,float erosion,out RockCap cap,bool broadLedges=false,float wavelength=12)
         {
             var vertices=new List<Vector3>();var indices=new List<int>();
             var polygon=shape.Footprint;
@@ -43,7 +43,7 @@ namespace Spacewars.Presentation
             }
             float Roof(float x,float z)
             {
-                float n=Mathf.PerlinNoise(x*.27f+31,z*.27f+71)*.65f+Mathf.PerlinNoise(x*.79f+11,z*.79f+17)*.35f;
+                float n=broadLedges?Mathf.PerlinNoise(x/wavelength+31,z/wavelength+71):Mathf.PerlinNoise(x*.27f+31,z*.27f+71)*.65f+Mathf.PerlinNoise(x*.79f+11,z*.79f+17)*.35f;
                 return (float)top-Mathf.Min(erosion,(float)(top-bottom)*.4f)*Mathf.SmoothStep(0,1,Mathf.InverseLerp(.2f,.8f,n));
             }
             Vector3 P(NavPoint p)=>new Vector3((float)p.X,Roof((float)p.X,(float)p.Z),(float)p.Z);
@@ -72,13 +72,15 @@ namespace Spacewars.Presentation
                 var a=P(polygon.Vertices[i]);var b=P(polygon.Vertices[(i+1)%polygon.Vertices.Count]);
                 var ra=P(roofPolygon.Vertices[i]);var rb=P(roofPolygon.Vertices[(i+1)%polygon.Vertices.Count]);
                 int steps=16; // Matches four cap subdivisions, avoiding T-junction cracks.
-                int layers=Mathf.Max(2,Mathf.CeilToInt((float)(top-bottom)/.65f));
+                int layers=broadLedges?4:Mathf.Max(2,Mathf.CeilToInt((float)(top-bottom)/.65f));
                 var inward=new Vector3(-(b.z-a.z),0,b.x-a.x).normalized;
                 Vector3 Wall(float along,float level)
                 {
                     var crest=Vector3.Lerp(ra,rb,along);float roof=Roof(crest.x,crest.z);
-                    var p=Vector3.Lerp(Vector3.Lerp(a,b,along),crest,level);
-                    float cut=Mathf.Sin(level*Mathf.PI)*Mathf.Sin(along*Mathf.PI)*erosion*.28f*(.2f+.8f*Mathf.PerlinNoise(p.x*.9f+level*7,p.z*.9f));
+                    // Two broad benches share continuous rings; no per-triangle crumpling.
+                    float slope=broadLedges?(level<=.25f?level*2:level<=.5f?.5f:level<=.75f?.5f+(level-.5f)*2:1):level;
+                    var p=Vector3.Lerp(Vector3.Lerp(a,b,along),crest,slope);
+                    float cut=(broadLedges?0:1)*Mathf.Sin(level*Mathf.PI)*Mathf.Sin(along*Mathf.PI)*erosion*.28f*(.2f+.8f*Mathf.PerlinNoise(p.x*.9f+level*7,p.z*.9f));
                     var shifted=p+inward*cut;
                     if(shape.Contains(new NavPoint(shifted.x,shifted.z))){p.x=shifted.x;p.z=shifted.z;}
                     p.y=Mathf.Lerp((float)bottom,roof,level);return p;

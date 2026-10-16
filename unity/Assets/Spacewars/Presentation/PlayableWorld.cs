@@ -48,7 +48,7 @@ namespace Spacewars.Presentation
         private readonly Transform root;
         private int presentationLayer;
         public void SetPresentationLayer(int layer){presentationLayer=layer;Layer(root.gameObject);}
-        private void Layer(GameObject value){foreach(var part in value.GetComponentsInChildren<Transform>(true))part.gameObject.layer=presentationLayer;}
+        public void Layer(GameObject value){foreach(var part in value.GetComponentsInChildren<Transform>(true))part.gameObject.layer=presentationLayer;}
         private readonly Dictionary<int, Actor> actors = new Dictionary<int, Actor>();
         public IReadOnlyDictionary<int, Actor> Actors => actors;
         private static readonly Color Ally = new Color(.19f,.72f,.77f), Enemy = new Color(.93f,.34f,.23f), Dark = new Color(.09f,.13f,.16f);
@@ -135,7 +135,7 @@ namespace Spacewars.Presentation
             double scale=BuildingScale(key);
             model.localScale=Vector3.one*(float)scale;
             // Authored model front is +Z; presentation facing follows the starting camera, independent of domain exits.
-            model.localRotation=BuildingFacing;a.Turbine=model.GetComponentsInChildren<Transform>(true).FirstOrDefault(t=>t.name=="turbineYaw");
+            model.localRotation=BuildingFacing;UpdateBuildingSelection(a,key);a.Turbine=model.GetComponentsInChildren<Transform>(true).FirstOrDefault(t=>t.name=="turbineYaw");
             return a;
         }
         public void FaceBuilding(Actor actor,Camera camera=null)
@@ -167,7 +167,7 @@ namespace Spacewars.Presentation
                 string key=BuildingKey(building.Kind.ToString(),building.RefineryUpgraded);
                 actor.Hull=Model(key,actor.Root,building.Owner==PlayableOwner.Player);
                 actor.Hull.localScale=Vector3.one*(float)BuildingScale(key);actor.Hull.localRotation=BuildingFacing;
-                actor.RefineryUpgraded=building.RefineryUpgraded;actor.PresentationPaint=null;
+                UpdateBuildingSelection(actor,key);actor.RefineryUpgraded=building.RefineryUpgraded;actor.PresentationPaint=null;
                 actor.Turbine=actor.Hull.GetComponentsInChildren<Transform>(true).FirstOrDefault(t=>t.name=="turbineYaw");
             }
             // Animation follows simulation time, so pause also freezes the turbine.
@@ -236,14 +236,26 @@ namespace Spacewars.Presentation
             var block=new MaterialPropertyBlock();block.SetFloat("_RingWidth",(float)profile.SelectionRingWidth/radius);renderer.SetPropertyBlock(block);
             return g;
         }
+        private void UpdateBuildingSelection(Actor actor,string key)
+        {
+            var half=ApronModelHalf(key);
+            float radius=half.magnitude+(float)(profile.BuildingSelectionPadding+profile.BuildingSelectionWidth);
+            actor.Selection.transform.localScale=new Vector3(radius,1,radius);
+            var renderer=actor.Selection.GetComponent<Renderer>();var block=new MaterialPropertyBlock();renderer.GetPropertyBlock(block);
+            block.SetFloat("_RingWidth",(float)profile.BuildingSelectionWidth/radius);renderer.SetPropertyBlock(block);
+        }
         private Actor Base(int id,bool friendly,bool unit=false,PlayableEntityKind kind=PlayableEntityKind.Tank)
         {
             var a=new Actor{MaterialFinish=MaterialFinish};a.Root=new GameObject("Entity "+id).transform;a.Root.SetParent(root,false);
             a.UnitSelection=unit;
-            a.Selection=unit?UnitRing(a.Root,kind):Part("Selection",a.Root,new Vector3(0,.07f,0),new Vector3(2.4f,.035f,2.4f),friendly?Ally:Enemy,PrimitiveType.Cylinder);a.Selection.SetActive(false);
+            a.Selection=UnitRing(a.Root,kind);a.Selection.SetActive(false);
             var healthRoot=new GameObject("Health").transform;healthRoot.SetParent(root,false);healthRoot.localPosition=new Vector3(0,3.8f,0);
-            Part("Health background",healthRoot,Vector3.zero,new Vector3(2,.13f,.17f),Dark);
+            float outline=(float)profile.HealthBarOutlineWidth;
+            // Match the established full bar dimensions; the outline stays around the full capacity.
+            Part("Health outline",healthRoot,new Vector3(0,.01f,.12f),new Vector3(2+2*outline,.15f+2*outline,.02f),Color.black);
+            Part("Health background",healthRoot,Vector3.zero,new Vector3(2,.15f,.17f),Dark);
             a.Health=Part("Health fill",healthRoot,new Vector3(0,.01f,-.01f),new Vector3(2,.15f,.18f),friendly?Ally:Enemy).transform;
+            foreach(var renderer in healthRoot.GetComponentsInChildren<Renderer>()){renderer.shadowCastingMode=UnityEngine.Rendering.ShadowCastingMode.Off;renderer.receiveShadows=false;}
             actors[id]=a;return a;
         }
         public static void UpdateHealth(Actor actor,Camera camera,float ratio,bool? selected=null)
@@ -261,7 +273,7 @@ namespace Spacewars.Presentation
         }
         public void Remove(int id){RemoveRallyFlag(id);if(actors.TryGetValue(id,out var a)){ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);actors.Remove(id);}}
         public void Clear(){ClearUnitWrecks();ClearRallyFlags();Fog.Reset();ClearMemories();ClearPads();foreach(var a in actors.Values){ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);}actors.Clear();}
-        public void Dispose(){Clear();wreckFlashVisuals.Dispose();Fog.Dispose();if(mossPaintMask)ReleaseWorldObject(mossPaintMask);if(mossAccentMask)ReleaseWorldObject(mossAccentMask);if(mossTerrainMaterial)ReleaseWorldObject(mossTerrainMaterial);if(basaltPaintMask)ReleaseWorldObject(basaltPaintMask);if(basaltAccentMask)ReleaseWorldObject(basaltAccentMask);if(basaltTerrainMaterial)ReleaseWorldObject(basaltTerrainMaterial);surfaceMaterials?.Dispose();if(foundryRoadMask)ReleaseWorldObject(foundryRoadMask);if(foundryLavaHeat)ReleaseWorldObject(foundryLavaHeat);foreach(var mesh in terrainMeshes)ReleaseWorldObject(mesh);terrainMeshes.Clear();if(apronMaterial)ReleaseWorldObject(apronMaterial);ReleaseWorldObject(selectionMaterial);ReleaseWorldObject(selectionQuad);ReleaseWorldObject(material);if(root)ReleaseWorldObject(root.gameObject);}
+        public void Dispose(){Clear();wreckFlashVisuals.Dispose();Fog.Dispose();if(mossPaintMask)ReleaseWorldObject(mossPaintMask);if(mossAccentMask)ReleaseWorldObject(mossAccentMask);if(mossTransitionMask)ReleaseWorldObject(mossTransitionMask);if(mossTerrainMaterial)ReleaseWorldObject(mossTerrainMaterial);if(basaltPaintMask)ReleaseWorldObject(basaltPaintMask);if(basaltAccentMask)ReleaseWorldObject(basaltAccentMask);if(basaltTerrainMaterial)ReleaseWorldObject(basaltTerrainMaterial);surfaceMaterials?.Dispose();if(foundryRoadMask)ReleaseWorldObject(foundryRoadMask);if(foundryLavaHeat)ReleaseWorldObject(foundryLavaHeat);if(foundryRouteMask)ReleaseWorldObject(foundryRouteMask);foreach(var mesh in terrainMeshes)ReleaseWorldObject(mesh);terrainMeshes.Clear();if(apronMaterial)ReleaseWorldObject(apronMaterial);ReleaseWorldObject(selectionMaterial);ReleaseWorldObject(selectionQuad);ReleaseWorldObject(material);if(root)ReleaseWorldObject(root.gameObject);}
         public GameObject Part(string name,Transform parent,Vector3 position,Vector3 scale,Color color,PrimitiveType shape=PrimitiveType.Cube)
         {
             var g=GameObject.CreatePrimitive(shape);g.name=name;g.layer=presentationLayer;g.transform.SetParent(parent,false);g.transform.localPosition=position;g.transform.localScale=scale;

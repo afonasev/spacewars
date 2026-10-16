@@ -25,9 +25,14 @@ namespace Spacewars.Tests.EditMode
         [Test] public void FullRequestMailboxPreservesActiveMove()
         {
             var session=new NavigationSession(1,new NavGeometry(20,new NavObstacle[0],1),new NavigationProfile());session.Crowd.Add(0,new NavPoint(0,0));
-            session.Move(0,new NavPoint(10,0));NavigationRequest request;session.Requests.TryDequeue(out request);session.Answers.TryEnqueue(new NavigationAnswer(request,new[]{new NavPoint(10,0)}));session.Step(1d/30);
-            for(int i=0;i<NavMailbox<NavigationRequest>.Capacity;i++)Assert.IsTrue(session.Requests.TryEnqueue(request));
-            Assert.IsFalse(session.Move(0,new NavPoint(-10,0)));Assert.IsTrue(session.Crowd.Units[0].Moving);Assert.AreEqual(10,session.Crowd.Units[0].Goal.X);
+            NavigationHostRequest pin=null;
+            try{
+                Assert.True(session.Move(0,new NavPoint(10,0)));Assert.True(session.Requests.TryDequeue(out var request));pin=request.StorageOwner;pin.Retain();
+                Assert.True(session.Answers.TryEnqueue(new NavigationAnswer(request,new[]{new NavPoint(10,0)})));session.Step(1d/30);
+                for(int i=0;i<session.Requests.InstanceCapacity;i++)Assert.IsTrue(session.Requests.TryEnqueue(request));
+                Assert.IsFalse(session.Move(0,new NavPoint(-10,0)));Assert.IsTrue(session.Crowd.Units[0].Moving);Assert.AreEqual(10,session.Crowd.Units[0].Goal.X);
+            }finally{pin?.Release();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);}
+
         }
     }
 }

@@ -26,6 +26,35 @@ namespace Spacewars.Tests.EditMode
             }
             var last=Entity(60);motion.BeginFrame(Frame(last,60));Assert.AreEqual(60,motion.Sample(last,100).Position.X);
         }
+        [TestCase(.5)][TestCase(2)][TestCase(4)] public void PlaybackRateScalesOnlyInterpolationTime(double speed)
+        {
+            var m=new PlayableUnitMotion();var a=Entity(0);m.BeginFrame(Frame(a,0),speed:speed);m.Sample(a,0);
+            var b=Entity(1);m.BeginFrame(Frame(b,1),speed:speed);m.Sample(b,1);
+            Assert.AreEqual(.5,m.Sample(b,1+Step/speed*.5).Position.X,1e-10);
+            Assert.AreEqual(1,m.Sample(b,2).Position.X);Assert.AreEqual(1,b.Position.X);
+        }
+        [Test] public void AcceleratedSkippedRenderUsesLastConsecutiveAuthoritySegmentWithoutCuttingCorner()
+        {
+            var m=new PlayableUnitMotion();var a=Entity(0);m.BeginFrame(Frame(a,0),speed:4);m.Sample(a,0);
+            var corner=Entity(1);var end=Entity(1,1);
+            m.BeginFrame(Frame(end,2),speed:4,previous:Frame(corner,1));
+            Assert.AreEqual(new NavPoint(1,0),m.Sample(end,0).Position);
+            Assert.AreEqual(new NavPoint(1,.5),m.Sample(end,Step/8).Position);
+            var geometry=new NavGeometry(3,new[]{new NavObstacle(-.5,.2,.8,2)},1);
+            Assert.True(geometry.SegmentFree(new NavPoint(1,0),m.Sample(end,Step/8).Position,.1));
+            // No old fog-visible entity / surface or context mismatch: snap, no ghost.
+            var next=Entity(10);m.BeginFrame(Frame(next,4),speed:4,previous:Frame(Entity(3),2));Assert.AreEqual(10,m.Sample(next,2).Position.X);
+            var upper=Entity(20,surface:"upper");m.BeginFrame(Frame(upper,6),speed:4,previous:Frame(Entity(19),5));Assert.AreEqual(20,m.Sample(upper,3).Position.X);
+            m.BeginFrame(Frame(Entity(30,surface:"upper"),8,paused:true),speed:4,previous:Frame(upper,7));Assert.AreEqual(30,m.Sample(Entity(30,surface:"upper"),4).Position.X);
+        }
+        [Test] public void ReceivedSnapshotAgeDoesNotRestartInterpolationAtRenderArrival()
+        {
+            var m=new PlayableUnitMotion();var a=Entity(0);m.BeginFrame(Frame(a,0),speed:4);m.Sample(a,0);
+            var b=Entity(1);m.BeginFrame(Frame(b,1),speed:4,snapshotAge:Step/8);
+            Assert.AreEqual(.5,m.Sample(b,0).Position.X,1e-10);
+            m.BeginFrame(Frame(b,1),speed:4,snapshotAge:Step/4);
+            Assert.AreEqual(1,m.Sample(b,Step/8).Position.X,1e-10);
+        }
         [Test] public void HullAndTurretTakeShortestTurnAcrossAngleWrap()
         {
             var motion=new PlayableUnitMotion();var a=Entity(0,hull:Math.PI-.1,turret:-Math.PI+.1);

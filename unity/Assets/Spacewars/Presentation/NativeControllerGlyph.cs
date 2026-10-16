@@ -27,6 +27,11 @@ namespace Spacewars.Presentation
             generateVisualContent+=ctx=>{var p=ctx.painter2D;p.fillColor=new Color(.06f,.08f,.11f);p.strokeColor=tint;p.lineWidth=1.5f;p.BeginPath();p.Arc(new Vector2(14,14),12,0,360);p.ClosePath();p.Fill();p.Stroke();};
             schedule.Execute(()=>Refresh(this.device())).Every(80);Refresh(this.device());
         }
+        public static string TopSymbol(Gamepad pad)
+        {
+            if(pad==null)return "Верх";string family=(pad.layout+" "+pad.description.manufacturer).ToLowerInvariant();
+            return family.Contains("dual")||family.Contains("sony")||family.Contains("nintendo")||family.Contains("switch")||family.Contains("xinput")||family.Contains("xbox")||family.Contains("microsoft")?Symbol("Y",pad):"Верх";
+        }
         public static string Symbol(string button,Gamepad pad)
         {
             bool sony=pad!=null&&(pad.layout.IndexOf("Dual",StringComparison.OrdinalIgnoreCase)>=0||pad.description.manufacturer?.IndexOf("Sony",StringComparison.OrdinalIgnoreCase)>=0);

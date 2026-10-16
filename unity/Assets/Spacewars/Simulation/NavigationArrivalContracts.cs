@@ -9,7 +9,7 @@ namespace Spacewars.Simulation
     public enum NavArrivalOccupantKind { Actor, PendingReservation, InstalledReservation }
     public enum NavArrivalReservationKind { PendingRequest, InstalledExecution }
 
-    public sealed class NavArrivalMember
+    public sealed partial class NavArrivalMember
     {
         public NavArrivalMember(long entityId, long incarnation, long order, long mobilityRevision,
             NavLocation origin, NavClearanceProfile clearance, long worldGeneration, long groupId,
@@ -35,7 +35,7 @@ namespace Spacewars.Simulation
             });
         }
         public long EntityId { get; } public long Incarnation { get; } public long Order { get; }
-        public long MobilityRevision { get; } public NavLocation Origin { get; } public NavClearanceProfile Clearance { get; }
+        public long MobilityRevision { get; } public NavLocation Origin { get; private set; } public NavClearanceProfile Clearance { get; }
         public double Radius => Clearance.Radius; public long WorldGeneration { get; } public long GroupId { get; }
         public long RootOrderRevision { get; } public long CommandSequence { get; } public long IssuedTick { get; }
         public long ActivationRevision { get; } public long MemberOrderRevision { get; }
@@ -44,7 +44,7 @@ namespace Spacewars.Simulation
 
     // Occupancy facts are a copied view. Reservation rows deliberately describe
     // intent/execution identity; neither kind certifies a reachable route.
-    public sealed class NavArrivalOccupant
+    public sealed partial class NavArrivalOccupant
     {
         public NavArrivalOccupant(NavArrivalOccupantKind kind, long actorId, long incarnation,
             NavLocation location, double radius, bool blocksPlacement, string identity,
@@ -70,13 +70,13 @@ namespace Spacewars.Simulation
             });
         }
         public NavArrivalOccupantKind Kind { get; } public long ActorId { get; } public long Incarnation { get; }
-        public NavLocation Location { get; } public double Radius { get; } public bool BlocksPlacement { get; }
+        public NavLocation Location { get; private set; } public double Radius { get; } public bool BlocksPlacement { get; }
         public string Identity { get; } public NavArrivalReservationKind? ReservationKind { get; }
-        public long RequestSequence { get; } public long HistoricalExecution { get; } public NavLocation? ActorTarget { get; }
+        public long RequestSequence { get; } public long HistoricalExecution { get; } public NavLocation? ActorTarget { get; private set; }
         public string StableKey { get; }
     }
 
-    public sealed class NavArrivalOccupancySnapshot
+    public sealed partial class NavArrivalOccupancySnapshot
     {
         private readonly NavArrivalOccupant[] rows;
         public NavArrivalOccupancySnapshot(long generation, IEnumerable<NavArrivalOccupant> occupants)
@@ -94,7 +94,7 @@ namespace Spacewars.Simulation
         public string StableKey { get; }
     }
 
-    public sealed class NavArrivalCandidateSource
+    public sealed partial class NavArrivalCandidateSource
     {
         private readonly NavLocation[] candidates;
         public NavArrivalCandidateSource(string id, int revision, NavLocation requested, IEnumerable<NavLocation> candidates)
@@ -108,16 +108,23 @@ namespace Spacewars.Simulation
             StableKey = NavContract.Digest(w => { w.Write(Id); w.Write(Revision); NavContract.Location(w, Requested);
                 w.Write(this.candidates.Length); foreach (var candidate in this.candidates) NavContract.Location(w, candidate); });
         }
-        public string Id { get; } public int Revision { get; } public NavLocation Requested { get; }
+        public string Id { get; } public int Revision { get; } public NavLocation Requested { get; private set; }
         public IReadOnlyList<NavLocation> Candidates { get; } public string StableKey { get; }
     }
 
-    public sealed class NavArrivalInput
+    public sealed partial class NavArrivalWorkingBinding
+    {
+        public NavArrivalWorkingBinding(long entity, ILayeredNavigationProvider provider, NavGraphProfile profile)
+        { Entity = entity; Provider = provider ?? throw new ArgumentNullException(nameof(provider)); Profile = profile ?? throw new ArgumentNullException(nameof(profile)); }
+        public long Entity { get; } public ILayeredNavigationProvider Provider { get; } public NavGraphProfile Profile { get; }
+    }
+
+    public sealed partial class NavArrivalInput
     {
         private readonly NavArrivalMember[] members;
         public NavArrivalInput(string topologyIdentity, string profileIdentity, ILayeredNavigationProvider provider,
             NavGraphProfile profile, NavigationProfile arrivalProfile, NavGraphCompileLimits limits, NavArrivalCandidateSource source,
-            IEnumerable<NavArrivalMember> members, NavArrivalOccupancySnapshot occupancy, int maxLabels = 4096)
+            IEnumerable<NavArrivalMember> members, NavArrivalOccupancySnapshot occupancy, int maxLabels = 4096, IEnumerable<NavArrivalWorkingBinding> workingBindings = null, bool independentMembers = false)
         {
             if (string.IsNullOrWhiteSpace(topologyIdentity) || topologyIdentity.Length > 256 ||
                 string.IsNullOrWhiteSpace(profileIdentity) || profileIdentity.Length > 256 || provider == null ||
@@ -134,6 +141,10 @@ namespace Spacewars.Simulation
                 this.members.Select(x => x.WorldGeneration).Distinct().Count() != 1 ||
                 this.members.Any(x => x.WorldGeneration != occupancy.Generation)) throw new ArgumentException("Invalid ordered group members.");
             Members = Array.AsReadOnly((NavArrivalMember[])this.members.Clone());
+            IndependentMembers = independentMembers;
+            var bindings = (workingBindings ?? this.members.Select(m => new NavArrivalWorkingBinding(m.EntityId, provider, profile))).ToArray();
+            if (bindings.Length != this.members.Length || bindings.Select(b => b.Entity).Distinct().Count() != bindings.Length || bindings.Any(b => !this.members.Any(m => m.EntityId == b.Entity))) throw new ArgumentException("Invalid member working bindings.");
+            WorkingBindings = Array.AsReadOnly(bindings.OrderBy(b => b.Entity).ToArray());
             ProviderIdentity = provider.Binding;
             StableKey = NavContract.Digest(w => {
                 w.Write(TopologyIdentity); w.Write(ProfileIdentity); w.Write(ProviderIdentity);
@@ -141,6 +152,7 @@ namespace Spacewars.Simulation
                 w.Write(ArrivalProfile.ArrivalSlotSpacing); w.Write(ArrivalProfile.ArrivalTolerance); w.Write(ArrivalProfile.LocalGridCell);
                 w.Write(source.StableKey); w.Write(occupancy.StableKey); w.Write(maxLabels); w.Write(this.members.Length);
                 foreach (var member in this.members) w.Write(member.StableKey);
+                w.Write(independentMembers); foreach (var binding in WorkingBindings) { w.Write(binding.Entity); w.Write(binding.Provider.Binding); w.Write(binding.Profile.ExactProfileBinding); w.Write(binding.Profile.GridCell); }
                 w.Write(limits.MaxSamples); w.Write(limits.MaxNodes); w.Write(limits.MaxArcs);
             });
         }
@@ -150,10 +162,13 @@ namespace Spacewars.Simulation
         public NavGraphCompileLimits Limits { get; } public NavArrivalCandidateSource Source { get; }
         public NavArrivalOccupancySnapshot Occupancy { get; } public IReadOnlyList<NavArrivalMember> Members { get; }
         public int MaxLabels { get; } public string StableKey { get; }
+        public bool IndependentMembers { get; }
+        public IReadOnlyList<NavArrivalWorkingBinding> WorkingBindings { get; }
+        public NavArrivalWorkingBinding WorkingFor(NavArrivalMember member) => WorkingBindings.Single(b => b.Entity == member.EntityId);
         internal NavArrivalMember[] CopyMembers() => (NavArrivalMember[])members.Clone();
     }
 
-    public sealed class NavArrivalProposal
+    public sealed partial class NavArrivalProposal
     {
         internal NavArrivalProposal(NavArrivalMember member, NavLocation endpoint, NavTypedRoute route,
             NavArrivalReachabilityProof proof)

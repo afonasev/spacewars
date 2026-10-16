@@ -106,7 +106,7 @@ namespace Spacewars.Tests.EditMode
                 } else {
                     var field = typeof(NavigationSession).GetField("installedExecutions", BindingFlags.Instance | BindingFlags.NonPublic);
                     Assert.NotNull(field);
-                    ((System.Collections.IDictionary)field.GetValue(session)).Remove(actor.Id);
+                    ((System.Collections.Generic.IDictionary<int,NavigationInstalledExecutionState>)field.GetValue(session)).Remove(actor.Id);
                 }
                 var retained = session.CaptureArrivalOccupancySnapshot();
                 var reservation = retained.Occupants.Single(x => x.Kind == NavArrivalOccupantKind.InstalledReservation);
@@ -144,7 +144,7 @@ namespace Spacewars.Tests.EditMode
             Assert.Less(pendingBefore.Identity.Length, 256);
 
             var wire = WriteAndReadV7(session.CaptureState(), out var version);
-            Assert.AreEqual(7, version);
+            Assert.AreEqual(8, version);
             var restored = new NavigationSession(1, geometry, profile);
             restored.RestoreState(wire);
             var after = restored.CaptureArrivalOccupancySnapshot();
@@ -187,7 +187,7 @@ namespace Spacewars.Tests.EditMode
             }
         }
 
-        [Test] public void V7SessionWireRoundTripPreservesOccupancyAndResumedAllocationOutcome()
+        [Test] public void V8SessionWireRoundTripPreservesOccupancyAndResumedAllocationOutcome()
         {
             var geometry = new NavGeometry(20, Array.Empty<NavObstacle>(), 1);
             var session = new NavigationSession(1, geometry, new NavigationProfile());
@@ -207,7 +207,7 @@ namespace Spacewars.Tests.EditMode
 
             var state = session.CaptureState();
             var wire = WriteAndReadV7(state, out var version);
-            Assert.AreEqual(7, version);
+            Assert.AreEqual(8, version);
             var restoredSession = new NavigationSession(1, geometry, new NavigationProfile());
             restoredSession.RestoreState(wire);
             var restoredMember = Member(restoredSession.Crowd.Units.Single(x => x.Id == 5));

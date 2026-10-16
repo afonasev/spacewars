@@ -4,14 +4,14 @@ using System.Linq;
 
 namespace Spacewars.Simulation
 {
-    public sealed class NavArrivalReachabilityProof
+    public sealed partial class NavArrivalReachabilityProof
     {
         internal NavArrivalReachabilityProof(NavArrivalInput input, NavArrivalMember member,
             NavLocation endpoint, NavScheduledRequest request, NavTypedRoute route)
         {
             if (!Verify(input, member, endpoint, request, route)) throw new ArgumentException("Invalid exact arrival route proof.");
             MemberKey = member.StableKey; Endpoint = endpoint; Radius = member.Radius;
-            ProviderBinding = input.ProviderIdentity; TopologyIdentity = input.TopologyIdentity;
+            ProviderBinding = input.WorkingFor(member).Provider.Binding; TopologyIdentity = input.TopologyIdentity;
             ProfileIdentity = input.ProfileIdentity; GraphBinding = request.GraphKey;
             Subscription = request.Subscription; OccupancyBinding = input.Occupancy.StableKey; Route = route;
             StableKey = NavContract.Digest(w => {
@@ -24,14 +24,14 @@ namespace Spacewars.Simulation
                 }
             });
         }
-        public string MemberKey { get; } public NavLocation Endpoint { get; } public double Radius { get; }
+        public string MemberKey { get; } public NavLocation Endpoint { get; private set; } public double Radius { get; }
         public string ProviderBinding { get; } public string TopologyIdentity { get; } public string ProfileIdentity { get; }
         public string GraphBinding { get; } public NavRouteSubscription Subscription { get; }
         public string OccupancyBinding { get; } public NavTypedRoute Route { get; } public string StableKey { get; }
 
         internal bool ValidateAgainst(NavArrivalInput input, NavArrivalMember member, NavLocation endpoint)
             => input != null && member != null && MemberKey == member.StableKey && Endpoint.Equals(endpoint) &&
-               ProviderBinding == input.ProviderIdentity && TopologyIdentity == input.TopologyIdentity &&
+               ProviderBinding == input.WorkingFor(member).Provider.Binding && TopologyIdentity == input.TopologyIdentity &&
                ProfileIdentity == input.ProfileIdentity && OccupancyBinding == input.Occupancy.StableKey &&
                Radius == member.Radius && Subscription.StableKey == Route.Subscription.StableKey &&
                Subscription.Origin.Equals(member.Origin) && Subscription.AssignedEndpoint.Equals(endpoint);
@@ -40,7 +40,7 @@ namespace Spacewars.Simulation
             NavScheduledRequest request, NavTypedRoute route)
         {
             if (input == null || member == null || request == null || route == null ||
-                request.Provider != input.Provider || request.Clearance.Radius != member.Radius ||
+                request.Provider != input.WorkingFor(member).Provider || request.Clearance.Radius != member.Radius ||
                 route.Subscription.StableKey != request.Subscription.StableKey ||
                 !request.Subscription.Origin.Equals(member.Origin) || !request.Subscription.AssignedEndpoint.Equals(endpoint) ||
                 request.Subscription.EntityId != member.EntityId || request.Subscription.Incarnation != member.Incarnation ||

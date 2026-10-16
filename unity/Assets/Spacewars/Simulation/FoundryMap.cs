@@ -17,7 +17,7 @@ namespace Spacewars.Simulation
         public double Read(FoundryProfileData p)=>(double)field.GetValue(p);
         public void Write(FoundryProfileData p,double value){if(double.IsNaN(value)||double.IsInfinity(value)||value<Minimum||value>Maximum)throw new ArgumentOutOfRangeException(Path);field.SetValue(p,value);}
     }
-    public sealed class FoundryMap : IPlayableTerrain
+    public sealed class FoundryMap : IPlayableTerrain, INavArrivalPointTerrain
     {
         public static readonly IReadOnlyList<FoundryField> Fields=Array.AsReadOnly(new[]{
             new FoundryField("scale","Layout scale","Scales authored clearances, roads and site distances; building/unit sizes remain unchanged.","ratio",1,1.5,.05),
@@ -30,6 +30,7 @@ namespace Spacewars.Simulation
         public IReadOnlyList<NavObstacle> Lava{get;} public IReadOnlyList<NavObstacle> Roads{get;}
         private readonly NavGeometry geometry;
         private readonly TerrainLocations locations;
+        TerrainLocations INavArrivalPointTerrain.ArrivalLocations=>locations;
         public int SurfaceSemanticsVersion=>1;
         public IReadOnlyList<NavSurfaceTransition> SurfaceTransitions=>locations.Transitions;
         public bool TryLocate(NavPoint point,double radius,out NavLocation location)=>locations.TryLocate(point,radius,out location);

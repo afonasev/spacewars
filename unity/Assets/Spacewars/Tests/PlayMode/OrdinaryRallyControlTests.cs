@@ -31,7 +31,7 @@ namespace Spacewars.Input.Tests
             float scale=host.GetComponent<UIDocument>().panelSettings.scale;
             return new Vector2(panel.x*scale,Screen.height-panel.y*scale);
         }
-        [UnityTest] public IEnumerator MouseKeepsProducerSelectionHidesDistantMenuAndUnitCircles()
+        [UnityTest] public IEnumerator MouseKeepsProducerSelectionHidesDistantMenuAndKeepsUnitCircles()
         {
             yield return StartOrdinary(1);Put(app,"battleController",false);
             var view=Get<PlayableSnapshot>(app,"view");var building=view.Buildings.First(b=>b.Owner==view.Owner&&b.Kind==PlayableBuildingKind.Headquarters);
@@ -44,7 +44,7 @@ namespace Spacewars.Input.Tests
             yield return Capture("mouse-distant-building",()=>{Put(app,"battleController",false);Set(Mouse.current.position,new Vector2(Screen.width-2,Screen.height-2));Call(app,"UpdateHud");});
             Set(Mouse.current.position,screen);InputSystem.Update();Call(app,"UpdateHud");Assert.AreEqual(DisplayStyle.Flex,Get<OrbitalBattleRing>(app,"battleRing").style.display.value);
             var unit=view.Entities.First(e=>e.Owner==view.Owner);Selection(app).Clear();Selection(app).Add(unit.Id);Call(app,"Render");
-            Assert.IsFalse(world.Actors[unit.Id].Selection.activeSelf);CollectionAssert.AreEqual(new[]{unit.Id},Selection(app));
+            Assert.IsTrue(world.Actors[unit.Id].Selection.activeSelf,"GAME_SPEC 2026-10-10: ground selection rings stay visible for mouse and gamepad.");CollectionAssert.AreEqual(new[]{unit.Id},Selection(app));
             Put(app,"battleController",true);Call(app,"Render");Assert.IsTrue(world.Actors[unit.Id].Selection.activeSelf);
             Runtime.RequestStop();yield return Wait(()=>Runtime.IsStopped,"stop");
         }

@@ -20,14 +20,27 @@ namespace Spacewars.Presentation
         private KeyboardSelectable[] KeyboardEntities() => view.Entities.Where(e=>e.Health>0).Select(e=>new KeyboardSelectable(e.Id,(int)e.Kind,e.Owner==view.Owner,false,e.Position.X,e.Position.Z))
             .Concat(view.Buildings.Where(b=>b.Health>0&&b.Phase!=ConstructionPhase.Pending).Select(b=>new KeyboardSelectable(b.Id,(int)b.Kind,b.Owner==view.Owner,true,b.Position.X,b.Position.Z))).ToArray();
         private NativeLocalInputProfile KeyboardProfile => keyboardProfile ?? (keyboardProfile=JsonUtility.FromJson<NativeLocalInputProfile>(Resources.Load<TextAsset>("NativeLocalInputProfile").text));
+        private bool WorldKeyboardOwnsToolkit=>SeatUsesKeyboard&&input?.WorldInputEnabled==true&&!MenuOwnsInput&&input.IsKeyboardInUi?.Invoke()!=true;
+        private bool KeyboardBlocksCamera
+        {
+            get
+            {
+                var focused=root?.focusController?.focusedElement as VisualElement;
+                return MenuOwnsInput||focused is TextField||focused?.GetFirstAncestorOfType<TextField>()!=null;
+            }
+        }
+        private bool WorldCameraOwnsToolkit=>SeatUsesKeyboard&&input?.WorldInputEnabled==true&&!KeyboardBlocksCamera;
         private void BindKeyboardCommands()
         {
+            input.IsKeyboardBlockingCamera=()=>KeyboardBlocksCamera;
             input.SelectionDragPixels=(float)profile.SelectionDragPixels;
             input.DoubleClickMilliseconds=KeyboardProfile.doubleTapMs;
             input.SelectionKey=KeyboardSelection;
             input.CanIssueAttack=()=>view!=null&&view.Entities.Any(e=>e.Owner==view.Owner&&e.Health>0&&selection.Contains(e.Id));
             input.SelectSameType=SelectSameType;
             input.ResetCamera=ResetKeyboardCamera;
+            // HUD overlays still block orders, but must not cover the camera edge zones.
+            input.IsPointerBlockingCamera=point=>!cameraView.pixelRect.Contains(point);
             input.EdgePanAxis=point=>SeatUsesKeyboard?AngularCommandCursor.EdgePan(point,cameraView.pixelRect,(float)profile.CameraEdgePanZonePixels):Vector2.zero;
             input.EdgePan=axis=>cameraView.transform.position+=NativeCameraScrollSettings.Displacement(cameraView.transform,axis,NativeCameraScrollSettings.EdgeSpeed(profile.CameraEdgePanSpeed),Time.unscaledDeltaTime);
             commandCursor=new AngularCommandCursor();commandCursor.Set(false);

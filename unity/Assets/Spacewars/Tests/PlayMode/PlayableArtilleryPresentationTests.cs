@@ -19,6 +19,14 @@ public sealed class PlayableArtilleryPresentationTests
     }
     [SetUp]public void Setup(){host=new GameObject("artillery projection test");hud=host.AddComponent<PlayableBootstrap>();hud.enabled=false;Set("profile",PlayableProfile.Default);world=new PlayableWorld(host.transform,PlayableProfile.Default);Set("world",world);}
     [TearDown]public void Cleanup(){UnityEngine.Object.DestroyImmediate(host);}
+    [TestCase(8)][TestCase(9)]public void AllProjectilePartsMarkersAndImpactsUseTheSeatCameraLayer(int layer)
+    {
+        world.SetPresentationLayer(layer);
+        var shots=new[]{new PlayableProjectileSnapshot(1,1,2,new NavPoint(0,0),PlayableEntityKind.Tank),new PlayableProjectileSnapshot(2,1,2,new NavPoint(1,0),PlayableEntityKind.Explorer),new PlayableProjectileSnapshot(3,1,2,new NavPoint(2,0),PlayableEntityKind.Shkval,marker:new PlayableImpactMarker(new NavPoint(3,4),1,.2))};
+        Render(shots,new[]{new PlayableImpactSnapshot(4,PlayableOwner.Player,new BallisticPoint(3,0,4),1,30,1)},tick:31);
+        foreach(string collection in new[]{"shells","impactMarkers","impactEffects"})foreach(GameObject effect in Get(collection).Values)
+            foreach(var part in effect.GetComponentsInChildren<Transform>(true))Assert.AreEqual(layer,part.gameObject.layer,part.name);
+    }
     [Test]public void MarkerOnlyNeverMaterializesHiddenMissileAndPausedTransformsStayFixed()
     {
         var marker=new PlayableImpactMarker(new NavPoint(3,4),1.6,.22);var shot=new PlayableProjectileSnapshot(7,0,0,default,PlayableEntityKind.Shkval,visible:false,marker:marker);
@@ -67,7 +75,8 @@ public sealed class PlayableArtilleryPresentationTests
         world.Part("Evidence ground",host.transform,new Vector3(0,-.05f,0),new Vector3(30,.1f,30),new Color(.19f,.21f,.23f),PrimitiveType.Cube);
         foreach(var item in new[]{(1,PlayableEntityKind.Tank,-3f),(2,PlayableEntityKind.Explorer,0f),(3,PlayableEntityKind.Shkval,3f)}){
             var actor=world.Tank(item.Item1,true,item.Item2);actor.Root.position=new Vector3(item.Item3,0,1);}
-        var cameraHost=new GameObject("Projectile evidence camera");cameraHost.transform.SetParent(host.transform,false);var camera=cameraHost.AddComponent<Camera>();camera.orthographic=true;camera.orthographicSize=4;camera.transform.position=new Vector3(7,9,-11);camera.transform.LookAt(new Vector3(0,.5f,0));camera.backgroundColor=new Color(.06f,.08f,.1f);camera.clearFlags=CameraClearFlags.SolidColor;
+        var cameraHost=new GameObject("Projectile evidence camera");cameraHost.transform.SetParent(host.transform,false);var camera=cameraHost.AddComponent<Camera>();camera.orthographic=true;camera.orthographicSize=4;camera.transform.position=new Vector3(7,9,-11);camera.transform.LookAt(new Vector3(0,.5f,0));world.SetPresentationLayer(8);camera.cullingMask=1<<8;camera.backgroundColor=new Color(.06f,.08f,.1f);camera.clearFlags=CameraClearFlags.SolidColor;
+        foreach(var actor in world.Actors.Values)PlayableWorld.UpdateHealth(actor,camera,.6f,true);
         var lightHost=new GameObject("Evidence light");lightHost.transform.SetParent(host.transform,false);var light=lightHost.AddComponent<Light>();light.type=LightType.Directional;light.intensity=2;light.transform.rotation=Quaternion.Euler(45,-30,0);
         var texture=new RenderTexture(1400,900,24);texture.Create();camera.targetTexture=texture;
         var folder=System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath,"../../.local/qa/shkval-web-rules/frames"));System.IO.Directory.CreateDirectory(folder);
@@ -75,7 +84,8 @@ public sealed class PlayableArtilleryPresentationTests
             var shots=new[]{new PlayableProjectileSnapshot(21,1,10,new NavPoint(-3,-1),PlayableEntityKind.Tank,-Math.PI/2,.5),new PlayableProjectileSnapshot(22,2,10,new NavPoint(0,-1),PlayableEntityKind.Explorer,-Math.PI/2,.5),new PlayableProjectileSnapshot(23,3,10,new NavPoint(3,-1),PlayableEntityKind.Shkval,-Math.PI/2,2,.25,age:.2)};
             var hit=new PlayableImpactSnapshot(24,PlayableOwner.Player,new BallisticPoint(0,0,-3),1.4,30,1);
             for(int tick=0;tick<=35;tick++){
-                if(tick<30){float progress=tick/30f;var radius=PlayableProfile.Default.ShkvalMarkerStartRadius+(PlayableProfile.Default.ShkvalBlastRadius-PlayableProfile.Default.ShkvalMarkerStartRadius)*progress;
+                if(tick==0)Render(shots,tick:tick);
+                else if(tick<30){float progress=tick/30f;var radius=PlayableProfile.Default.ShkvalMarkerStartRadius+(PlayableProfile.Default.ShkvalBlastRadius-PlayableProfile.Default.ShkvalMarkerStartRadius)*progress;
                     var markerShot=new PlayableProjectileSnapshot(23,3,10,new NavPoint(3,-1),PlayableEntityKind.Shkval,-Math.PI/2,2,.25,age:progress,marker:new PlayableImpactMarker(new NavPoint(0,-3),radius,PlayableProfile.Default.ShkvalMarkerOpacity));Render(new[]{markerShot},tick:tick);}
                 else Render(Array.Empty<PlayableProjectileSnapshot>(),new[]{hit},tick:tick);
                 yield return null;camera.Render();Save(texture,System.IO.Path.Combine(folder,"web-tick-"+tick.ToString("D2")+".png"));

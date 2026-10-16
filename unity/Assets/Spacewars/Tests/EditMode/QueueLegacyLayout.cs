@@ -16,7 +16,7 @@ namespace Spacewars.Tests.EditMode
             var legacyPaths=legacyFields.Select(field=>field.Path).ToArray();
             using(var input=new MemoryStream(world.Domain))using(var reader=new BinaryReader(input))using(var output=new MemoryStream())using(var writer=new BinaryWriter(output)){
                 int count=reader.ReadInt32();writer.Write(count);
-                for(int k=0;k<count;k++){writer.Write(reader.ReadInt32());int size=reader.ReadInt32();writer.Write(size);if(size>=0)writer.Write(reader.ReadBytes(size));foreach(var field in PlayableProfileMetadata.Fields){var value=reader.ReadBytes(8);if(legacyPaths.Contains(field.Path))writer.Write(value);}}
+                for(int k=0;k<count;k++){writer.Write(reader.ReadInt32());int size=reader.ReadInt32();writer.Write(size);if(size>=0)writer.Write(reader.ReadBytes(size));foreach(var field in PlayableProfileMetadata.PreCrowdFields){var value=reader.ReadBytes(8);if(legacyPaths.Contains(field.Path))writer.Write(value);}}
                 int start=(int)input.Position,tail=Tag(world.Domain,0x53505231);writer.Write(world.Domain.Skip(start).Take(tail-start).ToArray());world.Domain=output.ToArray();
             }
             int group=Tag(world.Navigation,0x47525031);

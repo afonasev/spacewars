@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -109,7 +110,10 @@ func githubHTTPClient() *http.Client {
 	}}
 }
 func githubFetch(address string, limit int64) ([]byte, error) {
-	req, e := http.NewRequest("GET", address, nil)
+	return githubFetchContext(context.Background(), address, limit)
+}
+func githubFetchContext(ctx context.Context, address string, limit int64) ([]byte, error) {
+	req, e := http.NewRequestWithContext(ctx, "GET", address, nil)
 	if e != nil {
 		return nil, e
 	}
@@ -136,6 +140,8 @@ type githubAsset struct {
 	Size int64  `json:"size"`
 }
 type githubRelease struct {
+	Body       string        `json:"body"`
+	Published  string        `json:"published_at"`
 	Tag        string        `json:"tag_name"`
 	Draft      bool          `json:"draft"`
 	Prerelease bool          `json:"prerelease"`
@@ -208,6 +214,9 @@ func githubCandidate(platform string) ([]byte, Manifest, error) {
 	return bestRaw, best, nil
 }
 func fetchRange(address string, c PackageChunk, total int64) ([]byte, error) {
+	return fetchRangeContext(context.Background(), address, c, total)
+}
+func fetchRangeContext(ctx context.Context, address string, c PackageChunk, total int64) ([]byte, error) {
 	// Callers derive URL only from validated signed fields and a pinned repository.
 	u, e := url.Parse(address)
 	if e != nil {
@@ -216,7 +225,7 @@ func fetchRange(address string, c PackageChunk, total int64) ([]byte, error) {
 	if u.Scheme != "https" && u.Host != strings.TrimPrefix(apiOrigin, "http://") {
 		return nil, errors.New("invalid package scheme")
 	}
-	req, e := http.NewRequest("GET", address, nil)
+	req, e := http.NewRequestWithContext(ctx, "GET", address, nil)
 	if e != nil {
 		return nil, e
 	}
@@ -242,4 +251,62 @@ func storeNamespace() string {
 		return "native-test-v1"
 	}
 	return "native-v1"
+}
+
+// History is independent of candidate discovery and never changes the selected package.
+type ReleaseHistory struct {
+	Releases []ReleaseNote `json:"releases"`
+}
+type ReleaseNote struct {
+	Version string `json:"version"`
+	Date    string `json:"date"`
+	Russian string `json:"ru"`
+	English string `json:"en"`
+}
+
+func releaseNote(r githubRelease) ReleaseNote {
+	n := ReleaseNote{Version: strings.TrimPrefix(r.Tag, "v"), Date: r.Published}
+	body := strings.ReplaceAll(r.Body, "\r\n", "\n")
+	ru, en := strings.Index(body, "## Русский"), strings.Index(body, "## English")
+	if ru >= 0 && en > ru {
+		n.Russian = strings.TrimSpace(body[ru+len("## Русский") : en])
+		n.English = strings.TrimSpace(body[en+len("## English"):])
+	}
+	return n
+}
+func githubHistory(installed string) (ReleaseHistory, error) {
+	return githubHistoryContext(context.Background(), installed)
+}
+func githubHistoryContext(ctx context.Context, installed string) (ReleaseHistory, error) {
+	result := ReleaseHistory{Releases: []ReleaseNote{}}
+	b, err := githubFetchContext(ctx, fmt.Sprintf("%s/repos/%s/releases?per_page=100", apiOrigin, repository), 16*1024*1024)
+	if err != nil {
+		return result, err
+	}
+	var releases []githubRelease
+	if err = json.Unmarshal(b, &releases); err != nil {
+		return result, err
+	}
+	found := false
+	for _, r := range releases {
+		if selectedRelease(r, channel) && (len(result.Releases) < 10 || r.Tag == "v"+installed) {
+			result.Releases = append(result.Releases, releaseNote(r))
+			found = found || r.Tag == "v"+installed
+		}
+	}
+	if !found {
+		b, err = githubFetchContext(ctx, fmt.Sprintf("%s/repos/%s/releases/tags/v%s", apiOrigin, repository, installed), 16*1024*1024)
+		if err != nil {
+			return result, err
+		}
+		var r githubRelease
+		if err = json.Unmarshal(b, &r); err != nil {
+			return result, err
+		}
+		if !selectedRelease(r, channel) || r.Tag != "v"+installed {
+			return result, errors.New("installed release history unavailable")
+		}
+		result.Releases = append(result.Releases, releaseNote(r))
+	}
+	return result, nil
 }

@@ -41,6 +41,17 @@ namespace Spacewars.Tests.EditMode
             Assert.True(Frame().Players[0].OwnerResearch.Single().Complete);Assert.False(Frame().Overview.Buildings.Any(b=>b.Id==pending.Id));
             Assert.IsEmpty(Frame().Players[1].OwnerResearch);Assert.True(Frame().Players[1].Buildings.Where(b=>b.Owner!=PlayableOwner.Enemy).All(b=>b.PrivateState==null));
         }
+        [Test] public void OfflinePublicationSharesFogSafeViewsAlreadyBuiltForSpectator()
+        {
+            using(var runtime=new PlayableRuntime(OfflineParticipantAuthorityTests.Config(4),81,startPaused:true)){
+                runtime.RequestStop();Assert.True(System.Threading.SpinWait.SpinUntil(()=>runtime.IsStopped,5000));
+                var spectator=runtime.SpectatorFrame("spectator-99");var offline=runtime.OfflineFrame;
+                foreach(var player in spectator.Players){
+                    Assert.AreSame(player,offline.Views[player.OwnerId]);
+                    Assert.True(player.Buildings.Where(b=>b.Owner!=player.Owner).All(b=>b.PrivateState==null));
+                }
+            }
+        }
         [Test] public void RuntimeCapabilityAndSpeedDoNotGrantCommands()
         {
             using(var r=new PlayableRuntime(PlayableProfile.Default,9,7,autonomousOwnerAi:false,spectator:true,startPaused:true))

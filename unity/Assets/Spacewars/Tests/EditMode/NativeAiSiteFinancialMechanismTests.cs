@@ -43,6 +43,29 @@ namespace Spacewars.Tests.EditMode
         {p=p??PlayableProfile.Default;var opening=Opening();b.ObserveBank(o.Credits);Call(f,"Reconcile",o,p,AiProfile.Initial,opening,b,a,ex);var old=Call(f,"Detach",b);Call(f,"Observe",o,p,AiProfile.Initial,opening,b,a,ex,old,protect,allowed);}
         private static void Validate(object f,AiBudgetLedger b,AiDecisionArbiter a,long tick,PlayableProfile p=null)
         {p=p??PlayableProfile.Default;Call(f,"Validate",p,AiProfile.Initial,b,a,tick,41,TerritoryRules.Sites(p),2);}
+        [TestCase(3)][TestCase(4)]
+        public void PreparationRequiresFullQuoteAndReleasesOnFundingLoss(int siteId)
+        {
+            var p=PlayableProfile.Default;var f=Start();var b=new AiBudgetLedger("player-1",71);var a=new AiDecisionArbiter(AiProfile.Initial);var ex=new AiExpansionPlanner("player-1");
+            int cost=TerritoryRules.Cost(p,TerritoryRules.Sites(p).Single(s=>s.Id==siteId).Kind);
+            int Preparation(PlayableAiObservation o)=>(int)Call(f,"PreparationSite",o,p,AiProfile.Initial,b,a,ex,true);
+            foreach(int cash in new[]{0,cost-1,cost})
+            {
+                var o=View(cash,cash,siteId:siteId);Observe(f,b,a,ex,o);
+                Assert.AreEqual(cash==cost?siteId:0,Preparation(o),"preparation requires the exact full current quote");
+            }
+            var funded=View(cost+1,cost,siteId:siteId);Observe(f,b,a,ex,funded);
+            var registry=new AiArmyRegistry("player-1",71,AiProfile.Initial,AiDifficulty.Fighter);var scout=new AiScoutPlanner();
+            AiKnowledgeState Knowledge(PlayableAiObservation o)=>new AiKnowledgeState(o.OwnerId,o.Generation,o.Tick,Array.Empty<AiKnownContact>(),new[]{new AiVisitedArea(siteId,o.Tick,true,false)});
+            var move=scout.Plan(funded,Knowledge(funded),registry,p,AiProfile.Initial,2,Preparation(funded));
+            Assert.NotNull(move);scout.Commit(funded,move,registry,Preparation(funded));Assert.True(scout.IsPreparationActor(registry,siteId,13));
+            scout.Observe(funded,Knowledge(funded),registry,AiProfile.Initial,2,Preparation(funded));Assert.Greater(registry.ArmyFor(13),0);
+            var lost=View(cost+2,cost-1,siteId:siteId);Observe(f,b,a,ex,lost);Assert.Zero(Preparation(lost));
+            scout.Observe(lost,new AiKnowledgeState(lost.OwnerId,lost.Generation,lost.Tick,Array.Empty<AiKnownContact>(),Array.Empty<AiVisitedArea>()),registry,AiProfile.Initial,2,Preparation(lost));Assert.Zero(registry.ArmyFor(13),"unaccepted preparation releases on loss of full funding");
+            var unsafeView=View(cost+3,cost,siteId:siteId,safe:false);Observe(f,b,a,ex,unsafeView);Assert.Zero(Preparation(unsafeView));
+            Assert.Zero(ex.Capture().SiteId,"preparation never invents an accepted expansion obligation");
+        }
+
         [Test]
         public void NewFinancialGoalAndExpiryWaitForObservedHomeReady()
         {

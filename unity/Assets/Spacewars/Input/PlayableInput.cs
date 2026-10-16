@@ -21,6 +21,7 @@ namespace Spacewars.Input
         // 0 world, 1 compact, 2 tactical, 3 tactical backdrop (consumes input).
         public Func<Vector2,int> MapAt;
         public Action<int,Vector2,Vector2,bool> MapSelect;
+        public Action<int,Vector2> MapPan;
         public Action<int,Vector2,bool,bool> MapOrder;
         private int mapDrag;
         public Action<Vector2> Pan, EdgePan;
@@ -29,7 +30,9 @@ namespace Spacewars.Input
         public Action<Vector2, Vector2, bool> Drag;
         public Action<bool> AttackModeChanged;
         public Func<Vector2, bool> IsPointerOverUi;
+        public Func<Vector2, bool> IsPointerBlockingCamera;
         public Func<bool> IsKeyboardInUi;
+        public Func<bool> IsKeyboardBlockingCamera;
         public Func<bool> CancelContext;
         public Func<bool> CanIssueAttack;
         public bool SourceSeatSemantics;
@@ -150,7 +153,7 @@ namespace Spacewars.Input
                 else if(WorldAllowed)DispatchPointerEdge(edge);
             }
             if (!WorldAllowed) { ClearMode(); CloseMap?.Invoke(); return; }
-            if (keyboard != null && IsKeyboardInUi?.Invoke()!=true)
+            if (keyboard != null && (IsKeyboardBlockingCamera??IsKeyboardInUi)?.Invoke()!=true)
             {
                 var axis = new Vector2((keyboard.rightArrowKey.isPressed ? 1 : 0) - (keyboard.leftArrowKey.isPressed ? 1 : 0),
                     (keyboard.upArrowKey.isPressed ? 1 : 0) - (keyboard.downArrowKey.isPressed ? 1 : 0));
@@ -160,13 +163,18 @@ namespace Spacewars.Input
             if (mouse == null) return;
             Vector2 position = mouse.position.ReadValue();
             if (dragging) Drag?.Invoke(origin, position, true);
-            if (mapDrag > 0) Drag?.Invoke(origin, position, mapDrag == 2);
-            if ((MapAt?.Invoke(position) ?? 0) > 0 || IsPointerOverUi?.Invoke(position) == true) return;
-            if(IsKeyboardInUi?.Invoke()!=true)
+            if (mapDrag > 0)
+            {
+                Drag?.Invoke(origin, position, mapDrag == 2);
+                if (mapDrag == 1 && mouse.leftButton.isPressed && (MapAt?.Invoke(position) ?? 0) == 1) MapPan?.Invoke(1, position);
+            }
+            if ((MapAt?.Invoke(position) ?? 0) > 0) return;
+            if(IsKeyboardInUi?.Invoke()!=true&&(IsPointerBlockingCamera??IsPointerOverUi)?.Invoke(position)!=true)
             {
                 var edgeAxis=EdgePanAxis?.Invoke(position)??Vector2.zero;
                 if(edgeAxis.sqrMagnitude>0)EdgePan?.Invoke(edgeAxis);
             }
+            if(IsPointerOverUi?.Invoke(position)==true)return;
             float scroll = mouse.scroll.ReadValue().y;
             if (scroll != 0) Zoom?.Invoke(scroll);
         }
@@ -211,7 +219,7 @@ namespace Spacewars.Input
                     if (map < 3)
                     {
                     if (attackMode&&CommandAllowed) { if(CanIssueAttack?.Invoke()!=false){MapOrder?.Invoke(map, position, true, edge.Append); ResetMode();} }
-                        else { origin = position; mapDrag = map; }
+                        else { origin = position; mapDrag = map; if(map==1)MapPan?.Invoke(map,position); }
                     }
                 }
                 else if (!overUi)

@@ -572,7 +572,14 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void DefenseRecovery_AggregatePendingCapacityRoundtripsAcrossReactionLongerThanCadence()
         {
-            var c=DefenseConfig();var data=AiProfile.Initial.CopyData();data.revision++;
+            var basis=DefenseConfig();
+            // Capacity=1 cannot admit macro work while survival still owns every slot.
+            // Keep the 100-tick/reaction/restore contract, but place the observed threat
+            // within the existing defenders' weapon range so actual combat clears it.
+            var scenario=basis.ScenarioUnits.Select(u=>u.LogicalPlayer==2?new OfflineScenarioUnit(u.LogicalPlayer,u.Kind,new NavPoint(-12,-4),u.Heading,u.Upgraded):u).ToArray();
+            Assert.True(scenario.Where(u=>u.LogicalPlayer==1).Any(u=>AiOpponentSelector.Distance(u.Position,scenario.Single(e=>e.LogicalPlayer==2).Position)<=P.TankRange));
+            var c=new OfflineMatchConfiguration(P,basis.SourceIdentity,basis.MapIdentity,basis.RouteProvenance,basis.Seed,basis.Roster.ToArray(),basis.Starts.ToArray(),basis.Sites.ToArray(),basis.Obstacles.ToArray(),new double[,]{{0,100},{100,0}},scenario:scenario,scenarioBuildings:basis.ScenarioBuildings.ToArray());
+            var data=AiProfile.Initial.CopyData();data.revision++;
             data.fields.Single(f=>f.path=="difficulty.fighter.reactionSeconds").value=2;
             data.fields.Single(f=>f.path=="difficulty.fighter.actionsPerDecision").value=1;
             data.fields.Single(f=>f.path=="difficulty.recruit.actionsPerDecision").value=1;
@@ -588,7 +595,8 @@ namespace Spacewars.Tests.EditMode
                     Assert.LessOrEqual(items.Length,1,"Aggregate accepted pending actions must obey the existing C9 capacity, including old actions plus newly selected policies");
                     Assert.DoesNotThrow(()=>{var b=PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c,ai);CollectionAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes());b.Stop();});
                 }
-                Assert.True(pending);Assert.True(macro);a.Stop();
+                TestContext.WriteLine("Aggregate capacity diagnostic: pendingDefense="+pending+" pendingMacro="+macro+" bank="+a.ParticipantView("west-owner").Credits+" records="+string.Join(" | ",((PlayableAiOwnerLoop)Owner(a)).Checkpoint.Records.Select(x=>x.Policy+":"+x.Status+":"+x.DueTick+":"+x.Message)));
+                Assert.True(pending,"actual defense was admitted");Assert.True(macro,"actual affordable macro work was admitted alongside the capacity-bound defense lifecycle");a.Stop();
             }
         }
         private static byte[] LoopBytes(object loop)

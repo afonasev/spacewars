@@ -21,6 +21,7 @@ namespace Spacewars.Presentation
         }
         public static void Save(GameplayAudioProfile candidate)
         {candidate.Validate();var text=JsonUtility.ToJson(candidate);PlayerPrefs.SetString(Key,text);PlayerPrefs.Save();current=JsonUtility.FromJson<GameplayAudioProfile>(text);}
+        public static void UseSession(GameplayAudioProfile profile){profile.Validate();current=JsonUtility.FromJson<GameplayAudioProfile>(JsonUtility.ToJson(profile));}
         public static void Reload()=>current=null;
         public static VisualElement Open(VisualElement root,NativeMenuNavigation navigation,Action closed)
         {

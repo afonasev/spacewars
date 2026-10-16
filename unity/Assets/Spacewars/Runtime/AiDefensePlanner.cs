@@ -34,11 +34,18 @@ namespace Spacewars.Runtime
         {if(string.IsNullOrWhiteSpace(owner)||generation<=0)throw new ArgumentException("Defense identity");this.owner=owner;this.generation=generation;}
         private void Bind(PlayableAiObservation o)
         {if(o==null||o.OwnerId!=owner||o.Generation!=generation)throw new ArgumentException("Defense observation binding");}
+        internal static PlayableEntitySnapshot[] LastHeadquartersAttackers(PlayableAiObservation o)
+        {
+            var headquarters=o.Buildings.Where(b=>b.Owner==o.Owner&&b.Health>0&&b.Phase!=ConstructionPhase.Pending&&b.Kind==PlayableBuildingKind.Headquarters).ToArray();
+            if(headquarters.Length!=1)return Array.Empty<PlayableEntitySnapshot>();
+            var sources=o.OwnCenterDamage.Where(d=>d.CenterId==headquarters[0].Id).Select(d=>d.AttackerId).ToArray();
+            return o.Entities.Where(e=>sources.Contains(e.Id)&&o.IsHostile(e.Owner)&&e.Health>0&&o.Vision!=null&&o.Vision.IsVisible(e.Position)).OrderBy(e=>e.Id).ToArray();
+        }
         public static PlayableEntitySnapshot[] Threats(PlayableAiObservation o,PlayableProfile p)
         {
             var centers=o.Buildings.Where(b=>b.Owner==o.Owner&&b.Health>0&&(b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost)).ToArray();
             return o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0&&centers.Any(c=>Distance(e.Position,c.Position)<=(c.Kind==PlayableBuildingKind.Headquarters?p.HeadquartersVisionRange:p.OutpostVisionRange)))
-                .OrderBy(e=>e.Id).ToArray();
+                .Concat(LastHeadquartersAttackers(o)).GroupBy(e=>e.Id).Select(g=>g.First()).OrderBy(e=>e.Id).ToArray();
         }
         private static PlayableEntitySnapshot[] LocalThreats(PlayableAiObservation o,PlayableProfile p,PlayableEntitySnapshot target)
         {
@@ -200,6 +207,8 @@ namespace Spacewars.Runtime
         public PlayableAiAction Propose(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiArmyRegistry registry)
         {
             Bind(o);if(registry==null||registry.OwnerId!=owner||registry.Generation!=generation)throw new ArgumentException("Defense registry binding");if(pendingId!=0)return null;
+            var survival=LastHeadquartersAttackers(o);
+            if(survival.Length>0)return ProposeSurvival(o,registry,survival);
             var threats=Threats(o,p);if(threats.Length==0)return null;
             var own=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0).ToArray();
             var groups=registry.Capture().Armies.Where(a=>a.Major&&a.Phase!=AiArmyPhase.Disbanded&&(Active?a.Id==armyId:true)).Select(a=>new
@@ -227,6 +236,35 @@ namespace Spacewars.Runtime
             var units=choice.Units;
             if(Active&&units.All(u=>u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Attack&&u.CurrentOrder.TargetId==choice.Target.Id))return null;
             return new PlayableAiAction(nextId,owner,o.ProfileId,o.ProfileRevision,generation,o.SnapshotSequence,PlayableCommandKind.Attack,units.Select(u=>u.Id).ToArray(),choice.Target.Position,targetId:choice.Target.Id,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+        }
+        private PlayableAiAction ProposeSurvival(PlayableAiObservation o,AiArmyRegistry registry,PlayableEntitySnapshot[] attackers)
+        {
+            var own=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&!u.Held&&u.Queue==null&&
+                !(u.CurrentOrder!=null&&u.OrderStamp?.Origin==PlayableOrderOrigin.Human)).ToArray();
+            // New production is idle; never seize a human order, queue or scout assignment.
+            var free=own.Where(u=>registry.ArmyFor(u.Id)==0&&u.CurrentOrder==null&&u.Queue==null&&u.NavigationOutcome==NavigationOutcome.Idle&&AiRosterCatalog.Initial.For(u.Kind).lineWeight>0).ToArray();
+            var groups=registry.Capture().Armies.Where(a=>a.Major&&a.Phase!=AiArmyPhase.Disbanded&&(Active?a.Id==armyId:true)).ToArray();
+            var choices=new List<Choice>();
+            foreach(var target in attackers)
+            {
+                var available=free.Where(u=>Route(o,u,target)!=null).ToArray();
+                foreach(var group in groups)
+                {
+                    var members=own.Where(u=>group.Members.Contains(u.Id)).ToArray();
+                    // Keep whole-group ownership on first preemption. Once Defense owns
+                    // the group, an unavailable member must not block reachable defenders.
+                    var reachable=members.Where(u=>Route(o,u,target)!=null).ToArray();
+                    if(!Active&&reachable.Length!=group.Members.Length)continue;
+                    var units=reachable.Concat(Active?available:Array.Empty<PlayableEntitySnapshot>()).OrderBy(u=>u.Id).ToArray();
+                    if(!units.Any(u=>AiRosterCatalog.Initial.For(u.Kind).lineWeight>0))continue;
+                    choices.Add(new Choice{ArmyId=group.Id,Units=units,Target=target,Distance=units.Average(u=>RouteDistance(Route(o,u,target)))});
+                }
+                if(!Active&&groups.Length<registry.MajorCap&&available.Length>0)
+                    choices.Add(new Choice{Units=available,Target=target,Distance=available.Average(u=>RouteDistance(Route(o,u,target)))});
+            }
+            var choice=choices.OrderBy(c=>c.Distance).ThenBy(c=>c.ArmyId).ThenBy(c=>c.Target.Id).FirstOrDefault();
+            if(choice==null||choice.Units.All(u=>u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Attack&&u.CurrentOrder.TargetId==choice.Target.Id))return null;
+            return new PlayableAiAction(nextId,owner,o.ProfileId,o.ProfileRevision,generation,o.SnapshotSequence,PlayableCommandKind.Attack,choice.Units.Select(u=>u.Id).ToArray(),choice.Target.Position,targetId:choice.Target.Id,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
         }
         internal PlayableAiAction ProposeAssembly(PlayableAiObservation o,PlayableProfile p,AiArmyRegistry registry,IEnumerable<PlayableAiTraceRecord> records)
         {
@@ -258,9 +296,19 @@ namespace Spacewars.Runtime
         public void Commit(PlayableAiObservation o,PlayableAiAction action,AiArmyRegistry registry)
         {
             Bind(o);if(action==null||action.ActionId!=nextId||pendingId!=0||action.PlayerId!=owner||action.Generation!=generation||action.SnapshotSequence!=o.SnapshotSequence||registry.OwnerId!=owner||registry.Generation!=generation||action.Kind!=PlayableCommandKind.Attack||!o.Entities.Any(e=>e.Id==action.TargetId&&o.IsHostile(e.Owner)&&e.Health>0))throw new InvalidOperationException("Defense commit binding");
-            var id=registry.ArmyFor(action.EntityIds[0]);
+            bool survival=LastHeadquartersAttackers(o).Any(e=>e.Id==action.TargetId);
+            var assigned=action.EntityIds.Select(registry.ArmyFor).Where(assignedArmy=>assignedArmy!=0).Distinct().ToArray();
+            if(assigned.Length>1||Active&&assigned.Any(assignedArmy=>assignedArmy!=armyId))throw new InvalidOperationException("Defense crosses army ownership");
+            var id=Active?armyId:assigned.FirstOrDefault();
             if(id==0){if(!registry.TryCreate(o,AiArmyRole.MobileDefense,Policy,action.EntityIds,out id))throw new InvalidOperationException("Defense slot admission");}
-            else if(!(Active&&id==armyId&&registry.Capture().Armies.Any(a=>a.Id==id&&a.TacticalOwner==Policy))&&!registry.PreemptDefense(id,action.EntityIds))throw new InvalidOperationException("Defense atomic ownership admission");
+            else
+            {
+                var original=action.EntityIds.Where(unit=>registry.ArmyFor(unit)==id).ToArray();
+                if(!(Active&&id==armyId&&registry.Capture().Armies.Any(a=>a.Id==id&&a.TacticalOwner==Policy))&&!registry.PreemptDefense(id,original))throw new InvalidOperationException("Defense atomic ownership admission");
+                var additions=action.EntityIds.Where(unit=>registry.ArmyFor(unit)==0).ToArray();
+                if(additions.Length>0&&(!survival||!registry.TryReinforce(o,id,Policy,additions)))throw new InvalidOperationException("Defense survival reinforcement admission");
+            }
+            if(survival)registry.JoinReinforcements(id,Policy,action.EntityIds);
             armyId=id;targetId=action.TargetId;emergencyObserved=true;
             previousDistance=o.Entities.Where(u=>u.Owner==o.Owner&&action.EntityIds.Contains(u.Id)).Average(u=>Distance(u.Position,action.Target));previousTargetHealth=o.Entities.Single(e=>e.Id==targetId&&o.IsHostile(e.Owner)).Health;
             registry.UpdateMission(id,Policy,AiArmyPhase.Staging,o.Tick,"defend:"+targetId,rally:action.Target);

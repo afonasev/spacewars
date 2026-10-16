@@ -14,10 +14,13 @@ namespace Spacewars.Presentation
         private readonly Func<Gamepad> gamepad;
         private readonly Func<bool> worldOwnsInput,keyboardAllowed;
         public Func<bool> Focused;
+        // Directional world input can stay active while a HUD button retains submit focus.
+        public Func<bool> WorldOwnsNavigation;
         private VisualElement scope;
         private Action back;
         private Label hints;
         private bool dispatching,armed;
+        private readonly HashSet<KeyCode> pressedKeys=new HashSet<KeyCode>();
         private readonly HashSet<NavigationSubmitEvent> ownedSubmits=new HashSet<NavigationSubmitEvent>();
         private Vector2 held;
         private float repeatAt;
@@ -28,11 +31,13 @@ namespace Spacewars.Presentation
         public VisualElement Scope => scope;
         // A route may consume Start for its own ready action instead of treating it as Back.
         public Func<Gamepad,bool> Start;
+        public Func<Gamepad,bool> North;
         public NativeMenuNavigation(VisualElement root):this(root,null){}
         public NativeMenuNavigation(VisualElement root,Func<Gamepad> gamepad,Func<bool> worldOwnsInput=null,Func<bool> keyboardAllowed=null)
         {
             this.root=root;this.gamepad=gamepad??(()=>Gamepad.current);this.worldOwnsInput=worldOwnsInput;this.keyboardAllowed=keyboardAllowed;
             root.RegisterCallback<KeyDownEvent>(KeyDown,TrickleDown.TrickleDown);
+            root.RegisterCallback<KeyUpEvent>(KeyUp,TrickleDown.TrickleDown);root.RegisterCallback<WheelEvent>(Wheel,TrickleDown.TrickleDown);
             root.RegisterCallback<NavigationMoveEvent>(BlockMove,TrickleDown.TrickleDown);
             root.RegisterCallback<NavigationSubmitEvent>(BlockSubmit,TrickleDown.TrickleDown);
             root.RegisterCallback<NavigationCancelEvent>(BlockCancel,TrickleDown.TrickleDown);
@@ -41,6 +46,7 @@ namespace Spacewars.Presentation
         public void UseGamepad(){UsingGamepad=true;UpdateHints();}
         public void SetScope(VisualElement element,Action onBack=null,VisualElement preferred=null,Label hintLabel=null)
         {
+            if(scope!=null)foreach(var label in scope.Query<Label>(name:"menu-pad-glyph").ToList())label.RemoveFromHierarchy();
             scope=element;back=onBack;hints=hintLabel;armed=false;held=Vector2.zero;
             if(scope==null)return;
             Focus(Visible(preferred)?preferred:Controls().FirstOrDefault());UpdateHints();
@@ -59,9 +65,10 @@ namespace Spacewars.Presentation
             if(pad==null){armed=true;return;}
             Vector2 axis=pad.dpad.ReadValue();if(axis.sqrMagnitude<.1f)axis=pad.leftStick.ReadValue();
             axis=axis.magnitude<.55f?Vector2.zero:Mathf.Abs(axis.x)>Mathf.Abs(axis.y)?new Vector2(Mathf.Sign(axis.x),0):new Vector2(0,Mathf.Sign(axis.y));
+            bool north=pad.buttonNorth.isPressed;
             bool confirm=pad.buttonSouth.isPressed,cancel=pad.buttonEast.isPressed||pad.startButton.isPressed;
-            if(axis!=Vector2.zero||pad.buttonSouth.wasPressedThisFrame||pad.buttonEast.wasPressedThisFrame||pad.startButton.wasPressedThisFrame){UseGamepad();}
-            if(!armed){if(axis==Vector2.zero&&!confirm&&!cancel)armed=true;return;}
+            if(axis!=Vector2.zero||pad.buttonNorth.wasPressedThisFrame||pad.buttonSouth.wasPressedThisFrame||pad.buttonEast.wasPressedThisFrame||pad.startButton.wasPressedThisFrame){UseGamepad();}
+            if(!armed){if(axis==Vector2.zero&&!confirm&&!cancel&&!north)armed=true;return;}
             if(axis!=Vector2.zero&&(axis!=held||now>=repeatAt))
             {Move(axis);repeatAt=now+(axis!=held?.35f:.10f);}
             held=axis;
@@ -71,6 +78,7 @@ namespace Spacewars.Presentation
                 if(Start?.Invoke(pad)!=true)Back();
                 return;
             }
+            if(pad.buttonNorth.wasPressedThisFrame&&North?.Invoke(pad)==true)return;
             if(pad.buttonSouth.wasPressedThisFrame)Activate();
             var focused=root.focusController?.focusedElement as VisualElement;
             if(UsingGamepad&&(!Visible(focused)||!scope.Contains(focused)))Focus(Controls().FirstOrDefault(x=>x.name==lastFocus)??Controls().FirstOrDefault());
@@ -131,32 +139,47 @@ namespace Spacewars.Presentation
         private void Focus(VisualElement element)
         {
             if(element==null)return;element.Focus();lastFocus=element.name;
-            for(var parent=element.parent;parent!=null;parent=parent.parent)if(parent is ScrollView scroll){scroll.ScrollTo(element);break;}
+            for(var parent=element.parent;parent!=null;parent=parent.parent)if(parent is ScrollView scroll){scroll.ScrollTo(element);break;}UpdateHints();
         }
+        private void KeyUp(KeyUpEvent evt)=>pressedKeys.Remove(evt.keyCode);
+        private void Wheel(WheelEvent evt){if(keyboardAllowed?.Invoke()!=false){UsingGamepad=false;UpdateHints();}}
         private void KeyDown(KeyDownEvent evt)
         {
             if(scope==null||dispatching||DropdownOpen)return;if(keyboardAllowed?.Invoke()==false){evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);return;}UsingGamepad=false;UpdateHints();
             // Ordinary typing remains native; only escape/tab leave a text editor.
             bool typing=evt.target is VisualElement target&&(target is TextField||target.GetFirstAncestorOfType<TextField>()!=null);
+            bool oneShot=evt.keyCode==KeyCode.Escape||!typing&&(evt.keyCode==KeyCode.Return||evt.keyCode==KeyCode.KeypadEnter||evt.keyCode==KeyCode.Space);
+            if(oneShot&&!pressedKeys.Add(evt.keyCode)){evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);return;}
             if(evt.keyCode==KeyCode.Escape)Back();
             else if(evt.keyCode==KeyCode.Tab)Move(evt.shiftKey?Vector2.up:Vector2.down);
             else if(!typing&&evt.keyCode==KeyCode.UpArrow)Move(Vector2.up);
             else if(!typing&&evt.keyCode==KeyCode.DownArrow)Move(Vector2.down);
             else if(!typing&&evt.keyCode==KeyCode.LeftArrow)Move(Vector2.left);
             else if(!typing&&evt.keyCode==KeyCode.RightArrow)Move(Vector2.right);
-            else if(!typing&&(evt.keyCode==KeyCode.Return||evt.keyCode==KeyCode.Space))Activate();
+            else if(!typing&&(evt.keyCode==KeyCode.Return||evt.keyCode==KeyCode.KeypadEnter||evt.keyCode==KeyCode.Space))Activate();
             else return;
             evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);
         }
-        private void BlockMove(NavigationMoveEvent evt){if((Active||worldOwnsInput?.Invoke()==true)&&!dispatching&&!DropdownOpen){evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);}}
+        private void BlockMove(NavigationMoveEvent evt){if((Active||worldOwnsInput?.Invoke()==true||WorldOwnsNavigation?.Invoke()==true)&&!dispatching&&!DropdownOpen){evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);}}
         private void BlockSubmit(NavigationSubmitEvent evt){if(ownedSubmits.Remove(evt))return;if(!DropdownOpen&&(Active||worldOwnsInput?.Invoke()==true))evt.StopImmediatePropagation();}
         private void BlockCancel(NavigationCancelEvent evt){if((Active||worldOwnsInput?.Invoke()==true)&&!dispatching&&!DropdownOpen)evt.StopImmediatePropagation();}
         private void PointerDown(PointerDownEvent evt){if(keyboardAllowed?.Invoke()==false)return;UsingGamepad=false;UpdateHints();}
         private void UpdateHints()
         {
-            if(hints==null)return;
             var pad=gamepad();
-            hints.text=UsingGamepad?(NativeControllerGlyph.Symbol("A",pad)+"  Выбрать    "+NativeControllerGlyph.Symbol("B",pad)+"  Назад    ↔  Изменить"):"↑↓ / Tab  Выбрать    Enter  Открыть    Esc  Назад";
+            if(scope!=null)
+            {
+                foreach(var label in scope.Query<Label>(name:"menu-pad-glyph").ToList())label.RemoveFromHierarchy();
+                if(UsingGamepad)foreach(var button in scope.Query<Button>().ToList())
+                {
+                    if(!Visible(button))continue;bool isBack=back!=null&&(button.name?.EndsWith("-back")==true||button.name?.EndsWith("-cancel")==true);
+                    bool isReset=scope.name=="settings-screen"&&button.name=="settings-reset-all";
+                    if(!isReset&&!isBack&&root.focusController?.focusedElement!=button)continue;
+                    var glyph=new Label(isReset?NativeControllerGlyph.TopSymbol(pad):NativeControllerGlyph.Symbol(isBack?"B":"A",pad)){name="menu-pad-glyph",pickingMode=PickingMode.Ignore};glyph.style.position=Position.Absolute;glyph.style.right=5;glyph.style.top=5;glyph.style.fontSize=11;button.Add(glyph);
+                }
+            }
+            if(hints==null)return;
+            hints.text=UsingGamepad?(NativeControllerGlyph.Symbol("A",pad)+"  Выбрать    "+NativeControllerGlyph.Symbol("B",pad)+"  Назад    ↔  Изменить"):"";
         }
         private void OpenKeyboard(TextField field)
         {
@@ -177,6 +200,7 @@ namespace Spacewars.Presentation
         public void Dispose()
         {
             root.UnregisterCallback<KeyDownEvent>(KeyDown,TrickleDown.TrickleDown);
+            root.UnregisterCallback<KeyUpEvent>(KeyUp,TrickleDown.TrickleDown);root.UnregisterCallback<WheelEvent>(Wheel,TrickleDown.TrickleDown);
             root.UnregisterCallback<NavigationMoveEvent>(BlockMove,TrickleDown.TrickleDown);
             root.UnregisterCallback<NavigationSubmitEvent>(BlockSubmit,TrickleDown.TrickleDown);
             root.UnregisterCallback<NavigationCancelEvent>(BlockCancel,TrickleDown.TrickleDown);

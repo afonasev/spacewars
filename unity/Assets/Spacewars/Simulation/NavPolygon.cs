@@ -4,11 +4,70 @@ using System.Linq;
 namespace Spacewars.Simulation
 {
     // Immutable simple polygon; the triangulation and collision describe the same closed footprint.
-    public sealed class NavPolygon
+    public sealed partial class NavPolygon : INavStorageFacade
     {
         private readonly NavPoint[] vertices; private readonly int[] triangles;
         public IReadOnlyList<NavPoint> Vertices{get;} public IReadOnlyList<int> Triangles{get;}
         public double MinX{get;} public double MaxX{get;} public double MinZ{get;} public double MaxZ{get;}
+        private readonly OwnedBuffers owned;
+        NavOwnedStorage INavStorageFacade.StorageRoot=>owned;
+        internal NavOwnedStorage StorageRoot=>owned;
+        internal sealed partial class OwnedBuffers : NavOwnedStorage
+        {
+            internal NavRetainedArray<NavPoint> Points;internal NavRetainedArray<int> Indices;internal NavPolygon Facade;private bool released;
+            internal OwnedBuffers():base(192){}
+            internal override void ReleaseOwner(){if(released)return;released=true;Release();}
+            protected override void ReleaseEdges(){Facade=null;Points?.ReleaseOwner();Indices?.ReleaseOwner();}
+        }
+        private NavPolygon(NavPolygon source,OwnedBuffers storage)
+        {owned=storage;vertices=storage.Points.ReadOnlyBacking;triangles=storage.Indices.ReadOnlyBacking;Vertices=storage.Points;Triangles=storage.Indices;MinX=source.MinX;MaxX=source.MaxX;MinZ=source.MinZ;MaxZ=source.MaxZ;}
+        internal static NavPolygon CopyOwned(NavPolygon source,INavStorageReservation reservation)
+        {
+            if(source==null||reservation==null)throw new ArgumentNullException();
+            using(var allocation=new NavStorageAllocation(reservation.TryReserve)){
+                allocation.Reserve(192);var storage=allocation.Register(new OwnedBuffers());
+                storage.Points=NavRetainedArray<NavPoint>.Copy(source.Vertices,reservation.TryReserve);storage.Indices=NavRetainedArray<int>.Copy(source.Triangles,reservation.TryReserve);
+                storage.Facade=new NavPolygon(source,storage);storage.Retain();return storage.Facade;
+            }
+        }
+        // Admit the construction itself, including triangulation workspace;
+        // copying an already allocated polygon cannot cover that allocation.
+        internal static NavPolygon CreateOwned(IReadOnlyList<NavPoint> source,INavStorageReservation reservation)
+        {
+            if(source==null||reservation==null)throw new ArgumentNullException();
+            int count=source.Count;if(count<3)throw new ArgumentException("Invalid polygon vertices");
+            int indexCount=checked(3*(count-2));
+            using(var scratch=NavStorageScratch.Reserve(reservation,checked(64L+4L*count+64L+4L*indexCount)))
+            using(var allocation=new NavStorageAllocation(reservation.TryReserve)){
+                allocation.Reserve(192);var storage=allocation.Register(new OwnedBuffers());
+                storage.Points=NavRetainedArray<NavPoint>.Copy(source,reservation.TryReserve);
+                var points=storage.Points.ReadOnlyBacking;
+                double area=0,minX=double.PositiveInfinity,maxX=double.NegativeInfinity,minZ=double.PositiveInfinity,maxZ=double.NegativeInfinity;
+                for(int i=0;i<count;i++){
+                    var a=points[i];var b=points[(i+1)%count];
+                    if(double.IsNaN(a.X)||double.IsInfinity(a.X)||double.IsNaN(a.Z)||double.IsInfinity(a.Z))throw new ArgumentException("Invalid polygon vertices");
+                    if(Distance(a,b)<Epsilon)throw new ArgumentException("Zero polygon edge");
+                    area+=a.X*b.Z-b.X*a.Z;
+                    minX=Math.Min(minX,a.X);maxX=Math.Max(maxX,a.X);minZ=Math.Min(minZ,a.Z);maxZ=Math.Max(maxZ,a.Z);
+                    for(int j=i+2;j<count;j++){if(i==0&&j==count-1)continue;if(Intersects(a,b,points[j],points[(j+1)%count]))throw new ArgumentException("Self-intersecting polygon");}
+                }
+                if(Math.Abs(area)<Epsilon)throw new ArgumentException("Zero polygon area");
+                // This storage is still private and has no capture/authority edge.
+                if(area<0)Array.Reverse(points);
+                var remaining=new int[count];for(int i=0;i<count;i++)remaining[i]=i;
+                var indices=new int[indexCount];int left=count,used=0;
+                while(left>3){bool clipped=false;for(int k=0;k<left;k++){
+                    int a=remaining[(k+left-1)%left],b=remaining[k],c=remaining[(k+1)%left];
+                    if(Cross(points[a],points[b],points[c])<=Epsilon)continue;
+                    bool occupied=false;for(int j=0;j<left;j++){int q=remaining[j];if(q!=a&&q!=b&&q!=c&&InTriangle(points[q],points[a],points[b],points[c])){occupied=true;break;}}
+                    if(occupied)continue;indices[used++]=a;indices[used++]=b;indices[used++]=c;
+                    Array.Copy(remaining,k+1,remaining,k,left-k-1);left--;clipped=true;break;
+                }if(!clipped)throw new ArgumentException("Polygon cannot be triangulated");}
+                for(int i=0;i<3;i++)indices[used++]=remaining[i];
+                storage.Indices=NavRetainedArray<int>.Copy(indices,reservation.TryReserve);
+                storage.Facade=new NavPolygon(storage,minX,maxX,minZ,maxZ);storage.Retain();return storage.Facade;
+            }
+        }
         private const double Epsilon=1e-9; // Numerical predicate tolerance, not a map parameter.
         public NavPolygon(IEnumerable<NavPoint> source)
         {

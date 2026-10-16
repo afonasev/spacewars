@@ -95,7 +95,7 @@ namespace Spacewars.Runtime
         }
         private void AdvanceFoundations()
         {
-            bool changed=false;
+            var foundations=new List<Building>();
             foreach(var b in buildings.Values)
             {
                 if(b.Phase!=ConstructionPhase.Pending||b.Sale!=null)continue;
@@ -110,9 +110,9 @@ namespace Spacewars.Runtime
                     if(TryEvacuate(b,u,n.Position))b.Evacuated.Add(u.Id);
                 }
                 if(occupied){b.BlockedReason=enemy?"Враг на площадке":"Освобождаем площадку";if(elapsed>=b.RetryAt)b.RetryAt=elapsed+profile.EvacuationRetrySeconds;continue;}
-                b.Phase=ConstructionPhase.Constructing;b.BlockedReason=null;b.Health=0;Sound(PlayableSoundKind.ConstructionStarted,b.Position,PlayableEntityKind.Tank,b.Owner,true);changed=true;
+                foundations.Add(b);
             }
-            if(changed)RebuildGeometry();
+            if(foundations.Count>0&&TryRebuildGeometry(foundations))foreach(var b in foundations)Sound(PlayableSoundKind.ConstructionStarted,b.Position,PlayableEntityKind.Tank,b.Owner,true);
         }
         private bool TryEvacuate(Building b,Unit u,NavPoint from)
         {

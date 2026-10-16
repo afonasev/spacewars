@@ -11,6 +11,31 @@ namespace Spacewars.Tests.EditMode
         [Serializable]private class Case{public double arc,duration,midY,progress,x,y;public bool wall;public int[] hits;}
         private static BallisticBody Body(int id,double x,double z,PlayableOwner owner=PlayableOwner.Enemy,bool building=false,double radius=1,double height=2)=>new BallisticBody(id,owner,new NavPoint(x,z),default,radius,height,100,building);
 
+        [TestCase(0d)][TestCase(.09)][TestCase(2d)]
+        public void TerrainBroadPhasePreservesEverySampleOnAuthoredMossAndBoundaryCases(double radius)
+        {
+            var map=new MossHighlandMap();var random=new Random(1564176781);
+            var solids=map.Solids.Concat(new[]{new NavObstacle(-1,-3,1,3),new NavObstacle(new NavPoint(5,5),2),
+                new NavObstacle(new NavPolygon(new[]{new NavPoint(-7,-5),new NavPoint(-3,-4),new NavPoint(-5,0)}),1,4)}).ToArray();
+            bool Full(BallisticPoint a,BallisticPoint b){
+                double distance=Math.Sqrt(Math.Pow(b.X-a.X,2)+Math.Pow(b.Z-a.Z,2)+Math.Pow(b.Y-a.Y,2));int steps=Math.Max(1,(int)Math.Ceiling(distance/.025));
+                for(int i=0;i<=steps;i++){double t=(double)i/steps;var point=new BallisticPoint(a.X+(b.X-a.X)*t,a.Y+(b.Y-a.Y)*t,a.Z+(b.Z-a.Z)*t);
+                    if(point.Y-radius<map.SurfaceHeight(point.Ground)-1e-5)return false;
+                    foreach(var solid in solids)if(point.Y+radius>=solid.Bottom&&point.Y-radius<=(double.IsNaN(solid.Top)?3:solid.Top)&&
+                        point.X+radius>=solid.MinX&&point.X-radius<=solid.MaxX&&point.Z+radius>=solid.MinZ&&point.Z-radius<=solid.MaxZ&&solid.DistanceSquared(point.Ground)<=radius*radius)return false;
+                }return true;
+            }
+            for(int i=0;i<120;i++){
+                var a=new BallisticPoint(random.NextDouble()*120-60,random.NextDouble()*6,random.NextDouble()*120-60);
+                var b=i%10==0?a:new BallisticPoint(random.NextDouble()*120-60,random.NextDouble()*6,random.NextDouble()*120-60);
+                Assert.AreEqual(Full(a,b),PlayableBallistics.TerrainLineClear(a,b,radius,solids,3,map.SurfaceHeight),"ray "+i);
+            }
+            foreach(double edge in new[]{-1-radius,-1-radius-1e-10,1+radius,1+radius+1e-10}){
+                var a=new BallisticPoint(edge,2,-3);var b=new BallisticPoint(edge,2,3);
+                Assert.AreEqual(Full(a,b),PlayableBallistics.TerrainLineClear(a,b,radius,solids,3,map.SurfaceHeight),"tangent "+edge);
+            }
+        }
+
         [Test]public void BuildingsInterceptAndShieldWhileUnitsDoNot()
         {
             var wall=Body(3,5,0,building:true,radius:.5,height:6);var target=Body(4,6,0);var friend=Body(5,4,1,PlayableOwner.Player);

@@ -89,15 +89,37 @@ namespace Spacewars.Tests.EditMode
             funding.Observe(o,p,AiProfile.Initial,b,arbiter,plan,allowed,PlayableUnitRules.Cost(p,PlayableEntityKind.Explorer));Assert.Greater(b.Reserved,0);Assert.AreEqual(PlayableUnitRules.Cost(p,PlayableEntityKind.Explorer),b.Available);Assert.AreEqual(176,a.ParticipantView("ai-4").Credits);var held=a.CaptureBytes();CollectionAssert.AreEqual(held,PlayableAuthorityTick.RestoreBytes(held,config).CaptureBytes());
             var domain=Get(a,"domain");var hq=o.Buildings.Single(x=>x.Owner==o.Owner&&x.Kind==PlayableBuildingKind.Headquarters);var nav=(NavigationSession)Get(domain,"navigation");var geometry=(NavGeometry)domain.GetType().GetProperty("Geometry",f).GetValue(domain);double radius=PlayableUnitRules.Radius(p,PlayableEntityKind.Tank);var point=Enumerable.Range(0,16).Select(i=>new NavPoint(hq.Position.X+Math.Cos(i*Math.PI/8)*p.HeadquartersVisionRange/2,hq.Position.Z+Math.Sin(i*Math.PI/8)*p.HeadquartersVisionRange/2)).First(v=>geometry.IsFree(v,radius)&&nav.Crowd.CanPlace(v,radius));domain.GetType().GetMethod("SpawnUnit",f).Invoke(domain,new object[]{point,PlayableOwner.Player,PlayableEntityKind.Tank});var threat=PlayableAiObservation.From(a.ParticipantView("ai-4"));Assert.True((bool)owner.GetType().GetMethod("TechnologyEmergency",f).Invoke(owner,new object[]{threat}));long paid=b.PaidTotal;owner.GetType().GetMethod("GuardDefenseDelivery",f).Invoke(owner,new[]{domain});Assert.IsEmpty(b.Capture().Reserved.Where(AiTechnologyFunding.IsFunding));Assert.AreEqual(paid,b.PaidTotal,"uncovered actual visible threat releases savings before any technology spend");a.Stop();
         }
+        [Test] public void Legacy3900NavigationSectionsMigrateIndependentlyOfIncompatibleAiBinding()
+        {
+            var root=new DirectoryInfo(Directory.GetCurrentDirectory());while(root!=null&&!File.Exists(Path.Combine(root.FullName,"workflow/project.json")))root=root.Parent;Assert.NotNull(root);
+            var legacy=File.ReadAllBytes(Path.Combine(root.FullName,"unity/Tests/Fixtures/o6-tech-funding/checkpoint-3900.world"));var current=File.ReadAllBytes(Path.Combine(root.FullName,"unity/Tests/Fixtures/o6-tech-funding/checkpoint-3900-nav-v8.world"));
+            Assert.AreEqual("adb5a83b5fc184ddd1dd74869c139fbef3a21aaba00a6c115f3f52be2c0e7f1c",Wire.Hash(legacy));Assert.AreEqual("689431f1a9f57cf971f8ffee84a51f4431978432262e509e0d2f225d3cffcc78",Wire.Hash(current));
+            var x=PlayableWorldState.Decode(legacy);var y=PlayableWorldState.Decode(current);CollectionAssert.AreEqual(x.Domain,y.Domain);CollectionAssert.AreEqual(x.AiAuthority,y.AiAuthority);CollectionAssert.AreEqual(x.Binding,y.Binding);CollectionAssert.AreEqual(x.Participants,y.Participants);CollectionAssert.AreEqual(x.RuntimeTransport,y.RuntimeTransport);
+            Assert.Throws<ArgumentException>(()=>WorldWire.Unpack(y.Navigation,WorldWire.ReadNavigationSessionState),"Historical v8 requires an explicit grammar");
+            var terrain=new AiTestMap();var profile=PlayableProfile.Create(PlayableProfile.Default.CopyData(),terrain);NavigationSession a=null,b=null;
+            NavigationSession Import(byte[] bytes,NavigationV8Format format){
+                using(var state=WorldWire.Unpack(bytes,r=>WorldWire.ReadNavigationSessionState(r,format))){
+                    var geometry=new NavGeometry(state.Geometry.HalfExtent,state.Geometry.Obstacles,state.Geometry.Revision);
+                    var navigation=state.NavigationGeometryIndex==0?geometry:new NavGeometry(state.NavigationGeometry.HalfExtent,state.NavigationGeometry.Obstacles,state.NavigationGeometry.Revision);
+                    var result=new NavigationSession(state.Generation,geometry,profile.Navigation,navigation,terrain);result.ConfigureMarch(profile.GroupMarchMaximumStretch,profile.Revision);try{result.RestoreState(state);return result;}catch{result.DestroyNavigationAuthority();throw;}
+                }
+            }
+            byte[] Capture(NavigationSession session){using(var state=session.CaptureState())return WorldWire.Pack(w=>WorldWire.Write(w,state));}
+            try{
+                a=Import(x.Navigation,NavigationV8Format.Unspecified);b=Import(y.Navigation,NavigationV8Format.MainInstalledLayout);Assert.AreNotSame(a.RoutePort,b.RoutePort);
+                CollectionAssert.AreEqual(PlayableWorldRestoreTests.FactBytes(a,true),PlayableWorldRestoreTests.FactBytes(b,true),"Independent migrated navigation authority agrees without AI import or simulation");
+                CollectionAssert.AreEqual(Capture(a),Capture(b));Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(a),a.PhysicalHostBudget.PhysicalBytes);Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(b),b.PhysicalHostBudget.PhysicalBytes);
+            }finally{a?.DestroyNavigationAuthority();b?.DestroyNavigationAuthority();if(a!=null)Assert.Zero(a.PhysicalHostBudget.PhysicalBytes);if(b!=null)Assert.Zero(b.PhysicalHostBudget.PhysicalBytes);}
+        }
         [Test] public void Legacy3900UpgradeAndCurrentV8FixtureKeepExactCompleteWorldState()
         {
             var root=new DirectoryInfo(Directory.GetCurrentDirectory());while(root!=null&&!File.Exists(Path.Combine(root.FullName,"workflow/project.json")))root=root.Parent;Assert.NotNull(root);
             var legacy=File.ReadAllBytes(Path.Combine(root.FullName,"unity/Tests/Fixtures/o6-tech-funding/checkpoint-3900.world"));var current=File.ReadAllBytes(Path.Combine(root.FullName,"unity/Tests/Fixtures/o6-tech-funding/checkpoint-3900-nav-v8.world"));
             Assert.AreEqual("adb5a83b5fc184ddd1dd74869c139fbef3a21aaba00a6c115f3f52be2c0e7f1c",Wire.Hash(legacy));Assert.AreEqual("689431f1a9f57cf971f8ffee84a51f4431978432262e509e0d2f225d3cffcc78",Wire.Hash(current));
             var p=PlayableProfile.Create(PlayableProfile.Default.CopyData(),new AiTestMap());var roster=Enumerable.Range(0,8).Select(i=>new OfflineParticipant("ai-"+i,i+1,i+1,OfflineControl.Ai)).ToArray();var config=((AiTestMap)p.AuthoredMap).Configuration(p,7109,roster);Assert.AreEqual(500,p.StartingCredits);Assert.IsEmpty(config.ScenarioUnits);Assert.IsEmpty(config.ScenarioBuildings);
-            var a=PlayableAuthorityTick.RestoreBytes(legacy,config);var b=PlayableAuthorityTick.RestoreBytes(current,config);PlayableAuthorityTick clone=null;
+            Assert.AreEqual(254,LegacyTransactionProfileCodec.Fields.Length);var a=PlayableAuthorityTick.ImportLegacyCheckpoint(legacy,config,NavigationV8Format.Unspecified,LegacyTransactionProfileFormat.Original254,AiProfile.Initial,LegacyAiProfileFormat.BeforeExpansionSelection);var b=PlayableAuthorityTick.ImportLegacyCheckpoint(current,config,NavigationV8Format.MainInstalledLayout,LegacyTransactionProfileFormat.Original254,AiProfile.Initial,LegacyAiProfileFormat.BeforeExpansionSelection);PlayableAuthorityTick clone=null;
             try{
-                CollectionAssert.AreEqual(current,a.CaptureBytes(),"Entire actual legacy-read upgrade matches immutable currentfixture");CollectionAssert.AreEqual(current,b.CaptureBytes(),"Current initial full world/AI capture exactlymatchesfixture");clone=PlayableAuthorityTick.RestoreBytes(b.CaptureBytes(),config);CollectionAssert.AreEqual(current,clone.CaptureBytes(),"Full current repeatedrestore/recapture remains exact");
+                Assert.Throws<ArgumentException>(()=>PlayableAuthorityTick.RestoreBytes(current,config),"ambiguousv8 cannot pick a grammar");var migrated=a.CaptureBytes();CollectionAssert.AreEqual(migrated,b.CaptureBytes(),"v7 and explicitmainv8 converge to the same actor-owned authority");clone=PlayableAuthorityTick.RestoreBytes(migrated,config);CollectionAssert.AreEqual(migrated,clone.CaptureBytes(),"New physical format recapture remains exact after accepted migration");
                 Assert.AreEqual(3900,a.Tick);Assert.AreEqual(a.Tick,b.Tick);Assert.AreEqual(176,a.ParticipantView("ai-4").Credits);Assert.AreEqual(176,b.ParticipantView("ai-4").Credits);Assert.AreEqual(PlayableWorldRestoreTests.Facts(a.Domain,true),PlayableWorldRestoreTests.Facts(b.Domain,true),"All independentlyread presentauthority fields remainexact; no normalization/exclusion");
                 var x=PlayableWorldState.Decode(legacy);var y=PlayableWorldState.Decode(current);Assert.AreEqual(x.Version,y.Version);Assert.AreEqual(x.Seed,y.Seed);Assert.AreEqual(x.Generation,y.Generation);Assert.AreEqual(x.Tick,y.Tick);Assert.AreEqual(x.SourceIdentity,y.SourceIdentity);
                 CollectionAssert.AreEqual(x.Domain,y.Domain);CollectionAssert.AreEqual(x.AiAuthority,y.AiAuthority);CollectionAssert.AreEqual(x.Binding,y.Binding);CollectionAssert.AreEqual(x.Participants,y.Participants);CollectionAssert.AreEqual(x.RuntimeTransport,y.RuntimeTransport);Assert.AreEqual(8,x.Vision.Length);for(int i=0;i<8;i++)CollectionAssert.AreEqual(x.Vision[i],y.Vision[i]);
@@ -105,8 +127,30 @@ namespace Spacewars.Tests.EditMode
                 // Pin the sole version-word difference and exact new metadata; compare every other byte.
                 for(int i=0;i<x.Navigation.Length;i++)if(i<13631||i>=13635)Assert.AreEqual(x.Navigation[i],y.Navigation[i],"existingNavbyte "+i);
                 CollectionAssert.AreEqual(new byte[]{1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0},y.Navigation.Skip(x.Navigation.Length).ToArray());
-                var oldNav=WorldWire.Unpack(x.Navigation,WorldWire.ReadNavigationSessionState);var newNav=WorldWire.Unpack(y.Navigation,WorldWire.ReadNavigationSessionState);Assert.Zero(oldNav.InstalledExecutionLayoutVersion);Assert.IsEmpty(oldNav.InstalledExecutions);Assert.AreEqual(1,newNav.InstalledExecutionLayoutVersion);Assert.IsEmpty(newNav.InstalledExecutions);Assert.IsEmpty(newNav.InstalledExecutionKeys);CollectionAssert.AreEqual(new[]{0},newNav.InstalledExecutionLayout,"Honest empty legacy-dense reconstruction; oldwire contains no allocationhistory");
-            }finally{a.Stop();b.Stop();clone?.Stop();}
+                var oldNav=WorldWire.Unpack(x.Navigation,WorldWire.ReadNavigationSessionState);var newNav=WorldWire.Unpack(y.Navigation,r=>WorldWire.ReadNavigationSessionState(r,NavigationV8Format.MainInstalledLayout));Assert.Zero(oldNav.InstalledExecutionLayoutVersion);Assert.IsEmpty(oldNav.InstalledExecutions);Assert.AreEqual(1,newNav.InstalledExecutionLayoutVersion);Assert.IsEmpty(newNav.InstalledExecutions);Assert.IsEmpty(newNav.InstalledExecutionKeys);CollectionAssert.AreEqual(new[]{0},newNav.InstalledExecutionLayout,"Honest empty legacy-dense reconstruction; oldwire contains no allocationhistory");
+            }finally{foreach(var t in new[]{a,b,clone})if(t!=null){t.Stop();t.Domain.DestroyOwnedNavigation();Assert.Zero(t.Domain.Navigation.PhysicalHostBudget.PhysicalBytes);Assert.Zero(t.Domain.Navigation.PhysicalHostBudget.HeldBytes);Assert.Zero(t.Domain.Navigation.PhysicalHostBudget.ActiveScopes);}}
+        }
+        [TestCase(false,false)][TestCase(true,false)][TestCase(false,true)]
+        public void Legacy3900AiMigrationUsesSuppliedExpansionValuesAndKeepsOtherBindingsStrict(bool changedExpansion,bool changedOther)
+        {
+            var root=new DirectoryInfo(Directory.GetCurrentDirectory());while(root!=null&&!File.Exists(Path.Combine(root.FullName,"workflow/project.json")))root=root.Parent;Assert.NotNull(root);
+            var bytes=File.ReadAllBytes(Path.Combine(root.FullName,"unity/Tests/Fixtures/o6-tech-funding/checkpoint-3900.world"));var original=(byte[])bytes.Clone();
+            var p=PlayableProfile.Create(PlayableProfile.Default.CopyData(),new AiTestMap());var roster=Enumerable.Range(0,8).Select(i=>new OfflineParticipant("ai-"+i,i+1,i+1,OfflineControl.Ai)).ToArray();var config=((AiTestMap)p.AuthoredMap).Configuration(p,7109,roster);
+            var data=AiProfile.Initial.CopyData();
+            if(changedExpansion){data.fields.Single(f=>f.path=="economy.remoteExpansionShare").value=.37;data.fields.Single(f=>f.path=="economy.enemyMainProtectedIncomeSites").value=4;}
+            if(changedOther)data.fields.Single(f=>f.path=="economy.reserveSeconds").value=20;
+            var target=new AiProfile(data);
+            Assert.Throws<ArgumentException>(()=>PlayableAuthorityTick.ImportLegacyCheckpoint(bytes,config,NavigationV8Format.Unspecified,LegacyTransactionProfileFormat.Original254,target),"Default import must still reject an incompatible AI hash");
+            Assert.Throws<ArgumentNullException>(()=>PlayableAuthorityTick.ImportLegacyCheckpoint(bytes,config,NavigationV8Format.Unspecified,LegacyTransactionProfileFormat.Original254,aiFormat:LegacyAiProfileFormat.BeforeExpansionSelection));
+            PlayableAuthorityTick Import()=>PlayableAuthorityTick.ImportLegacyCheckpoint(bytes,config,NavigationV8Format.Unspecified,LegacyTransactionProfileFormat.Original254,target,LegacyAiProfileFormat.BeforeExpansionSelection);
+            if(changedOther){Assert.Throws<ArgumentException>(()=>Import(),"Migration cannot ignore another changed historical field");CollectionAssert.AreEqual(original,bytes);return;}
+            PlayableAuthorityTick a=null,b=null;
+            try{
+                a=Import();Assert.AreEqual(3900,a.Tick);Assert.AreEqual(176,a.ParticipantView("ai-4").Credits);
+                foreach(var owner in a.Scheduler.Owners){var actual=(AiProfile)owner.GetType().GetField("nativeProfile",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(owner);Assert.AreSame(target,actual);Assert.AreEqual(changedExpansion ? .37 : .1,actual.Value("economy.remoteExpansionShare"));Assert.AreEqual(changedExpansion?4:2,actual.Value("economy.enemyMainProtectedIncomeSites"));}
+                var migrated=a.CaptureBytes();b=PlayableAuthorityTick.RestoreBytes(migrated,config,target);CollectionAssert.AreEqual(migrated,b.CaptureBytes(),"Migrated current binding restores through the strict current reader");
+                CollectionAssert.AreEqual(original,bytes);
+            }finally{foreach(var t in new[]{a,b})if(t!=null){t.Stop();t.Domain.DestroyOwnedNavigation();Assert.Zero(t.Domain.Navigation.PhysicalHostBudget.PhysicalBytes);Assert.Zero(t.Domain.Navigation.PhysicalHostBudget.HeldBytes);Assert.Zero(t.Domain.Navigation.PhysicalHostBudget.ActiveScopes);}}
         }
         // Fixed before execution: the original3900 state advances at most3600 ticks,
         // to7500, within its original18000 horizon. No bank/AI/world/selection injections.

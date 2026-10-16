@@ -44,6 +44,40 @@ namespace Spacewars.Runtime
                 Math.Max(previous,Math.Min(0,bestTravel-traveled));
         }
 
+        // Shared by movement-only and projected result+movement preparation.
+        // Actor rows and installed/group inputs are already private projections.
+        internal static NavigationAuthorityGroup PrepareOwned(NavPreparedCrowdStep frame,NavigationAuthorityGroup source,NavigationInstalledExecutionOwner[] installed,bool[] detached,NavigationCommandSlots<int,long> memberGroups,double configuredStretch,int configuredRevision,double dt,INavStorageReservation reservation)
+        {
+            var data=source.Data;if(data.MarchVersion!=1||(data.Kind!=PlayableCommandKind.Move&&data.Kind!=PlayableCommandKind.AttackMove))return null;
+            int count=source.Members.Count;using(NavStorageScratch.Reserve(reservation,checked(512L+32L*count))){
+                var progress=new double[count];var requests=new long[count];var active=new bool[count];var rows=new int[count];
+                double anchor=data.MarchAnchor,stretch=data.MarchProfileRevision==configuredRevision?data.MarchStretch:configuredStretch;bool initialized=data.MarchInitialized;int moving=0;double pace=double.PositiveInfinity,minimum=double.PositiveInfinity;
+                for(int i=0;i<count;i++){
+                    var member=((NavigationAuthorityMember)source.Members[i]).Data;progress[i]=member.Progress;requests[i]=member.ProgressRequest;int row=frame.Find(member.Entity);
+                    if(member.FormationReleased||row<0||!InstalledActive(frame.After[row],source,member,installed[row],detached[row],memberGroups))continue;
+                    var actor=frame.After[row];var execution=installed[row].Corridor.Corridor;
+                    if(requests[i]!=execution.Request){progress[i]=double.NegativeInfinity;requests[i]=execution.Request;initialized=false;}
+                    progress[i]=Project(execution,actor.Location,progress[i]);active[i]=true;rows[i]=row;moving++;pace=Math.Min(pace,actor.Speed);minimum=Math.Min(minimum,progress[i]);
+                }
+                if(moving<2){anchor=0;initialized=false;}
+                else{anchor=Anchor(anchor,initialized,pace,dt,minimum);initialized=true;for(int i=0;i<count;i++)if(active[i]){int row=rows[i];frame.Preferred[row]=MaxSpeed(frame.After[row].Speed,pace,progress[i],anchor,stretch,dt);}}
+                var values=new NavigationAuthorityGroup.Values(data.WorldGeneration,data.GroupId,data.OrderRevision,data.CommandSequence,data.IssuedTick,data.MembershipRevision,data.JobId,data.ActionId,data.MarchVersion,configuredRevision,data.TeamId,data.TargetId,stretch,anchor,initialized,data.Origin,data.Kind,data.OriginalGoal,data.HasLocation,data.Location);
+                NavigationAuthorityGroup next=null;try{
+                    for(int i=0;i<count;i++){
+                        var before=(NavigationAuthorityMember)source.Members[i];var d=before.Data;var changedValues=new NavigationAuthorityMember.Values(d.Entity,d.Slot,d.Incarnation,d.OrderRevision,d.MobilityRevision,d.Phase,d.Goal,d.Location,d.HasLocation,d.HasGoal,d.FormationReleased,d.Branch,d.Reservation,d.ContactTick,requests[i],progress[i]);if(changedValues.BitwiseSame(d))continue;
+                        var changed=NavigationAuthorityMember.CopyWithValuesOwned(before,changedValues,reservation);try{var version=NavigationAuthorityGroup.CopyWithMemberAndMarchOwned(next??source,i,changed,values,reservation);next?.ReleaseStorage();next=version;}finally{changed.ReleaseStorage();}
+                    }
+                    if(next==null&&!values.BitwiseSame(data))next=NavigationAuthorityGroup.CopyWithValuesOwned(source,values,reservation);
+                    var result=next;next=null;return result;
+                }finally{next?.ReleaseStorage();}
+            }
+        }
+        private static bool InstalledActive(NavUnit actor,NavigationAuthorityGroup group,NavigationAuthorityMember.Values member,NavigationInstalledExecutionOwner owner,bool detached,NavigationCommandSlots<int,long> memberGroups)
+        {
+            if(owner==null||detached||!actor.Moving||actor.Held)return false;var d=owner.Corridor.Corridor;
+            if(actor.InstalledGroupId!=d.Group||actor.InstalledRevision!=d.ActivationRevision||actor.InstalledRequest!=d.Request||actor.InstalledOrder!=d.Order||actor.Incarnation!=d.Incarnation||actor.MobilityRevision!=d.Mobility||!memberGroups.TryGetValue(actor.Id,out var g)||g!=d.Group||group.Data.OrderRevision!=d.RootRevision||member.OrderRevision!=d.ActivationRevision||owner.Route.Count!=actor.route.Length)return false;
+            for(int i=0;i<actor.route.Length;i++)if(!owner.Route[i].Equals(actor.route[i]))return false;return true;
+        }
         internal static double Anchor(double previous,bool initialized,double slowest,double dt,double minimumProgress)
             =>initialized?Math.Min(minimumProgress,previous+slowest*dt):minimumProgress;
 
@@ -57,7 +91,7 @@ namespace Spacewars.Runtime
         private double marchStretch;
         private int marchProfileRevision;
 
-        public void ConfigureMarch(double maximumStretch,int profileRevision)
+        private static void ValidateMarchConfiguration(double maximumStretch,int profileRevision)
         {
             var field=PlayableProfileMetadata.Fields.Single(f=>f.Path=="groupMarch.maximumStretch");
             double steps=(maximumStretch-field.Minimum)/field.Step;
@@ -65,7 +99,11 @@ namespace Spacewars.Runtime
                 maximumStretch<field.Minimum||maximumStretch>field.Maximum||
                 Math.Abs(steps-Math.Round(steps))>1e-8||profileRevision<1)
                 throw new ArgumentException("Invalid group march profile.");
-            lock(transportGate){marchStretch=maximumStretch;marchProfileRevision=profileRevision;marchConfigured=true;}
+        }
+        public void ConfigureMarch(double maximumStretch,int profileRevision)
+        {
+            ValidateMarchConfiguration(maximumStretch,profileRevision);
+            lock(transportGate){authorityOperationIdentity=checked(authorityOperationIdentity+1);marchStretch=maximumStretch;marchProfileRevision=profileRevision;marchConfigured=true;}
         }
 
         private void ValidateMarchCheckpoint()

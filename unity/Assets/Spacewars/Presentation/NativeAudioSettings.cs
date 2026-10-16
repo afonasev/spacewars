@@ -6,8 +6,8 @@ namespace Spacewars.Presentation
     public static class NativeAudioSettings
     {
         public const string Prefix="spacewars.audio.";
-        private static float Get(string kind)=>Mathf.Clamp01(PlayerPrefs.GetFloat(Prefix+kind,1));
-        private static void Set(string kind,float value){if(NativeSilentStartup.IsSilent)return;PlayerPrefs.SetFloat(Prefix+kind,Mathf.Clamp01(value));PlayerPrefs.Save();}
+        private static float Get(string kind){float value=PlayerPrefs.GetFloat(Prefix+kind,1);return float.IsNaN(value)||float.IsInfinity(value)?1:Mathf.Clamp01(value);}
+        private static void Set(string kind,float value){if(NativeSilentStartup.IsSilent)return;NativePreferenceWriter.SetFloat(Prefix+kind,Mathf.Clamp01(value));}
         public static float Music{get=>Get("music");set=>Set("music",value);}
         public static float Effects{get=>Get("effects");set=>Set("effects",value);}
         public static float Notifications{get=>Get("notifications");set=>Set("notifications",value);}

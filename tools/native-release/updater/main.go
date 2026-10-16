@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -52,6 +53,9 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) == 5 && os.Args[1] == "--install-payload" {
+		return installPayload(os.Args[2], os.Args[3], os.Args[4])
+	}
 	if len(os.Args) == 5 && os.Args[1] == "--sign-document" {
 		return signDocument(os.Args[2], os.Args[3], os.Args[4])
 	}
@@ -137,7 +141,7 @@ func run() error {
 			}
 			continue
 		}
-		c := exec.Command(filepath.Join(root, "releases", a.ID, executableName("UpdateHost")), "--host")
+		c := exec.Command(filepath.Join(root, "releases", a.ID, executableName("UpdateHost")), append([]string{"--host"}, applicationArgs(os.Args[1:])...)...)
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr
 		e = c.Run()
@@ -186,7 +190,7 @@ type Status struct {
 }
 
 var discoverForHost = candidate
-var stageForHost = stageUpdate
+var stageForHost = stageUpdateContext
 var applyForHost = applyWithPermission
 
 func host(root, exe string) error {
@@ -256,6 +260,64 @@ func host(root, exe string) error {
 	commit := false
 	ready := false
 	menu := false
+	var downloadCancel context.CancelFunc
+	var downloadDone chan struct{}
+	paused := false
+	var historyCancel context.CancelFunc
+	var historyDone chan struct{}
+	beginDownload := func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		downloadCancel = cancel
+		downloadDone = make(chan struct{})
+		finished := downloadDone
+		status.State = "downloading"
+		status.Done = 0
+		status.Total = 0
+		status.Error = ""
+		paused = false
+		m, b := next, append([]byte(nil), raw...)
+		go func() {
+			defer close(finished)
+			s, err := stageForHost(ctx, root, cache, m, b, func(d, t int64) { mu.Lock(); status.Done = d; status.Total = t; mu.Unlock() })
+			mu.Lock()
+			defer mu.Unlock()
+			downloadCancel = nil
+			if ctx.Err() != nil {
+				if paused {
+					status.State = "paused"
+				} else {
+					status.State = "available"
+				}
+				return
+			}
+			if err != nil {
+				status.State = "error"
+				status.Error = err.Error()
+				return
+			}
+			if err = writePending(root, cache, s, m, b); err != nil {
+				status.State = "error"
+				status.Error = err.Error()
+				return
+			}
+			stage = s
+			status.State = "prepared"
+		}()
+	}
+	// Caller holds mu. Cancellation is acknowledged before allowing match entry.
+	stopDownload := func(pause bool) {
+		if downloadCancel == nil {
+			return
+		}
+		paused = pause
+		downloadCancel()
+		done := downloadDone
+		mu.Unlock()
+		<-done
+		mu.Lock()
+	}
+	defer func() { mu.Lock(); stopDownload(false); mu.Unlock() }()
+
 	check := func() {
 		b, m, err := discoverForHost(platform)
 		mu.Lock()
@@ -298,14 +360,6 @@ func host(root, exe string) error {
 				http.Error(w, "method", 405)
 				return
 			}
-		case "/check":
-			if r.Method != "POST" || status.State == "downloading" || status.State == "prepared" || status.State == "applying" || status.State == "checking" {
-				http.Error(w, "busy", 409)
-				return
-			}
-			status.State = "checking"
-			status.Error = ""
-			go check()
 		case "/ready":
 			if r.Method != "POST" {
 				http.Error(w, "method", 405)
@@ -313,45 +367,71 @@ func host(root, exe string) error {
 			}
 			ready = true
 			menu = true
+			if paused && status.State == "paused" {
+				beginDownload()
+			}
 		case "/play":
 			if r.Method != "POST" || status.State == "applying" {
 				http.Error(w, "busy", 409)
 				return
 			}
 			menu = false
+			stopDownload(true)
+			if historyCancel != nil {
+				historyCancel()
+				done := historyDone
+				mu.Unlock()
+				<-done
+				mu.Lock()
+			}
 		case "/menu":
 			if r.Method != "POST" {
 				http.Error(w, "method", 405)
 				return
 			}
 			menu = true
+			if paused && status.State == "paused" {
+				beginDownload()
+			}
 		case "/update":
 			if r.Method != "POST" || !menu || status.State != "available" && status.State != "error" || next.Sequence <= current.Sequence {
 				http.Error(w, "unavailable", 409)
 				return
 			}
-			status.State = "downloading"
-			status.Done = 0
-			status.Total = 0
-			status.Error = ""
-			m, b := next, append([]byte(nil), raw...)
-			go func() {
-				s, e := stageForHost(root, cache, m, b, func(d, t int64) { mu.Lock(); status.Done = d; status.Total = t; mu.Unlock() })
-				mu.Lock()
-				defer mu.Unlock()
-				if e != nil {
-					status.State = "error"
-					status.Error = e.Error()
-				} else {
-					if e = writePending(root, cache, s, m, b); e != nil {
-						status.State = "error"
-						status.Error = e.Error()
-						return
-					}
-					stage = s
-					status.State = "prepared"
-				}
-			}()
+			beginDownload()
+		case "/cancel":
+			if r.Method != "POST" || (status.State != "downloading" && status.State != "paused") {
+				http.Error(w, "unavailable", 409)
+				return
+			}
+			stopDownload(false)
+			paused = false
+			status.State = "available"
+		case "/history":
+			if r.Method != "GET" || !menu {
+				http.Error(w, "menu only", 409)
+				return
+			}
+			if historyCancel != nil {
+				http.Error(w, "history busy", 409)
+				return
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			historyCancel = cancel
+			historyDone = make(chan struct{})
+			done := historyDone
+			mu.Unlock()
+			history, err := githubHistoryContext(ctx, current.Version)
+			mu.Lock()
+			cancel()
+			historyCancel = nil
+			close(done)
+			if err != nil {
+				http.Error(w, err.Error(), 502)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(history)
+			return
 		case "/commit":
 			if r.Method != "POST" || !menu || status.State != "prepared" {
 				http.Error(w, "not prepared", 409)
@@ -371,7 +451,7 @@ func host(root, exe string) error {
 	if status.State == "checking" {
 		go check()
 	}
-	game := exec.Command(filepath.Join(root, "releases", a.ID, filepath.FromSlash(current.Entry)))
+	game := exec.Command(filepath.Join(root, "releases", a.ID, filepath.FromSlash(current.Entry)), applicationArgs(os.Args[1:])...)
 	game.Env = append(os.Environ(), "SPACEWARS_UPDATE_ENDPOINT=http://"+listener.Addr().String(), "SPACEWARS_UPDATE_TOKEN="+token)
 	game.Stdout = os.Stdout
 	game.Stderr = os.Stderr
@@ -427,3 +507,14 @@ func classifyPlayerExit(ready bool, err error) error {
 	return err
 }
 func restartBootstrap(root string) error { return restartRequested }
+
+// Internal helper switches are never forwarded to Unity; application flags survive restarts.
+func applicationArgs(args []string) []string {
+	result := []string{}
+	for _, arg := range args {
+		if arg != "--host" {
+			result = append(result, arg)
+		}
+	}
+	return result
+}

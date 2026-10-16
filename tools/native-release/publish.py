@@ -2,8 +2,10 @@
 """One command: exact-source builds -> signed packages -> verified draft -> channel release.
 No VPS operations. Use deploy_landing.py once and publish_legacy.py only for a production bridge.
 """
+import importlib.util
 import argparse,hashlib,json,os,pathlib,shutil,subprocess,sys,tempfile
 ROOT=pathlib.Path(__file__).resolve().parents[2]
+_notes_spec=importlib.util.spec_from_file_location('spacewars_release_notes',pathlib.Path(__file__).with_name('release_notes.py'));release_notes=importlib.util.module_from_spec(_notes_spec);_notes_spec.loader.exec_module(release_notes)
 REPO='afonasev/spacewars'
 PLATFORMS=('windows-x64','macos-universal')
 def run(args,**kw):return subprocess.check_output([str(x) for x in args],text=True,**kw).strip()
@@ -100,14 +102,20 @@ def main():
  payload.write_text(json.dumps({'schema':1,'version':a.version,'sequence':a.sequence,'channel':a.channel,'commit':head,'assets':inventory},sort_keys=True)+'\n')
  run([*go,'--sign-document',payload,pathlib.Path.home()/'.local/share/spacewars-release/native-ed25519.key',assets/'release.json'],cwd=module);payload.unlink()
  files=sorted(x for x in assets.iterdir() if x.is_file());expected={x.name:{'size':x.stat().st_size,'sha256':hashfile(x)} for x in files}
- notes=out/'release-notes.md';notes.write_text(f'''Spacewars {a.version} — {a.channel} channel
-
-Unity Windows x64 / macOS Universal. Existing icon; protected installation and default finish actions. GitHub-only Ed25519-authenticated differential updates: Check, explicit background Update, Restart or activation after exit. Profiles/settings retained.
-
-Unsigned test distribution: expected Windows SmartScreen and macOS Gatekeeper notices. Metadata signing is separate from OS publisher signing. Physical Windows/UAC and Intel Mac acceptance remain pending.
-
-Private build source: {head}; public snapshot: {public_commit}. No production/VPS feed cutover by this test publication.
-''')
+ previous=release_notes.previous_release(json.loads(run(['gh','api',f'repos/{REPO}/releases?per_page=100'])),a.channel)
+ if previous:
+  # Public snapshot history differs from private build history: release inventory records build identity.
+  previous_inventory=json.loads(run(['gh','release','download',previous,'--repo',REPO,'--pattern','release.json','--output','-']))
+  previous_payload=previous_inventory.get('payload',{})
+  if isinstance(previous_payload,str):
+   import base64
+   previous_payload=json.loads(base64.b64decode(previous_payload))
+  baseline=previous_payload.get('commit')
+  if not baseline:raise ValueError('previous release has no source baseline; do not invent a changelog')
+ else:baseline=None
+ body,provenance=release_notes.generate(ROOT,head,baseline)
+ notes=out/'release-notes.md';notes.write_text(body.replace('\n\n## English','\n\nТестовая поставка без подписи издателя: возможны предупреждения Windows SmartScreen и macOS Gatekeeper.\n\n## English')+'\nUnsigned dev/test distribution: Windows SmartScreen and macOS Gatekeeper notices may appear. OS publisher signing is pending.\n')
+ (out/'release-notes-source.json').write_text(json.dumps(provenance,indent=2)+'\n')
  args=['gh','release','create',tag,'--repo',REPO,'--target',public_commit,'--draft','--title',f'Spacewars {a.version} ({a.channel})','--notes-file',notes]
  if a.channel=='test':args+=['--prerelease','--latest=false']
  run(args);run(['gh','release','upload',tag,*files,'--repo',REPO])

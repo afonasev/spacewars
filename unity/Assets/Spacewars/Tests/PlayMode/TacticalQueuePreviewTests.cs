@@ -16,6 +16,36 @@ using Newtonsoft.Json;
 public sealed class TacticalQueuePreviewTests
 {
     const BindingFlags F=BindingFlags.Instance|BindingFlags.NonPublic;
+    [Test] public void OrderMarkerStyleHasValidatedEditableMetadata()
+    {
+        var art=EnvironmentArtProfile.Load();var fields=art.Parameters().Where(f=>f.Path.Contains(".orderMarker")).ToArray();Assert.AreEqual(3,fields.Length);
+        Assert.Less(art.orderMarkerRadius,12);Assert.Less(art.orderMarkerWidth,2);
+        foreach(var f in fields){float original=f.Read();Assert.IsNotEmpty(f.Description);Assert.IsNotEmpty(f.Unit);Assert.Greater(f.Step,0);foreach(float bad in new[]{float.NaN,float.PositiveInfinity,f.Minimum-f.Step,f.Maximum+f.Step}){f.Write(bad);Assert.Throws<ArgumentException>(()=>art.Validate());}f.Write(original);}art.Validate();
+    }
+    [UnityTest] public IEnumerator ActiveAndPendingMarkersRenderAsSmallHollowRings()
+    {
+        var host=new GameObject("Order marker style proof");var panel=ScriptableObject.CreateInstance<PanelSettings>();panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");panel.scaleMode=PanelScaleMode.ConstantPixelSize;
+        var target=new RenderTexture(256,128,24);target.Create();panel.targetTexture=target;
+        var doc=host.AddComponent<UIDocument>();doc.panelSettings=panel;var root=doc.rootVisualElement;root.style.width=256;root.style.height=128;root.style.backgroundColor=new Color(.18f,.22f,.25f);root.style.unityFont=Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        var layer=new PlayableOrderMarkerLayer(location=>new Vector2((float)location.Position.X,64));root.Add(layer);
+        var positions=new[]{48,104,160,216};layer.Set(positions.Select((x,i)=>new PlayableQueueMarker(i+1,i+1,i+1,i%2==0?PlayableCommandKind.Move:PlayableCommandKind.AttackMove,new NavLocation(new NavPoint(x,0),NavLocation.FlatSurface),i<2?QueueMarkerPhase.Active:QueueMarkerPhase.Pending)).ToArray());
+        Texture2D pixels=null;
+        try
+        {
+            yield return null;yield return null;yield return null;
+            var old=RenderTexture.active;RenderTexture.active=target;pixels=new Texture2D(256,128,TextureFormat.RGB24,false);pixels.ReadPixels(new Rect(0,0,256,128),0,0);pixels.Apply();RenderTexture.active=old;
+            var background=pixels.GetPixel(20,64);
+            foreach(int x in positions)
+            {
+                // Interior sample misses the central digit, proving that no disk/background fill remains.
+                var interior=pixels.GetPixel(x+5,64);Assert.Less(Vector3.Distance(new Vector3(background.r,background.g,background.b),new Vector3(interior.r,interior.g,interior.b)),.03f);
+                int colored=0;for(int y=52;y<=76;y++)for(int xx=x-12;xx<=x+12;xx++){var color=pixels.GetPixel(xx,y);if(color.g>color.r*2&&color.g>.5f||color.r>color.g*2&&color.r>.5f)colored++;}
+                Assert.Greater(colored,15);Assert.Less(colored,200,"Small outline must not become a filled marker");
+            }
+            var folder=Path.GetFullPath(Path.Combine(Application.dataPath,"../../.local/order-marker-captures"));Directory.CreateDirectory(folder);File.WriteAllBytes(Path.Combine(folder,"hollow-style.png"),pixels.EncodeToPNG());
+        }
+        finally{if(pixels)UnityEngine.Object.DestroyImmediate(pixels);panel.targetTexture=null;UnityEngine.Object.DestroyImmediate(host);UnityEngine.Object.DestroyImmediate(panel);target.Release();UnityEngine.Object.DestroyImmediate(target);}
+    }
     [UnityTest] public IEnumerator ProductionVariantASelectionAndAcceptedOrderExpireWithoutPermanentChain()
     {
         var profile=PlayableProfile.Default;var type=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.PlayableDomain",true);var domain=Activator.CreateInstance(type,F,null,new object[]{profile,1L,false},null);

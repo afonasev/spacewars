@@ -29,6 +29,22 @@ namespace Spacewars.Input.Tests
             Set("view",Snapshot(new[]{Unit(1,PlayableEntityKind.Tank,-5,0),Unit(2,PlayableEntityKind.Tank,0,0),Unit(3,PlayableEntityKind.Explorer,5,0),Unit(4,PlayableEntityKind.Tank,200,0),Unit(5,PlayableEntityKind.Tank,8,0,PlayableOwner.Enemy)},new[]{Building(10,-8,-6),Building(11,8,-6)}));
         }
         [TearDown] public void Teardown(){UnityEngine.Object.DestroyImmediate(go);UnityEngine.Object.DestroyImmediate(cameraObject);}
+        [UnityEngine.TestTools.UnityTest] public System.Collections.IEnumerator WorldArrowNavigationKeepsHudFocusOnTheField()
+        {
+            var input=go.AddComponent<PlayableInput>();input.enabled=false;Set("input",input);
+            input.IsKeyboardInUi=()=>Get<UnityEngine.UIElements.VisualElement>("root").focusController?.focusedElement is UnityEngine.UIElements.Button;
+            yield return null;
+            var root=Get<UnityEngine.UIElements.VisualElement>("root");root.Focus();
+            foreach(var direction in new[]{UnityEngine.UIElements.NavigationMoveEvent.Direction.Left,UnityEngine.UIElements.NavigationMoveEvent.Direction.Right,UnityEngine.UIElements.NavigationMoveEvent.Direction.Up,UnityEngine.UIElements.NavigationMoveEvent.Direction.Down})
+            {
+                using(var evt=UnityEngine.UIElements.NavigationMoveEvent.GetPooled(direction)){evt.target=root;root.SendEvent(evt);}
+                Assert.AreSame(root,root.focusController.focusedElement);
+                Assert.AreEqual(UnityEngine.UIElements.DisplayStyle.None,Get<UnityEngine.UIElements.VisualElement>("armyComposition").style.display.value);
+            }
+            // Explicit F6 HUD focus and pause menus must retain their own navigation.
+            Call("ToggleHudFocus");Assert.IsInstanceOf<UnityEngine.UIElements.Button>(root.focusController.focusedElement);
+            Assert.False((bool)typeof(PlayableBootstrap).GetProperty("WorldKeyboardOwnsToolkit",F).GetValue(hud));
+        }
         [Test] public void ModifierClicksOnlyAddUnitsAndBuildingsAlwaysReplace()
         {
             var view=Get<PlayableSnapshot>("view");var a=Screen(view.Entities[0].Position);var b=Screen(view.Entities[1].Position);var factory=Screen(view.Buildings[0].Position,1);

@@ -46,6 +46,14 @@ namespace Spacewars.Presentation
                 new NavPoint(center.X+x/2,center.Z-z),new NavPoint(center.X+x,center.Z),
                 new NavPoint(center.X+x/2,center.Z+z),new NavPoint(center.X-x/2,center.Z+z)}));
         }
+        public static double SiteEnvelope(TerritorySite site,PlayableProfile profile)=>site.Slots.Count==0
+            ?TerritoryRules.Radius(profile,site.Kind)+1
+            :profile.SlotRingRadius+Math.Max(profile.ScienceFootprintRadius,Math.Max(profile.FactoryFootprintRadius,profile.RefineryFootprintRadius))+1;
+        public static NavObstacle SitePad(TerritorySite site,PlayableProfile profile,FoundrySurfaceProfile settings)
+        {
+            double extent=SiteEnvelope(site,profile);var p=site.Position;
+            return site.Kind==PlayableBuildingKind.Headquarters?HomePad(p,extent,settings):new NavObstacle(p.X-extent,p.Z-extent,p.X+extent,p.Z+extent);
+        }
         public static float RoadCoverage(FoundryMap map,NavPoint point,FoundrySurfaceProfile settings)
         {
             double distance=0;

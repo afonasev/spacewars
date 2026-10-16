@@ -32,19 +32,19 @@ namespace Spacewars.Runtime
                 string portal=String(r);double cost=Number(r);var section=EnumValue<NavCorridorSection>(r);
                 long branch=r.ReadInt64();int merge=r.ReadInt32();
                 if(!from.HasValue||!to.HasValue)throw new ArgumentException("Missing typed corridor location.");
-                return new NavCorridorLeg(from.Value,to.Value,kind,portal,cost,section,branch,merge);
+                return Record(r,()=>new NavCorridorLeg(from.Value,to.Value,kind,portal,cost,section,branch,merge));
             });
             if(!origin.HasValue||!endpoint.HasValue)throw new ArgumentException("Missing corridor endpoint.");
-            var result=new NavCorridorDescriptor(version,graph,provider,profile,surface,hold,topology,radius,gridCell,provenance,
+            var result=Record(r,()=>new NavCorridorDescriptor(version,graph,provider,profile,surface,hold,topology,radius,gridCell,provenance,
                 world,group,root,command,issued,activation,entity,incarnation,mobility,request,order,
-                origin.Value,endpoint.Value,legs);
+                origin.Value,endpoint.Value,legs));
             if(result.StableKey!=sealedKey)throw new ArgumentException("Corridor descriptor seal mismatch.");
             return result;
         }
         private const int Tag=0x47525031;
         internal static void WriteExtension(BinaryWriter w,NavigationSessionState state)
         {
-            w.Write(Tag);w.Write(8);w.Write(state.GroupSequence);
+            w.Write(Tag);w.Write(state.HostAuthority==null?8:9);w.Write(state.GroupSequence);
             Array(w,state.Groups??System.Array.Empty<GroupOrderState>(),g=>{
                 w.Write(g.WorldGeneration);w.Write(g.GroupId);w.Write(g.OrderRevision);w.Write(g.CommandSequence);w.Write(g.IssuedTick);w.Write(g.MembershipRevision);
                 String(w,g.OwnerId);w.Write(g.TeamId);w.Write((int)g.Origin);w.Write((int)g.Kind);String(w,g.Source);w.Write(g.JobId);w.Write(g.ActionId);WorldWire.Write(w,g.OriginalGoal);w.Write(g.TargetId);
@@ -75,21 +75,24 @@ namespace Spacewars.Runtime
             Array(w,state.Groups,g=>{w.Write(g.GroupId);w.Write(g.MarchVersion);w.Write(g.MarchProfileRevision);
                 Number(w,g.MarchStretch);Number(w,g.MarchAnchor);w.Write(g.MarchInitialized);
                 Array(w,g.Members,m=>{w.Write(m.Entity);w.Write(m.ProgressRequest);});});
-            w.Write(state.InstalledExecutionLayoutVersion);
-            Array(w,state.InstalledExecutionKeys??System.Array.Empty<int>(),key=>w.Write(key));
-            Array(w,state.InstalledExecutionLayout??System.Array.Empty<int>(),slot=>w.Write(slot));
+            Array(w,state.AllocationRequestIndices??System.Array.Empty<int>(),i=>w.Write(i));
+            w.Write(state.ArrivalAuthority!=null);
+            if(state.ArrivalAuthority!=null){w.Write(state.ArrivalAuthority.Length);w.Write(state.ArrivalAuthority);}
+            if(state.HostAuthority!=null){Array(w,state.RegisteredRequestIndices??System.Array.Empty<int>(),i=>w.Write(i));Array(w,state.DeliveredRequestIndices??System.Array.Empty<int>(),i=>w.Write(i));w.Write(state.HostAuthority.Length);w.Write(state.HostAuthority);}
         }
-        internal static void ReadExtension(BinaryReader r,NavigationSessionState state)
+        internal static void ReadExtension(BinaryReader r,NavigationSessionState state,NavigationV8Format legacyFormat=NavigationV8Format.Unspecified)
         {
             if(r.BaseStream.Position==r.BaseStream.Length){LegacyAnswerStatuses(state);return;}
             if(r.ReadInt32()!=Tag)throw new ArgumentException("Unsupported navigation group extension.");
-            int version=r.ReadInt32();if(version<1||version>8)throw new ArgumentException("Unsupported navigation surface extension.");
-            state.GroupSequence=r.ReadInt64();state.Groups=Array(r,()=>new GroupOrderState{
+            int version=r.ReadInt32();if(version<1||version>9)throw new ArgumentException("Unsupported navigation surface extension.");
+            if(version==8&&legacyFormat==NavigationV8Format.Unspecified)throw new ArgumentException("Navigation v8 requires explicit A5Arrival or MainInstalledLayout import format.");
+            if(legacyFormat<NavigationV8Format.Unspecified||legacyFormat>NavigationV8Format.MainInstalledLayout)throw new ArgumentException("Unknown navigation v8 import format.");
+            state.GroupSequence=r.ReadInt64();state.Groups=Array(r,()=>Record(r,()=>new GroupOrderState{
                 WorldGeneration=r.ReadInt64(),GroupId=r.ReadInt64(),OrderRevision=r.ReadInt64(),CommandSequence=r.ReadInt64(),IssuedTick=r.ReadInt64(),MembershipRevision=r.ReadInt64(),
                 OwnerId=String(r),TeamId=r.ReadInt32(),Origin=EnumValue<PlayableOrderOrigin>(r),Kind=EnumValue<PlayableCommandKind>(r),Source=String(r),JobId=r.ReadInt64(),ActionId=r.ReadInt64(),OriginalGoal=ReadPoint(r),TargetId=r.ReadInt32(),
-                Members=Array(r,()=>new GroupMemberState{Entity=r.ReadInt32(),Incarnation=r.ReadInt64(),OrderRevision=r.ReadInt64(),MobilityRevision=r.ReadInt64(),Slot=r.ReadInt32(),Phase=EnumValue<GroupMemberPhase>(r),
-                    Goal=ReadPoint(r),HasGoal=Boolean(r),FormationReleased=Boolean(r),Branch=r.ReadInt64(),Reservation=r.ReadInt64(),Progress=Number(r),ContactTick=r.ReadInt64(),ContactPhase=String(r)})});
-            var identities=Array(r,()=>Boolean(r)?new NavigationMemberIdentity(r.ReadInt64(),r.ReadInt64(),r.ReadInt64(),r.ReadInt64(),r.ReadInt64()):null);
+                Members=Array(r,()=>Record(r,()=>new GroupMemberState{Entity=r.ReadInt32(),Incarnation=r.ReadInt64(),OrderRevision=r.ReadInt64(),MobilityRevision=r.ReadInt64(),Slot=r.ReadInt32(),Phase=EnumValue<GroupMemberPhase>(r),
+                    Goal=ReadPoint(r),HasGoal=Boolean(r),FormationReleased=Boolean(r),Branch=r.ReadInt64(),Reservation=r.ReadInt64(),Progress=Number(r),ContactTick=r.ReadInt64(),ContactPhase=String(r)}))}));
+            var identities=Array(r,()=>Boolean(r)?Record(r,()=>new NavigationMemberIdentity(r.ReadInt64(),r.ReadInt64(),r.ReadInt64(),r.ReadInt64(),r.ReadInt64())):null);
             if(identities.Length!=state.Requests.Length)throw new ArgumentException("Request group identity count mismatch.");
             for(int i=0;i<identities.Length;i++)state.Requests[i].MemberIdentity=identities[i];
             if(version==1){LegacyAnswerStatuses(state);return;}
@@ -107,8 +110,8 @@ namespace Spacewars.Runtime
                 ReadStatuses(state.ProbeAnswers??System.Array.Empty<NavigationAnswerState>());
                 ReadStatuses(state.AnswerMailbox);
                 ReadStatuses(state.BarrierAnswers??System.Array.Empty<NavigationAnswerState>());
-                state.TechnicalFailures=Array(r,()=>new NavigationTechnicalFailureState{
-                    Entity=r.ReadInt32(),Request=r.ReadInt64(),Status=EnumValue<NavSolveStatus>(r)});
+                state.TechnicalFailures=Array(r,()=>Record(r,()=>new NavigationTechnicalFailureState{
+                    Entity=r.ReadInt32(),Request=r.ReadInt64(),Status=EnumValue<NavSolveStatus>(r)}));
                 var seen=new System.Collections.Generic.HashSet<int>();
                 foreach(var failure in state.TechnicalFailures){
                     var actor=System.Array.Find(state.Crowd.Units,u=>u.Id==failure.Entity);
@@ -126,11 +129,11 @@ namespace Spacewars.Runtime
                 ReadCorridors(state.ProbeAnswers??System.Array.Empty<NavigationAnswerState>());
                 ReadCorridors(state.AnswerMailbox);
                 ReadCorridors(state.BarrierAnswers??System.Array.Empty<NavigationAnswerState>());
-                state.InstalledExecutions=Array(r,()=>new NavigationInstalledExecutionState{
+                state.InstalledExecutions=Array(r,()=>Record(r,()=>new NavigationInstalledExecutionState{
                     Entity=r.ReadInt32(),Detached=Boolean(r),Corridor=ReadCorridor(r),
                     InstalledRoute=Array(r,()=>ReadPoint(r)),ProfileId=String(r),ProfileRevision=r.ReadInt32(),
                     ProfileValues=Array(r,()=>Number(r)),HeldIdentity=String(r),
-                    GeometryIndex=r.ReadInt32(),BaseGeometryIndex=r.ReadInt32()});
+                    GeometryIndex=r.ReadInt32(),BaseGeometryIndex=r.ReadInt32()}));
             }else{state.CorridorWireVersion=0;state.InstalledExecutions=System.Array.Empty<NavigationInstalledExecutionState>();}
             if(version>=7){
                 int count=r.ReadInt32();if(count!=state.Groups.Length)throw new ArgumentException("March group count mismatch.");
@@ -143,7 +146,7 @@ namespace Spacewars.Runtime
                 }
             }
 
-            if(version>=8){
+            if(version==8&&legacyFormat==NavigationV8Format.MainInstalledLayout){
                 state.InstalledExecutionLayoutVersion=r.ReadInt32();if(state.InstalledExecutionLayoutVersion!=1)throw new ArgumentException("Version eight requires installed execution allocation layout.");state.InstalledExecutionKeys=Array(r,()=>r.ReadInt32());state.InstalledExecutionLayout=Array(r,()=>r.ReadInt32());
                 NavigationSession.ValidateInstalledExecutionLayout(state);
             }
@@ -161,6 +164,17 @@ namespace Spacewars.Runtime
                 foreach(var answer in answers){answer.Status=EnumValue<NavSolveStatus>(r);
                     if(answer.Status==NavSolveStatus.Pending||(answer.Status==NavSolveStatus.Ready)!=(answer.Route.Length>0))throw new ArgumentException("Invalid route status.");}
             }
+            if(version>=9||version==8&&legacyFormat==NavigationV8Format.A5Arrival){state.AllocationRequestIndices=Array(r,()=>r.ReadInt32());
+                if(!Boolean(r))throw new ArgumentException("Missing mandatory arrival authority tail.");
+                int length=r.ReadInt32();if(length<1||length>32*1024*1024||length>r.BaseStream.Length-r.BaseStream.Position)throw new ArgumentException("Invalid arrival section size.");
+                state.ArrivalAuthority=PrivateBytes(r,length);
+                if(version>=9){state.RegisteredRequestIndices=Array(r,()=>r.ReadInt32());state.DeliveredRequestIndices=Array(r,()=>r.ReadInt32());int hostLength=r.ReadInt32();
+                    if(hostLength<1||hostLength>32*1024*1024||hostLength>r.BaseStream.Length-r.BaseStream.Position)throw new ArgumentException("Missing required host BODY.");
+                    var transaction=(r as NavigationAdmittedReader)?.Transaction;
+                    if(transaction==null)state.HostAuthority=PrivateBytes(r,hostLength);
+                    else{state.DecodeHostOwner=transaction.OwnValue(checked(32L+hostLength),()=>r.ReadBytes(hostLength));state.HostAuthority=state.DecodeHostOwner.Value;}}
+            }
+
         }
         private static void LegacyAnswerStatuses(NavigationSessionState state)
         {

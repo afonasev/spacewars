@@ -191,7 +191,17 @@ namespace Spacewars.Runtime
                 if(q.Active!=null)q.Active.Suspended=true;else q.OldMotionSuspended=true;navigation.Crowd.Suspend(id);return;
             }
             if(tacticalQueues.TryGetValue(id,out var current)&&current.Active?.Issuance.Command.Kind==PlayableCommandKind.Attack&&navigation.Crowd.TryGet(id,out var actor)&&!actor.Moving&&!navigation.IsPending(id))return;
+            bool cancelledChase=current?.Active?.Issuance.Command.Kind==PlayableCommandKind.Attack&&navigation.IsPending(id);
             navigation.Stop(id,false);
+            // Stop removes the pending chase. Its attempt cannot remain the
+            // active proof after cancellation; the last installed route (or no
+            // route yet) is still the execution's authoritative binding.
+            if(cancelledChase&&!navigation.IsPending(id)&&navigation.Crowd.TryGet(id,out var stopped)&&!stopped.Moving){
+                var e=current.Active;
+                if(e.RouteRequest==0||stopped.InstalledRequest==e.RouteRequest&&stopped.InstalledOrder==e.RouteOrder&&stopped.InstalledGroupId==e.Issuance.GroupId&&stopped.InstalledRevision==e.Stamp.Revision){
+                    e.AttemptRequest=e.RouteRequest;e.AttemptOrder=e.RouteOrder;e.AttemptLocation=e.RouteRequest==0?null:stopped.GoalLocation;e.TerminalFailure=null;
+                }
+            }
         }
         private bool CombatMove(int id,NavPoint goal)
         {

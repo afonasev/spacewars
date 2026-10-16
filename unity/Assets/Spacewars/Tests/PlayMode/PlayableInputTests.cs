@@ -37,6 +37,22 @@ namespace Spacewars.Input.Tests
             input.SetFocus(true);MouseState(new Vector2(90,40),0);Assert.AreEqual(2,calls);Assert.AreEqual(new Vector2(.5f,0),axis);
         }
 
+        [Test] public void CameraEdgeZonesCanPassThroughHudWhileOrdersAndZoomRemainBlocked()
+        {
+            int calls=0,orders=0,zoom=0;Vector2 axis=default;
+            input.IsPointerOverUi=_=>true;input.IsPointerBlockingCamera=p=>!new Rect(0,0,100,80).Contains(p);
+            input.EdgePanAxis=p=>AngularCommandCursor.EdgePan(p,new Rect(0,0,100,80),20);
+            input.EdgePan=a=>{calls++;axis=a;};input.Order=(p,a,s)=>orders++;input.Zoom=_=>zoom++;
+            foreach(var point in new[]{new Vector2(10,40),new Vector2(90,40),new Vector2(50,10),new Vector2(50,70)})
+            {int before=calls;MouseState(point,0);Assert.AreEqual(before+1,calls);Assert.Greater(axis.sqrMagnitude,0);}
+            Assert.AreEqual(new Vector2(0,.5f),axis);
+            MouseState(new Vector2(50,70),2);MouseState(new Vector2(50,70),0);Assert.Zero(orders);
+            InputSystem.QueueStateEvent(mouse,new MouseState{position=new Vector2(50,70),scroll=new Vector2(0,120)});InputSystem.Update();input.Poll();Assert.Zero(zoom);
+            int count=calls;input.MapAt=_=>1;MouseState(new Vector2(50,70),0);Assert.AreEqual(count,calls);
+            input.MapAt=_=>0;input.IsKeyboardInUi=()=>true;MouseState(new Vector2(50,70),0);Assert.AreEqual(count,calls);
+            input.IsKeyboardInUi=()=>false;input.WorldInputEnabled=false;MouseState(new Vector2(50,70),0);Assert.AreEqual(count,calls);
+        }
+
         [Test] public void HoldAndStopAreDistinctAndRespectUiPauseAndFocus()
         {
             int hold=0,stop=0;input.Hold=()=>hold++;input.Stop=()=>stop++;
@@ -98,6 +114,18 @@ namespace Spacewars.Input.Tests
             Assert.AreEqual(1,map,"A+RMB cancels, with no movement order.");
             KeyboardState(Key.A);KeyboardState();MouseState(new Vector2(40,40),1);MouseState(new Vector2(40,40),0);
             Assert.AreEqual(2,map);Assert.AreEqual(1,selected);Assert.Zero(world);
+        }
+        [TestCase(true)][TestCase(false)] public void CompactMapPansWhileHeldAndStopsOnExitReleasePauseAndFocusLoss(bool commands)
+        {
+            input.CommandInputEnabled=commands;input.MapAt=p=>p.x<100?1:0;input.IsPointerOverUi=_=>true;
+            var points=new System.Collections.Generic.List<Vector2>();input.MapPan=(kind,p)=>{Assert.AreEqual(1,kind);points.Add(p);};
+            MouseState(new Vector2(20,20),1);Assert.IsNotEmpty(points);
+            MouseState(new Vector2(80,60),1);Assert.AreEqual(new Vector2(80,60),points[points.Count-1]);
+            int count=points.Count;MouseState(new Vector2(120,60),1);Assert.AreEqual(count,points.Count);
+            MouseState(new Vector2(120,60),0);MouseState(new Vector2(30,40),0);Assert.AreEqual(count,points.Count);
+            MouseState(new Vector2(30,40),1);input.SetFocus(false);count=points.Count;MouseState(new Vector2(40,40),1);Assert.AreEqual(count,points.Count);
+            input.SetFocus(true);MouseState(new Vector2(40,40),0);MouseState(new Vector2(30,40),1);input.WorldInputEnabled=false;count=points.Count;MouseState(new Vector2(40,40),1);Assert.AreEqual(count,points.Count);
+            input.WorldInputEnabled=true;MouseState(new Vector2(40,40),0);input.MapAt=_=>2;points.Clear();MouseState(new Vector2(20,20),1);MouseState(new Vector2(80,60),1);Assert.IsEmpty(points,"Tactical map retains box selection");
         }
         [Test] public void TacticalBackdropDragExitPauseAndFocusCannotLeakGestures()
         {

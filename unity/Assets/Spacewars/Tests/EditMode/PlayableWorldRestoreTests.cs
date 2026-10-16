@@ -58,8 +58,61 @@ namespace Spacewars.Tests.EditMode
             {"NavCrowd.<RepairCpuMs>k__BackingField","Wall-clock solver CPU metric"},
             {"NavUnit.routeView","Read-only view of route"},
             {"NavGeometry.obstacleView","Read-only view of obstacles"},
-            {"PlayableVision.cached","Derived immutable fog projection cache"}
+            {"PlayableVision.cached","Derived immutable fog projection cache"},
+            {"NavigationAuthorityGroup.MemberParentIdentity","Process-local candidate provenance points at the prior VersionIdentity; neither is serialized or used by future live edits"},
+            {"NavigationAuthorityGroup.versionIdentity","Process-local COW version birth token; primitive preflight49 forbids allocation-history IDs and restores fresh mutation tokens"},
+            {"NavigationLiveGroup.installToken","Consumed private installation capability; PhaseLive and exact Session/ledger ownership remain checked"},
+            {"NavigationLiveGroup.generation","Local observed-write generation reseeded with cold live owner; immutable group/member values remain included"},
+            {"NavigationSession.authorityOperationIdentity","Local preparation/source guard reseeded on cold restore; durable admissionPublicationIdentity remains included"},
+            {"NavigationHostRoot.released","Creator-handle release flag; retained root remains live and independent ownership walk requires positive references"},
+            {"NavigationHostRequest.released","Creator-handle release flag; transport/mailbox/BODY owning references and aliases are independently checked"},
+            {"NavOwnedStorage.CaptureEpoch","PhysicalIndex.Begin/Complete traversal stamp, absent from physical payload"},
+            {"NavOwnedStorage.CaptureId","PhysicalIndex per-encode alias index; owner aliases remain independently visited"},
+            {"NavOwnedStorage.CaptureTag","PhysicalIndex per-encode dispatch stamp"},
+            {"NavigationRetentionBudget.sequence","Admission token birth history; persisted gameplay publication identity remains included"},
+            {"NavigationRetentionBudget.peak","Allocation-history peak, independent unique reachable ledger is verified separately"},
+            {"NavigationRetentionBudget.resolvedScopes","Completed preparation count, not saved execution work"},
+            {"NavigationRetentionBudget.captureEpoch","Physical capture lane generation, not saved payload"},
+            {"NavigationSession.<OwnedCapturePublications>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedCaptureObservationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedCapturePublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<OwnedProbePublications>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedProbePublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedProbeTakeAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<OwnedProbeAnswerPublications>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedProbeAnswerPublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<OwnedRebindPublications>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedRebindPublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedLeaseReleaseAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedArrivalPruneAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedPhysicalCompletionAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedHeldMaintenancePublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<OwnedResultBatchPublications>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedResultBatchPublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedBarrierHandoffAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<OwnedArrivalRetryPublications>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedArrivalRetryPublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<OwnedReadyPublications>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedReadyPublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<OwnedIngressPublications>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedIngressPublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<OwnedOrdinaryFailurePublications>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedOrdinaryFailurePublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<OwnedDiscardPublications>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedDiscardPublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedStaleIngressAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<OwnedMovementPublications>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"},
+            {"NavigationSession.<LastOwnedMovementPublicationAllocatedBytes>k__BackingField","Explicit QA publication/allocation measurement; covered by owned-publication focused fixtures"}
         };
+        // Capture traversal stamps and explicitly named QA measurements do not
+        // form a persisted gameplay checkpoint. Keep unknown fields included.
+        private static bool ExcludeField(FieldInfo field)
+        {
+            var owner=field.DeclaringType;string name=owner.Name;int generic=name.IndexOf('`');if(generic>=0)name=name.Substring(0,generic);
+            // These audited exact flags retire a creator handle, not the live facade.
+            // Positive references, payload and owner aliases remain in the independent walk.
+            return field.Name=="released"&&(owner==typeof(NavGeometry.OwnedBuffers)||owner==typeof(NavPolygon.OwnedBuffers)||owner==typeof(NavigationHostProvider)||owner==typeof(NavigationHostCorridor)||owner==typeof(NavTypedLeg)||owner==typeof(NavTypedRoute)||owner==typeof(NavigationAuthorityMember)||owner==typeof(NavigationAuthorityGroup)||owner==typeof(NavigationHostAnswer))||Exclusions.ContainsKey(name+"."+field.Name)||owner.IsGenericType&&owner.GetGenericTypeDefinition()==typeof(NavMailbox<>)&&field.Name=="gate";
+        }
         // Cache immutable reflection metadata only. Every field value is still read
         // independently for each authority and tick; no state/digest is cached.
         private static readonly Dictionary<Type,FieldInfo[]> AuthorityFieldCache=new Dictionary<Type,FieldInfo[]>(),PublicFieldCache=new Dictionary<Type,FieldInfo[]>();
@@ -82,7 +135,7 @@ namespace Spacewars.Tests.EditMode
         }
         private sealed class Reader
         {
-            internal byte[] Name; internal Func<object,object> Read; internal bool Ordered;
+            internal byte[] Name; internal string MemberName;internal Func<object,object> Read; internal bool Ordered;
         }
         private sealed class Description
         {
@@ -94,36 +147,158 @@ namespace Spacewars.Tests.EditMode
                 var value=System.Linq.Expressions.Expression.Parameter(typeof(object),"value");
                 var target=System.Linq.Expressions.Expression.Convert(value,t);
                 var access=member is FieldInfo field?System.Linq.Expressions.Expression.Field(target,field):(System.Linq.Expressions.Expression)System.Linq.Expressions.Expression.Property(target,(PropertyInfo)member);
-                return new Reader{Name=NameBytes(member.Name),Read=System.Linq.Expressions.Expression.Lambda<Func<object,object>>(System.Linq.Expressions.Expression.Convert(access,typeof(object)),value).Compile(),Ordered=t==typeof(PlayableVision)&&member.Name=="known"||t==typeof(NavCrowd)&&member.Name=="units"};
+                return new Reader{MemberName=member.Name,Name=NameBytes(member.Name),Read=System.Linq.Expressions.Expression.Lambda<Func<object,object>>(System.Linq.Expressions.Expression.Convert(access,typeof(object)),value).Compile(),Ordered=t==typeof(PlayableVision)&&member.Name=="known"||t==typeof(NavCrowd)&&member.Name=="units"};
             };
-            return new Description{Name=NameBytes(t.FullName),Authority=Fields(t,true).Where(field=>!Exclusions.ContainsKey(t.Name+"."+field.Name)&&!(t.IsGenericType&&t.GetGenericTypeDefinition()==typeof(NavMailbox<>)&&field.Name=="gate")).Select(field=>reader(field)).ToArray(),Projection=Properties(t).Where(prop=>!(t==typeof(PlayableSnapshot)&&prop.Name=="Sounds")).Select(prop=>reader(prop)).Concat(Fields(t,false).Select(field=>reader(field))).ToArray()};
+            return new Description{Name=NameBytes(t.FullName),Authority=Fields(t,true).Where(field=>!ExcludeField(field)).Select(field=>reader(field)).ToArray(),Projection=Properties(t).Where(prop=>!(t==typeof(PlayableSnapshot)&&prop.Name=="Sounds")).Select(prop=>reader(prop)).Concat(Fields(t,false).Select(field=>reader(field))).ToArray()};
         });
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type,byte[]> TypeNames=new System.Collections.Concurrent.ConcurrentDictionary<Type,byte[]>();
         private static byte[] TypeName(Type type)=>TypeNames.GetOrAdd(type,t=>NameBytes(t.FullName));
-        internal static byte[] FactBytes(object value,bool authority=false,bool cachedNames=true)
+        private sealed class FactReferenceIdentity:IEqualityComparer<object>
         {
-            var identities=new Dictionary<object,int>();
-            var active=new Dictionary<object,int>(ReferenceIdentityComparer.Instance);
+            internal static readonly FactReferenceIdentity Instance=new FactReferenceIdentity();
+            public new bool Equals(object a,object b)=>ReferenceEquals(a,b);
+            public int GetHashCode(object value)=>System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(value);
+        }
+        private static bool FactOwnsExactFacade(NavOwnedStorage owner,object facade)
+            =>owner is NavDeclarationStorage declaration&&ReferenceEquals(declaration.Facade,facade)||owner is NavLiveUnitStorage unit&&ReferenceEquals(unit.Unit,facade)||owner is NavigationHostAnswer answer&&ReferenceEquals(answer.Answer,facade)||owner is NavGeometry.OwnedBuffers geometry&&ReferenceEquals(geometry.Facade,facade)||owner is NavPolygon.OwnedBuffers polygon&&ReferenceEquals(polygon.Facade,facade);
+        private static bool ValidateFootprintCache(TerrainLocations locations)
+        {
+            var type=typeof(TerrainLocations);var cache=(IDictionary)type.GetField("footprints",F).GetValue(locations);var fifo=(IEnumerable)type.GetField("footprintOrder",F).GetValue(locations);
+            Assert.AreEqual(cache==null,fifo==null,"Derived footprint cache and FIFO must have the same enabled mode");
+            if(cache==null)return false;
+            var keys=fifo.Cast<object>().ToArray();Assert.AreEqual(cache.Count,keys.Length);Assert.LessOrEqual(keys.Length,4096);
+            var unique=new HashSet<object>();var uncached=type.GetMethod("UncachedFootprint",F);
+            foreach(var key in keys){
+                Assert.True(unique.Add(key),"Derived footprint FIFO duplicate");Assert.True(cache.Contains(key),"Derived footprint FIFO must cover exactly the dictionary");
+                var keyType=key.GetType();double x=(double)keyType.GetField("x",F).GetValue(key),z=(double)keyType.GetField("z",F).GetValue(key),r=(double)keyType.GetField("r",F).GetValue(key);
+                Assert.AreEqual((bool)uncached.Invoke(locations,new object[]{new NavPoint(x,z),r}),(bool)cache[key],"Every cached positive and negative result must equal the pure uncached predicate");
+            }
+            return true;
+        }
+        [Test] public void IndependentOracleValidatesDerivedFootprintCacheWithoutDroppingGeometryOrMode()
+        {
+            var map=ThreeCrossingsMap.Default;var locations=(TerrainLocations)typeof(ThreeCrossingsMap).GetField("locations",F).GetValue(map);
+            var before=FactBytes(locations,true);Assert.True(map.TryLocate(new NavPoint(-20,18),.58,out _));Assert.False(map.TryLocate(new NavPoint(-20,18),-1,out _));
+            CollectionAssert.AreEqual(before,FactBytes(locations,true));CollectionAssert.AreEqual(FactBytes(locations,true,false),FactBytes(locations,true));
+            var cache=(IDictionary)typeof(TerrainLocations).GetField("footprints",F).GetValue(locations);Assert.AreEqual(2,cache.Count);var key=cache.Keys.Cast<object>().First();bool original=(bool)cache[key];
+            cache[key]=!original;Assert.Throws<AssertionException>(()=>FactBytes(locations,true));cache[key]=original;
+            var fifo=typeof(TerrainLocations).GetField("footprintOrder",F).GetValue(locations);var fifoType=fifo.GetType();var first=fifoType.GetMethod("Dequeue").Invoke(fifo,null);fifoType.GetMethod("Enqueue").Invoke(fifo,new[]{cache.Keys.Cast<object>().First(k=>!k.Equals(first))});
+            Assert.Throws<AssertionException>(()=>FactBytes(locations,true));fifoType.GetMethod("Clear").Invoke(fifo,null);foreach(var k in cache.Keys)fifoType.GetMethod("Enqueue").Invoke(fifo,new[]{k});
+            var changed=new TerrainLocations(new NavGeometry(20,Array.Empty<NavObstacle>(),1),Array.Empty<MapSupport>(),Array.Empty<NavSurfaceTransition>());
+            Assert.False(before.SequenceEqual(FactBytes(changed,true)),"Declared geometry and support state remain included");
+            var mode=typeof(TerrainLocations).GetField("footprintOrder",F);mode.SetValue(changed,null);Assert.Throws<AssertionException>(()=>FactBytes(changed,true));
+        }
+        private sealed class FactCycle{public FactCycle Next;}
+        [Test] public void IndependentOracleOwnedFacadeBackrefPreservesValuesAliasesAndManagedCycleDiagnostics()
+        {
+            var budget=new NavigationRetentionBudget();Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,1,1,out var scope));NavigationProfile first=null,second=null;NavLiveUnitStorage unit=null;NavGeometry ownedGeometry=null;NavPolygon ownedPolygon=null;
+            try{
+                first=NavigationProfile.CopyOwned(PlayableProfile.Default.Navigation,scope.OwnedReservation());var data=PlayableProfile.Default.CopyData();data.revision++;data.tankSpeed*=1.1;second=NavigationProfile.CopyOwned(PlayableProfile.Create(data).Navigation,scope.OwnedReservation());
+                foreach(var value in new object[]{first,first.StorageRoot,second,second.StorageRoot})CollectionAssert.AreEqual(FactBytes(value,true,false),FactBytes(value,true,true));
+                CollectionAssert.AreNotEqual(FactBytes(first,true),FactBytes(second,true));
+                unit=NavLiveUnitStorage.CreateOwned(1,new NavPoint(-2,0),1,1,1,scope.OwnedReservation());foreach(var value in new object[]{unit,unit.Unit})CollectionAssert.AreEqual(FactBytes(value,true,false),FactBytes(value,true,true));var priorUnit=FactBytes(unit.Unit,true);unit.Unit.Team++;CollectionAssert.AreNotEqual(priorUnit,FactBytes(unit.Unit,true));
+                ownedPolygon=NavPolygon.CreateOwned(new[]{new NavPoint(-1,-1),new NavPoint(1,-1),new NavPoint(1,1),new NavPoint(-1,1)},scope.OwnedReservation());ownedGeometry=NavGeometry.CopyOwned(new NavGeometry(20,new[]{new NavObstacle(ownedPolygon)},1),scope.OwnedReservation());foreach(var value in new object[]{ownedPolygon,ownedPolygon.StorageRoot,ownedGeometry,ownedGeometry.StorageRoot})CollectionAssert.AreEqual(FactBytes(value,true,false),FactBytes(value,true,true));
+                var geometry=new NavGeometry(20,Array.Empty<NavObstacle>(),1);var a=new NavigationRequest(1,1,1,1,PlayableProfile.Default.Navigation,geometry,new NavPoint(-2,0),new NavPoint(2,0));var b=new NavigationRequest(1,1,1,1,PlayableProfile.Default.Navigation,geometry,new NavPoint(-2,0),new NavPoint(2,0));
+                CollectionAssert.AreNotEqual(FactBytes(new[]{a,a},true),FactBytes(new[]{a,b},true));
+                var left=new AuthoritySlotMap<int,int>();var right=new AuthoritySlotMap<int,int>();foreach(var map in new[]{left,right}){map.Add(1,10);map.Add(2,20);}left.Remove(1);left.Remove(2);right.Remove(2);right.Remove(1);CollectionAssert.AreNotEqual(FactBytes(left,true),FactBytes(right,true));
+                var cycle=new FactCycle();cycle.Next=cycle;StringAssert.Contains("reference cycle",Assert.Throws<InvalidOperationException>(()=>FactBytes(cycle,true)).Message);
+            }finally{first?.StorageRoot.Release();second?.StorageRoot.Release();unit?.Release();ownedGeometry?.StorageRoot.Release();ownedPolygon?.StorageRoot.Release();scope.Discard();}Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+        }
+        [Test] public void IndependentOracleMailboxRotationRetainsPayloadAliasesAndChecksBacking()
+        {
+            var a=new NavigationSession(1,new NavGeometry(20,Array.Empty<NavObstacle>(),1),PlayableProfile.Default.Navigation);var b=new NavigationSession(1,new NavGeometry(20,Array.Empty<NavObstacle>(),1),PlayableProfile.Default.Navigation);
+            try{
+                foreach(var nav in new[]{a,b}){nav.Crowd.Add(1,new NavPoint(-5,0));Assert.True(nav.Move(1,new NavPoint(5,0)));Assert.True(nav.Requests.TryDequeue(out var request));Assert.True(nav.Requests.TryEnqueue(request));}
+                Assert.True(a.Requests.TryDequeue(out var extra));Assert.True(a.Requests.TryEnqueue(extra));var left=FactBytes(a,true);var right=FactBytes(b,true);int diff=Enumerable.Range(0,Math.Min(left.Length,right.Length)).FirstOrDefault(i=>left[i]!=right[i]);if(!left.SequenceEqual(right))TestContext.WriteLine("MAILBOX_FIRST_DIFF="+diff+" left="+Encoding.UTF8.GetString(left,Math.Max(0,diff-180),Math.Min(360,left.Length-Math.Max(0,diff-180)))+" right="+Encoding.UTF8.GetString(right,Math.Max(0,diff-180),Math.Min(360,right.Length-Math.Max(0,diff-180))));CollectionAssert.AreEqual(left,right,"same logical FIFO/owner aliases after different ring rotation");CollectionAssert.AreEqual(FactBytes(a,true,false),FactBytes(a,true,true));
+                var owners=(NavOwnedStorage[])typeof(NavMailbox<NavigationRequest>).GetField("slotOwners",F).GetValue(a.Requests);int head=(int)typeof(NavMailbox<NavigationRequest>).GetField("head",F).GetValue(a.Requests);var owner=owners[head];Assert.NotNull(owner);try{owners[head]=null;Assert.Throws<AssertionException>(()=>FactBytes(a,true));}finally{owners[head]=owner;}
+                foreach(var box in new object[]{a.Requests,a.Answers})foreach(var name in new[]{"authorityGate","validateEnqueue","acceptedEnqueue","publicTake","ownerSelector"}){var field=box.GetType().GetField(name,F);var prior=field.GetValue(box);try{field.SetValue(box,name=="authorityGate"?new object():prior==null?(box is NavMailbox<NavigationAnswer>?(object)(Action<NavigationAnswer>)(_=>{}):(object)(Action<NavigationRequest>)(_=>{})):null);Assert.Throws<AssertionException>(()=>FactBytes(a,true),name);}finally{field.SetValue(box,prior);}}
+                Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(a),a.PhysicalHostBudget.PhysicalBytes);Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(b),b.PhysicalHostBudget.PhysicalBytes);
+            }finally{a.DestroyNavigationAuthority();b.DestroyNavigationAuthority();Assert.Zero(a.PhysicalHostBudget.PhysicalBytes);Assert.Zero(b.PhysicalHostBudget.PhysicalBytes);}
+        }
+        [Test] public void IndependentOracleCommandSlotsPreserveFreeOrderAndValidateActualHashChains()
+        {
+            var budget=new NavigationRetentionBudget();Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,1,1,out var scope));NavigationCommandSlots<int,long> a=null,b=null;
+            try{
+                a=NavigationCommandSlots<int,long>.CreateOwned(4,scope.OwnedReservation());b=NavigationCommandSlots<int,long>.CreateOwned(4,scope.OwnedReservation());foreach(var map in new[]{a,b}){map.AddPreparing(1,10);map.AddPreparing(2,20);}a.Remove(1);a.Remove(2);b.Remove(2);b.Remove(1);
+                CollectionAssert.AreNotEqual(FactBytes(a,true),FactBytes(b,true),"identical empty values must preserve free LIFO");CollectionAssert.AreEqual(FactBytes(a,true,false),FactBytes(a,true,true));a.AddPreparing(3,30);b.AddPreparing(3,30);CollectionAssert.AreEqual(a.ToArray(),b.ToArray());CollectionAssert.AreNotEqual(FactBytes(a,true),FactBytes(b,true),"same values occupy different authoritative slots");
+                var buckets=(int[])typeof(NavigationCommandSlots<int,long>).GetField("buckets",F).GetValue(a);int original=buckets[0];try{buckets[0]=buckets[3];Assert.Throws<AssertionException>(()=>FactBytes(a,true));}finally{buckets[0]=original;}
+            }finally{a?.ReleaseOwner();b?.ReleaseOwner();scope.Discard();}Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+        }
+        private sealed class MailboxFacts
+        {
+            internal object Mailbox,Retention;internal Array Items,Retained,Slots;internal int Head,Count,Capacity;
+        }
+        internal static byte[] FactBytes(object value,bool authority=false,bool cachedNames=true,IDictionary<long,string> positions=null)
+        {
+            var identities=new Dictionary<object,int>(FactReferenceIdentity.Instance);var active=new HashSet<object>(FactReferenceIdentity.Instance);var path=new List<string>();
+            var mailboxes=new Dictionary<object,MailboxFacts>(FactReferenceIdentity.Instance);var boundArrays=new Dictionary<object,string>(FactReferenceIdentity.Instance);var transports=new Dictionary<object,NavigationHostRequest[]>(FactReferenceIdentity.Instance);var linkedRequests=new HashSet<object>(FactReferenceIdentity.Instance);
             using(var memory=new MemoryStream())using(var writer=new BinaryWriter(memory)){
+                object Read(object target,string field)=>target.GetType().GetField(field,F|BindingFlags.Public).GetValue(target);
+                void BindMailbox(object box,NavigationSession session,bool answers){
+                    if(mailboxes.ContainsKey(box))return;
+                    var c=new MailboxFacts{Mailbox=box,Items=(Array)Read(box,"items"),Slots=(Array)Read(box,"slotOwners"),Retention=Read(box,"retention"),Head=(int)Read(box,"head"),Count=(int)Read(box,"count"),Capacity=(int)Read(box,"capacity")};
+                    Assert.AreSame(Read(session,"transportGate"),Read(box,"authorityGate"),"mailbox authority gate");
+                    var transport=Read(session,"transportOwner");
+                    void Binding(string field,string method){var callback=Read(box,field) as Delegate;if(method==null){Assert.Null(callback,field);return;}Assert.NotNull(callback,field);Assert.AreEqual(1,callback.GetInvocationList().Length,field);Assert.AreSame(transport,callback.Target,field);Assert.AreEqual(typeof(NavigationTransportOwner).GetMethod(method,F|BindingFlags.Public),callback.Method,field);}
+                    Binding("validateEnqueue",answers?"ValidateAnswer":"Validate");Binding("acceptedEnqueue",answers?"AcceptAnswer":null);Binding("publicTake",answers?null:"Transfer");
+                    var selector=Read(box,"ownerSelector") as Delegate;Assert.NotNull(selector);Assert.AreEqual(1,selector.GetInvocationList().Length);var selectorMethod=selector.Method;Assert.True(selectorMethod.Name.StartsWith("<InitializeAnswerRetention>",StringComparison.Ordinal));var declaring=selectorMethod.DeclaringType;while(declaring!=null&&declaring!=typeof(NavigationSession))declaring=declaring.DeclaringType;Assert.AreEqual(typeof(NavigationSession),declaring);Assert.AreEqual(typeof(NavOwnedStorage),selectorMethod.ReturnType);var parameters=selectorMethod.GetParameters();Assert.AreEqual(1,parameters.Length);Assert.AreEqual(answers?typeof(NavigationAnswer):typeof(NavigationRequest),parameters[0].ParameterType);
+                    Assert.That(c.Capacity,Is.InRange(1,4096));Assert.That(c.Count,Is.InRange(0,c.Capacity));Assert.That(c.Head,Is.InRange(0,c.Capacity-1));Assert.Zero((int)Read(box,"transferThread"));Assert.True(c.Items.Length==0&&c.Count==0||c.Items.Length==c.Capacity);
+                    if(c.Retention!=null){c.Retained=(Array)Read(c.Retention,"Owners");Assert.AreEqual(c.Capacity,c.Retained.Length);boundArrays[c.Retained]="retained-mailbox-owners";if(answers){var backing=Read(c.Retention,"backing") as NavigationAnswerMailboxBacking;Assert.NotNull(backing);Assert.AreSame(c.Items,backing.Items);}}
+                    if(c.Slots!=null){Assert.AreEqual(c.Capacity,c.Slots.Length);boundArrays[c.Slots]="controlled-mailbox-owners";}
+                    if(!answers&&Read(session,"groupCommandBacking") is NavigationCommandAuthority command){Assert.AreSame(command.Mailbox,c.Items);Assert.AreSame(command.MailboxOwners,c.Slots);}
+                    boundArrays[c.Items]="logical-mailbox-items";mailboxes.Add(box,c);
+                }
+                void BindSession(NavigationSession session){
+                    BindMailbox(session.Requests,session,false);BindMailbox(session.Answers,session,true);
+                    if(Read(session,"groups") is NavigationCommandSlots<long,GroupOrderState> ownedGroups)foreach(var group in ownedGroups){Assert.True(ownedGroups.OwnerFor(group.Key) is NavigationLiveGroup);var live=(NavigationLiveGroup)ownedGroups.OwnerFor(group.Key);Assert.True(live.BelongsToSession(session));Assert.Greater(live.References,0);}
+                    var transport=(NavigationTransportOwner)Read(session,"transportOwner");if(transport==null||transports.ContainsKey(transport))return;var rows=new List<NavigationHostRequest>();var seen=new HashSet<object>(FactReferenceIdentity.Instance);NavigationHostRequest prior=null;
+                    for(var row=(NavigationHostRequest)Read(transport,"first");row!=null;row=row.TransportNext){Assert.True(seen.Add(row),"transport cycle");Assert.AreSame(transport,row.TransportOwner);Assert.AreSame(prior,row.TransportPrevious);Assert.True(row.TransportExternal||row.TransportAnswers>0);Assert.Greater(row.References,0);rows.Add(row);linkedRequests.Add(row);prior=row;}
+                    transports.Add(transport,rows.OrderBy(row=>row.Request.Session).ThenBy(row=>row.Request.Request).ThenBy(row=>row.Request.Entity).ToArray());
+                }
+                void Mailbox(MailboxFacts c){
+                    writer.Write(c.Capacity);writer.Write(c.Items.Length);writer.Write((bool)Read(c.Mailbox,"closed"));writer.Write(c.Count);writer.Write(c.Retention!=null);writer.Write(c.Slots!=null);Visit(c.Retention);
+                    var occupied=new bool[c.Capacity];for(int i=0;i<c.Count;i++){int slot=(c.Head+i)%c.Capacity;occupied[slot]=true;var item=c.Items.GetValue(slot);NavOwnedStorage expected=item is NavigationRequest request?request.StorageOwner:item is NavigationAnswer answer?answer.StorageOwner??(NavOwnedStorage)answer.Request.StorageOwner:null;var retained=c.Retained?.GetValue(slot);var owned=c.Slots?.GetValue(slot);if(c.Retained!=null)Assert.AreSame(expected,retained);if(c.Slots!=null)Assert.AreSame(expected,owned);Visit(item);Visit(retained);Visit(owned);}
+                    for(int i=0;i<c.Capacity;i++)if(!occupied[i]){if(i<c.Items.Length)Assert.Null(c.Items.GetValue(i));if(c.Retained!=null)Assert.Null(c.Retained.GetValue(i));if(c.Slots!=null)Assert.Null(c.Slots.GetValue(i));}
+                }
+                void Slots(object value){
+                    var keys=(Array)Read(value,"keys");var values=(Array)Read(value,"values");var edges=(Array)Read(value,"edges");var live=(bool[])Read(value,"live");var free=(int[])Read(value,"free");var next=(int[])Read(value,"next");var buckets=(int[])Read(value,"buckets");int length=(int)Read(value,"length"),count=(int)Read(value,"count"),freeCount=(int)Read(value,"freeCount"),capacity=keys.Length;bool reference=(bool)Read(value,"referenceKeys");
+                    foreach(var array in new Array[]{values,edges,live,free,next,buckets})Assert.AreEqual(capacity,array.Length);Assert.That(length,Is.InRange(0,capacity));Assert.That(count,Is.InRange(0,length));Assert.AreEqual(length-count,freeCount);writer.Write(((NavOwnedStorage)value).StorageBytes);writer.Write(capacity);writer.Write(length);writer.Write(count);writer.Write(reference);
+                    var holes=new bool[length];for(int i=0;i<freeCount;i++){int slot=free[i];Assert.That(slot,Is.InRange(0,length-1));Assert.False(live[slot]);Assert.False(holes[slot]);holes[slot]=true;writer.Write(slot);}
+                    object emptyKey=keys.GetType().GetElementType().IsValueType?Activator.CreateInstance(keys.GetType().GetElementType()):null,emptyValue=values.GetType().GetElementType().IsValueType?Activator.CreateInstance(values.GetType().GetElementType()):null;
+                    int occupied=0;for(int i=0;i<capacity;i++){writer.Write(live[i]);if(live[i]){Assert.Less(i,length);occupied++;Visit(keys.GetValue(i));Visit(values.GetValue(i));Visit(edges.GetValue(i));}else{if(i<length)Assert.True(holes[i]);Assert.AreEqual(emptyKey,keys.GetValue(i));Assert.AreEqual(emptyValue,values.GetValue(i));Assert.Null(edges.GetValue(i));}}Assert.AreEqual(count,occupied);
+                    var indexed=new bool[length];var unique=new HashSet<object>(reference?FactReferenceIdentity.Instance:EqualityComparer<object>.Default);for(int b=0;b<capacity;b++)for(int at=buckets[b];at>=0;at=next[at]){Assert.Less(at,length);Assert.True(live[at]);Assert.False(indexed[at],"hash chain duplicate/cycle");indexed[at]=true;var key=keys.GetValue(at);Assert.True(unique.Add(key));int hash=reference?System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(key):key.GetHashCode();Assert.AreEqual(b,(hash&int.MaxValue)%capacity);}for(int i=0;i<length;i++)Assert.AreEqual(live[i],indexed[i]);
+                }
                 void Name(string name){if(cachedNames)writer.Write(NameBytes(name));else writer.Write(name);}
                 void Visit(object v){
-                    // Bound callbacks can point back to the domain being inspected. Read
-                    // every field on entry, then encode only the actual recursion edge.
-                    // Completed non-authoritative aliases remain independent values.
-                    if(v==null||v is string||v.GetType().IsValueType){Contents(v);return;}
-                    if(active.TryGetValue(v,out int depth)){writer.Write("active-reference");writer.Write(depth);return;}
-                    active.Add(v,active.Count);
-                    try{Contents(v);}finally{active.Remove(v);}
+                    if(positions!=null)positions[memory.Position]=string.Join(" -> ",path);
+                    if(v==null){VisitValue(v);return;}
+                    var type=v.GetType();
+                    if(v is IntPtr||v is UIntPtr||v is System.Reflection.Pointer||type.IsPointer)throw new InvalidOperationException("Independent oracle native pointer: "+string.Join(" -> ",path)+" -> "+type.FullName);
+                    if(path.Count>128)throw new InvalidOperationException("Independent oracle traversal depth: "+string.Join(" -> ",path));
+                    bool track=!type.IsValueType&&!(v is string)&&!identities.ContainsKey(v);
+                    if(track&&active.Contains(v)&&v is INavStorageFacade facade&&facade.StorageRoot is NavOwnedStorage root&&FactOwnsExactFacade(root,v)&&identities.TryGetValue(root,out int ownerId)){
+                        if(cachedNames)writer.Write(TypeName(type));else writer.Write(type.FullName);writer.Write("owner-facade-backref");writer.Write(ownerId);return;
+                    }
+                    if(track&&!active.Add(v))throw new InvalidOperationException("Independent oracle reference cycle: "+string.Join(" -> ",path)+" -> "+type.FullName);
+                    path.Add(type.FullName);try{VisitValue(v);}finally{path.RemoveAt(path.Count-1);if(track)active.Remove(v);}
                 }
-                void Contents(object v){
+                void VisitValue(object v){
                     if(v==null){writer.Write("null");return;}var t=v.GetType();if(cachedNames)writer.Write(TypeName(t));else Name(t.FullName);
                     if(v is string str){writer.Write(str);return;}if(v is double number){writer.Write(number);return;}
-                    if(v is int integer){writer.Write(integer);return;}if(v is long wide){writer.Write(wide);return;}if(v is bool flag){writer.Write(flag);return;}if(v is byte octet){writer.Write(octet);return;}
+                    if(v is int integer){writer.Write(integer);return;}if(v is long wide){writer.Write(wide);return;}if(v is bool flag){writer.Write(flag);return;}if(v is byte octet){writer.Write(octet);return;}if(v is sbyte signedByte){writer.Write(signedByte);return;}if(v is short narrow){writer.Write(narrow);return;}if(v is ushort unsignedNarrow){writer.Write(unsignedNarrow);return;}if(v is uint unsigned){writer.Write(unsigned);return;}if(v is ulong unsignedWide){writer.Write(unsignedWide);return;}if(v is float single){writer.Write(single);return;}if(v is decimal precise){writer.Write(precise);return;}if(v is char character){writer.Write(character);return;}
                     if(t.IsEnum){writer.Write(Convert.ToInt32(v));return;}
                     if(v is IEnumerable<byte> raw){var bytes=v as byte[]??raw.ToArray();writer.Write(bytes.Length);writer.Write(bytes);return;}
                     // Geometry/request and session/port ownership aliases are operational authority. Others
                     // are values or views; profile object aliases do not change execution.
-                    if(authority&&(v is NavGeometry||v is NavigationRequest||v is NavigationSession||v is NavigationRoutePort)){if(identities.TryGetValue(v,out var identity)){writer.Write(identity);return;}writer.Write(identities.Count);identities.Add(v,identities.Count);}
+                    // Owned storage is an identity graph as well. Runtime transport
+                    // links may cycle; read each owner once and retain alias IDs.
+                    if(authority&&(v is NavGeometry||v is NavigationRequest||v is NavOwnedStorage||v is NavigationSession||v is NavigationRoutePort)){if(identities.TryGetValue(v,out var identity)){writer.Write(identity);return;}writer.Write(identities.Count);identities.Add(v,identities.Count);}
+                    if(authority&&v is NavigationSession session)BindSession(session);
+                    if(authority&&mailboxes.TryGetValue(v,out var mailbox)){Mailbox(mailbox);return;}
+                    if(authority&&v is Array bound&&boundArrays.TryGetValue(bound,out string role)){writer.Write(role);writer.Write(bound.Length);return;}
+                    if(authority&&v is NavigationTransportOwner transport&&transports.TryGetValue(transport,out var transferred)){writer.Write(transport.StorageBytes);writer.Write(transferred.Length);foreach(var row in transferred)Visit(row);return;}
+                    if(authority&&t.IsGenericType&&t.GetGenericTypeDefinition()==typeof(NavigationCommandSlots<,>)){Slots(v);return;}
+                    if(authority&&v is NavigationLiveProbeAnswers fifo){writer.Write(fifo.StorageBytes);writer.Write(fifo.Capacity);writer.Write(fifo.Count);for(int i=0;i<fifo.Count;i++)Visit(fifo.ReceiptAt(i));Visit(fifo.EmptyReset);Assert.Null(fifo.RetiredNext);var owners=(Array)Read(fifo,"owners");for(int i=fifo.Count;i<owners.Length;i++)Assert.Null(owners.GetValue(i));return;}
                     if(authority&&t.IsGenericType&&t.GetGenericTypeDefinition()==typeof(AuthoritySlotMap<,>)){
                         // Independent reflection over actual allocation state, never its
                         // CaptureLayout helper. The key->slot index is derived lookup.
@@ -131,19 +306,28 @@ namespace Spacewars.Tests.EditMode
                         var lookup=(IDictionary)t.GetField("index",F).GetValue(v);writer.Write(lookup.Count);
                         foreach(var key in lookup.Keys.Cast<object>().OrderBy(x=>Convert.ToString(x,CultureInfo.InvariantCulture),StringComparer.Ordinal)){Visit(key);Visit(lookup[key]);}return;
                     }
+                    if(authority&&v is TerrainLocations terrainLocations){
+                        bool enabled=ValidateFootprintCache(terrainLocations);
+                        foreach(var field in Fields(t,true)){if(ExcludeField(field))continue;Name(field.Name);
+                            if(field.Name=="footprints"||field.Name=="footprintOrder"){writer.Write("validated-pure-footprint-cache");writer.Write(enabled);continue;}
+                            path.Add(field.Name);try{Visit(field.GetValue(v));}finally{path.RemoveAt(path.Count-1);}
+                        }return;
+                    }
                     if(cachedNames&&v is double[] doubles){writer.Write(doubles.Length);var name=TypeName(typeof(double));foreach(double item in doubles){writer.Write(name);writer.Write(item);}return;}
                     if(cachedNames&&v is int[] integers){writer.Write(integers.Length);var name=TypeName(typeof(int));foreach(int item in integers){writer.Write(name);writer.Write(item);}return;}
                     if(v is IEnumerable rows){var items=rows.Cast<object>().ToArray();if(t.IsGenericType&&t.GetGenericTypeDefinition()==typeof(HashSet<>))items=items.OrderBy(x=>Convert.ToString(x,CultureInfo.InvariantCulture)).ToArray();writer.Write(items.Length);foreach(var row in items)Visit(row);return;}
                     if(cachedNames){foreach(var reader in authority?Describe(t).Authority:Describe(t).Projection){
-                        writer.Write(reader.Name);var item=reader.Read(v);
+                        writer.Write(reader.Name);if(linkedRequests.Contains(v)&&(reader.MemberName=="TransportNext"||reader.MemberName=="TransportPrevious")){writer.Write("validated-transport-link");continue;}var item=reader.Read(v);path.Add(reader.MemberName);try{
                         if(authority&&reader.Ordered){var dictionary=(IDictionary)item;foreach(object knownKey in dictionary.Keys.Cast<object>().OrderBy(x=>(int)x)){Visit(knownKey);Visit(dictionary[knownKey]);}}else Visit(item);
+                        }finally{path.RemoveAt(path.Count-1);}
                     }return;}
                     if(authority){foreach(var f in Fields(t,true)){
-                        string key=t.Name+"."+f.Name;if(Exclusions.ContainsKey(key)||t.IsGenericType&&t.GetGenericTypeDefinition()==typeof(NavMailbox<>)&&f.Name=="gate")continue;
-                        Name(f.Name);var item=f.GetValue(v);
+                        if(ExcludeField(f))continue;
+                        Name(f.Name);if(linkedRequests.Contains(v)&&(f.Name=="TransportNext"||f.Name=="TransportPrevious")){writer.Write("validated-transport-link");continue;}var item=f.GetValue(v);path.Add(f.Name);try{
                         // Vision memory and crowd lookup tables do not use insertion order for decisions;
                         // all mutable facts/counters are still read independently.
                         if(t==typeof(PlayableVision)&&f.Name=="known"||t==typeof(NavCrowd)&&f.Name=="units"){var dictionary=(IDictionary)item;foreach(object knownKey in dictionary.Keys.Cast<object>().OrderBy(x=>(int)x)){Visit(knownKey);Visit(dictionary[knownKey]);}}else Visit(item);
+                        }finally{path.RemoveAt(path.Count-1);}
                     }}else{
                         foreach(var prop in Properties(t)){if(t==typeof(PlayableSnapshot)&&prop.Name=="Sounds")continue;Name(prop.Name);Visit(prop.GetValue(v));}
                         foreach(var f in Fields(t,false)){Name(f.Name);Visit(f.GetValue(v));}
@@ -208,10 +392,15 @@ namespace Spacewars.Tests.EditMode
         }
         private static void Equal(object a,object b,int tick,bool projections=true)
         {
-            var actual=Facts(a,true);var restored=Facts(b,true);
+            foreach(var domain in new[]{a,b}){var navigation=Nav(domain);Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(navigation),navigation.PhysicalHostBudget.PhysicalBytes,"independent reachable ownership tick "+tick);Assert.Zero(navigation.PhysicalHostBudget.HeldBytes);Assert.Zero(navigation.PhysicalHostBudget.ActiveScopes);}
+            var leftFacts=FactBytes(a,true);var rightFacts=FactBytes(b,true);string Hash(byte[] facts){using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(facts));}var actual=Hash(leftFacts);var restored=Hash(rightFacts);
             if(actual!=restored){
-                string Diff(object x,object y,string path,int depth){if(depth>4||x==null||y==null||x.GetType()!=y.GetType())return path;var type=x.GetType();if(x is IEnumerable)return path+" [ordered collection]";var changed=new List<string>();foreach(var f in Fields(type,true)){if(Exclusions.ContainsKey(type.Name+"."+f.Name))continue;var l=f.GetValue(x);var r=f.GetValue(y);if(Facts(l,true)!=Facts(r,true))changed.Add(Diff(l,r,path+"."+f.Name,depth+1));}return changed.Count==0?path+" [reference aliases]":string.Join("; ",changed);}
-                Assert.Fail("Independent authority mismatch tick="+tick+" byteEqual="+Bytes(a).SequenceEqual(Bytes(b))+" fields="+Diff(a,b,"domain",0));
+                int first=0;while(first<Math.Min(leftFacts.Length,rightFacts.Length)&&leftFacts[first]==rightFacts[first])first++;string Around(byte[] facts){int start=Math.Max(0,first-180);return start>=facts.Length?"<end>":Encoding.UTF8.GetString(facts,start,Math.Min(360,facts.Length-start));}TestContext.WriteLine("PRIMARY root fact byte="+first+" left="+Around(leftFacts)+" right="+Around(rightFacts));
+                string Diff(object x,object y,string path,int depth){if(depth>4||x==null||y==null||x.GetType()!=y.GetType())return path;var type=x.GetType();if(type.IsPrimitive||type.IsEnum||x is string||x is decimal)return path+" ("+Convert.ToString(x,CultureInfo.InvariantCulture)+" -> "+Convert.ToString(y,CultureInfo.InvariantCulture)+")";if(x is IEnumerable)return path+" [ordered collection]";var changed=new List<string>();foreach(var f in Fields(type,true)){if(ExcludeField(f))continue;var l=f.GetValue(x);var r=f.GetValue(y);try{if(Facts(l,true)!=Facts(r,true))changed.Add(Diff(l,r,path+"."+f.Name,depth+1));}catch(InvalidOperationException diagnostic){changed.Add(path+"."+f.Name+" [diagnostic unavailable: "+diagnostic.Message+"]");}}return changed.Count==0?path+" [reference aliases]":string.Join("; ",changed);}
+                TestContext.WriteLine("PRIMARY independent authority mismatch before capture tick="+tick+" actual="+actual+" restored="+restored);
+                var diagnostic=Diff(a,b,"domain",0); // Capture itself can publish admission and traversal stamps.
+                var byteEqual=Bytes(a).SequenceEqual(Bytes(b));TestContext.WriteLine("PRIMARY independent authority mismatch tick="+tick+" byteEqual="+byteEqual+" actual="+actual+" restored="+restored+" preCaptureFields="+diagnostic);
+                Assert.Fail("Independent authority mismatch tick="+tick+" byteEqual="+byteEqual+" actual="+actual+" restored="+restored+" preCaptureFields="+diagnostic);
             }
             Assert.True(Bytes(a).SequenceEqual(Bytes(b)),"complete authority bytes at suffix tick "+tick);
             if(projections)foreach(PlayableOwner owner in new[]{PlayableOwner.Player,PlayableOwner.Enemy})Assert.AreEqual(Facts(View(a,owner)),Facts(View(b,owner)),"fog projection "+owner+" tick "+tick);
@@ -390,7 +579,7 @@ namespace Spacewars.Tests.EditMode
             using(var stream=new MemoryStream(domain))using(var reader=new BinaryReader(stream))
             {
                 int count=reader.ReadInt32();Assert.Greater(count,0);
-                for(int i=0;i<count;i++){Assert.Greater(reader.ReadInt32(),0);int nameBytes=reader.ReadInt32();Assert.GreaterOrEqual(nameBytes,0);reader.ReadBytes(nameBytes);foreach(var field in PlayableProfileMetadata.Fields)reader.ReadDouble();}
+                for(int i=0;i<count;i++){Assert.Greater(reader.ReadInt32(),0);int nameBytes=reader.ReadInt32();Assert.GreaterOrEqual(nameBytes,0);reader.ReadBytes(nameBytes);foreach(var field in PlayableProfileMetadata.PreCrowdFields)reader.ReadDouble();}
                 return (int)stream.Position;
             }
         }

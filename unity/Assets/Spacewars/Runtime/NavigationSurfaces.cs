@@ -10,7 +10,7 @@ namespace Spacewars.Runtime
             if(state.Crowd?.Units==null||state.Crowd.Units.Any(u=>u==null)||state.Requests.Any(r=>r==null)||state.Groups!=null&&state.Groups.Any(g=>g==null||g.Members==null||g.Members.Any(m=>m==null)))throw new ArgumentException("Invalid surface checkpoint collections.");
             var actorById=state.Crowd.Units.ToDictionary(u=>u.Id);
             var pendingByEntity=new System.Collections.Generic.Dictionary<int,NavigationRequestState>();
-            foreach(int index in state.PendingRequestIndices){if(index<0||index>=state.Requests.Length||!pendingByEntity.TryAdd(state.Requests[index].Entity,state.Requests[index]))throw new ArgumentException("Invalid pending surface request indices.");}
+            foreach(int index in state.PendingRequestIndices.Concat(state.AllocationRequestIndices??Array.Empty<int>())){if(index<0||index>=state.Requests.Length||!pendingByEntity.TryAdd(state.Requests[index].Entity,state.Requests[index]))throw new ArgumentException("Invalid pending surface request indices.");}
             bool legacy=state.SurfaceSemanticsVersion==0;
             if(!legacy&&(state.SurfaceSemanticsVersion!=(terrain?.SurfaceSemanticsVersion??1)||state.SurfaceProviderId!=(terrain?.Id??NavLocation.FlatSurface)))throw new ArgumentException("Terrain surface semantics mismatch.");
             // Explicit legacy codec: the two currently supported authored providers

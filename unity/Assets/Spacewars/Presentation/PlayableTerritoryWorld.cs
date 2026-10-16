@@ -10,13 +10,14 @@ namespace Spacewars.Presentation
     {
         private sealed class PadView { public GameObject Root,Fill; public Mesh Mesh; public MeshFilter Surface; public Vector2 Half; public double Progress=double.NaN; public Color Color=Color.clear; }
         private readonly Dictionary<string,PadView> territoryPads=new Dictionary<string,PadView>();
+        private readonly HashSet<int> readyPadSites=new HashSet<int>();
         private readonly Dictionary<string,Vector2> apronModelBounds=new Dictionary<string,Vector2>();
         private EnvironmentArtProfile apronArt;
         private Material apronMaterial;
         private long padTick=-1;
         private EnvironmentArtProfile ApronArt=>apronArt??(apronArt=EnvironmentArtProfile.Load());
         private static void DestroyPad(PadView p){foreach(var filter in p.Root.GetComponentsInChildren<MeshFilter>())UnityEngine.Object.Destroy(filter.sharedMesh);UnityEngine.Object.Destroy(p.Root);}
-        public void ClearPads(){foreach(var p in territoryPads.Values)DestroyPad(p);territoryPads.Clear();apronModelBounds.Clear();padTick=-1;}
+        public void ClearPads(){foreach(var p in territoryPads.Values)DestroyPad(p);territoryPads.Clear();readyPadSites.Clear();apronModelBounds.Clear();padTick=-1;}
         private Material ApronMaterial
         {
             get
@@ -49,7 +50,7 @@ namespace Spacewars.Presentation
             apronModelBounds.Add(key,size);return size;
         }
         private Vector2 ApronHalf(PlayableBuildingKind kind,bool upgraded=false)
-            =>ApronModelHalf(BuildingKey(kind.ToString(),upgraded))+Vector2.one*ApronArt.apronMargin;
+            =>ApronModelHalf(BuildingKey(kind.ToString(),upgraded))+Vector2.one*(ApronArt.apronMargin+(kind==PlayableBuildingKind.Outpost?ApronArt.outpostApronMargin:0));
         private Vector2 ObservedSupportHalf(string key,NavPoint point,PlayableBuildingKind emptyKind,PlayableBuildingSnapshot observed,PlayableSnapshot view)
         {
             if(observed!=null)return ApronHalf(observed.Kind,observed.RefineryUpgraded);
@@ -68,6 +69,8 @@ namespace Spacewars.Presentation
             {
                 var center=view.Buildings.FirstOrDefault(b=>b.Id==state.CenterId&&b.Phase!=ConstructionPhase.Pending);
                 UpdatePad(state.Site.Id+":0",state.Site.Position,ObservedSupportHalf(state.Site.Id+":0",state.Site.Position,state.Site.Kind,center,view),state.Owner??state.Claimant,center==null?state.Progress:0,state.Contested,view.Tick,facing,live);
+                if(state.Ready)readyPadSites.Add(state.Site.Id);else readyPadSites.Remove(state.Site.Id);
+                if(!state.Ready)continue;
                 foreach(var slot in state.Site.Slots)
                 {
                     var observed=view.Buildings.FirstOrDefault(b=>b.SiteId==state.Site.Id&&b.SlotId==slot.Id&&b.Phase!=ConstructionPhase.Pending);
@@ -80,6 +83,8 @@ namespace Spacewars.Presentation
                 if(view.Sites.Any(s=>s.Site.Id==site.Id))continue;
                 // Static discovered ground is safe to remember; never inspect hidden live buildings here.
                 UpdatePad(site.Id+":0",site.Position,ObservedSupportHalf(site.Id+":0",site.Position,site.Kind,null,view),null,0,false,view.Tick,facing,live);
+                // Last observed readiness only: discovered ground must not disclose hidden construction.
+                if(!readyPadSites.Contains(site.Id))continue;
                 foreach(var slot in site.Slots)UpdatePad(site.Id+":"+slot.Id,slot.Position,ObservedSupportHalf(site.Id+":"+slot.Id,slot.Position,PlayableBuildingKind.Factory,null,view),null,0,false,view.Tick,facing,live);
             }
             foreach(var key in territoryPads.Keys.ToArray())if(!live.Contains(key)){DestroyPad(territoryPads[key]);territoryPads.Remove(key);}

@@ -13,7 +13,7 @@ using UnityEngine.UIElements;
 public sealed class NativeDisplaySettingsTests
 {
     private readonly string[] ints={"spacewars.display.fullscreen","spacewars.display.shadows","spacewars.display.vsync","spacewars.display.width","spacewars.display.height"};
-    private readonly string[] floats={"spacewars.controls.cursorSpeed","spacewars.controls.cameraSpeed",NativeCameraScrollSettings.EdgeKey,NativeCameraScrollSettings.ArrowKey};
+    private readonly string[] floats={"spacewars.controls.cursorSpeed","spacewars.controls.cameraSpeed","spacewars.controls.cursorRecenterIdleMs",NativeCameraScrollSettings.EdgeKey,NativeCameraScrollSettings.ArrowKey};
     private readonly Dictionary<string,int> oldInts=new Dictionary<string,int>();
     private readonly Dictionary<string,float> oldFloats=new Dictionary<string,float>();
     private readonly Dictionary<Light,LightShadows> oldLights=new Dictionary<Light,LightShadows>();
@@ -97,6 +97,21 @@ public sealed class NativeDisplaySettingsTests
             Assert.Greater(page.Q<ScrollView>("settings-scroll").verticalScroller.worldBound.width,0);
             Assert.LessOrEqual(page.Q<ScrollView>("settings-scroll").verticalScroller.worldBound.width,10.5f);
             AssertColumns(page);
+            var rail=page.Q("settings-tabs");var pane=page.Q<ScrollView>("settings-scroll");
+            Assert.LessOrEqual(rail.worldBound.xMax,pane.worldBound.xMin,"Tabs stay to the left of the parameters");
+            foreach(var name in new[]{"Экран","Графика","Звук","Управление","Интерфейс"})
+            {
+                var tab=page.Q<Button>("settings-tab-"+name);Assert.NotNull(tab);
+                Assert.GreaterOrEqual(tab.worldBound.yMin,rail.worldBound.yMin);
+                Assert.LessOrEqual(tab.worldBound.yMax,pane.worldBound.yMax,"All tabs remain visible without scrolling");
+                navigation.SetScope(page,()=>{},tab);navigation.Activate();yield return null;
+                Assert.IsTrue(tab.ClassListContains("settings-tab-selected"));
+                foreach(var other in new[]{"Экран","Графика","Звук","Управление","Интерфейс"})
+                    Assert.AreEqual(other==name?DisplayStyle.Flex:DisplayStyle.None,page.Q("settings-group-"+other).resolvedStyle.display);
+                Assert.AreSame(tab,root.focusController.focusedElement,"Activation keeps focus on its tab");
+            }
+            navigation.ActivateElement(page.Q<Button>("settings-tab-Экран"));
+            navigation.SetScope(page,()=>{},page.Q("settings-resolution"));yield return null;
             var vsync=page.Q<Toggle>("settings-vsync");Assert.IsFalse(vsync.value);
             navigation.Move(Vector2.down);navigation.Move(Vector2.down);
             Assert.AreSame(vsync,root.focusController.focusedElement);
@@ -106,10 +121,17 @@ public sealed class NativeDisplaySettingsTests
             var edge=page.Q<Slider>("settings-camera-edge");edge.value=edge.highValue;
             var arrows=page.Q<Slider>("settings-camera-arrows");arrows.value=arrows.lowValue;
             Assert.AreEqual(edge.highValue,NativeCameraScrollSettings.EdgeSpeed(8));Assert.AreEqual(arrows.lowValue,NativeCameraScrollSettings.ArrowSpeed(12));
+            navigation.ActivateElement(page.Q<Button>("settings-tab-Управление"));
             var cursor=page.Q<Slider>("settings-pad-cursorSpeed");cursor.value=cursor.highValue;
             var camera=page.Q<Slider>("settings-pad-cameraSpeed");camera.value=camera.lowValue;
-            var reloaded=new NativeLocalControlSettings();Assert.AreEqual(controls.CursorSpeed,reloaded.CursorSpeed);Assert.AreEqual(controls.CameraSpeed,reloaded.CameraSpeed);
-            page.Q<Toggle>("settings-fullscreen").value=false;page.Q<Toggle>("settings-shadows").value=false;
+            var recenter=page.Q<Slider>("settings-pad-cursorRecenterIdleMs");Assert.NotNull(recenter);recenter.value=750;
+            var reloaded=new NativeLocalControlSettings();Assert.AreEqual(750,reloaded.CursorRecenterIdleMs);Assert.AreEqual(controls.CursorSpeed,reloaded.CursorSpeed);Assert.AreEqual(controls.CameraSpeed,reloaded.CameraSpeed);
+            navigation.ActivateElement(page.Q<Button>("settings-tab-Экран"));
+            page.Q<Toggle>("settings-fullscreen").value=false;
+            Assert.IsTrue(NativeDisplaySettings.Fullscreen,"Unconfirmed preview must not be saved");
+            navigation.ActivateElement(root.Q<Button>("settings-confirm-accept"));
+            navigation.ActivateElement(page.Q<Button>("settings-tab-Графика"));
+            page.Q<Toggle>("settings-shadows").value=false;
             navigation.Back();page=NativeSettingsView.Open(root,navigation,()=>{},reloaded);
             yield return null;yield return null;
             Assert.AreEqual(edge.highValue,page.Q<Slider>("settings-camera-edge").value);Assert.AreEqual(arrows.lowValue,page.Q<Slider>("settings-camera-arrows").value);
@@ -119,8 +141,10 @@ public sealed class NativeDisplaySettingsTests
             string directory=Environment.GetEnvironmentVariable("SPACEWARS_SETTINGS_EVIDENCE");
             if(!string.IsNullOrEmpty(directory)){Directory.CreateDirectory(directory);Capture(target,Path.Combine(directory,"settings-800x620.png"));}
             var scroll=page.Q<ScrollView>("settings-scroll");
-            // AA + SSAO + bloom + collapsed graphics foldout add four visible controls.
-            for(int i=0;i<17;i++)navigation.Move(Vector2.down);
+            // Four graphics controls and the cursor recenter slider extend the original focus path.
+            navigation.ActivateElement(page.Q<Button>("settings-tab-Управление"));
+            navigation.SetScope(page,()=>{},page.Q<Slider>("settings-camera-edge"));
+            for(int i=0;i<100&&root.focusController.focusedElement!=page.Q<Button>("settings-controls");i++)navigation.Move(Vector2.down);
             yield return null;yield return null;
             var help=page.Q<Button>("settings-controls");Assert.AreSame(help,root.focusController.focusedElement);
             Assert.GreaterOrEqual(help.worldBound.yMin,scroll.contentViewport.worldBound.yMin-1);
@@ -128,7 +152,7 @@ public sealed class NativeDisplaySettingsTests
             var back=page.Q<Button>("settings-back");Assert.GreaterOrEqual(back.worldBound.yMin,root.worldBound.yMin);Assert.LessOrEqual(back.worldBound.yMax,root.worldBound.yMax);
             if(!string.IsNullOrEmpty(directory))Capture(target,Path.Combine(directory,"settings-scrolled-800x620.png"));
             panel.targetTexture=null;target.Release();target.width=1280;target.height=800;target.Create();panel.targetTexture=target;
-            navigation.SetScope(page,()=>{},page.Q<DropdownField>("settings-resolution"));scroll.scrollOffset=Vector2.zero;
+            navigation.ActivateElement(page.Q<Button>("settings-tab-Экран"));navigation.SetScope(page,()=>{},page.Q<DropdownField>("settings-resolution"));scroll.scrollOffset=Vector2.zero;
             yield return new WaitForSecondsRealtime(.3f);yield return null;
             AssertColumns(page);
             if(!string.IsNullOrEmpty(directory))Capture(target,Path.Combine(directory,"settings-1280x800.png"));
@@ -140,9 +164,9 @@ public sealed class NativeDisplaySettingsTests
     private static void AssertColumns(VisualElement page)
     {
         float left=page.Q<DropdownField>("settings-resolution").Q(className:"unity-base-field__input").worldBound.xMin;
-        foreach(string name in new[]{"settings-fullscreen","settings-vsync","settings-shadows","settings-health","settings-volume","settings-camera-edge","settings-camera-arrows","settings-pad-cursorSpeed","settings-pad-cameraSpeed"})
+        foreach(string name in new[]{"settings-fullscreen","settings-vsync"})
             Assert.AreEqual(left,page.Q(name).Q(className:"unity-base-field__input").worldBound.xMin,1,name+" control column");
-        foreach(var toggle in page.Query<Toggle>().ToList())
+        foreach(var toggle in page.Query<Toggle>().ToList().Where(t=>t.resolvedStyle.display!=DisplayStyle.None&&t.worldBound.height>0))
         {
             var input=toggle.Q(className:"unity-base-field__input");
             Assert.Zero(input.resolvedStyle.borderLeftWidth,"Checkbox must not have an outer frame");

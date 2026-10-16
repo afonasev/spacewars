@@ -38,6 +38,9 @@ namespace Spacewars.Simulation.Ai
             Hash=Digest(Id+"\n"+Revision+"\n"+string.Join("\n",values.OrderBy(v=>v.Key,StringComparer.Ordinal).Select(v=>v.Key+"="+v.Value.ToString("R",CultureInfo.InvariantCulture))));
         }
         public double Value(string path)=>values[path];
+        // The explicit legacy importer validates every historical value. Only
+        // these two fields were absent; the live profile retains caller values.
+        internal string BeforeExpansionSelectionHash=>Digest(Id+"\n"+Revision+"\n"+string.Join("\n",values.Where(v=>v.Key!="economy.remoteExpansionShare"&&v.Key!="economy.enemyMainProtectedIncomeSites").OrderBy(v=>v.Key,StringComparer.Ordinal).Select(v=>v.Key+"="+v.Value.ToString("R",CultureInfo.InvariantCulture))));
         public double DifficultyValue(AiDifficulty difficulty,string name)=>Value("difficulty."+DifficultyId(difficulty)+"."+name);
         public static string DifficultyId(AiDifficulty difficulty)
         {if(!Enum.IsDefined(typeof(AiDifficulty),difficulty))throw new ArgumentException("Unknown difficulty.");return difficulty.ToString().ToLowerInvariant();}

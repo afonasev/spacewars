@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
+using Spacewars.Presentation;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
 namespace Spacewars.Tests.EditMode
@@ -13,19 +14,20 @@ namespace Spacewars.Tests.EditMode
     {
         private const BindingFlags F=BindingFlags.Instance|BindingFlags.NonPublic;
         private static readonly Type D=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.PlayableDomain",true);
-        private object domain; private NavigationSession nav; private long sequence;
+        private object domain; private NavigationSession nav; private long sequence; private UnityHostRouteService actualHost;
         private object Call(string name,params object[] args)=>D.GetMethod(name,F).Invoke(domain,args);
-        [SetUp] public void Setup(){domain=Activator.CreateInstance(D,F,null,new object[]{PlayableProfile.Default,1L,false},null);nav=(NavigationSession)D.GetProperty("Navigation",F).GetValue(domain);sequence=0;}
+        [SetUp] public void Setup(){domain=Activator.CreateInstance(D,F,null,new object[]{PlayableProfile.Default,1L,false},null);nav=(NavigationSession)D.GetProperty("Navigation",F).GetValue(domain);sequence=0;actualHost=null;}
+        [TearDown] public void CleanupActualHost(){if(actualHost!=null){actualHost.Dispose();actualHost=null;Call("DestroyOwnedNavigation");Assert.Zero(nav.PhysicalHostBudget.PhysicalBytes);Assert.Zero(nav.PhysicalHostBudget.HeldBytes);Assert.Zero(nav.PhysicalHostBudget.ActiveScopes);}}
         private int Spawn(double x,double z,PlayableOwner owner=PlayableOwner.Player)=>(int)Call("SpawnUnit",new NavPoint(x,z),owner,PlayableEntityKind.Tank);
         private PlayableCommandStatus Send(int id,NavPoint goal,PlayableCommandKind kind=PlayableCommandKind.Move,int target=0,PlayableOrderOrigin origin=PlayableOrderOrigin.Human)
             =>(PlayableCommandStatus)Call("Apply",new PlayableCommand(1,++sequence,"player-1",kind,new[]{id},goal,targetId:target,origin:origin,source:origin==PlayableOrderOrigin.Ai?"receipt-ai":null,jobId:origin==PlayableOrderOrigin.Ai?11:0,actionId:origin==PlayableOrderOrigin.Ai?12:0),null);
         private NavigationRequest[] Drain(){var rows=new List<NavigationRequest>();while(nav.Requests.TryDequeue(out var r))rows.Add(r);return rows.ToArray();}
-        private void Deliver(){foreach(var r in Drain())nav.Answers.TryEnqueue(new NavigationAnswer(r,new SharedFlowRouter(r.Geometry,r.Profile).FindPath(r.Start,r.Goal)));nav.ApplyResults();}
+        private void Deliver(){if(actualHost!=null){for(int pump=0;pump<20000&&nav.PendingCount>0;pump++){actualHost.Service(new PlayableRouteBinding((NavGeometry)D.GetProperty("Geometry",F).GetValue(domain),(PlayableProfile)D.GetField("profile",F).GetValue(domain),nav.Admission,nav.RoutePort),4);nav.ApplyResults();}Assert.Zero(nav.PendingCount,"actual host must drain current work: "+actualHost.LastProjectionFailure);return;}foreach(var r in Drain())nav.Answers.TryEnqueue(new NavigationAnswer(r,new SharedFlowRouter(r.Geometry,r.Profile).FindPath(r.Start,r.Goal)));nav.ApplyResults();}
         private void Step(int ticks=1){for(int i=0;i<ticks;i++)Call("Step",1d/30);}
         private PlayableSpatialCompletion Receipt(int id,PlayableOwner owner=PlayableOwner.Player)=>(PlayableSpatialCompletion)Call("SpatialCompletion",id,owner);
         private void Arrive(int id){for(int i=0;i<600&&Receipt(id)==null;i++){Deliver();Step();}Assert.NotNull(Receipt(id));}
         private byte[] Save()=>(byte[])Call("CaptureWorldBytes",19092026,"a1q-world");
-        private void Restore(byte[] bytes){domain=D.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{bytes,PlayableProfile.Default,19092026,"a1q-world"});nav=(NavigationSession)D.GetProperty("Navigation",F).GetValue(domain);}
+        private void Restore(byte[] bytes){var restored=D.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{bytes,PlayableProfile.Default,19092026,"a1q-world"});var restoredNav=(NavigationSession)D.GetProperty("Navigation",F).GetValue(restored);if(actualHost!=null){var previousDomain=domain;var previousNav=nav;var previousHost=actualHost;try{previousHost.Dispose();D.GetMethod("DestroyOwnedNavigation",F).Invoke(previousDomain,null);Assert.Zero(previousNav.PhysicalHostBudget.PhysicalBytes);Assert.Zero(previousNav.PhysicalHostBudget.HeldBytes);Assert.Zero(previousNav.PhysicalHostBudget.ActiveScopes);}catch{D.GetMethod("DestroyOwnedNavigation",F).Invoke(restored,null);throw;}domain=restored;nav=restoredNav;actualHost=new UnityHostRouteService();return;}domain=restored;nav=restoredNav;}
         private static string Identity(PlayableSpatialCompletion r)=>r==null?"none":$"{r.Order.Generation}/{r.Order.Sequence}/{r.Order.Revision}/{r.GroupId}/{r.Incarnation}/{r.OriginalTarget.X:R}/{r.OriginalTarget.Z:R}/{r.SurfaceId}/{r.ActivationTick}/{r.CompletionTick}/{r.Order.Source}/{r.Order.JobId}/{r.Order.ActionId}";
         private static int Tag(byte[] bytes,int tag){var needle=BitConverter.GetBytes(tag);int found=-1;for(int i=0;i<=bytes.Length-4;i++){
             if(bytes[i]!=needle[0]||bytes[i+1]!=needle[1]||bytes[i+2]!=needle[2]||bytes[i+3]!=needle[3])continue;
@@ -52,6 +54,7 @@ namespace Spacewars.Tests.EditMode
         [TestCase(PlayableCommandKind.Stop)][TestCase(PlayableCommandKind.Hold)][TestCase(PlayableCommandKind.Move)][TestCase(PlayableCommandKind.AttackMove)][TestCase(PlayableCommandKind.Attack)][TestCase(PlayableCommandKind.Follow)]
         public void AcceptedReplacementClearsOnlyRecipient(PlayableCommandKind kind)
         {
+            actualHost=new UnityHostRouteService();
             int a=Spawn(-12,-12),b=Spawn(-14,-12),leader=Spawn(-12,-8),enemy=Spawn(-6,-12,PlayableOwner.Enemy);
             Send(a,new NavPoint(-10,-12));Send(b,new NavPoint(-14,-10));Arrive(a);Arrive(b);var other=Identity(Receipt(b));
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(a,new NavPoint(-10,-10),kind,kind==PlayableCommandKind.Follow?leader:enemy));
@@ -89,7 +92,8 @@ namespace Spacewars.Tests.EditMode
         }
         [TestCase(0)][TestCase(1)][TestCase(2)][TestCase(3)] public void UnknownTruncatedDuplicateAndInvalidReceiptExtensionRejects(int corruption)
         {
-            int id=Spawn(-12,-12);Send(id,new NavPoint(-10,-12));Arrive(id);var state=PlayableWorldState.Decode(Save());int start=Tag(state.Domain,0x53505231);
+            actualHost=new UnityHostRouteService();
+            int id=Spawn(-12,-12);Send(id,new NavPoint(-10,-12));Arrive(id);var state=PlayableWorldState.Decode(Save());var expected=Identity(Receipt(id));Restore(state.Encode());Assert.AreEqual(expected,Identity(Receipt(id)));state=PlayableWorldState.Decode(Save());int start=Tag(state.Domain,0x53505231);
             if(corruption==0)state.Domain[start]^=1;
             if(corruption==1)state.Domain=state.Domain.Take(state.Domain.Length-1).ToArray();
             if(corruption==2){int count=start+12;var record=state.Domain.Skip(count+4).ToArray();state.Domain=state.Domain.Concat(record).ToArray();BitConverter.GetBytes(2).CopyTo(state.Domain,count);}

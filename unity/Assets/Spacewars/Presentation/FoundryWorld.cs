@@ -5,7 +5,7 @@ namespace Spacewars.Presentation
     public sealed partial class PlayableWorld
     {
         public static readonly Color FoundryGround=new Color(.49f,.43f,.36f),FoundryRoad=new Color(.46f,.36f,.28f),FoundryRock=new Color(.15f,.14f,.14f),FoundryLava=new Color(1,.25f,.035f);
-        private Texture2D foundryRoadMask,foundryLavaHeat;
+        private Texture2D foundryRoadMask,foundryLavaHeat,foundryRouteMask;
         private void CreateFoundry(FoundryMap map)
         {
             var settings=FoundrySurfaceProfile.Load();settings.Apply(material);
@@ -33,21 +33,28 @@ namespace Spacewars.Presentation
                 MapPrism("Lava river / fissure",lava,level-.04f,level,FoundryLava,null,11); // Thin presentation fluid below the exposed rim.
             }
             var sites=map.Sites(profile);
-            // A single mask excludes complete pads before paving: no texture boundary bisects a site.
-            double Envelope(TerritorySite site)=>site.Slots.Count==0?TerritoryRules.Radius(profile,site.Kind)+1:profile.SlotRingRadius+System.Math.Max(profile.ScienceFootprintRadius,System.Math.Max(profile.FactoryFootprintRadius,profile.RefineryFootprintRadius))+1;
+            // The same actual outline drives both the concrete mesh and road exclusion.
+            // Blue retains the underlying road solely for flush wear at concrete entries.
+            var pads=System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(sites,site=>FoundryTerrainMesh.SitePad(site,profile,settings)));
             // Public presentation mask; sampled continuously in world space instead of tiled road meshes.
             const int resolution=512; // Fixed raster quality, no simulation or gameplay tuning.
             foundryRoadMask=new Texture2D(resolution,resolution,TextureFormat.RGBA32,false,true){name="Foundry compacted slag mask",wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};
-            var pixels=new Color[resolution*resolution];var lavaPixels=new Color[pixels.Length];
+            var pixels=new Color[resolution*resolution];var lavaPixels=new Color[pixels.Length];var routePixels=new Color[pixels.Length];
+            var connections=FoundryRouteFinish.Connections(map);
             for(int z=0;z<resolution;z++)for(int x=0;x<resolution;x++)
             {
                 var q=new NavPoint(((x+.5)/resolution*2-1)*map.HalfExtent,((z+.5)/resolution*2-1)*map.HalfExtent);
                 float irregular=.75f+.5f*Mathf.PerlinNoise((float)q.X/settings.depositScale,(float)q.Z/settings.depositScale);
-                float amount=FoundryTerrainMesh.RoadCoverage(map,q,settings);
-                if(System.Linq.Enumerable.Any(sites,site=>System.Math.Abs(q.X-site.Position.X)<Envelope(site)&&System.Math.Abs(q.Z-site.Position.Z)<Envelope(site)))amount=0;
+                float approach=FoundryTerrainMesh.RoadCoverage(map,q,settings),amount=approach;
+                bool onPad=System.Linq.Enumerable.Any(pads,pad=>pad.Contains(q));
+                var routes=FoundryRouteFinish.Coverage(map,q,settings,connections);
+                // Road entry wear follows the true lateral outpost approach as well.
+                approach=Mathf.Max(approach,routes.y);
+                if(onPad)amount=0;
+                routePixels[z*resolution+x]=onPad?Color.clear:new Color(routes.x,routes.y,0,1);
                 double rockDistance=double.MaxValue;foreach(var rock in map.Solids)rockDistance=System.Math.Min(rockDistance,System.Math.Sqrt(rock.Footprint.DistanceSquared(q)));
                 float foot=1-Mathf.SmoothStep(0,1,(float)rockDistance/(settings.rockBlend*irregular));
-                pixels[z*resolution+x]=new Color(amount,foot,0,1);
+                pixels[z*resolution+x]=new Color(amount,foot,approach,1);
                 double lavaDistance=0,glowDistance=double.MaxValue;foreach(var lava in map.Lava)
                 {
                     if(lava.Contains(q))lavaDistance=System.Math.Max(lavaDistance,System.Math.Sqrt(lava.BoundaryDistanceSquared(q)));
@@ -55,12 +62,14 @@ namespace Spacewars.Presentation
                 }
                 lavaPixels[z*resolution+x]=new Color(Mathf.SmoothStep(0,1,(float)lavaDistance/settings.lavaCrustWidth),1-Mathf.SmoothStep(0,1,(float)glowDistance/settings.lavaCrustWidth),0,1);
             }
-            foundryRoadMask.SetPixels(pixels);foundryRoadMask.Apply();material.SetTexture("_RoadMask",foundryRoadMask);material.SetColor("_RoadTint",FoundryRoad);
+            foundryRouteMask=new Texture2D(resolution,resolution,TextureFormat.RGBA32,false,true){name="Foundry climbs and outpost connections",wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};
+            foundryRouteMask.SetPixels(routePixels);foundryRouteMask.Apply();material.SetTexture("_FoundryRouteMask",foundryRouteMask);
+            foundryRoadMask.SetPixels(pixels);foundryRoadMask.Apply();material.SetTexture("_RoadMask",foundryRoadMask);
             foundryLavaHeat=new Texture2D(resolution,resolution,TextureFormat.RGBA32,false,true){name="Foundry molten center / cooled rim",wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};foundryLavaHeat.SetPixels(lavaPixels);foundryLavaHeat.Apply();material.SetTexture("_FoundryLavaHeat",foundryLavaHeat);
             foreach(var site in sites)
             {
-                double extent=Envelope(site);var p=site.Position;
-                var pad=site.Kind==PlayableBuildingKind.Headquarters?FoundryTerrainMesh.HomePad(p,extent,settings):new NavObstacle(p.X-extent,p.Z-extent,p.X+extent,p.Z+extent);
+                double extent=FoundryTerrainMesh.SiteEnvelope(site,profile);var p=site.Position;
+                var pad=FoundryTerrainMesh.SitePad(site,profile,settings);
                 // Fixed mesh-layer offset stays below the existing live build/capture pad surfaces.
                 var obj=new GameObject((site.Kind==PlayableBuildingKind.Headquarters?"Hexagonal concrete home ":"Complete concrete site ")+site.Id);obj.transform.SetParent(root,false);
                 var mesh=TerrainMesh.Prism(pad,-.1,.05,q=>map.SurfaceHeight(q)+.006);terrainMeshes.Add(mesh);obj.AddComponent<MeshFilter>().sharedMesh=mesh;

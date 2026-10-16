@@ -29,5 +29,8 @@
       1254,
       1254
     ]
-  ]
+  ],
+  "active_family": "RockyMoss (profile revision 3)",
+  "legacy_family": "Moss retained as historical source",
+  "rocky_family_provenance": "docs/moss-highland-natural-aprons/rocky-textures/provenance.json"
 }

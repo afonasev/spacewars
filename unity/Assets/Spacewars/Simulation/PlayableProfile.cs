@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Spacewars.Simulation
 {
@@ -7,7 +8,11 @@ namespace Spacewars.Simulation
     public sealed class PlayableProfileData
     {
         public int schemaVersion;
+        public double crowdMotionHeadingIntervals=NavigationProfile.CrowdV1HeadingIntervals,crowdMotionSpeedBands=NavigationProfile.CrowdV1SpeedBands,crowdMotionLookaheadSeconds=NavigationProfile.CrowdV1LookaheadSeconds,crowdMotionNeighborCap=NavigationProfile.CrowdV1NeighborCap;
+        internal void ResetCrowdMotionV1(){crowdMotionHeadingIntervals=NavigationProfile.CrowdV1HeadingIntervals;crowdMotionSpeedBands=NavigationProfile.CrowdV1SpeedBands;crowdMotionLookaheadSeconds=NavigationProfile.CrowdV1LookaheadSeconds;crowdMotionNeighborCap=NavigationProfile.CrowdV1NeighborCap;}
+
         public double selectionRingPadding=.10, selectionRingWidth=.055, selectionRingLift=.045;
+        public double healthBarOutlineWidth=.035, buildingSelectionPadding=.35, buildingSelectionWidth=.10;
         public double scienceHealth;
         public double scienceBuildSeconds;
         public double scienceVisionRange;
@@ -470,6 +475,7 @@ namespace Spacewars.Simulation
             DefenderOffsetX=data.defenderOffsetX;DefenderOffsetZ=data.defenderOffsetZ;
             SchemaVersion = data.schemaVersion; ProfileId = data.profileId; Revision = data.revision;
             SourceCommit = data.sourceCommit; SourceProfileId = data.sourceProfileId; SourceProfileRevision = data.sourceProfileRevision; SourceManifestSha256 = data.sourceManifestSha256;
+            HealthBarOutlineWidth=data.healthBarOutlineWidth;BuildingSelectionPadding=data.buildingSelectionPadding;BuildingSelectionWidth=data.buildingSelectionWidth;
             SelectionRingPadding=data.selectionRingPadding;SelectionRingWidth=data.selectionRingWidth;SelectionRingLift=data.selectionRingLift;
             UnitOrderQueueLimit=(int)data.unitOrderQueueLimit;GroupMarchMaximumStretch=data.groupMarchMaximumStretch;FollowDistance=data.followDistance;FollowArrivalTolerance=data.followArrivalTolerance;IdleAutoDefenseMultiplier=data.idleAutoDefenseMultiplier;TankCollisionRadius = data.tankCollisionRadius; TankModelRadius = data.tankModelRadius; TankModelScale = data.tankModelScale; TankSpeed = data.tankSpeed; TankTurnSpeed = data.tankTurnSpeed; TankTurretTurnSpeed = data.tankTurretTurnSpeed; TankAimToleranceRadians = data.tankAimToleranceRadians; TankRange = data.tankRange; TankVisionRange = data.tankVisionRange;
             TankHealth = data.tankHealth; TankFiresWhileMoving = data.tankFiresWhileMoving; TankStopForMilliseconds = data.tankStopForMilliseconds; TankPopulationCost = data.tankPopulationCost; TankCreditCost = data.tankCreditCost; TankProductionMenuOrder = data.tankProductionMenuOrder; TankProductionSeconds = data.tankProductionSeconds; TankWeaponDamage = data.tankWeaponDamage; TankWeaponReloadMilliseconds = data.tankWeaponReloadMilliseconds; TankProjectileType = data.tankProjectileType; TankProjectileSpeed = data.tankProjectileSpeed; TankProjectileCollisionRadius = data.tankProjectileCollisionRadius; ProjectileExtraRangePercent = data.projectileExtraRangePercent;
@@ -483,7 +489,7 @@ namespace Spacewars.Simulation
             CentralObstacleHalfWidth = data.centralObstacleHalfWidth; CentralObstacleHalfDepth = data.centralObstacleHalfDepth; PassageHalfWidth = data.passageHalfWidth;
             EnemyAdvanceDelaySeconds = data.enemyAdvanceDelaySeconds; AttackApproachRangeRatio = data.attackApproachRangeRatio; AttackRepathSeconds = data.attackRepathSeconds; FactoryExitDistance = data.factoryExitDistance; DefaultRallyDistance = data.defaultRallyDistance; TargetPickRadiusMultiplier = data.targetPickRadiusMultiplier; BuildingPickRadius = data.buildingPickRadius; NavigationRequestsPerFrame = data.navigationRequestsPerFrame; RenderTargetFramesPerSecond = data.renderTargetFramesPerSecond;
             CameraOrthoSize = data.cameraOrthoSize; CameraHeight = data.cameraHeight; CameraOffsetX = data.cameraOffsetX; CameraOffsetZ = data.cameraOffsetZ; CameraPanSpeed = data.cameraPanSpeed; CameraEdgePanSpeed=data.cameraEdgePanSpeed; CameraEdgePanZonePixels=data.cameraEdgePanZonePixels; CameraMinZoom = data.cameraMinZoom; CameraMaxZoom = data.cameraMaxZoom; CameraZoomSpeed = data.cameraZoomSpeed; SelectionDragPixels = data.selectionDragPixels;
-            Navigation = new NavigationProfile(ProfileId, Revision, TankCollisionRadius, TankSpeed, TankTurnSpeed, .8d, .15d, 3.6d, .08d);
+            Navigation = new NavigationProfile(ProfileId, Revision, TankCollisionRadius, TankSpeed, TankTurnSpeed, .8d, .15d, 3.6d, .08d,crowdHeadingIntervals:data.crowdMotionHeadingIntervals,crowdSpeedBands:data.crowdMotionSpeedBands,crowdLookaheadSeconds:data.crowdMotionLookaheadSeconds,crowdNeighborCap:data.crowdMotionNeighborCap);
         }
 
         public double OutpostHealth {get; private set;}
@@ -522,6 +528,7 @@ namespace Spacewars.Simulation
         public double DefenderOffsetX{get;private set;} public double DefenderOffsetZ{get;private set;}
         public int SchemaVersion { get; private set; } public string ProfileId { get; private set; } public int Revision { get; private set; }
         public string SourceCommit { get; private set; } public string SourceProfileId { get; private set; } public int SourceProfileRevision { get; private set; } public string SourceManifestSha256 { get; private set; }
+        public double HealthBarOutlineWidth {get;private set;} public double BuildingSelectionPadding {get;private set;} public double BuildingSelectionWidth {get;private set;}
         public double SelectionRingPadding {get;private set;} public double SelectionRingWidth {get;private set;} public double SelectionRingLift {get;private set;}
         public double TankCollisionRadius { get; private set; } public double TankModelRadius { get; private set; } public double TankModelScale { get; private set; } public double TankSpeed { get; private set; } public double TankTurnSpeed { get; private set; } public double TankTurretTurnSpeed { get; private set; } public double TankAimToleranceRadians { get; private set; } public double TankRange { get; private set; } public double TankVisionRange { get; private set; }
         public int TankHealth { get; private set; } public bool TankFiresWhileMoving { get; private set; } public int TankStopForMilliseconds { get; private set; } public int TankPopulationCost { get; private set; } public int TankCreditCost { get; private set; } public int TankProductionMenuOrder { get; private set; } public int TankProductionSeconds { get; private set; } public int TankWeaponDamage { get; private set; } public int TankWeaponReloadMilliseconds { get; private set; } public string TankProjectileType { get; private set; } public double TankProjectileSpeed { get; private set; } public double TankProjectileCollisionRadius { get; private set; } public double ProjectileExtraRangePercent { get; private set; }
@@ -562,6 +569,7 @@ namespace Spacewars.Simulation
             foreach (PlayableProfileField field in PlayableProfileMetadata.Fields) { double value = field.Read(data); if (Double.IsNaN(value) || Double.IsInfinity(value) || value < field.Minimum || value > field.Maximum) throw new ArgumentException("Invalid playable profile field: " + field.Path, "data"); }
             foreach(var field in PlayableProfileMetadata.Fields)if(field.Path.StartsWith("system.follow.")){double steps=(field.Read(data)-field.Minimum)/field.Step;if(Math.Abs(steps-Math.Round(steps))>1e-8)throw new ArgumentException("Follow value must align to source metadata step: "+field.Path);}
             foreach(var field in PlayableProfileMetadata.Fields)if(field.Path.StartsWith("groupMarch.")){double steps=(field.Read(data)-field.Minimum)/field.Step;if(Math.Abs(steps-Math.Round(steps))>1e-8)throw new ArgumentException("March value must align to metadata step: "+field.Path);}
+            foreach(var field in PlayableProfileMetadata.CrowdFields){double steps=(field.Read(data)-field.Minimum)/field.Step;if(Math.Abs(steps-Math.Round(steps))>1e-8||field.Step==1&&field.Read(data)!=Math.Truncate(field.Read(data)))throw new ArgumentException("Crowd value must align to metadata: "+field.Path);}
             if(data.unitOrderQueueLimit!=Math.Truncate(data.unitOrderQueueLimit))throw new ArgumentException("Queue limit must be an integer.");
             if(data.fogExploredOpacity>=data.fogUnseenOpacity)throw new ArgumentException("Explored terrain must be clearer than unseen terrain.");
             if (data.headquartersSlots != Math.Floor(data.headquartersSlots) || data.outpostSlots != Math.Floor(data.outpostSlots)) throw new ArgumentException("Slot counts must be integers.");
@@ -690,7 +698,10 @@ namespace Spacewars.Simulation
 
     public static class PlayableProfileMetadata
     {
-        public static readonly IReadOnlyList<PlayableProfileField> Fields = new[] {
+        public static readonly IReadOnlyList<PlayableProfileField> PreCrowdFields = new[] {
+            new PlayableProfileField("presentation.healthBar.outlineWidth","Интерфейс · Здоровье","Толщина чёрного контура","Внешний чёрный контур полоски здоровья для чтения на светлом и тёмном фоне.","m",.005,.15,.005,p=>p.healthBarOutlineWidth,nameof(PlayableProfileData.healthBarOutlineWidth)),
+            new PlayableProfileField("presentation.buildingSelection.padding","Интерфейс · Выбор здания","Запас рамки здания","Расстояние от углов нижнего основания до зелёной окружности выбора; не меняет коллизии.","m",.1,2,.05,p=>p.buildingSelectionPadding,nameof(PlayableProfileData.buildingSelectionPadding)),
+            new PlayableProfileField("presentation.buildingSelection.width","Интерфейс · Выбор здания","Толщина рамки здания","Толщина зелёной окружности выбора здания на земле.","m",.03,.3,.01,p=>p.buildingSelectionWidth,nameof(PlayableProfileData.buildingSelectionWidth)),
             new PlayableProfileField("presentation.selectionRing.padding","Selection ring","Ring padding","Space between model footprint and selection circle.","m",0,1,.01,p=>p.selectionRingPadding,nameof(PlayableProfileData.selectionRingPadding)),
             new PlayableProfileField("presentation.selectionRing.width","Selection ring","Ring width","Width of the green ground circle.","m",.01,.2,.005,p=>p.selectionRingWidth,nameof(PlayableProfileData.selectionRingWidth)),
             new PlayableProfileField("presentation.selectionRing.lift","Selection ring","Surface lift","Avoids depth flicker against the terrain.","m",.01,.15,.005,p=>p.selectionRingLift,nameof(PlayableProfileData.selectionRingLift)),
@@ -881,6 +892,12 @@ new PlayableProfileField("explorer.muzzleOffset", "Explorer", "Muzzle distance",
             new PlayableProfileField("presentation.targetFramesPerSecond", "Rendering", "Target frame rate", "Native rendering cadence independent of the 30Hz domain.", "fps", 30, 240, 1, p=>p.renderTargetFramesPerSecond,nameof(PlayableProfileData.renderTargetFramesPerSecond)),
             new PlayableProfileField("camera.orthoSize", "Camera", "View size", "Playable camera orthographic half height.", "m", 5, 100, .01, p=>p.cameraOrthoSize,nameof(PlayableProfileData.cameraOrthoSize)), new PlayableProfileField("camera.height", "Camera", "Height", "Playable camera height above ground.", "m", 5, 200, 1, p=>p.cameraHeight,nameof(PlayableProfileData.cameraHeight)), new PlayableProfileField("camera.offsetX", "Camera", "X offset", "Diagonal camera lateral offset; also determines the direction building fronts face.", "m", -100, 100, 1, p=>p.cameraOffsetX,nameof(PlayableProfileData.cameraOffsetX)), new PlayableProfileField("camera.offsetZ", "Camera", "Z offset", "Playable camera longitudinal offset.", "m", -100, 100, 1, p=>p.cameraOffsetZ,nameof(PlayableProfileData.cameraOffsetZ)), new PlayableProfileField("camera.edgePanSpeed", "Camera", "Edge pan speed", "Pointer edge pan speed in focused gameplay; overridden by the local edge-scroll setting.", "m/s", .1, 100, .1, p=>p.cameraEdgePanSpeed,nameof(PlayableProfileData.cameraEdgePanSpeed)), new PlayableProfileField("camera.edgePanZonePixels", "Camera", "Edge pan zone", "Pointer edge acceleration band inside the active camera viewport.", "px", 8, 120, 1, p=>p.cameraEdgePanZonePixels,nameof(PlayableProfileData.cameraEdgePanZonePixels)), new PlayableProfileField("camera.panSpeed", "Camera", "Pan speed", "Arrow-key camera ground-pan speed; overridden by the local arrow-scroll setting.", "m/s", 1, 50, 1, p=>p.cameraPanSpeed,nameof(PlayableProfileData.cameraPanSpeed)), new PlayableProfileField("camera.minZoom", "Camera", "Minimum zoom", "Closest playable camera zoom.", "m", 4, 100, .01, p=>p.cameraMinZoom,nameof(PlayableProfileData.cameraMinZoom)), new PlayableProfileField("camera.maxZoom", "Camera", "Maximum zoom", "Farthest playable camera zoom.", "m", 5, 100, .01, p=>p.cameraMaxZoom,nameof(PlayableProfileData.cameraMaxZoom)), new PlayableProfileField("camera.zoomSpeed", "Camera", "Zoom speed", "Mouse-wheel zoom multiplier.", "ratio", .001, 1, .001, p=>p.cameraZoomSpeed,nameof(PlayableProfileData.cameraZoomSpeed)), new PlayableProfileField("input.selectionDragPixels", "Input", "Selection drag", "Pointer travel required to start box selection.", "px", 1, 100, 1, p=>p.selectionDragPixels,nameof(PlayableProfileData.selectionDragPixels))
         };
+        private static PlayableProfileField CrowdField(int index,Func<PlayableProfileData,double> read,string dataField)
+        {var f=NavigationProfile.CrowdMetadata[index];return new PlayableProfileField(f.Path,f.Group,f.Label,f.Description,f.Unit,f.Minimum,f.Maximum,f.Step,read,dataField);}
+        public static readonly IReadOnlyList<PlayableProfileField> CrowdFields=new[]{
+            CrowdField(0,p=>p.crowdMotionHeadingIntervals,nameof(PlayableProfileData.crowdMotionHeadingIntervals)),CrowdField(1,p=>p.crowdMotionSpeedBands,nameof(PlayableProfileData.crowdMotionSpeedBands)),CrowdField(2,p=>p.crowdMotionLookaheadSeconds,nameof(PlayableProfileData.crowdMotionLookaheadSeconds)),CrowdField(3,p=>p.crowdMotionNeighborCap,nameof(PlayableProfileData.crowdMotionNeighborCap))
+        };
+        public static readonly IReadOnlyList<PlayableProfileField> Fields=PreCrowdFields.Concat(CrowdFields).ToArray();
     }
 
     public static class PlayableMap

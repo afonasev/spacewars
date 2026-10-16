@@ -25,7 +25,7 @@ namespace Spacewars.Simulation
         public double Read(ThreeCrossingsProfileData data)=>(double)field.GetValue(data);
         public void Write(ThreeCrossingsProfileData data,double value)=>field.SetValue(data,value);
     }
-    public sealed class MapSupport
+    public sealed partial class MapSupport : INavStorageFacade
     {
         public MapSupport(string id,NavObstacle bounds,bool bridge,double height=0,NavPoint gradient=default(NavPoint),NavPoint origin=default(NavPoint),string surfaceId=null){SurfaceId=surfaceId;Id=id;Bounds=bounds;IsBridge=bridge;Height=height;Gradient=gradient;Origin=origin;}
         public string SurfaceId{get;} public string Id{get;} public NavObstacle Bounds{get;} public bool IsBridge{get;}
@@ -33,7 +33,7 @@ namespace Spacewars.Simulation
         public double HeightAt(NavPoint p)=>Height+(p.X-Origin.X)*Gradient.X+(p.Z-Origin.Z)*Gradient.Z;
         public bool Contains(NavPoint p)=>Bounds.Contains(p);
     }
-    public sealed partial class ThreeCrossingsMap : IPlayableTerrain
+    public sealed partial class ThreeCrossingsMap : IPlayableTerrain, INavArrivalPointTerrain
     {
         public static readonly IReadOnlyList<ThreeCrossingsField> Fields=Array.AsReadOnly(new[]{
             new ThreeCrossingsField("halfExtent","Layout","Half extent","Overall bank and route reserve.",48,96,1),
@@ -78,6 +78,7 @@ namespace Spacewars.Simulation
         public IReadOnlyList<MapSupport> Supports{get;} public IReadOnlyList<NavObstacle> Water{get;} public IReadOnlyList<NavObstacle> Solids{get;} public IReadOnlyList<NavObstacle> MovementBlockers{get;}
         private readonly NavGeometry geometry;
         private readonly TerrainLocations locations;
+        TerrainLocations INavArrivalPointTerrain.ArrivalLocations=>locations;
         public int SurfaceSemanticsVersion=>1;
         public IReadOnlyList<NavSurfaceTransition> SurfaceTransitions=>locations.Transitions;
         public bool TryLocate(NavPoint point,double radius,out NavLocation location)=>locations.TryLocate(point,radius,out location);

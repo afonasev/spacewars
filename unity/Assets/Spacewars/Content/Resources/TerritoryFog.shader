@@ -6,13 +6,23 @@ Shader "Spacewars/TerritoryFog"
         _FogColor("Fog tint",Color)=(0,0,0,1)
         _FogMask("Team fog",2D)="black" {}
         _SurfaceRole("Surface role",Float)=0
+        _PlatformSteel("Platform enabled lane panels contrast tread",Vector)=(0,2,.4,.55)
+        _PlatformBounds("Platform deck XZ bounds",Vector)=(0,0,1,1)
         _IndustrialFinish("Steel strength exponent concrete strength exponent",Vector)=(0,24,0,12)
         _FoundryPadBounds("Foundry pad center extent hex",Vector)=(0,0,1,0)
         _FoundryPadCenter("Foundry central foundation",Float)=0
         _FoundryPadFinish("Foundry sand width scale foundation radius feather",Vector)=(2.25,3,3.5,.25)
+        _FoundryPadPours("Foundry pour joint width contrast bay variation",Vector)=(.07,0,0,0)
+        _FoundryPadAge("Foundry edge age width strength",Vector)=(2.5,0,0,0)
         _FoundrySandTint("Foundry edge sand",Color)=(.55,.473,.363,1)
         _FoundryCenterValue("Foundry central concrete value",Float)=.28
         _FoundryVariation("Foundry texture variation",Vector)=(.8,13,0,0)
+        _FoundryReadability("Foundry face contrast road detail entry length wear",Vector)=(0,1,3,0)
+        _FoundryRouteMask("Foundry climb and outpost accents",2D)="black" {}
+        _FoundryClimbTint("Foundry climb aggregate",Color)=(.46,.46,.46,1)
+        _FoundryConnectionTint("Foundry connection slag",Color)=(.4,.4,.4,1)
+        _FoundryRouteFinish("Foundry climb wear spacing contrast",Vector)=(4,.16,0,0)
+        _FoundryBasaltWarmth("Foundry retained mineral warmth",Float)=1
         _FoundryGrain("Foundry deposit grain contrasts",Vector)=(13,.3,.18,.12)
         _FoundryLavaFinish("Lava depth glow crust scale flow",Vector)=(3.5,1.2,1.5,.18)
         _FoundryLavaRim("Molten level rim level enabled",Vector)=(0,0,0,0)
@@ -21,6 +31,8 @@ Shader "Spacewars/TerritoryFog"
         _RoadMask("Dirt road mask",2D)="black" {}
         _GroundTint("Ground tint",Color)=(.45,.46,.39,1)
         _RoadTint("Road tint",Color)=(.6,.52,.4,1)
+        _CrossingsRoadFinish("Crossings road center shade, shoulder tone, rut strength",Vector)=(0,.78,1,0)
+        _CrossingsMinePad("Crossings mine yard value and contact shade",Vector)=(.3,.32,.3,0)
         _SurfaceNoise("Surface noise",Vector)=(11,.38,.24,.16)
         _Concrete("Concrete",Vector)=(.69,4,.045,.22)
         _Metal("Metal",Vector)=(.41,2,2.5,.32)
@@ -36,6 +48,10 @@ Shader "Spacewars/TerritoryFog"
         _RockTexB("Rock sibling B",2D)="gray" {}
         _RockTexC("Rock sibling C",2D)="gray" {}
         _RockVariantGain("Rock calibrated gain and mean",Vector)=(1,1,1,.2)
+        _CrossingsRockProjection("Crossings rock enabled axis transition",Vector)=(0,.08,0,0)
+        _CrossingsGroundDetail("Crossings ground enabled open foot grain retention",Vector)=(0,.35,.65,.3)
+        _CrossingsRockFoot("Crossings contact width strength dust reach strength",Vector)=(.65,.2,2.2,.2)
+        _CrossingsFootPatch("Crossings foot patch scale",Float)=5
         _ConcreteTexB("Concrete sibling B",2D)="gray" {}
         _ConcreteTexC("Concrete sibling C",2D)="gray" {}
         _ConcreteVariantGain("Concrete calibrated gain and mean",Vector)=(1,1,1,.2)
@@ -82,6 +98,7 @@ Shader "Spacewars/TerritoryFog"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             TEXTURE2D(_FogMask); SAMPLER(sampler_FogMask);
+            TEXTURE2D(_FoundryRouteMask); SAMPLER(sampler_FoundryRouteMask);
             TEXTURE2D(_FoundryLavaHeat); SAMPLER(sampler_FoundryLavaHeat);
             TEXTURE2D(_RoadMask); SAMPLER(sampler_RoadMask);
             TEXTURE2D(_ConstructionMask); SAMPLER(sampler_ConstructionMask);
@@ -104,21 +121,30 @@ Shader "Spacewars/TerritoryFog"
                 float4 _TextureVariants;
                 float4 _EarthVariantGain;
                 float4 _RockVariantGain;
+                float4 _CrossingsRockProjection;
+                float4 _CrossingsGroundDetail, _CrossingsRockFoot;
+                float _CrossingsFootPatch;
                 float4 _ConcreteVariantGain;
                 float4 _SteelVariantGain;
                 half4 _BaseColor;
                 half4 _FogColor;
                 float4 _FogBounds;
                 float _SurfaceRole;
+                float4 _PlatformSteel, _PlatformBounds;
                 float _ArtReliefLimit;
                 float4 _FoundryGrain;
                 float4 _FoundryLavaFinish,_FoundryLavaRim;
                 half4 _FoundryLavaTint;
                 float4 _FoundryVariation;
-                float4 _FoundryPadBounds, _FoundryPadFinish;
+                float4 _FoundryReadability;
+                float _FoundryBasaltWarmth;
+                float4 _FoundryRouteFinish;
+                half4 _FoundryClimbTint,_FoundryConnectionTint;
+                float4 _FoundryPadBounds, _FoundryPadFinish, _FoundryPadPours, _FoundryPadAge;
                 half4 _FoundrySandTint;
                 float _FoundryPadCenter, _FoundryCenterValue;
                 half4 _GroundTint, _RoadTint;
+                float4 _CrossingsRoadFinish, _CrossingsMinePad;
                 float4 _SurfaceNoise, _Concrete, _Metal, _SurfaceExtras;
                 float4 _ArtTiles, _ArtDetail, _WaterMotion, _ShoreSettings, _NaturalBlend;
                 half4 _WaterDeep, _WaterShallow, _BasaltTint, _RustTint;
@@ -175,6 +201,22 @@ Shader "Spacewars/TerritoryFog"
             {
                 return float3(dot(p,float3(.70710678,0,-.70710678)),dot(p,float3(.57735027,.57735027,.57735027)),dot(p,float3(.40824829,-.81649658,.40824829)));
             }
+            // A fixed oblique detail plane collapses when tangent to a cliff.
+            // Use the best-covered world plane, retaining a single crisp image
+            // except near axis ties. Variant regions stay independent of that choice.
+            half3 crossingsRockSample(float3 p,float3 normal,float tile)
+            {
+                float3 coverage=abs(normal);
+                float largest=max(coverage.x,max(coverage.y,coverage.z));
+                float3 weights=smoothstep(largest-_CrossingsRockProjection.y,largest,coverage);
+                weights/=max(dot(weights,1),.0001);
+                float2 region=detailPosition(p).xz;
+                half3 rock=0;
+                if(weights.x>0)rock+=VARIANT_SAMPLE(Rock,sampler_RockTex,p.zy/tile,region)*weights.x;
+                if(weights.y>0)rock+=VARIANT_SAMPLE(Rock,sampler_RockTex,p.xz/tile,region)*weights.y;
+                if(weights.z>0)rock+=VARIANT_SAMPLE(Rock,sampler_RockTex,p.xy/tile,region)*weights.z;
+                return rock;
+            }
             float naturalNoise(float3 p,float scale)
             {
                 p=naturalPosition(p);
@@ -215,6 +257,8 @@ Shader "Spacewars/TerritoryFog"
                     float broad=noise(plane/_SurfaceNoise.x)-.5;
                     float grain=noise(plane/_SurfaceNoise.z)-.5;
                     bool natural=_SurfaceRole<1.5||(_SurfaceRole>3.5&&_SurfaceRole<4.5);
+                    bool quietGround=_CrossingsPalette.x>.5&&_CrossingsGroundDetail.x>.5&&_SurfaceRole<1.5&&_Dressing<.5;
+                    float groundReliefScale=1;
                     if(natural)
                     {
                         float3 p=input.positionWS;
@@ -225,7 +269,9 @@ Shader "Spacewars/TerritoryFog"
                         float height=p.y-_NaturalBlend.w;
                         float road=SAMPLE_TEXTURE2D(_RoadMask,sampler_RoadMask,uv).r;
                         // Break up feathered dirt edges without introducing a hard threshold.
-                        road=smoothstep(0,1,saturate(road+variation*_NaturalBlend.y*road*(1-road)*2));
+                        float roadEdgeNoise=(naturalNoise(p+float3(29,0,47),6.5)-.5)*2;
+                        float crossingsRoadEdgeNoise=_CrossingsPalette.x>.5?roadEdgeNoise*_CrossingsRoadFinish.w:0;
+                        road=smoothstep(0,1,saturate(road+variation*_NaturalBlend.y*road*(1-road)*2+crossingsRoadEdgeNoise*road*(1-road)*2));
                         road*=1-smoothstep(0,width,abs(height));
                         half3 soil=lerp(_GroundTint.rgb*(1+broad*_SurfaceNoise.y*2),_RoadTint.rgb*(1+broad*_SurfaceNoise.y),road);
                         float3 texturePosition=detailPosition(p);
@@ -241,9 +287,29 @@ Shader "Spacewars/TerritoryFog"
                             half3 mineral=lerp(_GroundTint.rgb,_CrossingsDustB.rgb,frontier);
                             soil=lerp(lerp(geology*1.12,mineral,.55),roadTint,road)*(1+broad*_SurfaceNoise.y);
                         }
+                        if(_CrossingsPalette.x>.5)
+                        {
+                            float shoulder=smoothstep(.03,.55,road)*(1-smoothstep(.55,.97,road));
+                            float core=smoothstep(.55,.95,road);
+                            half3 roadShoulder=lerp(soil,_GroundTint.rgb,_CrossingsRoadFinish.y);
+                            soil=lerp(soil,roadShoulder,shoulder);
+                            soil*=1-core*_CrossingsRoadFinish.x;
+                        }
                         earth=dot(earth,half3(.2126,.7152,.0722)).xxx;
-                        soil*=(1+grain*_SurfaceNoise.w)*lerp(1,clamp(earth/.18,.35,2),_ArtDetail.x*(1-road*.65));
+                        float groundDetail=_ArtDetail.x;
+                        float fineGrain=_SurfaceNoise.w;
+                        if(quietGround)
+                        {
+                            float footDistance=SAMPLE_TEXTURE2D(_RockMask,sampler_RockMask,uv).r*_ShoreSettings.z;
+                            float footDetail=1-smoothstep(0,_CrossingsRockFoot.z,footDistance);
+                            groundReliefScale=lerp(_CrossingsGroundDetail.y,_CrossingsGroundDetail.z,footDetail);
+                            groundDetail*=groundReliefScale;
+                            fineGrain*=_CrossingsGroundDetail.w;
+                        }
+                        soil*=(1+grain*fineGrain)*lerp(1,clamp(earth/.18,.35,2),groundDetail*(1-road*.65));
                         half3 rock=NATURAL_SAMPLE(Rock,sampler_RockTex,texturePosition,_ArtTiles.y);
+                        if(_CrossingsPalette.x>.5&&_CrossingsRockProjection.x>.5&&_SurfaceRole>3.5)
+                            rock=crossingsRockSample(p,normal,_ArtTiles.y);
                         float rockDetail=dot(rock,half3(.2126,.7152,.0722));
                         rock=geology*lerp(1,clamp(rockDetail/.18,.45,1.65),_ArtDetail.x)*_SurfaceExtras.y;
                         float strata=sin((p.y+naturalNoise(p,5)*1.4+p.x*.055+p.z*.025)/_Geology.z*6.283);
@@ -258,14 +324,28 @@ Shader "Spacewars/TerritoryFog"
                         float moss=smoothstep(.3,.7,naturalNoise(p,_ArtTiles.y))*_ArtDetail.z;
                         rock=lerp(rock,soil*.8,moss);
                         surface=lerp(soil,rock,stone);
+                        if(quietGround)
+                        {
+                            // Reuse authoritative geological-foot distances and existing
+                            // scree contact masks. No new scatter or gameplay geometry.
+                            float freeGround=(1-road)*(1-infrastructure.g)*smoothstep(.5,.9,normal.y);
+                            float fragments=SAMPLE_TEXTURE2D(_WeatheringMask,sampler_WeatheringMask,uv).g;
+                            float band=1-smoothstep(0,_CrossingsRockFoot.z,distance);
+                            float patch=smoothstep(.35,.65,naturalNoise(p,_CrossingsFootPatch));
+                            float dust=band*lerp(patch,1,fragments)*_CrossingsRockFoot.w*freeGround;
+                            half3 mineralDust=lerp(_GroundTint.rgb,roadTint,.6)*(1+broad*_SurfaceNoise.y);
+                            surface=lerp(surface,mineralDust,dust);
+                            float contact=max(1-smoothstep(0,_CrossingsRockFoot.x,distance),fragments*band);
+                            surface*=1-contact*_CrossingsRockFoot.y*freeGround;
+                        }
                         surface*=1-(1-smoothstep(0,_ArtDetail.w,shore))*.28;
                         if(_CrossingsPalette.x>.5&&_SurfaceRole<1.5&&_Dressing<.5)
                         {
                             half3 slab=VARIANT_SAMPLE(Concrete,sampler_ConcreteTex,plane/_ArtTiles.z,input.positionWS.xz);
                             float finish=dot(slab,half3(.2126,.7152,.0722));
-                            half3 yard=_Concrete.xxx*lerp(1,clamp(finish/.35,.7,1.3),_ArtDetail.x);
+                            half3 yard=_CrossingsMinePad.xxx*lerp(1,clamp(finish/.35,.7,1.3),_ArtDetail.x);
                             yard*=1-joints(plane,_Concrete.yy,_Concrete.z)*_Concrete.w;
-                            yard=lerp(yard,_CrossingsInfrastructure.xxx,infrastructure.b*.8);
+                            yard*=1-infrastructure.b*_CrossingsMinePad.y;
                             // Inset service lines sit on the yard, never form arbitrary ground decals.
                             yard*=1-infrastructure.a*_CrossingsConstruction.z;
                             surface=lerp(surface,yard,infrastructure.g);
@@ -316,6 +396,37 @@ Shader "Spacewars/TerritoryFog"
                         float brush=noise(plane/float2(_SurfaceNoise.z,_Metal.y))-.5;
                         surface=_Metal.xxx*(1+brush*_SurfaceExtras.x)*(1-seam*_Metal.w);
                         half3 steel=VARIANT_SAMPLE(Steel,sampler_SteelTex,plane/_ArtTiles.w,input.positionWS.xz);
+                        if(_PlatformSteel.x>.5)
+                        {
+                            // Fabricated zones occupy whole sheets. Their boundaries use the
+                            // same integer panel coordinates as joints(), never a noise mask.
+                            float2 sheet=floor(input.positionWS.xz/_Metal.yz);
+                            float2 first=floor(_PlatformBounds.xy/_Metal.yz);
+                            float2 last=ceil(_PlatformBounds.zw/_Metal.yz)-1;
+                            float2 middle=floor((first+last)*.5);
+                            float lanePanels=max(1,round(_PlatformSteel.y));
+                            float2 lane=step(middle-floor(lanePanels*.5),sheet)*(1-step(middle+ceil(lanePanels*.5),sheet));
+                            float treadZone=max(lane.x,lane.y);
+                            float2 edgeDistance=min(sheet-first,last-sheet);
+                            float border=(1-step(1,min(edgeDistance.x,edgeDistance.y)))*(1-treadZone);
+                            float3 weights=float3(1-treadZone-border,treadZone,border);
+                            float2 uvSteel=plane/_ArtTiles.w;
+                            half3 clean=SAMPLE_TEXTURE2D(_SteelTex,sampler_SteelTex,uvSteel).rgb*_SteelVariantGain.x;
+                            half3 tread=SAMPLE_TEXTURE2D(_SteelTexB,sampler_SteelTex,uvSteel).rgb*_SteelVariantGain.y;
+                            half3 worn=SAMPLE_TEXTURE2D(_SteelTexC,sampler_SteelTex,uvSteel).rgb*_SteelVariantGain.z;
+                            float contrast=_PlatformSteel.z;
+                            clean*=1+contrast*.65;
+                            tread*=half3(.91,.98,1.05)*(1-contrast*.35);
+                            worn*=lerp(half3(1,1,1),half3(1.18,.92,.72),contrast)*(1-contrast*.7);
+                            steel=clean*weights.x+tread*weights.y+worn*weights.z;
+                            // Alternating diagonal raised ribs, analytically antialiased at distance.
+                            float2 cell=floor(plane/.42),local=frac(plane/.42)-.5;
+                            float parity=fmod(abs(cell.x+cell.y),2);
+                            float diagonal=abs(local.x+(parity<1?local.y:-local.y));
+                            float aa=max(fwidth(diagonal),.015);
+                            float rib=(1-smoothstep(.055-aa,.055+aa,diagonal))*(1-smoothstep(.27,.39,max(abs(local.x),abs(local.y))));
+                            steel*=1+weights.y*_PlatformSteel.w*(rib*2-.2);
+                        }
                         surface*=lerp(1,clamp(steel/.2,.35,1.8),_ArtDetail.x);
                         // Fine tread ridges and paired fasteners repeat inside the existing panel layout.
                         float2 panel=frac(plane/_Metal.yz+.5);
@@ -369,6 +480,7 @@ Shader "Spacewars/TerritoryFog"
                         {
                             // Broad tire polishing remains legible at normal zoom; tread is restrained.
                             float traffic=weather.b*_CrossingsConstruction.z*smoothstep(.3,.85,normal.y);
+                            if(natural)traffic*=_CrossingsRoadFinish.z;
                             surface*=1-traffic*(.4+.35*weather.a);
                             if(_SurfaceRole>1.5&&_SurfaceRole<3.5)
                                 surface=lerp(surface,surface*half3(1.06,1.04,1.01),traffic*.5);
@@ -380,7 +492,7 @@ Shader "Spacewars/TerritoryFog"
                         float3 r1=cross(dy,normal),r2=cross(normal,dx);
                         float determinant=dot(dx,r1);
                         float3 gradient=(r1*ddx(rough)+r2*ddy(rough))*sign(determinant)/max(abs(determinant),.00001);
-                        normal=reliefNormal(normal,gradient);
+                        normal=reliefNormal(normal,gradient*groundReliefScale);
                     }
                 }
                 // Fixed content role contract: 6 ash, 7 gravel, 8 concrete, 9 slag, 10 basalt, 11 lava.
@@ -413,10 +525,20 @@ Shader "Spacewars/TerritoryFog"
                         float deposit=smoothstep(.25,.75,naturalNoise(p+float3(23,0,41),_FoundryGrain.x*.55));
                         float3 ash=surface*lerp(float3(.82,.86,.93),float3(1.22,1.03,.82),rust);
                         ash=lerp(ash,ash*float3(.72,.76,.79),deposit*_FoundryVariation.x*.45);
-                        float3 slag=_RoadTint.rgb*(1+broad*_FoundryGrain.z+grain*_FoundryGrain.w);
-                        surface=lerp(ash,slag,masks.r);
-                        surface=lerp(surface,_BasaltTint.rgb*float3(.91,.85,.78),masks.g*.6);
-                        surface*=lerp(1,.35+detail*2.2,_ArtDetail.x);
+                        float3 slag=_RoadTint.rgb*(1+(broad*_FoundryGrain.z+grain*_FoundryGrain.w)*_FoundryReadability.y);
+                        float ashFinish=lerp(1,.35+detail*2.2,_ArtDetail.x);
+                        float roadFinish=lerp(1,.35+detail*2.2,_ArtDetail.x*_FoundryReadability.y);
+                        surface=lerp(ash*ashFinish,slag*roadFinish,masks.r);
+                        float2 routes=SAMPLE_TEXTURE2D(_FoundryRouteMask,sampler_FoundryRouteMask,uv).rg;
+                        // Broad flush aggregate wear follows the authored X-axis climb.
+                        // Uneven band edges and retained grain prevent a painted ladder.
+                        float wearPhase=p.x/max(.1,_FoundryRouteFinish.x)+(noise(p.xz/_FoundryGrain.y)-.5)*.18;
+                        float wearBand=smoothstep(.15,.75,sin(wearPhase*6.2831853)*.5+.5);
+                        float3 climb=_FoundryClimbTint.rgb*roadFinish*(1-wearBand*_FoundryRouteFinish.y);
+                        surface=lerp(surface,_FoundryConnectionTint.rgb*roadFinish,routes.g);
+                        surface=lerp(surface,climb,routes.r);
+                        surface=lerp(surface,_BasaltTint.rgb*float3(.91,.85,.78)*ashFinish,masks.g*.6);
+                        detail*=lerp(1,_FoundryReadability.y,masks.r);
                     }
                     else if(_SurfaceRole<8.5)
                     {
@@ -426,7 +548,8 @@ Shader "Spacewars/TerritoryFog"
                         float3 concrete=NATURAL_SAMPLE(Concrete,sampler_ConcreteTex,projected,_ArtTiles.z);
                         float wear=dot(concrete,float3(.299,.587,.114));
                         surface=_BaseColor.rgb*lerp(1,clamp(.82+wear*.45+(wear-_ConcreteVariantGain.w)*_TextureVariants.z,.35,2),_ArtDetail.x);
-                        float2 local=abs(p.xz-_FoundryPadBounds.xy);
+                        float2 padPoint=p.xz-_FoundryPadBounds.xy;
+                        float2 local=abs(padPoint);
                         // Exact inward distance for the fixed six-sided circumscribed
                         // polygon (diagonal slope 1/2), or the unchanged square sites.
                         float edge=_FoundryPadBounds.z-max(local.x,local.y);
@@ -434,6 +557,25 @@ Shader "Spacewars/TerritoryFog"
                             edge=min(_FoundryPadBounds.z-local.y,(_FoundryPadBounds.z-local.x-local.y*.5)/sqrt(1.25));
                         float drift=noise(p.xz/_FoundryPadFinish.y+float2(17,43));
                         float sand=1-smoothstep(0,_FoundryPadFinish.x*(.3+1.4*drift),max(0,edge));
+                        float approach=SAMPLE_TEXTURE2D(_RoadMask,sampler_RoadMask,uv).b;
+                        sand*=1-approach;
+                        // Four large pours with staggered T joints, not a repeated tile grid.
+                        // Fixed thirds define this topology; artist-controlled widths/contrast
+                        // do not affect the authored outline, slots or road clearance.
+                        float split=_FoundryPadBounds.z/3;
+                        float row=padPoint.y+split;
+                        float column=padPoint.x-(row>0?split:-split);
+                        float jointDistance=min(abs(row),abs(column));
+                        float aa=max(fwidth(jointDistance),.001);
+                        float joint=1-smoothstep(_FoundryPadPours.x*.5-aa,_FoundryPadPours.x*.5+aa,jointDistance);
+                        float bay=(row>0?(column>0?.25:-.5):(column>0?.5:-.25));
+                        surface*=1+bay*_FoundryPadPours.z*_FoundryPadCenter;
+                        surface*=1-joint*_FoundryPadPours.y*_FoundryPadCenter;
+                        float age=1-smoothstep(0,_FoundryPadAge.x*(.5+drift),max(0,edge));
+                        age*=lerp(.35,1,drift)*(1-approach);
+                        surface*=1-age*_FoundryPadAge.y;
+                        float entry=approach*(1-smoothstep(0,_FoundryReadability.z,max(0,edge)));
+                        surface*=1-entry*_FoundryReadability.w;
                         float sandGrain=noise(p.xz/_FoundryGrain.y)-.5;
                         float3 sandColor=_FoundrySandTint.rgb*(1+grain*_FoundryGrain.w+broad*_FoundryGrain.z);
                         surface=lerp(surface,sandColor,sand);
@@ -451,12 +593,13 @@ Shader "Spacewars/TerritoryFog"
                     {
                         float mineral=smoothstep(.42,.78,naturalNoise(p,_FoundryGrain.x));
                         float3 basalt=_BasaltTint.rgb;
-                        surface=lerp(basalt,basalt*float3(1.34,.90,.64),mineral);
+                        surface=lerp(basalt,basalt*float3(1.34,.90,.64),mineral*_FoundryBasaltWarmth);
                         float layer=p.y/_Geology.z+(noise(p.xz/_FoundryGrain.x)-.5)*2.2+noise(p.xz/(_FoundryGrain.x*.3))*.35;
                         float strata=.5+.5*sin(layer*6.283185);
                         surface*=1-_Geology.w*smoothstep(.65,.95,strata)*(1-saturate(normal.y)*.65);
-                        surface*=lerp(1,.3+rockTexture*2.0,_ArtDetail.x);
+                        surface*=lerp(1-_FoundryReadability.x,1+_FoundryReadability.x*.35,smoothstep(.15,.8,normal.y));
                         detail=dot(rockTexture,float3(.299,.587,.114));
+                        surface*=lerp(1,.3+lerp(detail.xxx,rockTexture,_FoundryBasaltWarmth)*2.0,_ArtDetail.x);
                         float warmth=SAMPLE_TEXTURE2D(_FoundryLavaHeat,sampler_FoundryLavaHeat,uv).g*_FoundryLavaRim.z*(1-smoothstep(_FoundryLavaRim.x,max(_FoundryLavaRim.y,_FoundryLavaRim.x+.001),p.y));
                         emission=_FoundryLavaTint.rgb*warmth*_FoundryLavaFinish.y*.12;
 

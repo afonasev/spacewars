@@ -68,8 +68,8 @@ public sealed class PlayableTerritoryPadTests
     {
         world.Fog.ShowPublic();world.SetPresentationLayer(8);Call("Damage",1,View().Buildings.Single(b=>b.Id==1).Health);
         world.RenderSites(View());yield return null;AssertVisible(Pad("1:0"),8);
-        Assert.IsNotNull(Pad("1:1"),"Discovered physical aprons survive center loss");
-        Assert.AreEqual(PlayableCommandStatus.InvalidTarget,Call("BuildAt",1,1,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null),"A surviving apron does not grant building without a ready center");
+        Assert.IsNull(Pad("1:1"),"Observed center loss hides child aprons until a rebuilt center is ready");
+        Assert.AreEqual(PlayableCommandStatus.InvalidTarget,Call("BuildAt",1,1,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null),"Hidden child aprons do not grant building without a ready center");
         var pad=Pad("1:0");var camera=new GameObject("Pad viewer camera").AddComponent<Camera>();camera.transform.SetParent(host.transform);
         camera.cullingMask=1<<8;camera.orthographic=true;camera.orthographicSize=8;
         camera.transform.position=pad.position+new Vector3(9,15,-12);camera.transform.LookAt(pad.position);

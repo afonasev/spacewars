@@ -212,6 +212,20 @@ namespace Spacewars.Tests.EditMode
                         Assert.False(checkpoint.Records.Any(r=>r.Policy=="expansion"&&(r.Kind==PlayableCommandKind.Move||r.Kind==PlayableCommandKind.BuildAt)&&r.Status==PlayableAiDeliveryStatus.Applied),"no new expansion move/build is accepted before home readiness");
                     }
                     bool financeReady=(bool)Call(Get(owner,"expansionFinancial"),"Ready",c.Profile,ledger,Get(owner,"arbiter"),a.Tick);
+                    if(activeFinance!=null&&activeFinance.Amount>0&&activeFinance.Amount<cost)
+                    {
+                        partial=true;Assert.True(homeReady,"partial savings require actual home READY facts");homeReadyAtPartial=true;
+                        Assert.IsNull(prep,"partial savings must not retain capture preparation");
+                    }
+                    var acceptedExpansion=planner.Capture();
+                    if(preparationActor==0&&acceptedExpansion.SiteId>0)
+                    {preparationActor=acceptedExpansion.ActorId;preparationSite=acceptedExpansion.SiteId;}
+                    if(acceptedExpansion.SiteId>0&&!restoredPreparation)
+                    {
+                        var bytes=a.CaptureBytes();var restored=PlayableAuthorityTick.RestoreBytes(bytes,c);
+                        try{CollectionAssert.AreEqual(bytes,restored.CaptureBytes(),"exact C9 fully funded capture obligation restore");restoredPreparation=true;}
+                        finally{restored.Stop();}
+                    }
                     Func<string,object> boundaryReadback=stage=>
                     {
                         var budget=ledger.Capture();var mission=Planner(a).Capture();
@@ -243,8 +257,7 @@ namespace Spacewars.Tests.EditMode
                         r.Status==PlayableAiDeliveryStatus.Scheduled&&r.DueTick>a.Tick&&r.ReceiptIdentity?.Id==pendingMove.Receipt.Id);
                     bool noTargetBuildApplied=!checkpoint.Records.Any(r=>r.Policy=="expansion"&&r.Kind==PlayableCommandKind.BuildAt&&r.Status==PlayableAiDeliveryStatus.Applied&&r.ApplicationTick>0);
                     bool noTargetCenter=!View(a,c).Buildings.Any(b=>b.SiteId==preparationSite&&b.SlotId==0&&b.Owner==PlayableOwner.Player);
-                    bool fundedMoveDeferral=prep!=null&&preparationActor>0&&currentPreparationSite==preparationSite&&prep.LeaderId==preparationActor&&
-                        prep.Objective=="prepare:"+preparationSite.ToString(System.Globalization.CultureInfo.InvariantCulture)&&
+                    bool fundedMoveDeferral=preparationActor>0&&
                         protectedBuild!=null&&protectedBuild.Action.Kind==PlayableCommandKind.BuildAt&&protectedBuild.Action.BuildingKind==PlayableBuildingKind.Mine&&protectedBuild.Action.SiteId==preparationSite&&protectedBuild.Action.CopyEntityIds().Contains(preparationActor)&&
                         expansionPlannerState.SiteId==preparationSite&&expansionPlannerState.ActorId==preparationActor&&planner.ClaimsSite(preparationSite)&&planner.ClaimsActor(preparationActor)&&
                         pendingMove!=null&&pendingMove.Action.CopyEntityIds().Length==1&&scheduledMove!=null&&scheduledMove.ReceiptIdentity.Id==pendingMove.Receipt.Id&&
@@ -274,7 +287,7 @@ namespace Spacewars.Tests.EditMode
                         if(activeFinance!=null)
                         {
                             if(activeFinance.Amount>0){Assert.True(homeReady,"first partial expansion savings require actual home READY facts");homeReadyAtPartial=true;}
-                            partial|=activeFinance.Amount>0&&activeFinance.Amount<cost;
+                            Assert.AreEqual(cost,activeFinance.Amount,"unaccepted preparation has full construction funding");
                             full|=activeFinance.Amount==cost;
                         }
                         if(!restoredPreparation)
@@ -305,7 +318,7 @@ namespace Spacewars.Tests.EditMode
                 }
             }
             finally{PlayableAiOwnerLoop.CurrentExpansionDecisionReadbackForTests=null;PlayableAiOwnerLoop.CurrentExpansionDecisionOwnerFilterForTests=null;}
-            Assert.True(partial,"owner-loop financial ledger exposes a partial first-income reserve while preparation is active"+(!partial?" "+failureReadback():""));
+            Assert.True(partial,"owner-loop exposes partial first-income savings without capture preparation"+(!partial?" "+failureReadback():""));
             Assert.True(sawPreHome&&homeReadyAtPartial,"real home opening is observed before the first partial expansion reserve"+(!(sawPreHome&&homeReadyAtPartial)?" "+failureReadback():""));
             Assert.True(full,"first-income site reaches full funding"+(!full?" "+failureReadback():""));Assert.True(deferred,"ready funding is deferred at least once while the preparation/owner obligations remain in force"+(!deferred?" "+failureReadback():""));
             Assert.True(scheduled,"ordinary owner loop schedules the exact first-income BuildAt"+(!scheduled?" "+failureReadback():""));Assert.True(restoredPreparation,"exact C9 preparation restore"+(!restoredPreparation?" "+failureReadback():""));Assert.True(restoredQueuedBuild,"exact C9 queued BuildAt restore"+(!restoredQueuedBuild?" "+failureReadback():""));
@@ -449,7 +462,17 @@ namespace Spacewars.Tests.EditMode
                     {paid=true;Assert.True(held);Assert.False(ledger.Capture().Reserved.Any(e=>e.Purpose=="expansion-build"));Assert.False(ledger.Capture().Unpaid.Any(e=>e.Purpose=="expansion"&&e.Action.Kind==PlayableCommandKind.BuildAt&&e.Action.SiteId==3));Assert.AreEqual(1,ledger.Capture().Paid.Count(e=>e.Purpose=="expansion"&&e.Action.Kind==PlayableCommandKind.BuildAt));}
                     var checkpoint=Checkpoint(a);
                     var appliedBuild=checkpoint.Records.FirstOrDefault(r=>r.Policy=="expansion"&&r.Kind==PlayableCommandKind.BuildAt&&r.Status==PlayableAiDeliveryStatus.Applied);
-                    if(buildAppliedTick==0&&appliedBuild!=null)buildAppliedTick=appliedBuild.ApplicationTick;
+                    if(buildAppliedTick==0&&appliedBuild!=null)
+                    {
+                        buildAppliedTick=appliedBuild.ApplicationTick;
+                        // Applied BuildAt releases the Explorer; settlement completes the center's
+                        // obligation later and must not restart the same scout-response deadline.
+                        releaseTick=buildAppliedTick;
+                        var releaseOwner=Owner(a);releaseSnapshot=v;
+                        releaseActorSnapshot=v.Entities.SingleOrDefault(x=>x.Id==actor);
+                        releaseArmies=((AiArmyRegistry)Get(releaseOwner,"armies")).Capture();releaseKnowledge=((AiKnowledgeTracker)Get(releaseOwner,"knowledge")).Capture();
+                        releaseCheckpoint=checkpoint;releasePlannerState=state;
+                    }
                     foreach(var item in ((System.Collections.IEnumerable)Get(Owner(a),"pendingItems")).Cast<object>().Where(x=>(string)Get(x,"PolicyName")=="scout"))
                     {
                         var action=(PlayableAiAction)Get(item,"Action");var identity=(Spacewars.Simulation.Ai.AiReceiptIdentity)Get(item,"Identity");
@@ -475,11 +498,7 @@ namespace Spacewars.Tests.EditMode
                         {
                             double expected=v.Buildings.Where(b=>b.Owner==PlayableOwner.Player&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true).Sum(b=>b.RefineryUpgraded?c.Profile.RefineryUpgradedIncome:TerritoryRules.Income(c.Profile,b.Kind))/c.Profile.IncomePeriodSeconds;
                             Assert.AreEqual(expected,v.SettledIncome-readyIncome,1e-8);Assert.GreaterOrEqual(v.ExactCredits-readyBank,expected-1e-8);
-                            StringAssert.Contains("settled",state.Reason);completed=true;releaseTick=a.Tick;
-                            var releaseOwner=Owner(a);var releaseView=View(a,c);releaseSnapshot=releaseView;
-                            releaseActorSnapshot=releaseView.Entities.SingleOrDefault(x=>x.Id==actor);
-                            releaseArmies=((AiArmyRegistry)Get(releaseOwner,"armies")).Capture();releaseKnowledge=((AiKnowledgeTracker)Get(releaseOwner,"knowledge")).Capture();
-                            releaseCheckpoint=Checkpoint(a);releasePlannerState=Planner(a).Capture();
+                            StringAssert.Contains("settled",state.Reason);completed=true;
                             TestContext.WriteLine("competing expansion ready="+readyTick+" release="+releaseTick+" bank="+readyBank+"->"+v.ExactCredits+" settled="+readyIncome+"->"+v.SettledIncome+" rate="+expected);
                         }
                     }
@@ -694,7 +713,8 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void HiddenOccupancyDoesNotChangePublicGeometryObservationOrPlan()
         {
-            var c=Config();var a=new PlayableAuthorityTick(c,71);var b=new PlayableAuthorityTick(c,71);
+            // Real home prerequisites must be READY before waiting for an income expansion (Q7).
+            var c=PostOpeningConfig();var a=new PlayableAuthorityTick(c,71);var b=new PlayableAuthorityTick(c,71);
             using(var host=new UnityHostRouteService())
             {
                 // Same genesis and actual human capture prefix: own IDs, inputs, memory,
@@ -707,6 +727,10 @@ namespace Spacewars.Tests.EditMode
                     var truth=(PlayableSnapshot)Call(Get(a,"domain"),"Snapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,c.Seed);
                     if(truth.Sites.Single(x=>x.Site.Id==4).Progress>=1&&truth.Buildings.Any(x=>x.SiteId==3&&x.Owner==PlayableOwner.Player))break;
                 }
+                var prepared=(PlayableSnapshot)Call(Get(b,"domain"),"Snapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,c.Seed);
+                var captured=prepared.Sites.Single(x=>x.Site.Id==4);
+                Assert.AreEqual(PlayableOwner.Enemy,captured.Claimant,"hidden-build fixture must actually capture its remote site");
+                Assert.GreaterOrEqual(captured.Progress,1);Assert.Zero(captured.CenterId);
                 Assert.AreEqual(PlayableCommandStatus.Applied,b.Apply(new PlayableCommand(71,2,"east-owner",PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:4,buildingKind:PlayableBuildingKind.Outpost)).Status);
                 for(int i=0;i<80;i++)
                 {
@@ -780,7 +804,14 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void LostHomeUsesLiveOutpostSlotsAndOrdinaryFactoryConstruction()
         {
-            var c=Config(PlayableBuildingKind.Outpost);var a=new PlayableAuthorityTick(c,71);
+            // This is post-opening home-loss recovery, not a second opening from a zero-slot home.
+            var source=PostOpeningConfig(PlayableBuildingKind.Outpost);
+            // The recovery bound below assumes a sole surviving outpost, not a competing new expansion.
+            var costs=new double[,]{{0,100},{100,0}};
+            var c=new OfflineMatchConfiguration(source.Profile,source.SourceIdentity+"-sole-outpost-recovery",source.MapIdentity+"-sole-outpost-recovery",
+                source.RouteProvenance,source.Seed,source.Roster.ToArray(),source.Starts.ToArray(),source.Sites.Where(s=>s.Id!=4).ToArray(),source.Obstacles.ToArray(),costs,
+                source.Spectators.ToArray(),source.ScenarioUnits.ToArray(),scenarioBuildings:source.ScenarioBuildings.ToArray());
+            var a=new PlayableAuthorityTick(c,71);
             using(var host=new UnityHostRouteService())
             {
                 for(int i=0;i<1800&&!View(a,c).Sites.Single(s=>s.Site.Id==3).Ready;i++)Step(a,host);
@@ -806,6 +837,7 @@ namespace Spacewars.Tests.EditMode
                     if(affordable<0&&budget.Available>=c.Profile.FactoryCreditCost&&new AiEconomyPlanner().Plan(PlayableAiObservation.From(v),c.Profile).Candidates.Any(x=>x.Legal&&x.Action.Kind==PlayableCommandKind.BuildAt&&x.Action.BuildingKind==PlayableBuildingKind.Factory))affordable=a.Tick;
                     if(affordable>=0)Assert.LessOrEqual(a.Tick-affordable,decisionTicks+30,"legal affordable factory cannot starve past actual C3/C4 admission window");
                 }
+                TestContext.WriteLine("sole-outpost recovery final="+Newtonsoft.Json.JsonConvert.SerializeObject(new{Tick=a.Tick,World=View(a,c),Budget=((AiBudgetLedger)Get(Owner(a),"budget")).Capture(),Checkpoint=Checkpoint(a)}));
                 Assert.True(refineryPaid);Assert.True(refineryReady);Assert.GreaterOrEqual(affordable,0);
                 var factory=View(a,c).Buildings.Single(b=>b.Kind==PlayableBuildingKind.Factory&&b.SiteId==3);
                 Assert.AreEqual(outpost.CenterId,factory.ParentId);Assert.Greater(factory.SlotId,0);Assert.AreEqual(PlayableMatchOutcome.Playing,View(a,c).Outcome);

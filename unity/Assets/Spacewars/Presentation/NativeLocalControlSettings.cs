@@ -10,17 +10,19 @@ namespace Spacewars.Presentation
     {
         private readonly NativeLocalInputProfile profile;
         private const string Prefix="spacewars.controls.";
-        public float CursorSpeed {get;private set;}
-        public float CameraSpeed {get;private set;}
+        public float CursorSpeed {get=>Load("cursorSpeed",profile.cursorSpeed);private set=>Save("cursorSpeed",value);}
+        public float CameraSpeed {get=>Load("cameraSpeed",profile.cameraSpeed);private set=>Save("cameraSpeed",value);}
+        public float CursorRecenterIdleMs {get=>Load("cursorRecenterIdleMs",profile.cursorRecenterIdleMs);private set=>Save("cursorRecenterIdleMs",value);}
         public NativeLocalControlSettings()
-        {profile=JsonUtility.FromJson<NativeLocalInputProfile>(Resources.Load<TextAsset>("NativeLocalInputProfile").text);profile.Validate();CursorSpeed=Load("cursorSpeed",profile.cursorSpeed);CameraSpeed=Load("cameraSpeed",profile.cameraSpeed);}
+        {profile=JsonUtility.FromJson<NativeLocalInputProfile>(Resources.Load<TextAsset>("NativeLocalInputProfile").text);profile.Validate();}
         private float Load(string key,float fallback)
         {var field=profile.metadata.Single(m=>m.path.EndsWith("."+key));float value=PlayerPrefs.GetFloat(Prefix+key,fallback);return float.IsNaN(value)||float.IsInfinity(value)?fallback:Mathf.Clamp(value,field.min,field.max);}
-        private static void Save(string key,float value){PlayerPrefs.SetFloat(Prefix+key,value);PlayerPrefs.Save();}
+        private static void Save(string key,float value){NativePreferenceWriter.SetFloat(Prefix+key,value);}
         public void AddSliders(VisualElement parent)
         {
             Add("cursorSpeed","Скорость курсора · RS",CursorSpeed,value=>{CursorSpeed=value;Save("cursorSpeed",value);});
             Add("cameraSpeed","Скорость камеры · LS",CameraSpeed,value=>{CameraSpeed=value;Save("cameraSpeed",value);});
+            Add("cursorRecenterIdleMs","Пауза перед центрированием курсора",CursorRecenterIdleMs,value=>{CursorRecenterIdleMs=value;Save("cursorRecenterIdleMs",value);});
             void Add(string key,string title,float current,System.Action<float> changed)
             {
                 var field=profile.metadata.Single(m=>m.path.EndsWith("."+key));

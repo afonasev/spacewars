@@ -1,20 +1,30 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
 
 namespace Spacewars.Simulation
 {
     // Adapter over the actual authored precedence partition. Callers supply the
     // current movement geometry, including buildings and HOLD obstacles. An
     // arbitrary legacy terrain is intentionally not accepted as a layered map.
-    public sealed class PartitionNavigationProvider : ILayeredNavigationProvider
+    public sealed partial class PartitionNavigationProvider : ILayeredNavigationProvider, INavStorageFacade
     {
         private readonly TerrainLocations locations;
-        private readonly Dictionary<string, NavLayerSurface> bySurface;
+        private readonly string terrainId,holdBinding;
+        private readonly int terrainRevision,surfaceSemanticsVersion;
+        internal string TerrainId=>terrainId; internal string HoldBinding=>holdBinding;
+        internal int TerrainRevision=>terrainRevision; internal int SurfaceSemanticsVersion=>surfaceSemanticsVersion;
+        internal NavLocation OwnedCheckpointLocation(NavLocation location)=>locations.OwnedCheckpointLocation(location);
+        private IReadOnlyDictionary<string, NavLayerSurface> bySurface;
+
+        // Admission and host construction must agree on the same immutable map set.
+        public static bool SupportsTerrain(IPlayableTerrain terrain)
+            =>terrain is ThreeCrossingsMap||terrain is FoundryMap||terrain is BasaltCrownMap||terrain is MossHighlandMap;
 
         public PartitionNavigationProvider(IPlayableTerrain terrain, NavGeometry movementGeometry, string holdBinding)
         {
-            if (!(terrain is ThreeCrossingsMap) && !(terrain is FoundryMap) && !(terrain is BasaltCrownMap) && !(terrain is MossHighlandMap))
+            if (!SupportsTerrain(terrain))
                 throw new ArgumentException("No authored partition adapter for this terrain.", nameof(terrain));
             if (movementGeometry == null || movementGeometry.HalfExtent != terrain.HalfExtent)
                 throw new ArgumentException("Movement geometry does not match terrain extent.", nameof(movementGeometry));
@@ -30,47 +40,50 @@ namespace Spacewars.Simulation
                 new NavTraversalArea(s.Bounds.Footprint, terrain.HalfExtent, Array.Empty<NavObstacle>()))).ToArray());
             bySurface = Surfaces.ToDictionary(s => s.Id, StringComparer.Ordinal);
             Portals = Array.AsReadOnly(Array.Empty<NavLayerPortal>());
-            Binding = NavContract.Digest(w => {
-                w.Write("authored-partition-provider-v1"); w.Write(terrain.Id); w.Write(terrain.Revision);
-                w.Write(terrain.SurfaceSemanticsVersion); w.Write(terrain.HalfExtent);
-                w.Write(holdBinding != null); if (holdBinding != null) w.Write(holdBinding);
-                w.Write(terrain.Supports.Count);
-                foreach (var s in terrain.Supports) {
-                    w.Write(s.SurfaceId); w.Write(s.Id); NavContract.Polygon(w, s.Bounds.Footprint);
-                    w.Write(s.Height); w.Write(s.Gradient.X); w.Write(s.Gradient.Z);
-                    w.Write(s.Origin.X); w.Write(s.Origin.Z); w.Write(s.IsBridge);
-                }
-                w.Write(terrain.SurfaceTransitions.Count);
-                foreach (var t in terrain.SurfaceTransitions) { w.Write(t.Id); w.Write(t.From); w.Write(t.To); }
-                w.Write(movementGeometry.Revision); w.Write(movementGeometry.Obstacles.Count);
-                foreach (var b in movementGeometry.Obstacles) {
-                    w.Write(b.MinX); w.Write(b.MinZ); w.Write(b.MaxX); w.Write(b.MaxZ);
-                    w.Write(b.CircleRadius); w.Write(b.Bottom); w.Write(b.Top);
-                    w.Write(b.Polygon != null); if (b.Polygon != null) NavContract.Polygon(w, b.Polygon);
-                }
-                w.Write(Seams.Count);
-                foreach (var s in Seams) {
-                    w.Write(s.FromSurface); w.Write(s.ToSurface);
-                    NavContract.Point(w, s.From); NavContract.Point(w, s.To); w.Write(s.Allowed);
-                }
-            });
+            terrainId=terrain.Id;terrainRevision=terrain.Revision;surfaceSemanticsVersion=terrain.SurfaceSemanticsVersion;this.holdBinding=holdBinding;
+            Binding = NavContract.Digest(WriteBindingTranscript);
             // Account once for the geometry retained by TerrainLocations, the
             // support boundaries/arrangement and both seam views. A polygon
             // retains vertices, triangulation and wrappers, not just one slot.
             long supportVertices = terrain.Supports.Sum(s => (long)(s.Bounds.Polygon?.Vertices.Count ?? 4));
             long polygonVertices = movementGeometry.Obstacles.Sum(o => (long)(o.Polygon?.Vertices.Count ?? 0));
-            EstimatedRetainedBytes = checked(4096L + movementGeometry.SpatialIndexRetainedBytes + locations.FootprintCacheRetainedBytes + locations.RegionIndexRetainedBytes + 1024L * Surfaces.Count +
-                512L * supportVertices + 512L * Seams.Count +
-                256L * terrain.SurfaceTransitions.Count +
-                512L * movementGeometry.Obstacles.Count + 128L * polygonVertices);
+            EstimatedRetainedBytes = checked(RetainedPayloadEstimate(Surfaces.Count,supportVertices,Seams.Count,
+                terrain.SurfaceTransitions.Count,movementGeometry.Obstacles.Count,polygonVertices) +
+                movementGeometry.SpatialIndexRetainedBytes + locations.FootprintCacheRetainedBytes + locations.RegionIndexRetainedBytes);
+        }
+
+        internal static long RetainedPayloadEstimate(long surfaces,long supportVertices,long seams,long transitions,long obstacles,long polygonVertices)
+            =>checked(4096L+1024L*surfaces+512L*supportVertices+512L*seams+256L*transitions+512L*obstacles+128L*polygonVertices);
+
+        // A single unchanged transcript serves construction, owned-copy validation
+        // and physical restore. It reads the retained payloads, never a terrain catalog.
+        internal void WriteBindingTranscript(BinaryWriter w)
+        {
+            w.Write("authored-partition-provider-v1");w.Write(terrainId);w.Write(terrainRevision);
+            w.Write(surfaceSemanticsVersion);w.Write(HalfExtent);w.Write(holdBinding!=null);if(holdBinding!=null)w.Write(holdBinding);
+            w.Write(locations.Supports.Count);
+            foreach(var s in locations.Supports){
+                w.Write(s.SurfaceId);w.Write(s.Id);NavContract.Polygon(w,s.Bounds.Footprint);
+                w.Write(s.Height);w.Write(s.Gradient.X);w.Write(s.Gradient.Z);w.Write(s.Origin.X);w.Write(s.Origin.Z);w.Write(s.IsBridge);
+            }
+            w.Write(locations.Transitions.Count);
+            foreach(var t in locations.Transitions){w.Write(t.Id);w.Write(t.From);w.Write(t.To);}
+            var movementGeometry=locations.Geometry;w.Write(movementGeometry.Revision);w.Write(movementGeometry.Obstacles.Count);
+            foreach(var b in movementGeometry.Obstacles){
+                w.Write(b.MinX);w.Write(b.MinZ);w.Write(b.MaxX);w.Write(b.MaxZ);w.Write(b.CircleRadius);w.Write(b.Bottom);w.Write(b.Top);
+                w.Write(b.Polygon!=null);if(b.Polygon!=null)NavContract.Polygon(w,b.Polygon);
+            }
+            w.Write(Seams.Count);foreach(var s in Seams){w.Write(s.FromSurface);w.Write(s.ToSurface);NavContract.Point(w,s.From);NavContract.Point(w,s.To);w.Write(s.Allowed);}
         }
 
         public string Binding { get; }
         public double HalfExtent { get; }
         public long EstimatedRetainedBytes { get; }
-        public IReadOnlyList<NavLayerSurface> Surfaces { get; }
-        public IReadOnlyList<NavLayerPortal> Portals { get; }
-        public IReadOnlyList<NavPartitionSeam> Seams { get; }
+        internal int TracePortalBound=>locations.TracePortalBound;
+        internal long TraceScratchBound=>locations.TraceScratchBound;
+        public IReadOnlyList<NavLayerSurface> Surfaces { get; private set; }
+        public IReadOnlyList<NavLayerPortal> Portals { get; private set; }
+        public IReadOnlyList<NavPartitionSeam> Seams { get; private set; }
         public double SurfaceCost(string surfaceId) => bySurface.TryGetValue(surfaceId, out var surface)
             ? surface.DistanceCost : throw new ArgumentException("Unknown partition surface.", nameof(surfaceId));
         public bool TryLocate(NavPoint point, NavClearanceProfile clearance, out NavLocation location)
@@ -86,10 +99,19 @@ namespace Spacewars.Simulation
         public bool TryTrace(NavLocation from, NavPoint to, NavClearanceProfile clearance,
             out NavLocation reached, out IReadOnlyList<NavTypedLeg> trace)
             => locations.TryTrace(from, to, clearance.Radius, out reached, out trace);
+        internal bool TryTraceOwned(NavLocation from,NavPoint to,NavClearanceProfile clearance,out NavLocation reached,out IReadOnlyList<NavTypedLeg> trace,INavStorageReservation reservation)
+        {
+            if(StorageRoot!=null)NavStorageAdmission.RequireOwned(reservation,StorageRoot);
+            return locations.TryTrace(from,to,clearance.Radius,out reached,out trace,reservation,this);
+        }
+        internal void VerifyPhysicalTrace(NavLocation from,NavLocation to,NavClearanceProfile clearance,IReadOnlyList<NavTypedLeg> trace,INavStorageReservation reservation)
+            =>locations.VerifyTrace(from,to,clearance,trace,this,reservation);
         internal bool TryGraphTrace(NavLocation from,NavPoint to,NavClearanceProfile clearance,out NavLocation reached,out IReadOnlyList<NavTypedLeg> trace)
             =>locations.TryGraphTrace(from,to,clearance.Radius,out reached,out trace);
         internal bool TryGraphTraceValidated(NavLocation from,NavPoint to,NavClearanceProfile clearance,out NavLocation reached,out IReadOnlyList<NavTypedLeg> trace)
             =>locations.TryGraphTraceValidated(from,to,clearance.Radius,out reached,out trace);
+        internal bool TryGraphTraceValidatedOwned(NavLocation from,NavPoint to,NavClearanceProfile clearance,out NavLocation reached,out IReadOnlyList<NavTypedLeg> trace,INavStorageReservation reservation)
+        {if(StorageRoot!=null)NavStorageAdmission.RequireOwned(reservation,StorageRoot);return locations.TryGraphTraceValidated(from,to,clearance.Radius,out reached,out trace,reservation,this);}
         public NavConnectorResult QualifyPortal(string portalId, NavClearanceProfile clearance)
             => new NavConnectorResult(NavConnectorStatus.UnknownPortal, Binding, portalId, default, default, default, default, 0);
         public NavConnectorResult Connect(string portalId, NavLocation origin, NavLocation endpoint, NavClearanceProfile clearance)

@@ -30,6 +30,7 @@ namespace Spacewars.Presentation
         private Color[] ownerPaint;
         private Color Paint(PlayableOwner? owner)=>owner.HasValue?ownerPaint[(int)owner.Value]:Color.white;
         private NativeLocalInputProfile padProfile;
+        private double padRightStickLastActive=double.NegativeInfinity;
         private PlayableRuntime runtime;
         private OfflineLocalSession session;
         private readonly Viewport[] views=new Viewport[2];
@@ -82,7 +83,7 @@ namespace Spacewars.Presentation
             keyboard.TogglePause=()=>{if(runtime.Result!=null){ShowOfflineResult();return;}if(session?.Paused==true)Resume();else if(views[0].MapPanel.style.display==DisplayStyle.Flex)views[0].MapPanel.style.display=DisplayStyle.None;else Pause();};keyboard.FocusLost=Pause;
             keyboard.ToggleMap=()=>views[0].MapPanel.style.display=views[0].MapPanel.style.display==DisplayStyle.Flex?DisplayStyle.None:DisplayStyle.Flex;
             keyboard.CloseMap=()=>views[0].MapPanel.style.display=DisplayStyle.None;
-            keyboard.MapAt=p=>MapAt(p);keyboard.MapSelect=(map,a,b,add)=>MapSelect(map,a,b,add);
+            keyboard.MapAt=p=>MapAt(p);keyboard.MapSelect=(map,a,b,add)=>MapSelect(map,a,b,add);keyboard.MapPan=(map,p)=>Focus(0,MapGround(map,p));
             keyboard.MapOrder=(map,p,attack,append)=>Order(0,MapGround(map,p),attack,true,append);
             keyboard.IsPointerOverUi=p=>OverHud(p)||!views[0].Camera.pixelRect.Contains(p);
             BindOfflineKeyboardCommands();
@@ -165,14 +166,17 @@ namespace Spacewars.Presentation
         {
             if(runtime.Result!=null&&assignedPad?.startButton.wasPressedThisFrame==true){ShowOfflineResult();return;}
             var v=views[1];if(!assignedPad.added){gestures.Cancel();padRing.style.display=DisplayStyle.None;return;}
+            var rs=assignedPad.rightStick.ReadValue();
+            bool rightStickActive=Mathf.Abs(rs.x)>padProfile.deadzone||Mathf.Abs(rs.y)>padProfile.deadzone;
+            if(rightStickActive)padRightStickLastActive=Time.unscaledTimeAsDouble;
             if(v.Anchor!=0&&!v.View.Buildings.Any(b=>b.Id==v.Anchor&&b.Owner==v.View.Owner)){v.Anchor=0;gestures.SetMode("world");}
             bool wheel=gestures.Mode=="buildingWheel"||gestures.Mode=="groupWheel"||gestures.Mode=="groupAssign"||gestures.Mode=="baseWheel";
             if(!gestures.Blocked&&(!session.Paused||offlineResultOverview)&&focused){
                 float Axis(float x)=>Mathf.Abs(x)<=padProfile.deadzone?0:Mathf.Sign(x)*(Mathf.Abs(x)-padProfile.deadzone)/(1-padProfile.deadzone);
-                var rs=assignedPad.rightStick.ReadValue();var ls=assignedPad.leftStick.ReadValue();float dt=Time.unscaledDeltaTime;
+                var ls=assignedPad.leftStick.ReadValue();float dt=Time.unscaledDeltaTime;
                 if(!wheel){
                     v.Cursor=new NavPoint(Math.Clamp(v.Cursor.X+(gestures.Map?1:-1)*Axis(rs.x)*padProfile.cursorSpeed*dt,-profile.ArenaHalfExtent,profile.ArenaHalfExtent),Math.Clamp(v.Cursor.Z+(gestures.Map?-1:1)*Axis(rs.y)*padProfile.cursorSpeed*dt,-profile.ArenaHalfExtent,profile.ArenaHalfExtent));
-                    if(!gestures.Map){var delta=new Vector2(-Axis(ls.x),Axis(ls.y))*padProfile.cameraSpeed*dt;Pan(1,delta);if(delta.sqrMagnitude>0)v.Cursor=Center(1);
+                    if(!gestures.Map){var delta=new Vector2(-Axis(ls.x),Axis(ls.y))*padProfile.cameraSpeed*dt;Pan(1,delta);if(delta.sqrMagnitude>0&&!rightStickActive&&Time.unscaledTimeAsDouble-padRightStickLastActive>=padProfile.cursorRecenterIdleMs/1000.0)v.Cursor=Center(1);
                         v.CameraState.AdjustZoom(((assignedPad.dpad.down.isPressed?1:0)-(assignedPad.dpad.up.isPressed?1:0))*padProfile.zoomSpeed*dt,padProfile);v.CameraState.Apply(v.Camera);
                         if(assignedPad.leftStickButton.wasPressedThisFrame){v.CameraState.Reset();v.CameraState.Apply(v.Camera);v.Cursor=Center(1);}}
                 }else if(gestures.Mode=="baseWheel"){if(assignedPad.dpad.left.wasPressedThisFrame)v.BasePage=Math.Max(0,v.BasePage-1);if(assignedPad.dpad.right.wasPressedThisFrame)v.BasePage++;}

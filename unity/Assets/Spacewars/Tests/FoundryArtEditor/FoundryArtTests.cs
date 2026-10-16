@@ -9,6 +9,90 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class FoundryArtTests
     {
+        [Test] public void RoleAccentsFollowRealClimbsAndOpenOutpostApproaches()
+        {
+            var settings=FoundrySurfaceProfile.Load();
+            foreach(double scale in new[]{1d,1.5d})
+            {
+                var map=new FoundryMap(new FoundryProfileData{scale=scale});var paths=FoundryRouteFinish.Connections(map);
+                Assert.AreEqual(4,paths.Length);
+                // Maximum configurable accent width remains within real passage clearance.
+                foreach(var path in paths)for(int i=1;i<path.Length;i++)
+                    Assert.IsTrue(map.SupportsSweep(path[i-1],path[i],6),"Accent must not imply a route through a wall");
+                foreach(int side in new[]{-1,1})foreach(int end in new[]{-1,1})
+                {
+                    Assert.Greater(FoundryRouteFinish.Coverage(map,map.Point(side*44,end*35),settings,paths).x,.99f);
+                    Assert.Greater(FoundryRouteFinish.Coverage(map,map.Point(side*65,end*80),settings,paths).x,.99f);
+                    Assert.Greater(FoundryRouteFinish.Coverage(map,map.Point(side<0?-44:58,end*65),settings,paths).y,.99f);
+                }
+                foreach(var point in new[]{map.Point(0,0),map.Point(0,80),map.Point(77,0)})
+                    Assert.AreEqual(Vector2.zero,FoundryRouteFinish.Coverage(map,point,settings,paths),"Unrelated flat route remains unchanged");
+                foreach(var point in new[]{map.Point(38,54),map.Point(38,-54),map.Point(-22,70),map.Point(-22,-70)})
+                    Assert.AreEqual(Vector2.zero,FoundryRouteFinish.Coverage(map,point,settings,paths),"No accent through pocket walls");
+            }
+        }
+        [Test] public void RouteMaskPreservesEveryPadAndBindsValidatedFinish()
+        {
+            var profile=FoundryGreybox.LoadProfile();var map=(FoundryMap)profile.AuthoredMap;var settings=FoundrySurfaceProfile.Load();
+            var parent=new GameObject("Foundry role mask contract");
+            try
+            {
+                using(var world=new PlayableWorld(parent.transform,profile))
+                {
+                    var material=parent.GetComponentsInChildren<MeshRenderer>().First(r=>r.name=="Lava river / fissure").sharedMaterial;
+                    var mask=(Texture2D)material.GetTexture("_FoundryRouteMask");Assert.NotNull(mask);
+                    var pads=map.Sites(profile).Select(site=>FoundryTerrainMesh.SitePad(site,profile,settings)).ToArray();
+                    var pixels=mask.GetPixels();int padSamples=0,climbSamples=0,connectionSamples=0;
+                    for(int z=0;z<mask.height;z++)for(int x=0;x<mask.width;x++)
+                    {
+                        var q=new NavPoint(((x+.5)/mask.width*2-1)*map.HalfExtent,((z+.5)/mask.height*2-1)*map.HalfExtent);
+                        var pixel=pixels[z*mask.width+x];
+                        if(pads.Any(pad=>pad.Contains(q))){Assert.AreEqual(0,pixel.r);Assert.AreEqual(0,pixel.g);padSamples++;}
+                        if(pixel.r>.9f)climbSamples++;if(pixel.g>.9f)connectionSamples++;
+                    }
+                    Assert.Greater(padSamples,1000);Assert.Greater(climbSamples,1000);Assert.Greater(connectionSamples,1000);
+                    Assert.AreEqual(new Vector4(settings.padJointWidth,settings.padJointContrast,settings.padBayVariation,0),material.GetVector("_FoundryPadPours"));
+                    Assert.AreEqual(new Vector4(settings.padAgeWidth,settings.padAgeStrength,0,0),material.GetVector("_FoundryPadAge"));
+                    Assert.AreEqual(settings.climbValue,material.GetColor("_FoundryClimbTint").r,.001f);
+                    Assert.AreEqual(settings.connectionValue,material.GetColor("_FoundryConnectionTint").r,.001f);
+                    Assert.AreEqual(settings.climbWearSpacing,material.GetVector("_FoundryRouteFinish").x,.001f);
+                    Assert.AreEqual(settings.climbWearContrast,material.GetVector("_FoundryRouteFinish").y,.001f);
+                    Assert.IsEmpty(parent.GetComponentsInChildren<Collider>());
+                }
+            }
+            finally{UnityEngine.Object.DestroyImmediate(parent);}
+        }
+        [Test] public void RoadMaskRespectsHexCornersAndRetainsFlushApproachCoverage()
+        {
+            var profile=FoundryGreybox.LoadProfile();var map=(FoundryMap)profile.AuthoredMap;
+            var settings=FoundrySurfaceProfile.Load();var parent=new GameObject("Foundry road connections");
+            try
+            {
+                using(var world=new PlayableWorld(parent.transform,profile))
+                {
+                    var material=parent.GetComponentsInChildren<MeshRenderer>().First(r=>r.name=="Lava river / fissure").sharedMaterial;
+                    var mask=(Texture2D)material.GetTexture("_RoadMask");
+                    int checkedCorners=0;
+                    foreach(var home in map.Sites(profile).Where(s=>s.Kind==PlayableBuildingKind.Headquarters&&Math.Abs(s.Position.X)>1))
+                    {
+                        double extent=FoundryTerrainMesh.SiteEnvelope(home,profile);
+                        // Inside the real hex but outside the former square exclusion,
+                        // on the existing transverse allied road. Its concrete stays whole.
+                        var q=new NavPoint(home.Position.X-Math.Sign(home.Position.X)*extent*1.2,Math.Sign(home.Position.Z)*106);
+                        var pad=FoundryTerrainMesh.SitePad(home,profile,settings);
+                        Assert.IsTrue(pad.Contains(q));
+                        var pixel=mask.GetPixelBilinear((float)(q.X/map.HalfExtent*.5+.5),(float)(q.Z/map.HalfExtent*.5+.5));
+                        Assert.Less(pixel.r,.01f,"No road material cuts the concrete hex corner");
+                        Assert.Greater(pixel.b,.9f,"Authored approach remains available to pad-edge finish");
+                        checkedCorners++;
+                    }
+                    Assert.AreEqual(4,checkedCorners,"Both sides of each allied rear");
+                    Assert.AreEqual(settings.roadValue,material.GetColor("_RoadTint").r,.001f);
+                    Assert.AreEqual(settings.padEntryWear,material.GetVector("_FoundryReadability").w,.001f);
+                }
+            }
+            finally{UnityEngine.Object.DestroyImmediate(parent);}
+        }
         [Test] public void SixHexagonalHomesContainCompleteSquareEnvelopesAndRemainSupported()
         {
             var profile=FoundryGreybox.LoadProfile();var map=(FoundryMap)profile.AuthoredMap;

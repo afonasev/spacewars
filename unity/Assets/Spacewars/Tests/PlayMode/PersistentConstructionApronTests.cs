@@ -45,7 +45,7 @@ public sealed class PersistentConstructionApronTests
     }
     private void Fits(PlayableBuildingSnapshot b)
     {
-        var pad=Pad(b.SiteId+":"+b.SlotId);var bounds=pad.GetComponentInChildren<MeshFilter>().sharedMesh.bounds;var actor=world.Actors[b.Id];float margin=EnvironmentArtProfile.Load().apronMargin;
+        var pad=Pad(b.SiteId+":"+b.SlotId);var bounds=pad.GetComponentInChildren<MeshFilter>().sharedMesh.bounds;var actor=world.Actors[b.Id];var art=EnvironmentArtProfile.Load();float margin=art.apronMargin+(b.Kind==PlayableBuildingKind.Outpost?art.outpostApronMargin:0);
         Assert.Less(Quaternion.Angle(pad.rotation,actor.Hull.rotation),.001f);
         var foundation=actor.Hull.GetComponentsInChildren<Renderer>().Where(r=>r.name.EndsWith(":foundation-concrete",StringComparison.Ordinal)).ToArray();Assert.AreEqual(1,foundation.Length);var half=Vector2.zero;
         foreach(var renderer in foundation)for(int i=0;i<8;i++)
@@ -86,9 +86,45 @@ public sealed class PersistentConstructionApronTests
             var material=pad.GetComponentInChildren<MeshRenderer>().sharedMaterial;Assert.AreEqual("Spacewars/ConstructionApron",material.shader.name);Assert.IsTrue(material.shader.isSupported);Assert.AreSame(world.Fog.Texture,material.GetTexture("_FogMask"));
         }
     }
+    [UnityTest] public IEnumerator ChildApronsWaitForObservedReadyCenterAndRememberOnlyObservedReadiness()
+    {
+        foreach(var kind in new[]{PlayableBuildingKind.Headquarters,PlayableBuildingKind.Outpost})
+        {
+            world.ClearPads();yield return null;
+            var site=new TerritorySite(500,kind,new NavPoint(0,0),new[]{new TerritorySlot(1,new NavPoint(-5,0),0),new TerritorySlot(2,new NavPoint(5,0),0)});
+            PlayableSnapshot State(ConstructionPhase? phase,bool hidden=false)
+            {
+                var buildings=phase.HasValue?new[]{new PlayableBuildingSnapshot(50,PlayableOwner.Player,kind,site.Position,100,phase==ConstructionPhase.Ready?1:.5,0,0,default,site.Id,0,phase:phase.Value)}:Array.Empty<PlayableBuildingSnapshot>();
+                return new PlayableSnapshot(profile.ProfileId,profile.Revision,1,7,++tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,0,null,Array.Empty<PlayableEntitySnapshot>(),buildings,Array.Empty<PlayableProjectileSnapshot>(),null,null,
+                    sites:hidden?null:new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,phase.HasValue?50:0,phase==ConstructionPhase.Ready)},discoveredSites:hidden?new[]{site}:null);
+            }
+            void Count(int expected){Assert.AreEqual(expected,host.GetComponentsInChildren<Transform>().Count(t=>t.name.StartsWith("Site pad ")));Assert.NotNull(Pad("500:0"));}
+            world.RenderSites(State(null,true));yield return null;Count(1);
+            foreach(ConstructionPhase? phase in new ConstructionPhase?[]{null,ConstructionPhase.Pending,ConstructionPhase.Constructing})
+            {world.RenderSites(State(phase));yield return null;Count(1);}
+            world.RenderSites(State(ConstructionPhase.Ready));yield return null;Count(3);
+            world.RenderSites(State(null,true));yield return null;Count(3);
+            world.RenderSites(State(null));yield return null;Count(1);
+            world.RenderSites(State(null,true));yield return null;Count(1);
+        }
+    }
+    [UnityTest] public IEnumerator CaptureReadabilityAndCenterConstructionLifecycle()
+    {
+        var target=new RenderTexture(1600,1000,24);target.Create();camera.targetTexture=target;
+        try
+        {
+            var view=SceneView(true);world.RenderSites(view,camera);Actors(view);
+            foreach(var actor in world.Actors.Values){actor.Selection.SetActive(true);PlayableWorld.UpdateHealth(actor,camera,.65f,true);}
+            yield return null;Capture(target,"readability-buildings.png");
+            camera.orthographicSize=5;camera.transform.position=new Vector3(7,11,-11);camera.transform.LookAt(new Vector3(0,0,7));world.RenderSites(view,camera);
+            foreach(var actor in world.Actors.Values){world.FaceBuilding(actor,camera);PlayableWorld.UpdateHealth(actor,camera,.65f,true);}
+            yield return null;Capture(target,"outpost-close.png");
+        }
+        finally{camera.targetTexture=null;target.Release();UnityEngine.Object.DestroyImmediate(target);}
+    }
     [Test] public void ApronProfileControlsHaveMetadataAndRejectInvalidRanges()
     {
-        var art=EnvironmentArtProfile.Load();var fields=art.Parameters().Where(f=>f.Path.Contains(".apron")).ToArray();Assert.AreEqual(4,fields.Length);
+        var art=EnvironmentArtProfile.Load();var fields=art.Parameters().Where(f=>f.Path.Contains(".apron")||f.Path.EndsWith(".outpostApronMargin")).ToArray();Assert.AreEqual(5,fields.Length);
         foreach(var f in fields){float original=f.Read();Assert.IsNotEmpty(f.Description);Assert.IsNotEmpty(f.Unit);Assert.Greater(f.Step,0);foreach(float bad in new[]{float.NaN,float.PositiveInfinity,f.Minimum-f.Step,f.Maximum+f.Step}){f.Write(bad);Assert.Throws<ArgumentException>(()=>art.Validate());}f.Write(original);}art.Validate();
     }
     [UnityTest] public IEnumerator CaptureEmptyOccupiedAndFoundryApronsWithRealModelsAndUnits()

@@ -120,6 +120,16 @@ namespace Spacewars.Tests.EditMode
                 Assert.NotNull(pending,"Actual owner must schedule a detached unit Move");
                 var old=(PlayableAiAction)Field(pending,"Action");string policy=(string)Field(pending,"PolicyName");var identity=(AiReceiptIdentity)Field(pending,"Identity");var observation=PlayableAiObservation.From(a.ParticipantView(registry.OwnerId));
                 Assert.True(a.CaptureDiagnosticBudgets().Single().Unpaid.Any(e=>e.Receipt.Id==identity.Id),"Accepted pending claim must exist before reassignment");
+                // The current scout planner already claims its actor before scheduling.
+                // Explicitly release that single assignment before constructing the
+                // transport reassignment exercised here; double ownership is forbidden.
+                var previousArmy=registry.ArmyFor(old.EntityIds.Single());
+                if(previousArmy!=0)
+                {
+                    var previous=registry.Capture().Armies.Single(g=>g.Id==previousArmy);
+                    Assert.AreEqual(AiArmyRole.Scout,previous.Role);Assert.AreEqual(policy,previous.TacticalOwner);
+                    CollectionAssert.AreEqual(old.EntityIds,previous.Members);registry.Disband(previousArmy);
+                }
                 Assert.True(registry.TryCreate(observation,AiArmyRole.Transport,change=="new-assignment"?"new-owner":policy,old.EntityIds,out var army));
                 if(change=="transfer")Assert.True(registry.TryClaim(army,policy,"new-owner"));
                 var restored=PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c);long due=(long)Field(pending,"DueTick");

@@ -65,19 +65,16 @@ namespace Spacewars.Presentation
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
             if(orbitalEvidence!=null)path=System.IO.Path.Combine(orbitalEvidence,"native-balance.json");
 #endif
-            balanceStore=new NativeBalanceStore(profile,path);
+            balanceStore=NativeBalanceStore.ForApplication(profile,path);
         }
         private void OpenLaboratory()
         {
+            if(!inLobby||preparing)return;
             try{
-                EnsureBalanceStore();bool fromMain=inLobby;
-                if(fromMain)nativeMainMenu.ScreenRoot.style.display=DisplayStyle.None;else {Pause(true);modal.style.display=DisplayStyle.None;}
+                EnsureBalanceStore();nativeMainMenu.ScreenRoot.style.display=DisplayStyle.None;
                 var page=new NativeBalanceView(root,menuNavigation,balanceStore,()=>{
-                    childMenu=null;
-                    if(fromMain)nativeMainMenu.RestoreFocus(nativeMainMenu.ScreenRoot.Q<Button>("main-laboratory"));
-                    else {modal.style.display=DisplayStyle.Flex;menuNavigation.SetScope(modalCard,()=>Pause(false),resumeButton);}
-                },fromMain?null:next=>runtime.RequestBalance(ComposeLobbyProfile(next),generation,view.ProfileRevision),fromMain?null:runtime.Latest.ActiveProfile);
-                childMenu=page.Page;
+                    childMenu=null;nativeMainMenu.RestoreFocus(nativeMainMenu.ScreenRoot.Q<Button>("main-laboratory"));
+                });childMenu=page.Page;
             }catch(System.Exception e){Debug.LogException(e);notice="Не удалось открыть лабораторию: "+e.Message;}
         }
         private void RebindPresentation()

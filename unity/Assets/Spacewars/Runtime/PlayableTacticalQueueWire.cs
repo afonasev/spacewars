@@ -78,9 +78,9 @@ namespace Spacewars.Runtime
             // remains the only evidence for the old active Attack chase.
             return TerminalProofMatches(e,actor);
         }
-        private void ValidateTacticalQueues()
+        private void ValidateTacticalQueues(NavigationSessionState privateNavigation)
         {
-            var nav=navigation.CaptureState();var pending=nav.PendingRequestIndices.Select(i=>nav.Requests[i]).ToDictionary(r=>r.Entity);var orders=nav.Orders.ToDictionary(o=>o.Entity,o=>o.Order);
+            using var validationCapture=privateNavigation==null?navigation.CaptureOwnedState():null;var nav=privateNavigation??validationCapture;var pending=nav.PendingRequestIndices.Concat(nav.AllocationRequestIndices??System.Array.Empty<int>()).Select(i=>nav.Requests[i]).ToDictionary(r=>r.Entity);var orders=nav.Orders.ToDictionary(o=>o.Entity,o=>o.Order);
             var issuanceRows=tacticalQueues.Values.SelectMany(q=>q.Deferred.Concat(q.Active==null?Enumerable.Empty<QueueIssuance>():new[]{q.Active.Issuance}).Concat(q.Pending==null?Enumerable.Empty<QueueIssuance>():new[]{q.Pending.Issuance})).GroupBy(i=>i.Id).Select(g=>g.First()).ToArray();
             foreach(var i in issuanceRows){var c=i.Command;var g=nav.Groups.SingleOrDefault(g=>g.GroupId==i.GroupId);if(i.GroupId>nav.GroupSequence||g!=null&&(g.OrderRevision!=i.Revision||g.CommandSequence!=c.Sequence||g.IssuedTick!=i.Tick||g.OwnerId!=c.PlayerId||g.Kind!=c.Kind||g.Origin!=c.Origin||g.Source!=c.Source||g.JobId!=c.JobId||g.ActionId!=c.ActionId||g.TargetId!=c.TargetId||!g.OriginalGoal.Equals(c.Target)||!g.OriginalLocation.Equals(c.TargetLocation)))throw new ArgumentException("Invalid issuance root/provenance.");}
             var rootRefs=issuanceRows.Where(i=>i.GroupId>0).Select(i=>new{Id=i.Id,Root=i.GroupId}).Concat(tacticalQueues.Values.Where(q=>q.Completion!=null).Select(q=>new{Id=q.Completion.IssuanceId,Root=q.Completion.GroupId}));

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using Spacewars.Runtime;
+using Spacewars.Presentation;
 using Spacewars.Simulation;
 using Spacewars.Simulation.Ai;
 
@@ -199,7 +200,9 @@ namespace Spacewars.Tests.EditMode
         [Test] public void ScaleAndUseIncomeOverflowBuildsThenActuallyProducesOnNewLine()
         {
             var c=RichEconomyConfig();
-            var a=new PlayableAuthorityTick(c,71);int original=PrepareLine(a,c,true);
+            var a=new PlayableAuthorityTick(c,71);
+            // The capacity fixture requires a completed Safe military opening.
+            FactoryFirst(a,c,PlayableAiOpening.Safe);int original=PrepareLine(a,c,true);
             var initial=EconomyView(a,c);Assert.Greater(initial.IncomePerSecond,PlayableUnitRules.Cost(c.Profile,PlayableEntityKind.Tank)/PlayableUnitRules.Duration(c.Profile,PlayableEntityKind.Tank));
             var d=Get(a,"domain");double settled=initial.SettledIncome;
             // External fixture bank funding/refunds are deliberately excluded from settled income.
@@ -248,7 +251,7 @@ namespace Spacewars.Tests.EditMode
             var owner=EconomyOwner(a,c);var view=EconomyView(a,c);var checkpoint=a.CaptureDiagnosticCheckpoints().Single(x=>x.OwnerId==c.Roster[0].Id);var ledger=Budget(owner).Capture();
             TestContext.WriteLine("C4_SCALING_ACTUAL "+Newtonsoft.Json.JsonConvert.SerializeObject(new{a.Tick,view.Credits,view.SettledIncome,view.IncomePerSecond,checkpoint.OpeningExecution,checkpoint.EconomyDecision,Ledger=ledger,Buildings=view.Buildings.Where(b=>b.Owner==view.Owner).Select(b=>new{b.Id,b.Kind,b.SiteId,b.SlotId,b.Phase,Queue=b.PrivateState?.Orders}),Technology=((AiTechnologyPlan)owner.GetType().GetProperty("TechnologyPlan",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic).GetValue(owner))}));
         }
-        private static PlayableBuildingSnapshot AwaitAdditionalFactory(PlayableAuthorityTick a,OfflineMatchConfiguration c,int original)
+        private PlayableBuildingSnapshot AwaitAdditionalFactory(PlayableAuthorityTick a,OfflineMatchConfiguration c,int original)
         {
             for(int i=0;i<3000;i++){Step(a);if(a.Tick%300==0)FundingEvidence(a,c);var b=EconomyView(a,c).Buildings.FirstOrDefault(x=>x.Owner==PlayableOwner.Player&&x.Kind==PlayableBuildingKind.Factory&&x.Id!=original);if(b!=null)return b;}
             Assert.Fail("Expected real additional factory");return null;
@@ -321,7 +324,9 @@ namespace Spacewars.Tests.EditMode
         }
         [TestCase(false)][TestCase(true)] public void ScaleAndUseStartupReleasesOnDestroyedFactoryOrBoundedExpiry(bool expire)
         {
-            var c=RichEconomyConfig();var a=new PlayableAuthorityTick(c,71);int original=PrepareLine(a,c,true);var extra=AwaitAdditionalFactory(a,c,original);
+            var c=RichEconomyConfig();var a=new PlayableAuthorityTick(c,71);
+            // The capacity fixture requires a completed Safe military opening.
+            FactoryFirst(a,c,PlayableAiOpening.Safe);int original=PrepareLine(a,c,true);var extra=AwaitAdditionalFactory(a,c,original);
             var ledger=Budget(EconomyOwner(a,c));var hold=ledger.Capture().Reserved.Single(x=>x.Purpose=="factory-startup");
             if(expire)
             {
@@ -506,8 +511,22 @@ namespace Spacewars.Tests.EditMode
                 TestContext.WriteLine("O4_E1_AUTHORED_FACTORY "+state.OwnerId+" "+state.Opening+" "+state.ProfileIdentity+" seed="+c.Seed);
             }
         }
-        private static void Step(PlayableAuthorityTick t)
-        {while(t.Requests.TryDequeue(out var r))Assert.True(t.Answers.TryEnqueue(new NavigationAnswer(r,Array.Empty<NavPoint>())));if(!t.TryAdvance()){while(t.Requests.TryDequeue(out var r))Assert.True(t.Answers.TryEnqueue(new NavigationAnswer(r,Array.Empty<NavPoint>())));Assert.True(t.TryAdvance());}}
+        private readonly System.Collections.Generic.Dictionary<PlayableAuthorityTick,UnityHostRouteService> routeHosts =
+            new System.Collections.Generic.Dictionary<PlayableAuthorityTick,UnityHostRouteService>();
+        [TearDown] public void DisposeRouteHosts()
+        {
+            foreach(var pair in routeHosts){try{pair.Key.Stop();}finally{pair.Value.Dispose();}}
+            routeHosts.Clear();
+        }
+        private void Step(PlayableAuthorityTick t)
+        {
+            // Each live/restored authority owns a host for its whole fixture lifetime.
+            // Legacy empty mailbox answers do not service owned barrier maintenance.
+            if(!routeHosts.TryGetValue(t,out var host))routeHosts.Add(t,host=new UnityHostRouteService());
+            for(int attempt=0;attempt<512;attempt++)
+            {if(t.TryAdvance())return;host.Service(t,64);}
+            Assert.Fail("ordinary economy route barrier at tick "+t.Tick+"; projection: "+host.LastProjectionFailure);
+        }
         [Test] public void LedgerRealAuthoritySaveRestorePendingAndPaidSuffix()
         {
             var c=Config();var a=new PlayableAuthorityTick(c,71);for(int i=0;i<45;i++)Step(a);

@@ -58,19 +58,20 @@ namespace Spacewars.Runtime
         internal void JoinReinforcements(long id,string tacticalOwner,IEnumerable<int> ids)
         {if(armies.TryGetValue(id,out var a)&&a.TacticalOwner==tacticalOwner){a.Reinforcements=a.Reinforcements.Except(ids).ToArray();AssertInvariants();}}
         private bool Binding(PlayableAiObservation o)=>o!=null&&o.OwnerId==OwnerId&&o.Generation==Generation;
-        private bool Units(PlayableAiObservation o,int[] ids,AiArmyRole role,AiRosterCatalog catalog)
+        private bool Units(PlayableAiObservation o,int[] ids,AiArmyRole role,AiRosterCatalog catalog,int? required=null)
         {
             if(ids.Length==0||ids.Any(id=>id<=0)||ids.Distinct().Count()!=ids.Length)return false;
             var own=o.Entities.Where(e=>e.Owner==o.Owner&&e.Health>0).ToDictionary(e=>e.Id);
             if(ids.Any(id=>!own.ContainsKey(id)))return false;
-            return role==AiArmyRole.Scout||role==AiArmyRole.Transport?ids.All(id=>catalog.For(own[id].Kind).reconWeight>0&&catalog.For(own[id].Kind).lineWeight==0&&catalog.For(own[id].Kind).supportWeight==0):ids.Count(id=>catalog.For(own[id].Kind).lineWeight+catalog.For(own[id].Kind).supportWeight>0)>=minimum&&ids.Any(id=>catalog.For(own[id].Kind).lineWeight>0);
+            return role==AiArmyRole.Scout||role==AiArmyRole.Transport?ids.All(id=>catalog.For(own[id].Kind).reconWeight>0&&catalog.For(own[id].Kind).lineWeight==0&&catalog.For(own[id].Kind).supportWeight==0):ids.Count(id=>catalog.For(own[id].Kind).lineWeight+catalog.For(own[id].Kind).supportWeight>0)>=(required??minimum)&&ids.Any(id=>catalog.For(own[id].Kind).lineWeight>0);
         }
         public bool TryCreate(PlayableAiObservation o,AiArmyRole role,string tacticalOwner,IEnumerable<int> members,out long id,AiRosterCatalog catalog=null)
         {
             id=0;if(!Binding(o)||!Enum.IsDefined(typeof(AiArmyRole),role)||string.IsNullOrWhiteSpace(tacticalOwner)||members==null)return false;
             var units=members.OrderBy(x=>x).ToArray();bool major=role!=AiArmyRole.Scout&&role!=AiArmyRole.Transport;
-            if((major&&Active.Count(a=>a.Major)>=majorCap)||(role==AiArmyRole.Scout&&Active.Count(a=>a.Role==role)>=scoutCap)||!Units(o,units,role,catalog??AiRosterCatalog.Initial)||units.Any(membership.ContainsKey))return false;
-            id=nextId;nextId=checked(nextId+1);var a=new AiArmyState{Id=id,OwnerId=OwnerId,Role=role,TacticalOwner=tacticalOwner,Members=units,LeaderId=units[0],MinimumViableForce=major?minimum:1,CreatedTick=o.Tick,ProgressTick=o.Tick,Phase=AiArmyPhase.Forming};
+            int required=role==AiArmyRole.MobileDefense&&tacticalOwner==AiDefensePlanner.Policy&&AiDefensePlanner.LastHeadquartersAttackers(o).Length>0?1:minimum;
+            if((major&&Active.Count(a=>a.Major)>=majorCap)||(role==AiArmyRole.Scout&&Active.Count(a=>a.Role==role)>=scoutCap)||!Units(o,units,role,catalog??AiRosterCatalog.Initial,required)||units.Any(membership.ContainsKey))return false;
+            id=nextId;nextId=checked(nextId+1);var a=new AiArmyState{Id=id,OwnerId=OwnerId,Role=role,TacticalOwner=tacticalOwner,Members=units,LeaderId=units[0],MinimumViableForce=major?required:1,CreatedTick=o.Tick,ProgressTick=o.Tick,Phase=AiArmyPhase.Forming};
             armies.Add(id,a);foreach(var unit in units)membership.Add(unit,id);AssertInvariants();return true;
         }
         public bool TryTransfer(PlayableAiObservation o,long from,long to,IEnumerable<int> units,AiRosterCatalog catalog=null)

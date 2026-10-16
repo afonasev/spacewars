@@ -46,8 +46,8 @@ namespace Spacewars.Presentation
             scroll.Add(image);
             scroll.contentViewport.RegisterCallback<GeometryChangedEvent>(evt =>
             {
-                float available = evt.newRect.height;
-                if (available > 0) image.style.height = Mathf.Max(220, available - 64);
+                float width=evt.newRect.width;var asset=image.image;
+                if(width>0&&asset!=null)image.style.height=Mathf.Max(220,width*asset.height/asset.width);
             });
 
             var equivalents = OrbitalTheme.Text("", "orbital-muted");
@@ -56,20 +56,15 @@ namespace Spacewars.Presentation
             equivalents.style.marginTop = 8;
             scroll.Add(equivalents);
 
-            var reminders = OrbitalTheme.Text("Лобби: X добавляет бота, Y присоединяет контроллер. В меню нажмите «Назад», чтобы вернуться к матчу или лобби.", "orbital-muted");
-            reminders.style.whiteSpace = WhiteSpace.Normal;
-            reminders.style.marginTop = 10;
-            scroll.Add(reminders);
-
             var buttons = new Button[Titles.Length];
             void Select(int selected)
             {
                 scroll.scrollOffset = Vector2.zero;
                 var texture = Resources.Load<Texture2D>("ControlsHelp/" + Images[selected]);
                 image.image = texture;
+                if(texture!=null&&scroll.contentViewport.resolvedStyle.width>0)image.style.height=Mathf.Max(220,scroll.contentViewport.resolvedStyle.width*texture.height/texture.width);
                 image.style.display = texture == null ? DisplayStyle.None : DisplayStyle.Flex;
                 equivalents.style.display = selected < 4 && texture != null ? DisplayStyle.Flex : DisplayStyle.None;
-                reminders.style.display = selected == 0 ? DisplayStyle.Flex : DisplayStyle.None;
 
                 if (texture == null)
                 {

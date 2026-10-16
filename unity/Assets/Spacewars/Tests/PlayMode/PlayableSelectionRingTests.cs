@@ -32,6 +32,25 @@ public sealed class PlayableSelectionRingTests
         } finally {world.Dispose();UnityEngine.Object.DestroyImmediate(host);}
     }
 
+    [Test] public void BuildingRingSurroundsEveryFoundationAndKeepsFixedGreenWithoutShadows()
+    {
+        var host=new GameObject("Building selection footprint");var profile=PlayableProfile.Default;var world=new PlayableWorld(host.transform,profile);
+        try
+        {
+            int id=10;
+            foreach(string kind in new[]{"Headquarters","Outpost","Factory","Refinery","ScientificCenter","Mine"})
+            {
+                var actor=world.Building(id++,kind,true);float cornerRadius=0;
+                foreach(var r in actor.Hull.GetComponentsInChildren<Renderer>().Where(r=>r.name.EndsWith(":foundation-concrete")))for(int i=0;i<8;i++)
+                {var b=r.localBounds;var corner=b.center+Vector3.Scale(b.extents,new Vector3((i&1)==0?-1:1,(i&2)==0?-1:1,(i&4)==0?-1:1));var p=actor.Root.InverseTransformPoint(r.transform.TransformPoint(corner));cornerRadius=Mathf.Max(cornerRadius,new Vector2(p.x,p.z).magnitude);}
+                Assert.Greater(cornerRadius,0);var renderer=actor.Selection.GetComponent<Renderer>();Assert.AreEqual("Spacewars/UnitSelectionRing",renderer.sharedMaterial.shader.name);
+                Assert.AreEqual(UnityEngine.Rendering.ShadowCastingMode.Off,renderer.shadowCastingMode);Assert.False(renderer.receiveShadows);
+                Assert.Greater(actor.Selection.transform.localScale.x,cornerRadius+(float)profile.BuildingSelectionPadding);
+                var block=new MaterialPropertyBlock();renderer.GetPropertyBlock(block);Assert.That(block.GetFloat("_RingWidth")*actor.Selection.transform.localScale.x,Is.EqualTo(profile.BuildingSelectionWidth).Within(.0001));
+            }
+        }
+        finally{world.Dispose();UnityEngine.Object.DestroyImmediate(host);}
+    }
     [Test]
     public void RingSettingsValidateAndRemainEditable()
     {

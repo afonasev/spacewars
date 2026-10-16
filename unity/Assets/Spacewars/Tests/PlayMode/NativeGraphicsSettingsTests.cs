@@ -67,17 +67,17 @@ namespace Spacewars.Tests.PlayMode
             var host=new GameObject("Player graphics settings UI");hosts.Add(host);var panel=ScriptableObject.CreateInstance<PanelSettings>();panels.Add(panel);panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");var doc=host.AddComponent<UIDocument>();doc.panelSettings=panel;OrbitalTheme.ConfigurePanel(panel,doc.rootVisualElement);
             var target=new RenderTexture(800,620,0);target.Create();panel.targetTexture=target;using(var nav=new NativeMenuNavigation(doc.rootVisualElement)){
             try{
-                var page=NativeSettingsView.Open(doc.rootVisualElement,nav,()=>{},new NativeLocalControlSettings());yield return null;yield return null;
+                var page=NativeSettingsView.Open(doc.rootVisualElement,nav,()=>{},new NativeLocalControlSettings());nav.ActivateElement(page.Q<Button>("settings-tab-Графика"));yield return null;yield return null;
                 Assert.IsNull(page.Q("settings-graphics-advanced"));Assert.Zero(page.Query<Slider>().ToList().Count(s=>s.name.StartsWith("settings-graphics-")),"No fine graphics tuning in player menu");
                 var aa=page.Q<DropdownField>("settings-graphics-aa");CollectionAssert.AreEqual(new[]{"Выключено","MSAA 4×","SMAA · высокое качество"},aa.choices);Assert.AreEqual(1,aa.index);aa.index=0;
                 page.Q<Toggle>("settings-graphics-ssao").value=false;page.Q<Toggle>("settings-graphics-bloom").value=false;
-                nav.Back();page=NativeSettingsView.Open(doc.rootVisualElement,nav,()=>{},new NativeLocalControlSettings());yield return null;yield return null;
+                nav.Back();page=NativeSettingsView.Open(doc.rootVisualElement,nav,()=>{},new NativeLocalControlSettings());nav.ActivateElement(page.Q<Button>("settings-tab-Графика"));yield return null;yield return null;
                 Assert.Zero(page.Q<DropdownField>("settings-graphics-aa").index);Assert.False(page.Q<Toggle>("settings-graphics-ssao").value);Assert.False(page.Q<Toggle>("settings-graphics-bloom").value);
                 foreach(var size in new[]{new Vector2Int(800,620),new Vector2Int(1280,800)}){
                     panel.targetTexture=null;target.Release();target.width=size.x;target.height=size.y;target.Create();panel.targetTexture=target;yield return null;yield return null;
                     var bloom=page.Q<Toggle>("settings-graphics-bloom");bloom.Focus();page.Q<ScrollView>("settings-scroll").ScrollTo(bloom);yield return null;yield return null;nav.Activate();Assert.True(bloom.value);nav.Activate();Assert.False(bloom.value);Save(target,"player-graphics-"+size.x+"x"+size.y);
                 }
-                nav.ActivateElement(page.Q<Button>("settings-graphics-reset"));Assert.AreEqual(1,page.Q<DropdownField>("settings-graphics-aa").index);Assert.True(page.Q<Toggle>("settings-graphics-bloom").value);Assert.True(page.Q<Toggle>("settings-graphics-ssao").value);
+                var restore=NativePreferenceWriter.Capture();try {nav.ActivateElement(page.Q<Button>("settings-reset-all"));nav.ActivateElement(doc.rootVisualElement.Q<Button>("settings-confirm-accept"));nav.ActivateElement(doc.rootVisualElement.Q<Button>("settings-confirm-accept"));Assert.AreEqual(1,page.Q<DropdownField>("settings-graphics-aa").index);Assert.True(page.Q<Toggle>("settings-graphics-bloom").value);Assert.True(page.Q<Toggle>("settings-graphics-ssao").value);}finally{restore();PlayerPrefs.Save();}
             }finally{panel.targetTexture=null;target.Release();UnityEngine.Object.Destroy(target);}}yield return null;
         }
         private static Color TeamPaint(PlayableWorld.Actor actor)

@@ -17,6 +17,9 @@ namespace Spacewars.Simulation
         private int version;
         private ICollection<TKey> keyView;private ICollection<TValue> valueView;
         public int Count=>index.Count;
+        internal int SlotCount=>slots.Count;
+        internal bool TryReadSlot(int slot,out TKey key,out TValue value)
+        {if(slot>=0&&slot<slots.Count&&slots[slot].Live){key=slots[slot].Key;value=slots[slot].Value;return true;}key=default;value=default;return false;}
         public TValue this[TKey key] { get=>slots[index[key]].Value; set { if(index.TryGetValue(key,out var i)){var s=slots[i];s.Value=value;slots[i]=s;version++;}else Add(key,value); } }
         public void Add(TKey key,TValue value){if(index.ContainsKey(key))throw new ArgumentException("Duplicate key.");int i=free.Count>0?free.Pop():slots.Count;index.Add(key,i);var s=new Slot{Live=true,Key=key,Value=value};if(i==slots.Count)slots.Add(s);else slots[i]=s;version++;}
         public bool Remove(TKey key){if(!index.TryGetValue(key,out var i))return false;index.Remove(key);slots[i]=default;free.Push(i);version++;return true;}
@@ -34,6 +37,7 @@ namespace Spacewars.Simulation
         public void CopyTo(KeyValuePair<TKey,TValue>[] array,int offset){foreach(var p in this)array[offset++]=p;}
         // The bound protects decoded allocation, not gameplay balance. Live rows are
         // emitted in occupied-slot order; the complement of free slots binds them.
+        internal int LayoutLength=>free.Count+1;
         public int[] CaptureLayout(){var a=new int[free.Count+1];a[0]=slots.Count;free.CopyTo(a,1);return a;}
         public void RestoreLayout(int[] layout){
             if(layout==null||layout.Length<1||layout[0]<0||layout[0]>MaximumSlots||layout.Length-1>layout[0]||Count!=layout[0]-(layout.Length-1))throw new ArgumentException("Invalid authority layout.");

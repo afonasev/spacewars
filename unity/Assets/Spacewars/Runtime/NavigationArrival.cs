@@ -20,49 +20,43 @@ namespace Spacewars.Runtime
                 var rows = new List<NavArrivalOccupant>();
                 foreach (var actor in Crowd.Units.OrderBy(x => x.Id)) {
                     var location = actor.Location;
-                    bool movingMember = moving.Contains(actor.Id + ":" + actor.Incarnation) && actor.Moving && !actor.Held;
+                    bool movingMember = moving.Contains(actor.Id + ":" + actor.Incarnation) && !actor.Held;
                     string identity = "actor:" + Generation + ":" + actor.Id + ":" + actor.Incarnation + ":" +
                         actor.MobilityRevision + ":" + actor.Team + ":" + Bit(actor.Position.X) + ":" + Bit(actor.Position.Z) + ":" +
                         Bit(actor.Radius) + ":" + actor.Moving + ":" + actor.Held;
                     rows.Add(new NavArrivalOccupant(NavArrivalOccupantKind.Actor, actor.Id, actor.Incarnation,
                         location, actor.Radius, !movingMember, identity));
 
-                    if (!reservations.TryGetValue(actor.Id, out var reserved)) continue;
-                    if (pending.TryGetValue(actor.Id, out var request) && request.Request > 0) {
-                        RequireReservationTarget(actor, reserved, request.Goal, request.GoalLocation, false, "pending request");
-                        var memberIdentity = request.MemberIdentity;
-                        string requestIdentity = "pending:" + NavContract.Digest(w => {
-                            w.Write("arrival-pending-v1"); w.Write(request.Session); w.Write(request.Request); w.Write(request.Entity);
-                            w.Write(request.Order); w.Write(request.ProfileId); w.Write(request.ProfileRevision);
-                            w.Write(request.Geometry.Revision); w.Write(request.BaseGeometry.Revision);
-                            NavContract.Point(w, request.Start); WriteLocation(w, request.StartLocation);
-                            NavContract.Point(w, request.Goal); WriteLocation(w, request.GoalLocation);
-                            w.Write(request.HeldIdentity ?? ""); w.Write(memberIdentity != null);
-                            if (memberIdentity != null) {
-                                w.Write(memberIdentity.Incarnation); w.Write(memberIdentity.MobilityRevision);
-                                w.Write(memberIdentity.GroupId); w.Write(memberIdentity.OrderRevision);
-                                w.Write(memberIdentity.MembershipRevision);
-                            }
-                        });
-                        rows.Add(new NavArrivalOccupant(NavArrivalOccupantKind.PendingReservation, actor.Id,
-                            actor.Incarnation, request.GoalLocation.Value, actor.Radius, true, requestIdentity,
-                            NavArrivalReservationKind.PendingRequest, request.Request));
-                        continue;
+                    foreach(var row in arrivalLedger.Values.Where(r=>r.Entity==actor.Id))
+                        rows.Add(new NavArrivalOccupant(row.State==NavArrivalReservationKind.PendingRequest?NavArrivalOccupantKind.PendingReservation:NavArrivalOccupantKind.InstalledReservation,
+                            actor.Id,row.Incarnation,row.Endpoint,row.Radius,true,"ledger:"+row.World+":"+row.Id+":"+row.Proof,row.State,
+                            row.State==NavArrivalReservationKind.PendingRequest?row.Request:0,
+                            row.State==NavArrivalReservationKind.InstalledExecution?row.Request:0,
+                            row.State==NavArrivalReservationKind.InstalledExecution?(NavLocation?)row.Endpoint:null));
+                    if(pending.TryGetValue(actor.Id,out var request)&&!arrivalLedger.ContainsKey(request.Request)) {
+                        if(reservations.TryGetValue(actor.Id,out var reserved))RequireReservationTarget(actor,reserved,request.Goal,request.GoalLocation,false,"pending request");
+                        if(!request.GoalLocation.HasValue)throw new InvalidOperationException("Missing typed pending target.");
+                        rows.Add(new NavArrivalOccupant(NavArrivalOccupantKind.PendingReservation,actor.Id,actor.Incarnation,
+                            request.GoalLocation.Value,request.Profile.Radius,true,"pending:"+NavContract.Digest(w=>{
+                                w.Write("arrival-pending-v1");w.Write(request.Session);w.Write(request.Request);w.Write(request.Entity);w.Write(request.Order);
+                                w.Write(request.ProfileId);w.Write(request.ProfileRevision);w.Write(request.Geometry.Revision);w.Write(request.BaseGeometry.Revision);
+                                NavContract.Point(w,request.Start);WriteLocation(w,request.StartLocation);NavContract.Point(w,request.Goal);WriteLocation(w,request.GoalLocation);
+                                w.Write(request.HeldIdentity??"");var i=request.MemberIdentity;w.Write(i!=null);
+                                if(i!=null){w.Write(i.Incarnation);w.Write(i.MobilityRevision);w.Write(i.GroupId);w.Write(i.OrderRevision);w.Write(i.MembershipRevision);}
+                            }),
+                            NavArrivalReservationKind.PendingRequest,request.Request));
                     }
-                    if (!actor.Moving || actor.Held || actor.InstalledRequest < 1) continue;
-                    RequireReservationTarget(actor, reserved, actor.Goal, actor.GoalLocation, true, "installed execution");
-                    installedExecutions.TryGetValue(actor.Id, out var execution);
-                    string corridor = execution?.Corridor?.StableKey ?? "retained-target-only";
-                    string installedIdentity = "installed:" + NavContract.Digest(w => {
-                        w.Write("arrival-installed-v1"); w.Write(Generation); w.Write(actor.Id); w.Write(actor.Incarnation);
-                        w.Write(actor.InstalledGroupId); w.Write(actor.InstalledRevision); w.Write(actor.InstalledRequest);
-                        w.Write(actor.InstalledOrder); w.Write(corridor); NavContract.Point(w, actor.Goal);
-                        WriteLocation(w, actor.GoalLocation);
-                    });
-                    rows.Add(new NavArrivalOccupant(NavArrivalOccupantKind.InstalledReservation, actor.Id,
-                        actor.Incarnation, actor.GoalLocation.Value, actor.Radius, true, installedIdentity,
-                        NavArrivalReservationKind.InstalledExecution, 0, actor.InstalledRequest,
-                        actor.GoalLocation.Value));
+                    if(actor.Moving&&!actor.Held&&actor.InstalledRequest>0&&!arrivalLedger.ContainsKey(actor.InstalledRequest)) {
+                        if(!pending.ContainsKey(actor.Id)&&reservations.TryGetValue(actor.Id,out var retained))RequireReservationTarget(actor,retained,actor.Goal,actor.GoalLocation,true,"installed execution");
+                        if(!actor.GoalLocation.HasValue)throw new InvalidOperationException("Missing typed installed target.");
+                        rows.Add(new NavArrivalOccupant(NavArrivalOccupantKind.InstalledReservation,actor.Id,actor.Incarnation,
+                            actor.GoalLocation.Value,actor.Radius,true,"installed:"+NavContract.Digest(w=>{
+                                w.Write("arrival-installed-v1");w.Write(Generation);w.Write(actor.Id);w.Write(actor.Incarnation);w.Write(actor.InstalledGroupId);
+                                w.Write(actor.InstalledRevision);w.Write(actor.InstalledRequest);w.Write(actor.InstalledOrder);
+                                w.Write(installedExecutions.TryGetValue(actor.Id,out var e)?e.Corridor.StableKey:"retained-target-only");NavContract.Point(w,actor.Goal);WriteLocation(w,actor.GoalLocation);
+                            }),
+                            NavArrivalReservationKind.InstalledExecution,0,actor.InstalledRequest,actor.GoalLocation.Value));
+                    }
                 }
                 return new NavArrivalOccupancySnapshot(Generation, rows);
             }

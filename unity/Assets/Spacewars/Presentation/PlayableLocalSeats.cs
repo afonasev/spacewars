@@ -118,7 +118,7 @@ namespace Spacewars.Presentation
             input.Select=Select;input.Order=Order;input.Stop=()=>Submit(PlayableCommandKind.Stop);input.Hold=()=>Submit(PlayableCommandKind.Hold);
             input.CancelContext=()=>{if(mapOpen){CloseMap();return true;}return CloseBattleContext();};input.TogglePause=()=>Pause(!paused);input.Restart=Restart;input.FocusLost=()=>Pause(true);
             input.IsPointerOverUi=OverUi;input.IsKeyboardInUi=()=>MenuOwnsInput||root?.focusController?.focusedElement is VisualElement focused&&root.Contains(focused)&&(focused is Button||focused is TextField);
-            input.MapAt=MapAt;input.MapSelect=MapSelect;input.MapOrder=MapOrder;input.ToggleMap=ToggleMap;input.CloseMap=CloseMap;input.Pan=Pan;input.Zoom=Zoom;input.Drag=DrawDrag;BindKeyboardCommands();
+            input.MapAt=MapAt;input.MapSelect=MapSelect;input.MapPan=PanMap;input.MapOrder=MapOrder;input.ToggleMap=ToggleMap;input.CloseMap=CloseMap;input.Pan=Pan;input.Zoom=Zoom;input.Drag=DrawDrag;BindKeyboardCommands();
             input.AttackModeChanged=active=>{commandCursor?.Set(false);notice="";};
         }
         private void ConfigureLocalViewport(int index,int count)

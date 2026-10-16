@@ -265,11 +265,11 @@ namespace Spacewars.Runtime
             w.Write(AiStateWire.Version);w.Write(nextActionId);
             WorldWire.Array(w,owners,o=>o.WriteState(w));
         }
-        internal static AiAuthorityScheduler ReadState(BinaryReader r,PlayableProfile profile,AiProfile ai,long generation,int seed,long tick,IEnumerable<string> expectedOwners)
+        internal static AiAuthorityScheduler ReadState(BinaryReader r,PlayableProfile profile,AiProfile ai,long generation,int seed,long tick,IEnumerable<string> expectedOwners,string legacyAiHash=null)
         {
             AiStateWire.Require(r.ReadInt32()==AiStateWire.Version,"unsupported scheduler schema");
             long next=r.ReadInt64();AiStateWire.Require(next>=0,"action allocator");
-            var loops=WorldWire.Array(r,()=>PlayableAiOwnerLoop.ReadState(r,profile,ai,generation,seed,tick));
+            var loops=WorldWire.Array(r,()=>PlayableAiOwnerLoop.ReadState(r,profile,ai,generation,seed,tick,legacyAiHash));
             AiStateWire.Require(loops.Select(o=>o.OwnerId).SequenceEqual(expectedOwners.OrderBy(x=>x,StringComparer.Ordinal)),"AI owner roster");
             var result=new AiAuthorityScheduler(loops){nextActionId=next};
             AiStateWire.Require(loops.SelectMany(o=>o.StateActionIds).All(id=>id>0&&id<=next),"global action allocator binding");
@@ -305,6 +305,8 @@ namespace Spacewars.Runtime
         {
             if(next.Hash==nativeProfile.Hash)return;
             while(pending!=null)Cancel(PlayableAiDeliveryStatus.Cancelled,"AI profile revision changed.");
+            // A different AI profile must qualify demand with its own thresholds.
+            foreach(var witness in budget.Capture().Reserved.Where(AiEconomicInvestmentPlanner.IsDemand))budget.Release(witness.Id);
             var previousFinancial=expansionFinancial.Detach(budget);nativeProfile=next;knowledge.Rebind(next);nativeConfig=new AiOwnerConfig(OwnerId,nativeConfig.Difficulty,opening.MatchSeed,next);
             DecisionIntervalTicks=AiProfile.SecondsToTicks(next.DifficultyValue(nativeConfig.Difficulty,"decisionSeconds"),30);
             ObservationDelayTicks=AiProfile.SecondsToTicks(next.DifficultyValue(nativeConfig.Difficulty,"reactionSeconds"),30);
@@ -331,9 +333,10 @@ namespace Spacewars.Runtime
                 var i=p.Intent;String(w,i.Id);w.Write(i.ExpiresTick);w.Write(i.Credits);w.Write(i.Population);WorldWire.Array(w,i.Claims.ToArray(),c=>String(w,c));w.Write(i.Priority);Number(w,i.Utility);String(w,i.Conditions);String(w,i.Reason);w.Write(i.StartupFund);String(w,i.ReservationId);w.Write(i.Overdue);
             });
         }
-        internal static PlayableAiOwnerLoop ReadState(BinaryReader r,PlayableProfile profile,AiProfile ai,long generation,int seed,long tick)
+        internal static PlayableAiOwnerLoop ReadState(BinaryReader r,PlayableProfile profile,AiProfile ai,long generation,int seed,long tick,string legacyAiHash=null)
         {
-            AiStateWire.Require(String(r)==ai.Id&&r.ReadInt32()==ai.Revision&&String(r)==ai.Hash,"AI profile mismatch");
+            string id=String(r);int revision=r.ReadInt32();string hash=String(r);
+            AiStateWire.Require(id==ai.Id&&revision==ai.Revision&&(hash==ai.Hash||legacyAiHash!=null&&hash==legacyAiHash),"AI profile mismatch");
             var difficulty=EnumValue<AiDifficulty>(r);var opening=AiStateWire.ReadPlayableAiOpeningCompositionState(r);
             AiStateWire.Require(opening!=null&&opening.MatchSeed==seed&&PlayableAiOpeningComposition.HasNativeBinding(opening),"opening/RNG binding");
             AiStateWire.Require(r.ReadInt64()==generation,"owner generation");

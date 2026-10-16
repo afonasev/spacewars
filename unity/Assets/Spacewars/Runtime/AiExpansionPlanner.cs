@@ -39,6 +39,12 @@ namespace Spacewars.Runtime
         internal static string CompletionReadbackOwnerFilterForTests;
 #endif
         private readonly string ownerId;
+        internal AiKnowledgeState Knowledge{get;set;}
+        internal bool PreferRemote{get;set;}
+        internal int LocalSiteId{get;set;}
+        internal ISet<int> TeamDeniedSites{get;set;}
+        internal bool TeamAllowsSite(int id)=>id==siteId||TeamDeniedSites==null||!TeamDeniedSites.Contains(id);
+
         private int siteId,actorId;
         private long created,expires,progress,pendingId,pendingGeneration,nextId=1;
         private double capture,distance=double.MaxValue,initialIncome;
@@ -54,14 +60,14 @@ namespace Spacewars.Runtime
         internal long PendingId=>pendingId;
         internal long PendingGeneration=>pendingGeneration;
         private static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
-        private static string Condition(TerritorySiteSnapshot s,PlayableEntitySnapshot actor,PlayableAiObservation o,PlayableProfile p,AiProfile ai)
+        private static string Condition(TerritorySiteSnapshot s,PlayableEntitySnapshot actor,PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiKnowledgeState knowledge)
         {
             if(s==null)return "unknown-site";
             if(actor==null)return "lost-actor";
             double range=PlayableUnitRules.Vision(p,actor.Kind);
             var hostileUnits=o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0&&(Distance(e.Position,s.Site.Position)<=range||Distance(e.Position,actor.Position)<=range)).OrderBy(e=>e.Id).Select(e=>"u"+e.Id);
             var hostileBuildings=o.Buildings.Where(b=>o.IsHostile(b.Owner)&&b.Health>0&&(Distance(b.Position,s.Site.Position)<=range||Distance(b.Position,actor.Position)<=range)).OrderBy(b=>b.Id).Select(b=>"b"+b.Id);
-            return s.Owner+":"+s.Claimant+":"+s.CenterId+":"+s.Contested+":"+actor.Id+":"+string.Join(",",hostileUnits.Concat(hostileBuildings))+":"+(o.Credits>=TerritoryRules.Cost(p,s.Site.Kind))+":"+p.ProfileId+"@"+p.Revision+":"+ai.Hash;
+            return s.Owner+":"+s.Claimant+":"+s.CenterId+":"+s.Contested+":"+actor.Id+":"+string.Join(",",hostileUnits.Concat(hostileBuildings).Concat((knowledge?.Contacts??Array.Empty<AiKnownContact>()).Where(c=>c.Building&&o.IsHostile(c.Owner)&&(Distance(c.Position,s.Site.Position)<=range||Distance(c.Position,actor.Position)<=range)).Select(c=>"k"+c.Id)))+":"+(o.Credits>=TerritoryRules.Cost(p,s.Site.Kind))+":"+p.ProfileId+"@"+p.Revision+":"+ai.Hash;
         }
         public static PlayableRouteRequest[] RouteRequests(PlayableAiObservation o,PlayableProfile profile)=>
             RouteRequests(o.Entities,o.Sites,o.PublicScoutObjectives,o.Owner,o.Generation,o.Tick,profile);
@@ -72,7 +78,7 @@ namespace Spacewars.Runtime
             .SelectMany(u=>objectives.Where(g=>g.Role!=PlayablePublicScoutObjectiveRole.PossibleEnemyStart&&g.Reachable&&
                 sites.Any(s=>s.Site.Id==g.SiteId&&s.CenterId==0&&!s.Contested&&(!s.Owner.HasValue||s.Owner==owner)&&(!s.Claimant.HasValue||s.Claimant==owner)))
                 .OrderBy(g=>g.SiteId).Select(g=>new PlayableRouteRequest(u.Id,PlayableRouteTargetKind.PublicObjective,g.SiteId,generation,tick,u.Position,PlayableUnitRules.Radius(profile,u.Kind),g.Approach))).ToArray();
-        internal static bool Safe(PlayableAiObservation o,PlayableProfile p,AiProfile ai,TerritorySiteSnapshot s,PlayableEntitySnapshot actor,PlayableRouteProof route)
+        internal static bool Safe(PlayableAiObservation o,PlayableProfile p,AiProfile ai,TerritorySiteSnapshot s,PlayableEntitySnapshot actor,PlayableRouteProof route,AiKnowledgeState knowledge=null)
         {
             var points=route==null?new[]{s.Site.Position,actor.Position}:route.Path.Concat(new[]{s.Site.Position,actor.Position}).ToArray();
             var range=PlayableUnitRules.Vision(p,actor.Kind);
@@ -89,7 +95,8 @@ namespace Spacewars.Runtime
                 return false;
             }
             bool danger=o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0).Any(e=>Near(e.Id,e.Position,"unit"))||
-                o.Buildings.Where(b=>o.IsHostile(b.Owner)&&b.Health>0).Any(b=>Near(b.Id,b.Position,"building"));
+                o.Buildings.Where(b=>o.IsHostile(b.Owner)&&b.Health>0).Any(b=>Near(b.Id,b.Position,"building"))||
+                (knowledge?.Contacts??Array.Empty<AiKnownContact>()).Where(c=>c.Building&&o.IsHostile(c.Owner)).Any(c=>Near(c.Id,c.Position,"remembered-building"));
             // E4 has no escort/force evaluator. Any known local hostile requires S3 escort.
             return !s.Contested&&!danger;
         }
@@ -119,8 +126,8 @@ namespace Spacewars.Runtime
             }
             var actor=o.Entities.FirstOrDefault(u=>u.Id==actorId&&u.Owner==o.Owner&&u.Health>0);
             var site=o.Sites.FirstOrDefault(s=>s.Site.Id==siteId);
-            condition=Condition(site,actor,o,p,ai);
-            if(o.Tick>=expires||actor==null||site==null||site.Owner.HasValue&&site.Owner!=o.Owner||site.Claimant.HasValue&&site.Claimant!=o.Owner||!Safe(o,p,ai,site,actor,null))
+            condition=Condition(site,actor,o,p,ai,Knowledge);
+            if(o.Tick>=expires||actor==null||site==null||site.Owner.HasValue&&site.Owner!=o.Owner||site.Claimant.HasValue&&site.Claimant!=o.Owner||!Safe(o,p,ai,site,actor,null,Knowledge))
             {Release(o.Tick>=expires?"commitment expired":actor==null?"actor lost":"site lost/unknown/unsafe",true);return;}
             double current=Distance(actor.Position,site.Site.Position);
             var center=o.Buildings.FirstOrDefault(b=>b.Id==site.CenterId&&b.Owner==o.Owner&&b.Health>0);
@@ -141,7 +148,7 @@ namespace Spacewars.Runtime
                 CompletionReadbackForTests(new AiExpansionCompletionReadbackForTests(ownerId,siteId,created,phase,reason,initialIncome,o.Tick,o.SettledIncome,exactCredits,o.IncomePerSecond));
 #endif
         }
-        internal bool Suppressed(TerritorySiteSnapshot site,PlayableEntitySnapshot actor,PlayableAiObservation o,PlayableProfile p,AiProfile ai)=>failed.TryGetValue(site.Site.Id,out var f)&&f==Condition(site,actor,o,p,ai);
+        internal bool Suppressed(TerritorySiteSnapshot site,PlayableEntitySnapshot actor,PlayableAiObservation o,PlayableProfile p,AiProfile ai)=>failed.TryGetValue(site.Site.Id,out var f)&&f==Condition(site,actor,o,p,ai,Knowledge);
         public PlayableAiAction TryPlan(PlayableAiObservation o,PlayableProfile p,AiProfile ai)=>TryPlan(o,p,ai,0,null);
         internal PlayableAiAction TryPlan(PlayableAiObservation o,PlayableProfile p,AiProfile ai,int financialSite,Func<int,bool> admissibleActor,Func<int,bool> admissibleSite=null)
         {
@@ -155,6 +162,7 @@ namespace Spacewars.Runtime
                 var choices=from s in o.Sites
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"financial-site-filter",financialSite==0||s.Site.Id==financialSite)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-admissibility",admissibleSite==null||admissibleSite(s.Site.Id))
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"known-main-territory",AiIncomeSiteSelection.TerritoryAllowed(o,p,ai,Knowledge,s))
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-kind-and-income",(s.Site.Kind==PlayableBuildingKind.Mine||s.Site.Kind==PlayableBuildingKind.Outpost)&&TerritoryRules.Income(p,s.Site.Kind)>0)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-unoccupied",s.CenterId==0)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-uncontested",!s.Contested)
@@ -172,19 +180,22 @@ namespace Spacewars.Runtime
                     let route=o.RouteProofs.FirstOrDefault(r=>r.UnitId==u.Id&&r.TargetId==s.Site.Id&&r.Kind==PlayableRouteTargetKind.PublicObjective)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"public-objective",g!=null)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"typed-route-proof",route!=null)
-                    let safe=Safe(o,p,ai,s,u,route)
+                    let safe=Safe(o,p,ai,s,u,route,Knowledge)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"visible-threat-safety",safe)
-                    let suppressed=failed.TryGetValue(s.Site.Id,out var f)&&f==Condition(s,u,o,p,ai)
+                    let suppressed=failed.TryGetValue(s.Site.Id,out var f)&&f==Condition(s,u,o,p,ai,Knowledge)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"failed-site-suppression",!suppressed)
                     let length=RouteLength(route)
-                    orderby TerritoryRules.Cost(p,s.Site.Kind)/(TerritoryRules.Income(p,s.Site.Kind)/p.IncomePeriodSeconds),length,s.Site.Id,u.Id
+                    orderby length,s.Site.Id,u.Id
                     select new{s,u,g};
-                var best=choices.FirstOrDefault();if(best==null)return null;
+                var available=choices.ToArray();
+                var selected=financialSite!=0?available.Select(x=>x.s).FirstOrDefault():
+                    AiIncomeSiteSelection.Select(o,p,ai,Knowledge,available.Select(x=>x.s),PreferRemote,LocalSiteId);
+                var best=available.FirstOrDefault(x=>x.s.Site.Id==selected?.Site.Id);if(best==null)return null;
                 site=best.s;actor=best.u;objective=best.g;
                 siteId=site.Site.Id;actorId=actor.Id;pendingActionBuildingKind=site.Site.Kind;created=progress=o.Tick;
                 expires=checked(o.Tick+AiProfile.SecondsToTicks(ai.Value("economy.reservationExpirySeconds"),30));
                 capture=site.Progress;distance=Distance(actor.Position,site.Site.Position);initialIncome=o.SettledIncome;
-                phase="capture";reason="safe known reachable income expansion";condition=Condition(site,actor,o,p,ai);
+                phase="capture";reason="safe known reachable income expansion";condition=Condition(site,actor,o,p,ai,Knowledge);
             }
             else
             {site=o.Sites.FirstOrDefault(s=>s.Site.Id==siteId);actor=o.Entities.FirstOrDefault(u=>u.Id==actorId&&u.Owner==o.Owner&&u.Health>0);objective=o.PublicScoutObjectives.FirstOrDefault(g=>g.SiteId==siteId);}

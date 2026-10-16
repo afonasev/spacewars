@@ -48,6 +48,25 @@ namespace Spacewars.Tests.EditMode
             for(int i=0;i<100;i++)v.Refresh(new[]{b,a},Empty);
             Assert.AreSame(snapshot,v.Snapshot());Assert.AreEqual(count,v.CoverageUpdates);
         }
+        [Test] public void IncrementalHistoryMatchesFullRescanThroughMotionRemovalGrowthAndReturn()
+        {
+            var actual=new PlayableVision(1,32,24,4,1.5);var full=new PlayableVision(1,32,24,4,1.5);
+            for(int tick=0;tick<80;tick++){
+                var sources=new List<VisionSource>{Source(-12,0,14),Source(12,0,14),Source(Math.Sin(tick*.2)*20,Math.Cos(tick*.2)*14,6)};
+                if(tick%7<3)sources.Add(Source(0,12,tick%3+4));
+                if(tick%9==0)sources.Add(sources[0]); // Duplicate circle does not alter the union.
+                if(tick%11==0)sources.RemoveAt(0);
+                var buildings=tick<40?new[]{Building()}:Empty;
+                actual.Refresh(sources,buildings);
+                // Empty current sources retain history; the next refresh deliberately
+                // rescans every circle, reproducing the previous full-union algorithm.
+                full.Refresh(Array.Empty<VisionSource>(),buildings);full.Refresh(sources,buildings);
+                CollectionAssert.AreEqual(full.Snapshot().Coverage,actual.Snapshot().Coverage,"raster tick "+tick);
+                CollectionAssert.AreEqual(full.Snapshot().DiscoveredCells,actual.Snapshot().DiscoveredCells,"cells tick "+tick);
+                CollectionAssert.AreEqual(full.Snapshot().KnownBuildings.Select(b=>b.Id),actual.Snapshot().KnownBuildings.Select(b=>b.Id));
+                Assert.AreEqual(full.IsVisible(new NavPoint(10,0)),actual.IsVisible(new NavPoint(10,0)));
+            }
+        }
         [Test] public void MemoryPersistsThroughUnseenDestructionAndClearsOnlyOnRevisit()
         {
             var v=new PlayableVision(1,32,32,4,1.5);var building=Building();

@@ -73,3 +73,16 @@ func acquireHostLock(root, cache string) (func(), error) {
 		syscall.CloseHandle(syscall.Handle(h))
 	}, nil
 }
+
+func freeBytes(path string) (uint64, error) {
+	p, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return 0, err
+	}
+	var available, total, free uint64
+	ok, _, callErr := syscall.NewLazyDLL("kernel32.dll").NewProc("GetDiskFreeSpaceExW").Call(uintptr(unsafe.Pointer(p)), uintptr(unsafe.Pointer(&available)), uintptr(unsafe.Pointer(&total)), uintptr(unsafe.Pointer(&free)))
+	if ok == 0 {
+		return 0, callErr
+	}
+	return available, nil
+}

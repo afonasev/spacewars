@@ -5,7 +5,24 @@ namespace Spacewars.Presentation
 {
     [Serializable] public sealed class FoundrySurfaceProfile
     {
-        public string id="foundry-warm-slag-basalt-v1";public int revision=7;
+        public string id="foundry-warm-slag-basalt-v1";public int revision=10;
+        [SurfaceSetting("Foundry routes","Climb value","Neutral exposed aggregate on existing flank climbs; no light or geometry change.","ratio",.3f,.55f,.01f)] public float climbValue=.46f;
+        [SurfaceSetting("Foundry routes","Climb wear spacing","Distance between broad transverse wear bands on flank climbs.","m",2,8,.25f)] public float climbWearSpacing=4;
+        [SurfaceSetting("Foundry routes","Climb wear contrast","Restrained transverse wear in the aggregate, without raised bars or emission.","ratio",0,.3f,.01f)] public float climbWearContrast=.16f;
+        [SurfaceSetting("Foundry routes","Connection value","Worn slag leading from central crossbars into the actual open sides of outposts.","ratio",.3f,.5f,.01f)] public float connectionValue=.40f;
+        [SurfaceSetting("Foundry routes","Connection width","Width of the surface wear accent; underlying road and clearance remain unchanged.","m",6,12,.5f)] public float connectionWidth=10;
+        [SurfaceSetting("Foundry routes","Route edge fade","Soft transition of climb and connection accents into existing slag.","m",1,4,.25f)] public float routeEdgeFade=2;
+        [SurfaceSetting("Foundry roads","Compacted slag value","Neutral road brightness, separated from warm ash without road markings.","ratio",.2f,.55f,.01f)] public float roadValue=.34f;
+        [SurfaceSetting("Foundry roads","Compacted detail","Retained road grain and relief relative to surrounding ash.","ratio",.1f,1,.05f)] public float roadDetail=.8f;
+        [SurfaceSetting("Foundry concrete","Entry wear length","Flush approach wear inside the real pad edge, only where an authored road meets it.","m",1,6,.25f)] public float padEntryLength=3;
+        [SurfaceSetting("Foundry concrete","Entry wear","Restrained darkening of concrete at road entries; no geometry or slot change.","ratio",0,.3f,.01f)] public float padEntryWear=.12f;
+        [SurfaceSetting("Foundry concrete","Pour joint width","Flush narrow construction joints between a few large pour bays; no repeating tile grid.","m",.02f,.15f,.01f)] public float padJointWidth=.07f;
+        [SurfaceSetting("Foundry concrete","Pour joint contrast","Subordinate dark joints on home and outpost concrete; zero disables them.","ratio",0,.35f,.01f)] public float padJointContrast=.20f;
+        [SurfaceSetting("Foundry concrete","Pour bay variation","Restrained value difference between large concrete pours; retains crisp source grain.","ratio",0,.12f,.01f)] public float padBayVariation=.05f;
+        [SurfaceSetting("Foundry concrete","Edge ageing width","Irregular inward ageing from the actual pad boundary, softened at road entries.","m",.5f,4,.25f)] public float padAgeWidth=2.5f;
+        [SurfaceSetting("Foundry concrete","Edge ageing strength","Neutral weathering beneath existing edge sand; no raised border or added obstruction.","ratio",0,.4f,.01f)] public float padAgeStrength=.22f;
+        [SurfaceSetting("Foundry geology","Face contrast","Separates basalt caps from steep faces without changing lighting or support geometry.","ratio",0,.5f,.05f)] public float rockFaceContrast=.25f;
+        [SurfaceSetting("Foundry geology","Mineral warmth","Retained warm mineral coloration; lower values keep basalt neutral against the warm ash.","ratio",0,1,.05f)] public float rockWarmth=.25f;
         [SurfaceSetting("Foundry lava","Fissure depth","Distance below the enclosing ridge rim; presentation only, no navigation change.","m",1,8,.25f)] public float lavaDepth=3.5f;
         [SurfaceSetting("Foundry lava","Molten glow","Emitted molten brightness and restrained lower-wall glow.","ratio",0,3,.1f)] public float lavaGlow=1.2f;
         [SurfaceSetting("Foundry lava","Crust scale","World size of cooled fragments over moving molten material.","m",.25f,5,.25f)] public float lavaCrustScale=1.5f;
@@ -71,6 +88,14 @@ namespace Spacewars.Presentation
             material.SetVector("_Geology",new Vector4(depositScale,0,strataSpacing,strataContrast));
             material.SetColor("_BasaltTint",new Color(basaltValue*.92f,basaltValue*.95f,basaltValue));
             material.SetVector("_FoundryVariation",new Vector4(textureVariation,depositScale,supportLightSmoothing,0));
+            material.SetColor("_RoadTint",new Color(roadValue,roadValue,roadValue));
+            material.SetVector("_FoundryReadability",new Vector4(rockFaceContrast,roadDetail,padEntryLength,padEntryWear));
+            material.SetFloat("_FoundryBasaltWarmth",rockWarmth);
+            material.SetColor("_FoundryClimbTint",new Color(climbValue,climbValue,climbValue));
+            material.SetColor("_FoundryConnectionTint",new Color(connectionValue,connectionValue,connectionValue));
+            material.SetVector("_FoundryRouteFinish",new Vector4(climbWearSpacing,climbWearContrast,0,0));
+            material.SetVector("_FoundryPadPours",new Vector4(padJointWidth,padJointContrast,padBayVariation,0));
+            material.SetVector("_FoundryPadAge",new Vector4(padAgeWidth,padAgeStrength,0,0));
             material.SetVector("_FoundryPadFinish",new Vector4(padSandWidth,padSandScale,padCenterRadius,padCenterFeather));
             material.SetColor("_FoundrySandTint",new Color(padSandValue,padSandValue*.86f,padSandValue*.66f));
             // The scalar central albedo needs the same sRGB conversion as SetColor tints.

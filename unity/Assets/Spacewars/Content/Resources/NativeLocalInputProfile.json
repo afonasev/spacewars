@@ -323,11 +323,28 @@
       "kind": "numeric",
       "path": "system.controlGroupFocusRadius",
       "value": 12
+    },
+    {
+      "section": "Управление · Геймпад",
+      "group": "Курсор и жесты",
+      "target": "system",
+      "key": "gamepad",
+      "subkey": "cursorRecenterIdleMs",
+      "label": "Пауза перед центрированием курсора",
+      "unit": "мс",
+      "min": 0,
+      "max": 2000,
+      "step": 50,
+      "description": "Левый стик центрирует курсор только после этой паузы в работе правого стика.",
+      "kind": "numeric",
+      "path": "system.gamepad.cursorRecenterIdleMs",
+      "value": 1000
     }
   ],
   "doubleTapMs": 450,
   "cameraDefaultZoom": 12,
   "cameraMinZoom": 6,
   "cameraMaxZoom": 30,
-  "controlGroupFocusRadius": 12
+  "controlGroupFocusRadius": 12,
+  "cursorRecenterIdleMs": 1000
 }

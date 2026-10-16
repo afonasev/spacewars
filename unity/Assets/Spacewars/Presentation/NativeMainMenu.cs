@@ -18,7 +18,7 @@ namespace Spacewars.Presentation
         private VisualElement card;
         private string endpoint,token;
         private Label stateLabel,versionLabel;
-        private Button playButton,updateButton,restartButton;
+        private Button playButton,updateButton,restartButton,cancelButton;
         private UpdateState current;
         private PanelSettings panel;
         public NativeLocalControlSettings LocalControls;
@@ -36,9 +36,10 @@ namespace Spacewars.Presentation
             card=new VisualElement();card.AddToClassList("orbital-main-stack");ScreenRoot.Add(card);
             card.Add(OrbitalTheme.Text("SPACEWARS","orbital-logo"));
             playButton=OrbitalTheme.Action("В бой!",()=>StartCoroutine(EnterGame()),"main-play",true);card.Add(playButton);
-            var network=OrbitalTheme.Action("Сетевая игра",()=>{},"main-network");network.SetEnabled(false);network.tooltip="Пока недоступно";card.Add(network);
+            var network=OrbitalTheme.Action("Сетевая игра",()=>{},"main-network");network.SetEnabled(false);network.style.display=DisplayStyle.None;network.tooltip="Пока недоступно";card.Add(network);
             var settings=OrbitalTheme.Action("Настройки",()=>OpenSettings(),"main-settings");card.Add(settings);
             card.Add(OrbitalTheme.Action("Управление",()=>{ScreenRoot.style.display=DisplayStyle.None;NativeControlsHelp.Open(HostRoot??GetComponent<UIDocument>().rootVisualElement,Navigation,()=>RestoreFocus(card.Q<Button>("main-controls")));},"main-controls"));
+            card.Add(OrbitalTheme.Action("Что нового",()=>StartCoroutine(OpenHistory()),"main-history"));
             card.Add(OrbitalTheme.Action("Лаборатория геймдизайна",()=>Laboratory?.Invoke(),"main-laboratory"));
             card.Add(OrbitalTheme.Action("Выйти",()=>Application.Quit(),"main-exit"));
             var footer=updatePanel=new VisualElement {name="main-update-panel"};footer.AddToClassList("orbital-menu-footer");card.Add(footer);
@@ -52,6 +53,7 @@ namespace Spacewars.Presentation
             updateProgress=new ProgressBar {name="main-update-progress",lowValue=0,highValue=100};updateProgress.style.display=DisplayStyle.None;footer.Add(updateProgress);
             var updateActions=new VisualElement();updateActions.AddToClassList("orbital-toolbar");footer.Add(updateActions);
             updateButton=OrbitalTheme.Action("Обновить",()=>StartCoroutine(UpdateGame()),"main-update");updateActions.Add(updateButton);updateButton.style.display=DisplayStyle.None;
+            cancelButton=OrbitalTheme.Action("Отменить загрузку",()=>StartCoroutine(CancelDownload()),"main-cancel-update");updateActions.Add(cancelButton);cancelButton.style.display=DisplayStyle.None;
             restartButton=OrbitalTheme.Action("Перезапустить",()=>StartCoroutine(RestartGame()),"main-restart");updateActions.Add(restartButton);restartButton.style.display=DisplayStyle.None;
             ScreenRoot.RegisterCallback<GeometryChangedEvent>(_=>{
                 bool small=ScreenRoot.resolvedStyle.width<850;card.style.left=Length.Percent(small?8:53);card.style.width=Length.Percent(small?84:40);
@@ -112,10 +114,11 @@ namespace Spacewars.Presentation
             updateButton.style.display=candidate?DisplayStyle.Flex:DisplayStyle.None;
             checkingSpinner.style.display=current.state=="checking"&&string.IsNullOrEmpty(requestError)&&string.IsNullOrEmpty(statusError)?DisplayStyle.Flex:DisplayStyle.None;
             bool downloading=current.state=="downloading";
+            cancelButton.style.display=downloading||current.state=="paused"?DisplayStyle.Flex:DisplayStyle.None;cancelButton.SetEnabled(!busy);
             updateProgress.style.display=downloading?DisplayStyle.Flex:DisplayStyle.None;
             updateProgress.value=current.total>0?Mathf.Clamp((float)(100d*current.done/current.total),0,100):0;
             updateProgress.title=current.total>0?Math.Round(updateProgress.value)+"%":"Подготовка…";
-            switch(current.state){case "available":stateLabel.text="Доступна версия "+current.available+". Нажмите «Обновить», чтобы скачать изменения.";break;case "downloading":stateLabel.text=current.total<=0?"Подготовка файлов к обновлению…":current.done>=current.total?"Загрузка завершена. Проверяем обновление…":"Загрузка и подготовка: "+Math.Round(100d*current.done/current.total)+"% ("+(current.done/1048576d).ToString("F1")+" / "+(current.total/1048576d).ToString("F1")+" МБ). Неизменённые части используются повторно.";break;case "checking":stateLabel.text="Проверяем наличие обновления…";break;case "prepared":stateLabel.text="Обновление готово. Можно продолжить играть; новая версия установится после выхода. Или нажмите «Перезапустить».";break;case "current":stateLabel.text="Установлена актуальная версия.";break;case "offline":stateLabel.text="Нет подключения к службе обновления. Можно играть в установленную версию.";break;case "error":stateLabel.text="Обновление не удалось. Рабочая версия сохранена. Можно повторить. "+current.error;break;case "applying":stateLabel.text="Устанавливаем обновление…";break;}
+            switch(current.state){case "available":stateLabel.text="Доступна версия "+current.available+". Нажмите «Обновить», чтобы скачать изменения.";break;case "downloading":stateLabel.text=current.total<=0?"Подготовка файлов к обновлению…":current.done>=current.total?"Загрузка завершена. Проверяем обновление…":"Загрузка и подготовка: "+Math.Round(100d*current.done/current.total)+"% ("+(current.done/1048576d).ToString("F1")+" / "+(current.total/1048576d).ToString("F1")+" МБ). Неизменённые части используются повторно.";break;case "checking":stateLabel.text="Проверяем наличие обновления…";break;case "paused":stateLabel.text="Загрузка приостановлена до возврата в меню.";break;case "prepared":stateLabel.text="Обновление готово. Можно продолжить играть; новая версия установится после выхода. Или нажмите «Перезапустить».";break;case "current":stateLabel.text="Установлена актуальная версия.";break;case "offline":stateLabel.text="Нет подключения к службе обновления. Можно играть в установленную версию.";break;case "error":stateLabel.text="Обновление не удалось. Рабочая версия сохранена. Можно повторить. "+current.error;break;case "applying":stateLabel.text="Устанавливаем обновление…";break;}
             if(!string.IsNullOrEmpty(requestError))stateLabel.text=requestError;
             if(!string.IsNullOrEmpty(statusError))stateLabel.text=statusError;
             if(!string.IsNullOrEmpty(current.notice))stateLabel.text=current.notice+" "+stateLabel.text;
@@ -136,6 +139,37 @@ namespace Spacewars.Presentation
             if(busy||current==null||current.state!="prepared")yield break;busy=true;
             bool accepted=false;yield return Request("/commit","POST",s=>accepted=s!=null);
             if(accepted)Application.Quit();else{busy=false;ShowStatus();}
+        }
+        [Serializable] private sealed class History {public ReleaseNote[] releases;}
+        [Serializable] private sealed class ReleaseNote {public string version,date,ru,en;}
+        private History historyCache;
+        private IEnumerator CancelDownload()
+        {
+            if(busy)yield break;busy=true;
+            yield return Request("/cancel","POST",s=>{if(s!=null)current=s;});busy=false;ShowStatus();
+        }
+        private IEnumerator OpenHistory()
+        {
+            var root=HostRoot??GetComponent<UIDocument>().rootVisualElement;
+            ScreenRoot.style.display=DisplayStyle.None;
+            var page=OrbitalTheme.Screen(root,"release-history");var box=OrbitalTheme.Card(page);box.Add(OrbitalTheme.Text("ЧТО НОВОГО","orbital-title"));
+            var list=new DropdownField("Версия"){name="history-version"};box.Add(list);
+            var scroll=OrbitalTheme.Scroll();scroll.style.minHeight=0;scroll.style.flexShrink=1;box.Add(scroll);
+            var text=OrbitalTheme.Text("Получаем историю версий…","orbital-muted");text.style.whiteSpace=WhiteSpace.Normal;scroll.Add(text);
+            Action back=()=>{page.RemoveFromHierarchy();RestoreFocus(card.Q<Button>("main-history"));};
+            var close=OrbitalTheme.Action("Назад",back,"history-back");box.Add(close);Navigation.SetScope(page,back,close);
+            if(historyCache==null&&!string.IsNullOrEmpty(endpoint))
+            {
+                using(var request=UnityWebRequest.Get(endpoint+"/history"))
+                {request.timeout=30;request.SetRequestHeader("Authorization","Bearer "+token);yield return request.SendWebRequest();
+                 if(request.result==UnityWebRequest.Result.Success){try{historyCache=JsonUtility.FromJson<History>(request.downloadHandler.text);}catch(ArgumentException){}}
+                }
+            }
+            if(page.panel==null)yield break;
+            if(historyCache?.releases==null||historyCache.releases.Length==0){text.text="История версий недоступна. Можно продолжить играть; попробуйте открыть её позже.";list.SetEnabled(false);yield break;}
+            list.choices=new System.Collections.Generic.List<string>();foreach(var release in historyCache.releases)list.choices.Add(release.version+(release.version==Application.version?" · установлена":""));
+            void Show(){var note=historyCache.releases[Mathf.Max(0,list.index)];text.text="Версия "+note.version+" · "+(string.IsNullOrEmpty(note.date)?"дата не указана":note.date)+"\n\n"+(string.IsNullOrWhiteSpace(note.ru)?"Описание на русском для этого исторического релиза отсутствует.":note.ru);scroll.scrollOffset=Vector2.zero;}
+            list.RegisterValueChangedCallback(_=>Show());list.index=0;Show();Navigation.SetScope(page,back,list);
         }
         private void OnDestroy(){ScreenRoot?.RemoveFromHierarchy();if(ownsNavigation)Navigation?.Dispose();if(panel)Destroy(panel);}
     }

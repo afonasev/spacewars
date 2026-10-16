@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -12,6 +13,9 @@ import (
 )
 
 func TestHostExplicitBackgroundAndExitActivation(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = append(append([]string(nil), os.Args...), "-noaudio", "-muted", "-fixture-path", "a path with spaces")
+	defer func() { os.Args = oldArgs }()
 	oldChannel := channel
 	oldDiscover := discoverForHost
 	oldStage := stageForHost
@@ -32,7 +36,9 @@ func TestHostExplicitBackgroundAndExitActivation(t *testing.T) {
 		pub, key, _ := ed25519.GenerateKey(rand.Reader)
 		publicKey = base64.StdEncoding.EncodeToString(pub)
 		script := []byte(`#!/usr/bin/env python3
-import os,json,time,urllib.request,pathlib
+import os,json,time,urllib.request,pathlib,sys
+assert "-muted" in sys.argv and "-noaudio" in sys.argv
+assert sys.argv[sys.argv.index("-fixture-path")+1]=="a path with spaces"
 base=os.environ['SPACEWARS_UPDATE_ENDPOINT'];token=os.environ['SPACEWARS_UPDATE_TOKEN'];root=pathlib.Path(os.environ['SPACEWARS_FIXTURE_ROOT'])
 def req(path,post=False):
  r=urllib.request.Request(base+path,method='POST' if post else 'GET',headers={'Authorization':'Bearer '+token})
@@ -44,6 +50,11 @@ for i in range(200):
  time.sleep(.02)
 assert s['state']=='available'
 assert not (root/'download-started').exists(), 'download before explicit click'
+try:
+ req('/check',True)
+ assert False, 'manual rediscovery remains available'
+except urllib.error.HTTPError as e:
+ assert e.code==404
 old=(root/'active.json').read_text();s=req('/update',True)
 assert s['state']=='downloading' and s['done']==0 and s['total']==0, 'click must acknowledge a fresh download'
 for i in range(200):
@@ -54,8 +65,12 @@ assert s['state']=='error' and s['error']=='simulated interrupted download'
 assert (root/'active.json').read_text()==old
 s=req('/update',True)
 assert s['state']=='downloading' and s['done']==0 and s['total']==0, 'retry must reset stale progress'
+s=req('/cancel',True)
+assert s['state']=='available'
+s=req('/update',True)
 s=req('/play',True)
-assert s['state']=='downloading', 'play blocked during download'
+assert s['state']=='paused', 'download must quiesce before play'
+s=req('/menu',True)
 for i in range(200):
  s=req('/status')
  assert (root/'active.json').read_text()==old,'activation during play'
@@ -84,7 +99,7 @@ assert s['state']=='prepared' and s['done']==12 and s['total']==12, 'progress mu
 		raw := signWith(next, key)
 		discoverForHost = func(p string) ([]byte, Manifest, error) { return raw, next, nil }
 		attempts := 0
-		stageForHost = func(r, c string, m Manifest, b []byte, progress func(int64, int64)) (string, error) {
+		stageForHost = func(ctx context.Context, r, c string, m Manifest, b []byte, progress func(int64, int64)) (string, error) {
 			os.WriteFile(filepath.Join(root, "download-started"), []byte("1"), 0600)
 			attempts++
 			if attempts == 1 {
@@ -92,7 +107,11 @@ assert s['state']=='prepared' and s['done']==12 and s['total']==12, 'progress mu
 				return "", errors.New("simulated interrupted download")
 			}
 			progress(0, 12)
-			time.Sleep(300 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(300 * time.Millisecond):
+			}
 			s := filepath.Join(c, "staged", m.ID)
 			os.MkdirAll(s, 0700)
 			os.WriteFile(filepath.Join(s, m.Entry), []byte("working game"), 0755)

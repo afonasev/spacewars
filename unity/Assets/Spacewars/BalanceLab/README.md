@@ -1,3 +1,5 @@
+Current native laboratory UI/lifecycle is documented in `docs/design-lab/CONNECTION.md` and implemented by `Presentation/NativeBalanceStore.cs` / `NativeBalanceView.cs`. It reuses AtomicStore and ContractCodec. The older schema2 gameplay+AI repository described below remains separate and does not define the current native editable scope.
+
 # Native Balance Lab data prerequisite (U9)
 
 This pure assembly reads lossless schema2 gameplay+AI revisions and stores device/development history. No runtime, match, projection, Player route or authoring controls consume it. The complete offline Lab still requires typed governed writers/coverage, applicable gameplay/AI/presentation consumers, desktop UI, tick transaction and Player acceptance. `EffectiveRevision.HasRuntimeProjection` is explicitly false.

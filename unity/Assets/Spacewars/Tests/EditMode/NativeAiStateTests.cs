@@ -31,6 +31,44 @@ namespace Spacewars.Tests.EditMode
         {var d=p.CopyData();d.revision++;d.factoryCreditCost+=50;d.tankCreditCost+=10;return PlayableProfile.Create(d,p.AuthoredMap,"F6 revised");}
         private static AiProfile ChangedAi(){var d=AiProfile.Initial.CopyData();d.revision++;return new AiProfile(d);}
 
+        [Test] public void ActualAiOwnedSectionSurvivesFailedTransportReplacementAndDomainDestruction()
+        {
+            var authority=new PlayableAuthorityTick(Config(2),71,difficulty:AiDifficulty.Veteran);
+            var budget=authority.Domain.Navigation.PhysicalHostBudget;
+            using(var state=authority.CaptureWorldState(authority.PublicationSequence,_=>0)){
+                Assert.NotNull(state.CaptureAi);Assert.Greater(state.AiAuthority.Length,0);
+                var aiBytes=(byte[])state.AiAuthority.Clone();var aiOwner=state.CaptureAi;
+                state.SetTransportCapture(w=>{w.Write(1);w.Write(false);w.Write(0L);w.Write(0);w.Write(0L);w.Write(0);w.Write(0);w.Write(0);});
+                var old=state.CaptureTransport;var oldBytes=(byte[])state.RuntimeTransport.Clone();long live=budget.PhysicalBytes;
+                var expected=WorldCaptureEncodingTests.Original(state);CollectionAssert.AreEqual(expected,state.Encode());
+                var callerInput=new byte[1025];
+                Assert.Throws<InvalidOperationException>(()=>state.SetTransportCapture(w=>{w.Write(callerInput);throw new InvalidOperationException("actual capture callback abort");}));
+                Assert.AreSame(old,state.CaptureTransport);Assert.AreSame(aiOwner,state.CaptureAi);
+                CollectionAssert.AreEqual(oldBytes,state.RuntimeTransport);CollectionAssert.AreEqual(aiBytes,state.AiAuthority);
+                Assert.AreEqual(live,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+                authority.Domain.DestroyOwnedNavigation();
+                Assert.Greater(budget.PhysicalBytes,0,"owned capture survives authority destruction");
+                CollectionAssert.AreEqual(expected,state.Encode());Assert.AreEqual(live,budget.PhysicalBytes);
+            }
+            Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+        }
+
+        [TestCase(false)][TestCase(true)] public void CurrentAiRestoreValidatesTailBeforeTransferringCandidateOwnership(bool trailing)
+        {
+            var config=Config(2);var source=new PlayableAuthorityTick(config,71);PlayableAuthorityTick restored=null;
+            var budget=new NavigationRetentionBudget();int allocations=0;budget.AllocationAdmission=_=>{allocations++;return true;};
+            try{
+                Run(source,15);var bytes=source.CaptureBytes();var before=(byte[])bytes.Clone();
+                if(trailing){using(var state=PlayableWorldState.Decode(bytes)){state.AiAuthority=state.AiAuthority.Concat(new byte[]{0}).ToArray();bytes=state.Encode();}}
+                PlayableAuthorityTick Restore()=>PlayableAuthorityTick.RestoreBytes(bytes,config.Profile,config.Seed,config.SourceIdentity,config,AiProfile.Initial,config.Roster.Select(p=>p.Id),budget);
+                if(trailing){var error=Assert.Throws<ArgumentException>(()=>Restore());StringAssert.Contains("Trailing world data",error.Message);Assert.Zero(budget.PhysicalBytes,"A fully decoded candidate must retire after late AI-section rejection");}
+                else{restored=Restore();CollectionAssert.AreEqual(bytes,restored.CaptureBytes());for(int tick=0;tick<10;tick++){Step(source);Step(restored);CollectionAssert.AreEqual(source.CaptureBytes(),restored.CaptureBytes());}Assert.Greater(budget.PhysicalBytes,0,"Successful return transfers the live candidate");}
+                Assert.Greater(allocations,0);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+                if(trailing)CollectionAssert.AreEqual(before,source.CaptureBytes(),"Rejected detached candidate cannot mutate the source");
+            }finally{budget.AllocationAdmission=null;restored?.Stop();restored?.Domain.DestroyOwnedNavigation();source.Stop();source.Domain.DestroyOwnedNavigation();}
+            Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+        }
+
         [TestCase(2)][TestCase(3)][TestCase(6)] public void Roundtrip(int count)
         {
             var c=Config(count);var a=new PlayableAuthorityTick(c,71,difficulty:AiDifficulty.Veteran);Run(a,15);

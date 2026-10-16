@@ -28,7 +28,7 @@ namespace Spacewars.Input.Tests
         private PlayableRuntime Runtime=>Get<PlayableRuntime>(app,"runtime");
         private HashSet<int> Selection(PlayableBootstrap seat)=>Get<HashSet<int>>(seat,"selection");
         private readonly Dictionary<string,float> savedControls=new Dictionary<string,float>();
-        private readonly string[] controlKeys={"spacewars.controls.cursorSpeed","spacewars.controls.cameraSpeed"};
+        private readonly string[] controlKeys={"spacewars.controls.cursorSpeed","spacewars.controls.cameraSpeed","spacewars.controls.cursorRecenterIdleMs"};
         private bool savedCursorVisible;
         [SetUp] public override void Setup()
         {savedCursorVisible=Cursor.visible;base.Setup();savedControls.Clear();foreach(var key in controlKeys){if(PlayerPrefs.HasKey(key))savedControls[key]=PlayerPrefs.GetFloat(key);PlayerPrefs.DeleteKey(key);}}
@@ -46,6 +46,30 @@ namespace Spacewars.Input.Tests
             Call(app,"UpdateFrame");Assert.AreEqual(humans,Seats.Length);Assert.AreEqual(humans,Runtime.Latest.Participants.Count(p=>p.Control==OfflineControl.Human));
             foreach(var seat in Seats){Assert.AreSame(Runtime,Get<PlayableRuntime>(seat,"runtime"));Assert.AreEqual(Runtime.Generation,Get<PlayableSnapshot>(seat,"view").Generation);Assert.True(Get<PlayableInput>(seat,"input").WorldInputEnabled);}
             Call(app,"OnApplicationFocus",true);Call(app,"UpdateFrame");yield return null;
+        }
+        [UnityTest] public IEnumerator CameraPanRecentersOnlyAfterRightStickIdle()
+        {
+            yield return StartOrdinary(2);
+            var seat=Seats[1];var camera=Get<Camera>(seat,"cameraView");
+            var center=camera.pixelRect.center;
+            PadCursor(seat,(NavPoint)Call(seat,"Ground",center+new Vector2(80,0)));
+            Set(pads[1].leftStick,Vector2.right);Set(pads[1].rightStick,Vector2.up);InputSystem.Update();
+            yield return null;Call(app,"UpdateFrame");
+            Assert.Greater(Vector2.Distance(Get<Vector2>(seat,"battleCursor"),center),40,"simultaneous sticks must not recenter");
+            Set(pads[1].rightStick,Vector2.zero);InputSystem.Update();
+            yield return null;Call(app,"UpdateFrame");
+            Assert.Greater(Vector2.Distance(Get<Vector2>(seat,"battleCursor"),center),30,"recent right stick activity protects cursor");
+            var delay=((NativeLocalControlSettings)typeof(PlayableBootstrap).GetProperty("LocalControlSettings",F).GetValue(seat)).CursorRecenterIdleMs;
+            yield return new WaitForSecondsRealtime(delay/1000f+.05f);Call(app,"UpdateFrame");
+            Assert.Less(Vector2.Distance(Get<Vector2>(seat,"battleCursor"),center),1,"idle right stick permits recenter");
+            // Even zero delay must never override active right-stick movement.
+            var controls=(NativeLocalControlSettings)typeof(PlayableBootstrap).GetProperty("LocalControlSettings",F).GetValue(seat);
+            var settingsRoot=new VisualElement();controls.AddSliders(settingsRoot);
+            settingsRoot.Q<Slider>("settings-pad-cursorRecenterIdleMs").value=0;
+            // A new right-stick movement must restart protection independently for this seat.
+            PadCursor(seat,(NavPoint)Call(seat,"Ground",center+new Vector2(80,0)));
+            Set(pads[1].rightStick,Vector2.up);InputSystem.Update();yield return null;Call(app,"UpdateFrame");
+            Assert.Greater(Vector2.Distance(Get<Vector2>(seat,"battleCursor"),center),40,"renewed activity restarts protection");
         }
         private IEnumerator Wait(Func<bool> ready,string phase="runtime")
         {float end=Time.realtimeSinceStartup+15;int progress=-1;while(!ready()){int current=(Runtime!=null?10:0)+Seats.Length;if(current!=progress){progress=current;end=Time.realtimeSinceStartup+15;}if(Time.realtimeSinceStartup>=end)break;if(Runtime!=null&&!Get<bool>(app,"preparing"))Call(app,"OnApplicationFocus",true);Call(app,"UpdateFrame");yield return null;}Assert.True(ready(),"ordinary local scenario deadline: "+phase+" paused="+Get<bool>(app,"paused")+" preparing="+Get<bool>(app,"preparing")+" stopped="+Runtime?.IsStopped+" failure="+Runtime?.Latest?.Failure+RallyDiagnostics()+" receipts="+string.Join(",",Runtime?.OfflineFrame?.Receipts.Select(r=>r.Receipt.OwnerId+":"+r.Receipt.Sequence+":"+r.Receipt.Status)??Array.Empty<string>()));}

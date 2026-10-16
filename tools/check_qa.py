@@ -77,10 +77,15 @@ def validate_results(path, fixtures=(), ui=False):
     if int(root.get('total', '-1')) != len(cases) or int(root.get('passed', '-1')) != len(cases):
         raise ValueError('NUnit totals do not match executed cases')
     methods = [name.split('(', 1)[0] for name in names]
+    def selected(method, fixture):
+        # NUnit accepts either a complete fixture or an exact method filter. Keep
+        # parameterized cases together, while rejecting unrelated sibling methods.
+        return method == fixture or method.rsplit('.', 1)[0] == fixture
+
     for fixture in fixtures:
-        if not any(name.rsplit('.', 1)[0] == fixture for name in methods):
+        if not any(selected(method, fixture) for method in methods):
             raise ValueError('Missing fixture: ' + fixture)
-    if fixtures and any(name.rsplit('.', 1)[0] not in fixtures for name in methods):
+    if fixtures and any(not any(selected(method, fixture) for fixture in fixtures) for method in methods):
         raise ValueError('Unexpected fixture in focused result')
     if ui:
         contracts = {'PlayableUiShellTests': UI_METHODS, **UI_AFFECTED_METHODS}

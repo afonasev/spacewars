@@ -21,8 +21,12 @@ namespace Spacewars.Presentation
             {
                 var target=panel.targetTexture;
                 float scale=ReadableScale(target!=null?target.width:UnityEngine.Screen.width,target!=null?target.height:UnityEngine.Screen.height);
+                scale*=NativeDevicePreferences.UiScale;root.EnableInClassList("high-contrast",NativeDevicePreferences.HighContrast);
                 if(!Mathf.Approximately(panel.scale,scale))panel.scale=scale;
             }
+            var fps=new Label(){name="device-fps",pickingMode=PickingMode.Ignore};fps.style.position=Position.Absolute;fps.style.left=8;fps.style.top=4;root.Add(fps);
+            float last=Time.realtimeSinceStartup;int frames=Time.frameCount;
+            root.schedule.Execute(()=>{fps.style.display=NativeDevicePreferences.ShowFps?DisplayStyle.Flex:DisplayStyle.None;float now=Time.realtimeSinceStartup;fps.text=Mathf.RoundToInt((Time.frameCount-frames)/Mathf.Max(.001f,now-last))+" FPS";last=now;frames=Time.frameCount;fps.BringToFront();}).Every(500);
             Resize();root.RegisterCallback<GeometryChangedEvent>(_=>Resize());root.schedule.Execute(Resize).Every(100);
         }
         public static void Install(VisualElement root)

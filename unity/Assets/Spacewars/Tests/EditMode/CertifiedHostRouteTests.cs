@@ -192,11 +192,37 @@ namespace Spacewars.Tests.EditMode
             }
         }
 
+        internal static NavigationSession LegacyCheckpointSession(NavGeometry geometry,PlayableProfile profile,IPlayableTerrain terrain=null)
+            =>LegacyCheckpointSession(geometry,profile.Navigation,terrain);
+        internal static NavigationSession LegacyCheckpointSession(NavGeometry geometry,NavigationProfile profile,IPlayableTerrain terrain=null)
+        {
+            // Explicit historical A5-v8 / ARR3 empty input, never reflection-switch
+            // a current physical Session into destructive replay mode.
+            var source=new NavigationSession(1,geometry,profile,terrain:terrain);
+            try{
+                using(var state=source.CaptureState()){
+                    state.HostAuthority=null;state.RegisteredRequestIndices=state.DeliveredRequestIndices=Array.Empty<int>();state.AllocationRequestIndices=Array.Empty<int>();
+                    state.ArrivalAuthority=WorldWire.Pack(w=>{w.Write(0x41525231);w.Write(3);for(int i=0;i<7;i++)w.Write(0L);for(int i=0;i<6;i++)w.Write(0);});
+                    var bytes=WorldWire.Pack(w=>WorldWire.Write(w,state));using(var saved=WorldWire.Unpack(bytes,r=>WorldWire.ReadNavigationSessionState(r,NavigationV8Format.A5Arrival))){var target=new NavigationSession(1,geometry,profile,terrain:terrain);try{target.RestoreState(saved);return target;}catch{target.DestroyNavigationAuthority();throw;}}
+                }
+            }finally{source.DestroyNavigationAuthority();}
+        }
+        [Test] public void PhysicalCheckpointReleaseRejectsBeforeCallbackAndPreservesExactColdNextPump()
+        {
+            var geometry=new NavGeometry(20,Array.Empty<NavObstacle>(),1);var profile=PlayableProfile.Default;var source=new NavigationSession(1,geometry,profile.Navigation);NavigationSession cold=null;var host=new UnityHostRouteService();var coldHost=new UnityHostRouteService();
+            try{
+                source.Crowd.Add(1,new NavPoint(-5,0));Assert.True(source.Move(1,new NavPoint(5,0)));var binding=new PlayableRouteBinding(geometry,profile,source.Admission,source.RoutePort);var kernel=(CertifiedRouteKernel)typeof(UnityHostRouteService).GetField("certified",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(host);kernel.PauseAtPhysicalBoundary=()=>source.RegisteredRouteCount>0;host.Service(binding,1);Assert.Greater(source.RegisteredRouteCount,0);kernel.PauseAtPhysicalBoundary=null;
+                byte[] Bytes(NavigationSession s)=>WorldWire.Pack(w=>WorldWire.Write(w,s.CaptureState()));var before=Bytes(source);var root=source.PinCommittedHostRoot();Assert.NotNull(root);int callbacks=0;
+                try{Assert.Throws<InvalidOperationException>(()=>source.RoutePort.ReleaseHostForWorldCheckpoint(()=>callbacks++));Assert.Zero(callbacks);Assert.Throws<InvalidOperationException>(()=>host.ReleaseForWorldCheckpoint(binding));CollectionAssert.AreEqual(before,Bytes(source));var current=source.PinCommittedHostRoot();try{Assert.AreSame(root,current);}finally{current.Release();}}finally{root.Release();}
+                host.Service(binding,1);var after=Bytes(source);host.Dispose();cold=new NavigationSession(1,geometry,profile.Navigation);using(var saved=WorldWire.Unpack(before,WorldWire.ReadNavigationSessionState))cold.RestoreState(saved);CollectionAssert.AreEqual(before,Bytes(cold));coldHost.Service(new PlayableRouteBinding(geometry,profile,cold.Admission,cold.RoutePort),1);CollectionAssert.AreEqual(after,Bytes(cold));Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(cold),cold.PhysicalHostBudget.PhysicalBytes);
+            }finally{host.Dispose();coldHost.Dispose();cold?.DestroyNavigationAuthority();source.DestroyNavigationAuthority();if(cold!=null)Assert.Zero(cold.PhysicalHostBudget.PhysicalBytes);Assert.Zero(source.PhysicalHostBudget.PhysicalBytes);}
+        }
+
         private static PlayableRouteBinding CheckpointFixture(out NavigationSession session)
         {
             var map=ThreeCrossingsMap.Default;var profile=PlayableProfile.ThreeCrossingsDefault;
             var geometry=new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision);
-            session=new NavigationSession(1,geometry,profile.Navigation,terrain:map);
+            session=LegacyCheckpointSession(geometry,profile,map);
             session.Crowd.Add(1,new NavPoint(-20,18),.58,4,4.5);
             session.Crowd.Add(2,new NavPoint(-18,18),.58,4,4.5);
             Assert.True(session.MoveGroup(new[]{1,2},new[]{new NavPoint(18,18),new NavPoint(20,18)}));
@@ -211,9 +237,49 @@ namespace Spacewars.Tests.EditMode
                 new[]{"lastEpoch","graphQuota","fieldQuota","connectorQuota","bookkeepingQuota","maintenanceQuota"}
                 .Select(name=>typeof(LayeredNavigationScheduler).GetField(name,flags).GetValue(scheduler))).ToArray();
         }
+        private static Action<NavigationSessionState> LegacyReplayValueAssertion(NavigationSession source)
+        {
+            const System.Reflection.BindingFlags flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+            object Field(object value,string name)=>value.GetType().GetField(name,flags).GetValue(value);
+            object[] Obstacles(System.Collections.Generic.IEnumerable<NavObstacle> obstacles)=>obstacles.Select(value=>new object[]{value.MinX,value.MinZ,value.MaxX,value.MaxZ,value.CircleRadius,value.Bottom,value.Top,value.Polygon?.Vertices.ToArray()}).Cast<object>().ToArray();
+            object Geometry(NavGeometry geometry)=>new object[]{geometry.HalfExtent,geometry.Revision,Obstacles(geometry.Obstacles)};
+            object SavedGeometry(NavigationGeometryState geometry)=>new object[]{geometry.HalfExtent,geometry.Revision,Obstacles(geometry.Obstacles)};
+            string Key(NavigationRequest request)=>request.Session+":"+request.Request+":"+request.Entity;
+            string SavedKey(NavigationRequestState row)=>row.Session+":"+row.Request+":"+row.Entity;
+            var expected=new System.Collections.Generic.SortedDictionary<string,byte[]>();
+            void Put(string key,object value)=>expected.Add(key,PlayableWorldRestoreTests.FactBytes(value));
+            var pending=(System.Collections.Generic.IDictionary<int,NavigationRequest>)Field(source,"pending");var queued=source.Requests.CopyItems();var requests=pending.Values.Concat(queued).Distinct().OrderBy(Key).ToArray();Assert.AreEqual(requests.Length,requests.Select(Key).Distinct().Count());
+            Put("session",new object[]{source.Generation,Field(source,"requestSequence"),Field(source,"groupSequence"),source.AppliedResults,source.RejectedResults,source.UnreachableResults});
+            Put("requests",requests.Select(request=>new object[]{request.Session,request.Request,request.Entity,request.Order,request.Start,request.Goal,request.StartLocation,request.GoalLocation,request.ProfileId,request.ProfileRevision,NavigationProfile.Metadata.Select(field=>field.Read(request.Profile)).ToArray(),request.HeldIdentity,request.CertifiedProviderBinding,request.MemberIdentity,Geometry(request.Geometry),Geometry(request.BaseGeometry)}).ToArray());
+            var baseGeometry=(NavGeometry)Field(source,"geometry");var navigationGeometry=(NavGeometry)Field(source,"navigationGeometry");Put("geometry",Geometry(baseGeometry));Put("navigationGeometry",Geometry(navigationGeometry));
+            var roots=new[]{baseGeometry,navigationGeometry}.Concat(requests.SelectMany(row=>new[]{row.Geometry,row.BaseGeometry})).ToArray();Put("geometryAliases",roots.SelectMany(first=>roots.Select(second=>ReferenceEquals(first,second))).ToArray());Put("geometryCount",roots.Distinct().Count());
+            Put("FIFO",queued.Select(Key).ToArray());Put("pending",pending.Select(pair=>new object[]{pair.Key,Key(pair.Value)}).ToArray());foreach(var input in queued)Assert.AreSame(input,pending[input.Entity]);
+            var orders=(System.Collections.Generic.IDictionary<int,long>)Field(source,"orders");Put("orders",orders.Select(pair=>new object[]{pair.Key,pair.Value}).ToArray());
+            foreach(var name in new[]{"reservations","retainedGoals"}){var values=(System.Collections.Generic.IDictionary<int,NavPoint>)Field(source,name);Put(name,values.Select(pair=>new object[]{pair.Key,pair.Value}).ToArray());}
+            var identities=(System.Collections.Generic.IDictionary<int,string>)Field(source,"movementIdentities");Put("identities",identities.Select(pair=>new object[]{pair.Key,pair.Value}).ToArray());
+            var groups=(System.Collections.Generic.IDictionary<long,GroupOrderState>)Field(source,"groups");Put("groups",groups.Values.ToArray());
+            Assert.Zero(source.RegisteredRouteCount);Assert.Zero(((System.Collections.Generic.IDictionary<int,NavigationRequest>)Field(source,"allocating")).Count);Assert.Zero(((System.Collections.Generic.IDictionary<int,NavigationRequest>)Field(source,"probes")).Count);Assert.Zero((int)typeof(NavigationSession).GetProperty("ProbeAnswerCount",flags).GetValue(source));Assert.Zero(source.Answers.Count);Assert.Zero((int)Field(source,"barrierAnswers").GetType().GetProperty("Count",flags|System.Reflection.BindingFlags.Public).GetValue(Field(source,"barrierAnswers")));Assert.Zero(((System.Collections.Generic.IDictionary<int,NavSolveStatus>)Field(source,"technicalFailures")).Count);Assert.Zero(((NavigationInstalledExecutions)Field(source,"installedExecutions")).Count);
+            var crowd=source.Crowd;var crowdProfile=(NavigationProfile)Field(crowd,"profile");var crowdGeometry=(NavGeometry)Field(crowd,"geometry");
+            Put("crowdHeaders",new object[]{Field(crowd,"nextIncarnation"),crowdGeometry.HalfExtent,Field(crowd,"maximumRadius"),crowdGeometry.Revision,crowdProfile.ProfileId,crowdProfile.Revision,NavigationProfile.Metadata.Select(field=>field.Read(crowdProfile)).ToArray(),crowd.RepairCount,crowd.RepairFailed,crowd.MaxNoProgressTicks,Obstacles(crowdGeometry.Obstacles)});
+            foreach(var actor in crowd.Units){foreach(var field in typeof(NavUnitSaveState).GetFields()){var property=typeof(NavUnit).GetProperty(field.Name);object value=field.Name=="Route"?actor.route:property!=null?property.GetValue(actor):Field(actor,char.ToLowerInvariant(field.Name[0])+field.Name.Substring(1));Put("actor."+actor.Id+"."+field.Name,value);}}
+            return saved=>{
+                var actual=new System.Collections.Generic.SortedDictionary<string,byte[]>();void Save(string key,object value)=>actual.Add(key,PlayableWorldRestoreTests.FactBytes(value));
+                Save("session",new object[]{saved.Generation,saved.RequestSequence,saved.GroupSequence,saved.AppliedResults,saved.RejectedResults,saved.UnreachableResults});
+                var rows=saved.Requests.OrderBy(SavedKey).ToArray();Assert.AreEqual(rows.Length,rows.Select(SavedKey).Distinct().Count());
+                Save("requests",rows.Select(row=>new object[]{row.Session,row.Request,row.Entity,row.Order,row.Start,row.Goal,row.StartLocation,row.GoalLocation,row.ProfileId,row.ProfileRevision,row.ProfileValues,row.HeldIdentity,row.CertifiedProviderBinding,row.MemberIdentity,SavedGeometry(row.Geometry),SavedGeometry(row.BaseGeometry)}).ToArray());
+                Save("geometry",SavedGeometry(saved.Geometry));Save("navigationGeometry",SavedGeometry(saved.NavigationGeometry));var indices=new[]{0,saved.NavigationGeometryIndex}.Concat(rows.SelectMany(row=>new[]{row.GeometryIndex,row.BaseGeometryIndex})).ToArray();Save("geometryAliases",indices.SelectMany(first=>indices.Select(second=>first==second)).ToArray());Save("geometryCount",saved.GeometryTable.Length);
+                Save("FIFO",saved.RequestMailboxIndices.Select(index=>SavedKey(saved.Requests[index])).ToArray());Save("pending",saved.PendingRequestIndices.Select(index=>new object[]{saved.Requests[index].Entity,SavedKey(saved.Requests[index])}).ToArray());
+                Save("orders",saved.Orders.Select(row=>new object[]{row.Entity,row.Order}).ToArray());Save("reservations",saved.Reservations.Select(row=>new object[]{row.Entity,row.Point}).ToArray());Save("retainedGoals",saved.RetainedGoals.Select(row=>new object[]{row.Entity,row.Point}).ToArray());Save("identities",saved.MovementIdentities.Select(row=>new object[]{row.Entity,row.Identity}).ToArray());Save("groups",saved.Groups);
+                Assert.Null(saved.RegisteredRequestIndices);Assert.Null(saved.DeliveredRequestIndices);Assert.IsEmpty(saved.AllocationRequestIndices);Assert.IsEmpty(saved.ProbeRequestIndices);Assert.IsEmpty(saved.ProbeAnswers);Assert.IsEmpty(saved.AnswerMailbox);Assert.IsEmpty(saved.BarrierAnswers);Assert.IsEmpty(saved.TechnicalFailures);Assert.IsEmpty(saved.InstalledExecutions);
+                var state=saved.Crowd;Save("crowdHeaders",new object[]{state.NextIncarnation,state.HalfExtent,state.MaximumRadius,state.GeometryRevision,state.ProfileId,state.ProfileRevision,state.ProfileValues,state.RepairCount,state.RepairFailed,state.MaxNoProgressTicks,Obstacles(state.Obstacles)});
+                foreach(var actor in state.Units)foreach(var field in typeof(NavUnitSaveState).GetFields())Save("actor."+actor.Id+"."+field.Name,field.GetValue(actor));
+                CollectionAssert.AreEqual(expected.Keys,actual.Keys);foreach(var pair in expected)CollectionAssert.AreEqual(pair.Value,actual[pair.Key],"Independent pre-capture legacy semantic value: "+pair.Key);
+            };
+        }
         [Test] public void WorldCheckpointReleaseReplaysRegisteredAndQueuedInputsAndRebindsWithoutQuotaRefill()
         {
-            var binding=CheckpointFixture(out var source);var port=source.RoutePort;
+            var binding=CheckpointFixture(out var source);var port=source.RoutePort;NavigationSession restored=null,independent=null;
+            try{
             using(var host=new UnityHostRouteService()){
                 host.Service(binding,1);
                 Assert.AreEqual(1,source.RegisteredRouteCount);Assert.AreEqual(1,source.Requests.Count);
@@ -231,25 +297,31 @@ namespace Spacewars.Tests.EditMode
                 CollectionAssert.AreEqual(ledger,CheckpointLedger(host),"Real release must retain all remaining epoch quotas");
                 Assert.AreEqual(counters.LogicalGraphWork,host.CertifiedCounters.LogicalGraphWork);
                 Assert.AreEqual(counters.LogicalFieldWork,host.CertifiedCounters.LogicalFieldWork);
-                var state=WorldWire.Unpack(WorldWire.Pack(w=>WorldWire.Write(w,source.CaptureState())),WorldWire.ReadNavigationSessionState);
-                var geometry=new NavGeometry(binding.Geometry.HalfExtent,binding.Geometry.Obstacles.ToArray(),binding.Geometry.Revision);
-                var restored=new NavigationSession(1,geometry,binding.Profile.Navigation,terrain:ThreeCrossingsMap.Default);
-                restored.RestoreState(state);var next=new PlayableRouteBinding(geometry,binding.Profile,restored.Admission,restored.RoutePort);
-                Assert.AreNotSame(port,restored.RoutePort);
-                Assert.AreEqual(PlayableWorldRestoreTests.Facts(source,true),PlayableWorldRestoreTests.Facts(restored,true),"Every authority field agrees before any host Service");
+                var assertLegacy=LegacyReplayValueAssertion(source);byte[] bytes;using(var captured=source.CaptureState())bytes=WorldWire.Pack(w=>WorldWire.Write(w,captured));
+                using(var state=WorldWire.Unpack(bytes,r=>WorldWire.ReadNavigationSessionState(r,NavigationV8Format.A5Arrival)))assertLegacy(state);
+                NavigationSession Import(){
+                    var geometry=new NavGeometry(binding.Geometry.HalfExtent,binding.Geometry.Obstacles.ToArray(),binding.Geometry.Revision);
+                    var candidate=new NavigationSession(1,geometry,binding.Profile.Navigation,terrain:ThreeCrossingsMap.Default);try{using(var state=WorldWire.Unpack(bytes,r=>WorldWire.ReadNavigationSessionState(r,NavigationV8Format.A5Arrival)))candidate.RestoreState(state);return candidate;}catch{candidate.DestroyNavigationAuthority();throw;}
+                }
+                restored=Import();independent=Import();Assert.AreNotSame(port,restored.RoutePort);Assert.AreNotSame(restored.RoutePort,independent.RoutePort);
+                AssertInstalledFacts(restored,independent,"Every primary owner/alias/layout field agrees between independent v8 migration endpoints");
+                Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(restored),restored.PhysicalHostBudget.PhysicalBytes);Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(independent),independent.PhysicalHostBudget.PhysicalBytes);
+                var next=new PlayableRouteBinding(restored.Admission.Geometry,binding.Profile,restored.Admission,restored.RoutePort);
                 CollectionAssert.AreEqual(ledger,CheckpointLedger(host),"Facade rebind performs no solver work");
                 for(int i=0;i<4096&&restored.PendingCount>0;i++){host.Service(next,8);restored.ApplyResults();}
                 Assert.Zero(restored.PendingCount);Assert.AreEqual(2,restored.AppliedResults);Assert.Zero(restored.RejectedResults);
                 Assert.Zero(source.Answers.Count);Assert.AreEqual(2,source.PendingCount,"Rebound host cannot answer its old session");
                 Assert.GreaterOrEqual(host.SolverEpoch,(long)ledger[0]);
             }
+            }finally{independent?.DestroyNavigationAuthority();restored?.DestroyNavigationAuthority();source.DestroyNavigationAuthority();if(independent!=null)Assert.Zero(independent.PhysicalHostBudget.PhysicalBytes);if(restored!=null)Assert.Zero(restored.PhysicalHostBudget.PhysicalBytes);Assert.Zero(source.PhysicalHostBudget.PhysicalBytes);}
         }
         [Test] public void WorldCheckpointReleaseRejectsWrongOwnerAndLostInputBeforeDroppingHostWork()
         {
-            var binding=CheckpointFixture(out var source);
+            var binding=CheckpointFixture(out var source);NavigationSession otherSession=null;
+            try{
             using(var host=new UnityHostRouteService()){
                 host.Service(binding,1);Assert.AreEqual(1,source.RegisteredRouteCount);
-                var other=CheckpointFixture(out _);var before=PlayableWorldRestoreTests.Facts(source,true);var ledger=CheckpointLedger(host);long memory=host.CertifiedRetainedBytes;
+                var other=CheckpointFixture(out otherSession);var before=PlayableWorldRestoreTests.Facts(source,true);var ledger=CheckpointLedger(host);long memory=host.CertifiedRetainedBytes;
                 Assert.Throws<InvalidOperationException>(()=>host.ReleaseForWorldCheckpoint(other));
                 Assert.AreEqual(before,PlayableWorldRestoreTests.Facts(source,true));Assert.AreEqual(memory,host.CertifiedRetainedBytes);
                 Assert.True(source.Requests.TryDequeue(out var lost));before=PlayableWorldRestoreTests.Facts(source,true);
@@ -258,11 +330,12 @@ namespace Spacewars.Tests.EditMode
                 CollectionAssert.AreEqual(ledger,CheckpointLedger(host));Assert.AreEqual(1,source.RegisteredRouteCount);
                 Assert.True(source.Requests.TryEnqueue(lost));
             }
+            }finally{otherSession?.DestroyNavigationAuthority();source.DestroyNavigationAuthority();if(otherSession!=null)Assert.Zero(otherSession.PhysicalHostBudget.PhysicalBytes);Assert.Zero(source.PhysicalHostBudget.PhysicalBytes);}
         }
         [TestCase(false)][TestCase(true)] public void WorldCheckpointNearCapReservationUsesRealReleasedMemory(bool releaseBeforeApply)
         {
             var geometry=new NavGeometry(20,Array.Empty<NavObstacle>(),1);var profile=PlayableProfile.Default;
-            var session=new NavigationSession(1,geometry,profile.Navigation);session.Crowd.Add(1,new NavPoint(-5,0));
+            var session=LegacyCheckpointSession(geometry,profile);session.Crowd.Add(1,new NavPoint(-5,0));
             Assert.True(session.Move(1,new NavPoint(5,0)));
             var host=new UnityHostRouteService();var port=session.RoutePort;var memory=IntPtr.Zero;
             try{
@@ -283,7 +356,7 @@ namespace Spacewars.Tests.EditMode
                 Assert.AreEqual(releaseBeforeApply?1:0,state.InstalledExecutions.Length);
                 if(!releaseBeforeApply){Assert.AreEqual(1,state.TechnicalFailures.Single().Entity);Assert.AreEqual(NavSolveStatus.CapacityExceeded,state.TechnicalFailures.Single().Status);Assert.AreEqual(NavigationOutcome.Rejected,session.Crowd.Units.Single().Outcome);Release();}
                 Assert.AreEqual(IntPtr.Zero,memory);Assert.Zero(session.HostRetainedBytes);
-            }finally{host.Dispose();if(memory!=IntPtr.Zero)System.Runtime.InteropServices.Marshal.FreeHGlobal(memory);}
+            }finally{host.Dispose();if(memory!=IntPtr.Zero)System.Runtime.InteropServices.Marshal.FreeHGlobal(memory);session.DestroyNavigationAuthority();Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);}
         }
 
         private static NavigationSession InstalledLayoutFixture()
@@ -303,73 +376,100 @@ namespace Spacewars.Tests.EditMode
                 Assert.Zero(session.PendingCount);Assert.NotNull(session.InstalledExecutionFor(id));
             }
         }
+        private static void AssertInstalledFacts(NavigationSession source,NavigationSession restored,string label)
+        {
+            var lp=new System.Collections.Generic.SortedDictionary<long,string>();var rp=new System.Collections.Generic.SortedDictionary<long,string>();var left=PlayableWorldRestoreTests.FactBytes(source,true,positions:lp);var right=PlayableWorldRestoreTests.FactBytes(restored,true,positions:rp);if(!left.SequenceEqual(right)){int first=0;while(first<Math.Min(left.Length,right.Length)&&left[first]==right[first])first++;string Around(byte[] value){int start=Math.Max(0,first-180);return start>=value.Length?"<end>":System.Text.Encoding.UTF8.GetString(value,start,Math.Min(360,value.Length-start));}TestContext.WriteLine("INSTALLED_PATH_LEFT="+lp.Last(e=>e.Key<=first).Value+" RIGHT="+rp.Last(e=>e.Key<=first).Value);TestContext.WriteLine("INSTALLED_ROOT_DIFF="+first+" left="+Around(left)+" right="+Around(right));}CollectionAssert.AreEqual(left,right,label);
+        }
         private static NavigationSession RestoreInstalledLayout(NavigationSession source)
         {
             var bytes=WorldWire.Pack(w=>WorldWire.Write(w,source.CaptureState()));
             var restored=new NavigationSession(1,new NavGeometry(30,Array.Empty<NavObstacle>(),1),PlayableProfile.Default.Navigation);
-            restored.RestoreState(WorldWire.Unpack(bytes,WorldWire.ReadNavigationSessionState));var ownPort=restored.RoutePort;
-            Assert.AreEqual(PlayableWorldRestoreTests.Facts(source,true),PlayableWorldRestoreTests.Facts(restored,true));
+            restored.RestoreState(WorldWire.Unpack(bytes,WorldWire.ReadNavigationSessionState));var ownPort=restored.RoutePort;Assert.AreNotSame(source.RoutePort,ownPort);
+            AssertInstalledFacts(source,restored,"exact independent actor-owned authority after cold restore");
             CollectionAssert.AreEqual(bytes,WorldWire.Pack(w=>WorldWire.Write(w,restored.CaptureState())));
             return restored;
         }
+        private static NavigationSessionState MainLayoutState(NavigationSession source,AuthoritySlotMap<int,byte> layout=null)
+        {
+            var state=source.CaptureState();if(layout==null){layout=new AuthoritySlotMap<int,byte>();foreach(var row in state.InstalledExecutions)layout.Add(row.Entity,0);}
+            state.InstalledExecutionLayoutVersion=1;state.InstalledExecutionKeys=layout.Keys.ToArray();state.InstalledExecutionLayout=layout.CaptureLayout();return state;
+        }
+        private static byte[] LegacyMainV8Bytes(NavigationSessionState state)
+        {
+            var bytes=WorldWire.Pack(w=>WorldWire.Write(w,state));int tag=QueueLegacyLayout.Tag(bytes,0x47525031);int version=BitConverter.ToInt32(bytes,tag+4);Assert.AreEqual(9,version);
+            int tail=checked(4+4*(state.AllocationRequestIndices?.Length??0)+1+4+state.ArrivalAuthority.Length+4+4*(state.RegisteredRequestIndices?.Length??0)+4+4*(state.DeliveredRequestIndices?.Length??0)+4+state.HostAuthority.Length);
+            using(var stream=new System.IO.MemoryStream())using(var writer=new System.IO.BinaryWriter(stream)){
+                writer.Write(bytes,0,bytes.Length-tail);writer.Write(state.InstalledExecutionLayoutVersion);WorldWire.Array(writer,state.InstalledExecutionKeys??Array.Empty<int>(),writer.Write);WorldWire.Array(writer,state.InstalledExecutionLayout??Array.Empty<int>(),writer.Write);
+                var result=stream.ToArray();BitConverter.GetBytes(8).CopyTo(result,tag+4);return result;
+            }
+        }
+        private static NavigationSession RestoreMainV8(byte[] bytes)
+        {
+            Assert.Throws<ArgumentException>(()=>WorldWire.Unpack(bytes,WorldWire.ReadNavigationSessionState),"ambiguous v8 requires caller format; no decoder fallback");
+            using(var state=WorldWire.Unpack(bytes,r=>WorldWire.ReadNavigationSessionState(r,NavigationV8Format.MainInstalledLayout))){var restored=new NavigationSession(1,new NavGeometry(30,Array.Empty<NavObstacle>(),1),PlayableProfile.Default.Navigation);try{restored.RestoreState(state);return restored;}catch{restored.DestroyNavigationAuthority();throw;}}
+        }
         [Test] public void InstalledAllocationLayoutKeepsChurnEmptyHolesAndFutureInstallExactly()
         {
-            var source=InstalledLayoutFixture();CollectionAssert.AreEqual(new[]{30,10,20},source.CaptureState().InstalledExecutionKeys);
-            source.Stop(30,false);source.Stop(20,false);
-            CollectionAssert.AreEqual(new[]{3,2,0},source.CaptureState().InstalledExecutionLayout);
-            var restored=RestoreInstalledLayout(source);
-            foreach(int id in new[]{40,50}){InstallLayoutRoute(source,id);InstallLayoutRoute(restored,id);Assert.AreEqual(PlayableWorldRestoreTests.Facts(source,true),PlayableWorldRestoreTests.Facts(restored,true));}
-            CollectionAssert.AreEqual(new[]{50,10,40},source.CaptureState().InstalledExecutionKeys);
-            restored=RestoreInstalledLayout(restored);
-            foreach(int id in new[]{10,40,50}){source.Stop(id,false);restored.Stop(id,false);}
-            Assert.Zero(source.CaptureState().InstalledExecutions.Length);Assert.Greater(source.CaptureState().InstalledExecutionLayout.Length,1);
-            restored=RestoreInstalledLayout(restored);
-            foreach(int id in new[]{30,20,10}){InstallLayoutRoute(source,id);InstallLayoutRoute(restored,id);CollectionAssert.AreEqual(WorldWire.Pack(w=>WorldWire.Write(w,source.CaptureState())),WorldWire.Pack(w=>WorldWire.Write(w,restored.CaptureState())));Assert.AreEqual(PlayableWorldRestoreTests.Facts(source,true),PlayableWorldRestoreTests.Facts(restored,true));}
+            var source=InstalledLayoutFixture();var layout=new AuthoritySlotMap<int,byte>();foreach(int id in new[]{30,10,20})layout.Add(id,0);
+            source.Stop(30,false);source.Stop(20,false);layout.Remove(30);layout.Remove(20);CollectionAssert.AreEqual(new[]{3,2,0},layout.CaptureLayout());
+            var legacy=MainLayoutState(source,layout);var bytes=LegacyMainV8Bytes(legacy);var restored=RestoreMainV8(bytes);NavigationSession cold=null;
+            try{
+                Assert.Zero(restored.CaptureState().InstalledExecutionLayoutVersion,"accepted migration drops independent slot history");Assert.IsNull(restored.CaptureState().InstalledExecutionLayout);Assert.NotNull(restored.InstalledExecutionFor(10));
+                cold=RestoreInstalledLayout(restored);
+                foreach(int id in new[]{40,50}){InstallLayoutRoute(restored,id);InstallLayoutRoute(cold,id);AssertInstalledFacts(restored,cold,"future installed authority");}
+                foreach(int id in new[]{10,40,50}){restored.Stop(id,false);cold.Stop(id,false);}Assert.Zero(restored.CaptureState().InstalledExecutions.Length);
+                foreach(int id in new[]{30,20,10}){InstallLayoutRoute(restored,id);InstallLayoutRoute(cold,id);CollectionAssert.AreEqual(WorldWire.Pack(w=>WorldWire.Write(w,restored.CaptureState())),WorldWire.Pack(w=>WorldWire.Write(w,cold.CaptureState())));AssertInstalledFacts(restored,cold,"future installed authority");}
+            }finally{cold?.DestroyNavigationAuthority();restored.DestroyNavigationAuthority();source.DestroyNavigationAuthority();}
         }
         [Test] public void InstalledAllocationLayoutRejectsCorruptionBeforeCandidateMutation()
         {
             var source=InstalledLayoutFixture();string before=PlayableWorldRestoreTests.Facts(source,true);
-            foreach(Action<NavigationSessionState> corrupt in new Action<NavigationSessionState>[] {
+            try{foreach(Action<NavigationSessionState> corrupt in new Action<NavigationSessionState>[] {
                 state=>state.InstalledExecutionLayoutVersion=2,state=>state.InstalledExecutionKeys=null,state=>state.InstalledExecutionLayout=null,
                 state=>state.InstalledExecutionKeys[1]=state.InstalledExecutionKeys[0],state=>state.InstalledExecutionKeys[0]=999,
                 state=>state.InstalledExecutionKeys=new[]{30},state=>state.InstalledExecutions[1].Entity=state.InstalledExecutions[0].Entity,
                 state=>state.InstalledExecutionLayout=new[]{-1},state=>state.InstalledExecutionLayout=new[]{AuthoritySlotMap<int,int>.MaximumSlots+1},
                 state=>state.InstalledExecutionLayout=new[]{5,4,4},state=>state.InstalledExecutionLayout=new[]{4,4},state=>state.InstalledExecutionLayout=new[]{2},
-                state=>state.InstalledExecutionLayoutVersion=0,
-                state=>state.InstalledExecutions=state.InstalledExecutions.Reverse().ToArray(),
+                state=>state.InstalledExecutionLayoutVersion=0,state=>state.InstalledExecutions=state.InstalledExecutions.Reverse().ToArray(),
                 state=>state.Crowd.Units=state.Crowd.Units.Where(u=>u.Id!=state.InstalledExecutions[0].Entity).ToArray()}){
-                var state=source.CaptureState();corrupt(state);
-                Assert.Throws<ArgumentException>(()=>WorldWire.Unpack(WorldWire.Pack(w=>WorldWire.Write(w,state)),WorldWire.ReadNavigationSessionState));
+                var state=MainLayoutState(source);corrupt(state);var bytes=LegacyMainV8Bytes(state);
+                Assert.Throws<ArgumentException>(()=>WorldWire.Unpack(bytes,r=>WorldWire.ReadNavigationSessionState(r,NavigationV8Format.MainInstalledLayout)));
                 var target=new NavigationSession(1,new NavGeometry(30,Array.Empty<NavObstacle>(),1),PlayableProfile.Default.Navigation);
-                Assert.Throws<ArgumentException>(()=>target.RestoreState(state));Assert.Zero(target.Crowd.Units.Count);Assert.Zero(target.Requests.Count);
+                try{Assert.Throws<ArgumentException>(()=>target.RestoreState(state));Assert.Zero(target.Crowd.Units.Count);Assert.Zero(target.Requests.Count);}finally{target.DestroyNavigationAuthority();}
                 Assert.AreEqual(before,PlayableWorldRestoreTests.Facts(source,true),"Rejected candidate cannot mutate original world");
-            }
+            }}finally{source.DestroyNavigationAuthority();}
         }
         [Test] public void VersionEightCannotDowngradeInstalledAllocationToLegacyDense()
         {
-            var source=InstalledLayoutFixture();string before=PlayableWorldRestoreTests.Facts(source,true);
-            var state=source.CaptureState();state.InstalledExecutionLayoutVersion=0;
-            state.InstalledExecutionKeys=Array.Empty<int>();state.InstalledExecutionLayout=Array.Empty<int>();
-            Assert.Throws<ArgumentException>(()=>WorldWire.Unpack(WorldWire.Pack(w=>WorldWire.Write(w,state)),WorldWire.ReadNavigationSessionState));
-            Assert.AreEqual(before,PlayableWorldRestoreTests.Facts(source,true));
+            var source=InstalledLayoutFixture();try{string before=PlayableWorldRestoreTests.Facts(source,true);var state=MainLayoutState(source);state.InstalledExecutionLayoutVersion=0;state.InstalledExecutionKeys=Array.Empty<int>();state.InstalledExecutionLayout=Array.Empty<int>();
+                Assert.Throws<ArgumentException>(()=>WorldWire.Unpack(LegacyMainV8Bytes(state),r=>WorldWire.ReadNavigationSessionState(r,NavigationV8Format.MainInstalledLayout)));Assert.AreEqual(before,PlayableWorldRestoreTests.Facts(source,true));
+            }finally{source.DestroyNavigationAuthority();}
         }
         [Test] public void VersionEightInstalledAllocationPreservesSupportedZeroEntity()
         {
-            var source=new NavigationSession(1,new NavGeometry(30,Array.Empty<NavObstacle>(),1),PlayableProfile.Default.Navigation);
-            source.Crowd.Add(0,new NavPoint(-10,0));InstallLayoutRoute(source,0);
-            CollectionAssert.AreEqual(new[]{0},source.CaptureState().InstalledExecutionKeys);
-            var restored=RestoreInstalledLayout(source);Assert.NotNull(restored.InstalledExecutionFor(0));
+            var source=new NavigationSession(1,new NavGeometry(30,Array.Empty<NavObstacle>(),1),PlayableProfile.Default.Navigation);NavigationSession restored=null;
+            try{source.Crowd.Add(0,new NavPoint(-10,0));InstallLayoutRoute(source,0);var state=MainLayoutState(source);CollectionAssert.AreEqual(new[]{0},state.InstalledExecutionKeys);restored=RestoreMainV8(LegacyMainV8Bytes(state));Assert.NotNull(restored.InstalledExecutionFor(0));Assert.Zero(restored.CaptureState().InstalledExecutionLayoutVersion);}
+            finally{restored?.DestroyNavigationAuthority();source.DestroyNavigationAuthority();}
         }
         [Test] public void VersionSevenInstalledRowsRestoreWithoutInventingMissingAllocationHistory()
         {
-            var source=InstalledLayoutFixture();var checkpoint=source.CaptureState();var bytes=WorldWire.Pack(w=>WorldWire.Write(w,checkpoint));
-            int tag=QueueLegacyLayout.Tag(bytes,0x47525031);Assert.AreEqual(8,BitConverter.ToInt32(bytes,tag+4));
-            var legacy=bytes.Take(bytes.Length-QueueLegacyLayout.InstalledLayoutTailBytes(checkpoint)).ToArray();BitConverter.GetBytes(7).CopyTo(legacy,tag+4);
-            var decoded=WorldWire.Unpack(legacy,WorldWire.ReadNavigationSessionState);Assert.Zero(decoded.InstalledExecutionLayoutVersion);Assert.IsNull(decoded.InstalledExecutionKeys);
-            var restored=new NavigationSession(1,new NavGeometry(30,Array.Empty<NavObstacle>(),1),PlayableProfile.Default.Navigation);restored.RestoreState(decoded);
-            CollectionAssert.AreEqual(new[]{10,20,30},restored.CaptureState().InstalledExecutionKeys,"Legacy sorted rows have only dense historical reconstruction");
-            foreach(int id in new[]{10,20,30})Assert.AreEqual(PlayableWorldRestoreTests.Facts(source.InstalledExecutionFor(id).Corridor),PlayableWorldRestoreTests.Facts(restored.InstalledExecutionFor(id).Corridor));
-            Assert.AreEqual(source.AppliedResults,restored.AppliedResults);Assert.Zero(restored.PendingCount);
+            var source=InstalledLayoutFixture();NavigationSession restored=null;try{var checkpoint=MainLayoutState(source);var bytes=LegacyMainV8Bytes(checkpoint);int tag=QueueLegacyLayout.Tag(bytes,0x47525031);Assert.AreEqual(8,BitConverter.ToInt32(bytes,tag+4));
+                var legacy=bytes.Take(bytes.Length-QueueLegacyLayout.InstalledLayoutTailBytes(checkpoint)).ToArray();BitConverter.GetBytes(7).CopyTo(legacy,tag+4);
+                var decoded=WorldWire.Unpack(legacy,WorldWire.ReadNavigationSessionState);Assert.Zero(decoded.InstalledExecutionLayoutVersion);Assert.IsNull(decoded.InstalledExecutionKeys);
+                restored=new NavigationSession(1,new NavGeometry(30,Array.Empty<NavObstacle>(),1),PlayableProfile.Default.Navigation);restored.RestoreState(decoded);Assert.Zero(restored.CaptureState().InstalledExecutionLayoutVersion);Assert.IsNull(restored.CaptureState().InstalledExecutionKeys);
+                foreach(int id in new[]{10,20,30})Assert.AreEqual(PlayableWorldRestoreTests.Facts(source.InstalledExecutionFor(id).Corridor),PlayableWorldRestoreTests.Facts(restored.InstalledExecutionFor(id).Corridor));Assert.AreEqual(source.AppliedResults,restored.AppliedResults);Assert.Zero(restored.PendingCount);
+            }finally{restored?.DestroyNavigationAuthority();source.DestroyNavigationAuthority();}
+        }
+        [Test] public void A5VersionEightRequiresExplicitFormatAndVersionNineKeepsItsExactBytes()
+        {
+            var source=InstalledLayoutFixture();try{var state=source.CaptureState();var current=WorldWire.Pack(w=>WorldWire.Write(w,state));int tag=QueueLegacyLayout.Tag(current,0x47525031);Assert.AreEqual(9,BitConverter.ToInt32(current,tag+4));int hostTail=4+4*state.RegisteredRequestIndices.Length+4+4*state.DeliveredRequestIndices.Length+4+state.HostAuthority.Length;
+                var missingBody=(byte[])current.Clone();BitConverter.GetBytes(0).CopyTo(missingBody,current.Length-state.HostAuthority.Length-4);
+                Assert.Throws<ArgumentException>(()=>WorldWire.Unpack(missingBody,WorldWire.ReadNavigationSessionState),"Current format requires a nonempty host BODY before publication");
+                Assert.Throws<ArgumentException>(()=>WorldWire.Unpack(current.Take(current.Length-1).ToArray(),WorldWire.ReadNavigationSessionState),"Truncated host BODY cannot be read as a legacy tail");
+                var legacy=current.Take(current.Length-hostTail).ToArray();BitConverter.GetBytes(8).CopyTo(legacy,tag+4);Assert.Throws<ArgumentException>(()=>WorldWire.Unpack(legacy,WorldWire.ReadNavigationSessionState));Assert.Throws<ArgumentException>(()=>WorldWire.Unpack(legacy,r=>WorldWire.ReadNavigationSessionState(r,NavigationV8Format.MainInstalledLayout)));
+                using(var decoded=WorldWire.Unpack(legacy,r=>WorldWire.ReadNavigationSessionState(r,NavigationV8Format.A5Arrival))){CollectionAssert.AreEqual(state.ArrivalAuthority,decoded.ArrivalAuthority);CollectionAssert.AreEqual(state.AllocationRequestIndices,decoded.AllocationRequestIndices);Assert.IsNull(decoded.HostAuthority);}
+                using(var decoded=WorldWire.Unpack(current,WorldWire.ReadNavigationSessionState))CollectionAssert.AreEqual(current,WorldWire.Pack(w=>WorldWire.Write(w,decoded)));
+            }finally{source.DestroyNavigationAuthority();}
         }
 
         [Test] public void HostClearReleasesNearCapReservationAfterOldWorldIsCleared()

@@ -42,6 +42,8 @@ namespace Spacewars.Simulation.Ai
             new AiProfileField("decision.retryLimit","ИИ / Внимание","Предел повторных попыток","После лимита отмена намерения/новая оценка причины.","attempts",1d,8d,1d,3d,true),
             new AiProfileField("economy.incomeWindowSeconds","ИИ / Экономика","Окно оценки дохода","Окно settled income и capacity.","s",5d,120d,5d,30d,false),
             new AiProfileField("economy.reserveSeconds","ИИ / Экономика","Горизонт резерва","Резерв в пределах этого горизонта подтверждённого расхода.","s",0d,60d,1d,15d,false),
+            new AiProfileField("economy.remoteExpansionShare","ИИ / Экспансия","Доля дальних экспансий","Вероятность дальней площадки при выборе новой цели. Если подходящей нет, выбирается ближайшая безопасная к своей базе.","ratio",0d,1d,0.01d,0.1d,false),
+            new AiProfileField("economy.enemyMainProtectedIncomeSites","ИИ / Экспансия","Ближайшие площадки врага","Число ближайших к известному вражескому мэйну доходных площадок, исключённых из дальних целей. Ближайшая свободная для врага также исключена.","sites",0d,32d,1d,2d,true),
             new AiProfileField("economy.reservationExpirySeconds","ИИ / Экономика","Срок денежного обязательства","Максимальный срок стратегического накопления без прогресса.","s",5d,180d,5d,45d,false),
             new AiProfileField("economy.excessBankDeadlineSeconds","ИИ / Экономика","Допустимое ожидание расхода","Окно допустимого excess bank при useful affordable action.","s",5d,120d,5d,20d,false),
             new AiProfileField("economy.idleLineDeadlineSeconds","ИИ / Экономика","Допустимый простой линии","Окно незагруженной affordable production line.","s",1d,30d,1d,8d,false),

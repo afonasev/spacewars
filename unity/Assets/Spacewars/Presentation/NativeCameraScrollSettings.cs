@@ -38,7 +38,7 @@ namespace Spacewars.Presentation
                 slider.RegisterValueChangedCallback(e=>
                 {
                     float value=Mathf.Clamp((float)(field.Minimum+Math.Round((e.newValue-field.Minimum)/field.Step)*field.Step),(float)field.Minimum,(float)field.Maximum);
-                    slider.SetValueWithoutNotify(value);PlayerPrefs.SetFloat(key,value);PlayerPrefs.Save();label.text=value.ToString("0.#")+" м/с";
+                    slider.SetValueWithoutNotify(value);NativePreferenceWriter.SetFloat(key,value);label.text=value.ToString("0.#")+" м/с";
                 });
                 slider.userData=new Action<int>(direction=>slider.value=Mathf.Clamp(slider.value+direction*(float)field.Step,slider.lowValue,slider.highValue));
             }

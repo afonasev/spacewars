@@ -1,5 +1,9 @@
 {
   "schemaVersion": 9,
+  "crowdMotionHeadingIntervals": 16,
+  "crowdMotionSpeedBands": 2,
+  "crowdMotionLookaheadSeconds": 1.2,
+  "crowdMotionNeighborCap": 8,
   "profileId": "unity-owner-research-queue-u6-v1",
   "revision": 1,
   "sourceCommit": "7d0acb8d078451eaf0ed166a6f8b6d748925abf8",
@@ -258,5 +262,8 @@
   "followDistance": 2,
   "followArrivalTolerance": 0.25,
   "idleAutoDefenseMultiplier": 1.1,
-  "unitOrderQueueLimit": 64
+  "unitOrderQueueLimit": 64,
+  "healthBarOutlineWidth": 0.035,
+  "buildingSelectionPadding": 0.35,
+  "buildingSelectionWidth": 0.1
 }

@@ -42,7 +42,7 @@ namespace Spacewars.Tests.EditMode
         private static byte[] DomainAfterTerms(byte[] bytes,bool legacy)
         {
             var legacyCodec=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.LegacyQueueCodec",true);
-            int fields=legacy?((Array)legacyCodec.GetProperty("Fields",BindingFlags.Static|BindingFlags.NonPublic).GetValue(null)).Length:PlayableProfileMetadata.Fields.Count;
+            int fields=legacy?((Array)legacyCodec.GetProperty("Fields",BindingFlags.Static|BindingFlags.NonPublic).GetValue(null)).Length:PlayableProfileMetadata.PreCrowdFields.Count;
             using(var stream=new MemoryStream(bytes))using(var reader=new BinaryReader(stream)){
                 int count=reader.ReadInt32();for(int i=0;i<count;i++){reader.ReadInt32();int n=reader.ReadInt32();if(n>=0)reader.ReadBytes(n);reader.ReadBytes(fields*8);}return bytes.Skip((int)stream.Position).ToArray();
             }

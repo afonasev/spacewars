@@ -121,14 +121,14 @@ namespace Spacewars.Presentation
         }
         private PlayableProfile ComposeLobbyProfile(PlayableProfile balance)
         {
-            IPlayableTerrain map=lobbySetup.MossHighland?new MossHighlandMap():lobbySetup.BasaltCrown?new BasaltCrownMap():lobbySetup.AiTestMap?new AiTestMap():lobbySetup.Foundry?new FoundryMap(JsonUtility.FromJson<FoundryProfileData>(Resources.Load<TextAsset>("FoundryProfile").text)):(IPlayableTerrain)new ThreeCrossingsMap(JsonUtility.FromJson<ThreeCrossingsProfileData>(Resources.Load<TextAsset>("ThreeCrossingsProfile").text));
+            IPlayableTerrain map=lobbySetup.MossHighland?new MossHighlandMap(JsonUtility.FromJson<MossHighlandProfileData>(Resources.Load<TextAsset>("MossHighlandProfile").text)):lobbySetup.BasaltCrown?new BasaltCrownMap():lobbySetup.AiTestMap?new AiTestMap():lobbySetup.Foundry?new FoundryMap(JsonUtility.FromJson<FoundryProfileData>(Resources.Load<TextAsset>("FoundryProfile").text)):(IPlayableTerrain)new ThreeCrossingsMap(JsonUtility.FromJson<ThreeCrossingsProfileData>(Resources.Load<TextAsset>("ThreeCrossingsProfile").text));
             return PlayableProfile.Create(balance.CopyData(),map,balance.DisplayName);
         }
         private void SelectLobbyMap(bool foundry,bool aiTest=false,bool basalt=false,bool moss=false)
         {
             bool defaults=!lobbyRosterEdited;
             lobbySetup.Foundry=foundry;lobbySetup.AiTestMap=aiTest;lobbySetup.BasaltCrown=basalt;lobbySetup.MossHighland=moss;if(defaults){lobbySetup.Participants=null;lobbySetup.InitializeParticipants();}
-            EnsureBalanceStore();profile=ComposeLobbyProfile(balanceStore.Selected);
+            EnsureBalanceStore();profile=ComposeLobbyProfile(balanceStore.Active);
             lobbyTerrain?.Dispose();lobbyTerrain=new PlayableMapTerrain(profile);lobbyTerrain.ShowPublicTerrain();lobbyPreview.Rebind(profile,lobbyTerrain.Texture);
             mapInfo.Q<Label>("lobby-map-capacity").text=moss?"4 игровых места":aiTest?"8 игровых мест":foundry?"6 игровых мест":"2 игровых места";
             mapPanel.Q<Label>("lobby-map-description").text=moss?"Влажный мох покрывает низины между серыми скальными грядами. Четыре стартовых сектора сходятся у центральной высоты; фланговые форпосты открывают пути к соседним базам.":basalt?"Базальтовый бастион возвышается над каменным кольцом. Два спуска ведут к двум шахтам на центральной высоте; внешние обходы связывают диагональные базы и боковые расширения.":aiTest?"Открытый полигон для проверки ИИ: восемь стартов, шахты и точки расширения. Без стен и перепадов высоты.":foundry?FoundryLobbyDescription:CrossingsLobbyDescription;
@@ -292,6 +292,13 @@ namespace Spacewars.Presentation
             if(lobbyScreen.style.display.value!=DisplayStyle.Flex){Record("evidence entry FAIL lobby timeout");Quit();yield break;}
             yield return new WaitForEndOfFrame();
             ScreenCapture.CaptureScreenshot(Path.Combine(evidence,"entry-lobby.png"));
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if(routePerformanceEvidence&&Array.IndexOf(Environment.GetCommandLineArgs(),"-fourPlayerPerformanceEvidence")>=0){
+                lobbyScreen.Q<DropdownField>("lobby-map-choice").value=MossLobbyName;
+                for(int i=0;i<lobbySetup.Participants.Count;i++){var p=lobbySetup.Participants[i];p.Human=false;p.Team=i+1;p.Name="ИИ "+(i+1);p.Difficulty=Spacewars.Simulation.Ai.AiDifficulty.Fighter;}
+                RebuildRoster();RefreshLobbyValidation();
+            }
+#endif
             launchButton.Focus();menuNavigation.Activate();
             while((inLobby||preparing)&&Time.realtimeSinceStartup<deadline)yield return null;
             if(inLobby||preparing||runtime==null){Record("evidence entry FAIL match timeout");Quit();yield break;}
@@ -331,7 +338,7 @@ namespace Spacewars.Presentation
         }
         private bool TryPrepareLobbySession()
         {
-            try{EnsureBalanceStore();profile=ComposeLobbyProfile(balanceStore.Selected);RecreateMapPresentation();StartSession();paused=true;return true;}
+            try{EnsureBalanceStore();profile=ComposeLobbyProfile(balanceStore.Active);NativeGameplayAudioProfile.UseSession(balanceStore.ActiveAudio);RecreateMapPresentation();StartSession();paused=true;return true;}
             catch(Exception error)
             {
                 Debug.LogException(error);runtime?.RequestStop();runtime=null;preparing=false;

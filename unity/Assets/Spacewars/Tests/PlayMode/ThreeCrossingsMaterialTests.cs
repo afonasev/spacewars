@@ -65,16 +65,22 @@ namespace Spacewars.Tests.PlayMode
                     r.GetPropertyBlock(block);int role=(int)block.GetFloat("_SurfaceRole");if(role==0)continue;
                     if(shared==null)shared=r.sharedMaterial;Assert.AreSame(shared,r.sharedMaterial);
                     Assert.AreSame(world.Fog.Texture,r.sharedMaterial.GetTexture("_FogMask"));
-                    if(r.name.EndsWith("-ramp"))Assert.AreEqual(2,role);
+                    if(r.name.StartsWith("platform-")){Assert.AreEqual(3,role);Assert.AreEqual(1,block.GetVector("_PlatformSteel").x);var bounds=block.GetVector("_PlatformBounds");Assert.Greater(bounds.z,bounds.x);Assert.Greater(bounds.w,bounds.y);}
+                    else Assert.AreEqual(0,block.GetVector("_PlatformSteel").x,"Steel finish variation is platform-only");
                     if(role==1)ground++;if(role==2)concrete++;if(role==3&&!r.name.StartsWith("Detail —"))metal++;
                     Assert.IsNull(r.GetComponent<Collider>());
                 }
-                Assert.AreEqual(2,ground);Assert.GreaterOrEqual(concrete,24);Assert.AreEqual(9,metal); // Three decks plus six rails.
+                Assert.AreEqual(2,ground);Assert.AreEqual(0,concrete);Assert.AreEqual(9+Map().Supports.Count(s=>s.Id.StartsWith("platform-"))+2*Map().Solids.Count(PlayableWorld.IsPlatformFence),metal); // Decks, ramps, foundation strips and fences.
                 var mask=(Texture2D)shared.GetTexture("_RoadMask");
                 Assert.Greater(mask.GetPixelBilinear((float)(-19.0/128+.5),.5f).r,.9f);
                 Assert.Less(mask.GetPixelBilinear(.5f,.65f).r,.01f);
-                Assert.AreEqual("three-crossings-materials-v1@12",world.SurfaceRevision);
-                Assert.AreEqual("natural-frontier-v1@9",world.EnvironmentRevision);
+                Assert.AreEqual("three-crossings-materials-v1@22",world.SurfaceRevision);
+                var surfaceProfile=ThreeCrossingsSurfaceProfile.Load();
+                Assert.AreEqual(new Vector4(surfaceProfile.roadCoreShade,surfaceProfile.roadShoulderTone,surfaceProfile.roadRutStrength,surfaceProfile.roadEdgeVariation),shared.GetVector("_CrossingsRoadFinish"));
+                Assert.AreEqual(surfaceProfile.minePadContactStrength,shared.GetVector("_CrossingsMinePad").y);
+                Assert.AreEqual(surfaceProfile.minePadContactWidth,shared.GetVector("_CrossingsMinePad").z);
+                Assert.Less(surfaceProfile.roadFeather,1,"Road shoulders must preserve a compacted center.");
+                Assert.AreEqual("natural-frontier-v1@11",world.EnvironmentRevision);
             }}finally{UnityEngine.Object.DestroyImmediate(root);}
         }
         [Test] public void ExpandedRoadPaintStopsAtSolidsAndFillsBridgeContacts()
@@ -140,7 +146,13 @@ namespace Spacewars.Tests.PlayMode
                 {
                     Assert.AreEqual(1,material.GetVector("_CrossingsPalette").x);
                     Assert.AreEqual(profile.paletteWidth,material.GetVector("_CrossingsPalette").w);
+                    Assert.AreEqual(new Vector4(1,profile.rockProjectionTransition,0,0),material.GetVector("_CrossingsRockProjection"));
+                    Assert.AreEqual(new Vector4(1,profile.groundOpenDetail,profile.groundFootDetail,profile.groundGrainRetention),material.GetVector("_CrossingsGroundDetail"));
+                    Assert.AreEqual(new Vector4(profile.rockFootContactWidth,profile.rockFootContactStrength,profile.rockFootDustReach,profile.rockFootDustStrength),material.GetVector("_CrossingsRockFoot"));
+                    Assert.AreEqual(profile.rockFootPatchScale,material.GetFloat("_CrossingsFootPatch"));
                     Assert.AreEqual(profile.concreteDetailContrast,material.GetVector("_CrossingsInfrastructure").z);
+                    Assert.AreEqual(new Vector4(QualitySettings.activeColorSpace==ColorSpace.Linear?Mathf.GammaToLinearSpace(profile.mineYardValue):profile.mineYardValue,profile.minePadContactStrength,profile.minePadContactWidth,0),material.GetVector("_CrossingsMinePad"));
+                    Assert.AreEqual(new Vector4(profile.roadCoreShade,profile.roadShoulderTone,profile.roadRutStrength,profile.roadEdgeVariation),material.GetVector("_CrossingsRoadFinish"));
                     Assert.AreNotEqual(material.GetColor("_BasaltTint"),material.GetColor("_RustTint"));
                     Assert.Greater(material.GetVector("_CrossingsConstruction").w,.5f,"Wheels must expose construction under sand");
                     Color.RGBToHSV(material.GetColor("_RustTint"),out float h,out float s,out float v);
@@ -312,6 +324,26 @@ namespace Spacewars.Tests.PlayMode
                     finally{UnityEngine.Object.DestroyImmediate(original);UnityEngine.Object.DestroyImmediate(detailed);}
                 }
             }}finally{UnityEngine.Object.DestroyImmediate(material);}
+        }
+        [Test] public void PlatformFencesStayInsideExistingBlockersAndKeepOpenGaps()
+        {
+            var map=Map();var profile=ThreeCrossingsSurfaceProfile.Load();
+            float deck=(float)map.Supports.First(s=>s.Id.StartsWith("platform-")&&!s.Id.EndsWith("-ramp")).Height;
+            var walls=map.Solids.Where(PlayableWorld.IsPlatformFence).ToArray();Assert.AreEqual(56,walls.Length);
+            foreach(var wall in walls)
+            {
+                var mesh=PlayableWorld.PlatformFence(wall,deck,profile);
+                try
+                {
+                    Assert.Greater(mesh.vertexCount,100);
+                    Assert.AreEqual(deck,mesh.bounds.min.y,.001f);Assert.AreEqual(wall.Top,mesh.bounds.max.y,.001);
+                    foreach(var v in mesh.vertices)Assert.IsTrue(wall.Contains(new NavPoint(v.x,v.z))||wall.BoundaryDistanceSquared(new NavPoint(v.x,v.z))<.000001,"Fence must stay inside the existing blocker, including beside gates");
+                    // Each face belongs to a narrow bar: no solid wall spanning a section.
+                    var vertices=mesh.vertices;
+                    for(int i=0;i<vertices.Length;i+=3)Assert.LessOrEqual(Mathf.Min((vertices[i+1]-vertices[i]).magnitude,Mathf.Min((vertices[i+2]-vertices[i]).magnitude,(vertices[i+2]-vertices[i+1]).magnitude)),profile.platformFenceWidth*1.5f);
+                }
+                finally{UnityEngine.Object.DestroyImmediate(mesh);}
+            }
         }
         [Test] public void MetalBridgeLatticeIsOpenAndOutsideDriveableWidth()
         {

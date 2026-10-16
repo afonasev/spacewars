@@ -43,7 +43,7 @@ namespace Spacewars.Presentation
                 else if(p.AuthoredMap is MossHighlandMap moss){
                     var q=new NavPoint(wx,wz);var patch=moss.Materials.FirstOrDefault(m=>m.Bounds.Contains(q));var color=mossArt.Palette(patch==null?4:MossHighlandArtProfile.Role(patch.Material));
                     Color.RGBToHSV(color,out float mh,out float ms,out float mv);color=Color.HSVToRGB(mh,ms*(float)p.MinimapTerrainSaturation,mv*(float)p.MinimapTerrainBrightness);
-                    terrain[y*size+x]=obstacle?color*(float)(1-p.MinimapTerrainTierContrast):color;
+                    terrain[y*size+x]=moss.BorderRivers.Any(r=>r.Contains(q))?mossArt.RiverColor:moss.BorderMountains.Any(r=>r.Contains(q))?mossArt.Palette(1)*(float)(1-p.MinimapTerrainTierContrast):obstacle?color*(float)(1-p.MinimapTerrainTierContrast):color;
                 }
                 else if(p.AuthoredMap is BasaltCrownMap basalt){
                     var q=new NavPoint(wx,wz);var patch=basalt.Materials.FirstOrDefault(m=>m.Bounds.Contains(q));

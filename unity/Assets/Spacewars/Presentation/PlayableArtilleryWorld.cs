@@ -39,7 +39,7 @@ namespace Spacewars.Presentation
                 if(p.Marker!=null)
                 {
                     markerIds.Add(p.Id);
-                    if(!impactMarkers.TryGetValue(p.Id,out var marker)){marker=projectileVisuals.GroundCircle(transform,ShotColor(p.Faction,(float)p.Marker.Opacity));impactMarkers.Add(p.Id,marker);}
+                    if(!impactMarkers.TryGetValue(p.Id,out var marker)){marker=projectileVisuals.GroundCircle(transform,ShotColor(p.Faction,(float)p.Marker.Opacity));world.Layer(marker);impactMarkers.Add(p.Id,marker);}
                     marker.transform.position=world.Point(p.Marker.Position)+Vector3.up*.015f;
                     var slope=profile.AuthoredMap?.SurfaceGradient(p.Marker.Position)??default(NavPoint);
                     marker.transform.rotation=Quaternion.FromToRotation(Vector3.up,new Vector3(-(float)slope.X,1,-(float)slope.Z).normalized);
@@ -55,7 +55,7 @@ namespace Spacewars.Presentation
                     else if(p.Kind==PlayableEntityKind.Tank&&profile.TankProjectileType=="kinetic-shell")shell=projectileVisuals.Tank(transform);
                     else if(p.Kind==PlayableEntityKind.Explorer)shell=projectileVisuals.Tracer(transform,(float)profile.ExplorerTracerLength,(float)profile.ExplorerTracerThickness);
                     else shell=world.Part("Energy orb",transform,Vector3.zero,Vector3.one*.36f,new Color(.498f,.965f,1),PrimitiveType.Sphere);
-                    shells[p.Id]=shell;
+                    world.Layer(shell);shells[p.Id]=shell;
                 }
                 shell.transform.position=new Vector3((float)p.Position.X,(float)p.Height,(float)p.Position.Z);
                 shell.transform.rotation=Quaternion.Euler(0,-(float)p.Heading*Mathf.Rad2Deg,0)*Quaternion.Euler(0,0,(float)p.Pitch*Mathf.Rad2Deg);
@@ -69,7 +69,7 @@ namespace Spacewars.Presentation
             foreach(var id in impactMarkers.Keys.Where(id=>!markerIds.Contains(id)).ToArray()){Destroy(impactMarkers[id]);impactMarkers.Remove(id);}
             var effects=new HashSet<int>();foreach(var p in view.Impacts)
             {
-                effects.Add(p.Id);if(!impactEffects.TryGetValue(p.Id,out var effect)){effect=projectileVisuals.ImpactFlash(transform);impactEffects.Add(p.Id,effect);}
+                effects.Add(p.Id);if(!impactEffects.TryGetValue(p.Id,out var effect)){effect=projectileVisuals.ImpactFlash(transform);world.Layer(effect);impactEffects.Add(p.Id,effect);}
                 effect.transform.position=new Vector3((float)p.Point.X,(float)p.Point.Y,(float)p.Point.Z);
                 float age=Mathf.Clamp01((float)((view.Tick-p.Tick)/30d/profile.ImpactEffectSec));
                 effect.transform.localScale=Vector3.one*(float)profile.ImpactEffectRadius*2*Mathf.Max(Mathf.Epsilon,age);

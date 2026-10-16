@@ -35,6 +35,17 @@ namespace Spacewars.Runtime
             =>request.MemberIdentity!=null&&request.MemberIdentity.GroupId==execution.GroupId&&
                 request.MemberIdentity.OrderRevision==execution.Order.Revision&&request.MemberIdentity.Incarnation==execution.Incarnation&&
                 request.Goal.Equals(execution.AssignedGoal)&&request.GoalLocation.HasValue&&request.GoalLocation.Value.Equals(execution.AssignedLocation.Value);
+        private void ObserveEndpointAssignment(NavigationRequest request)
+        {
+            if(tacticalQueues.TryGetValue(request.Entity,out var q)) {
+                var e=Matches(q.Pending,request)?q.Pending:null;
+                if(e!=null){e.Assigned=request.GoalLocation;e.AttemptLocation=request.GoalLocation;e.AttemptRequest=request.Request;e.AttemptOrder=request.Order;}
+            }
+            if(spatialExecutions.TryGetValue(request.Entity,out var execution)&&request.MemberIdentity!=null&&
+                execution.GroupId==request.MemberIdentity.GroupId&&execution.Order.Revision==request.MemberIdentity.OrderRevision&&execution.Incarnation==request.MemberIdentity.Incarnation){
+                execution.AssignedGoal=request.Goal;execution.AssignedLocation=request.GoalLocation;
+            }
+        }
         private void ObserveSpatialRequest(NavigationRequest request)
         {
             ObserveTacticalRequest(request);
@@ -105,10 +116,11 @@ namespace Spacewars.Runtime
             int receipts=reader.ReadInt32();if(receipts!=spatialCompletions.Count)throw new ArgumentException("Surface receipt count mismatch.");seen.Clear();
             for(int i=0;i<receipts;i++){int id=reader.ReadInt32();if(!seen.Add(id)||!spatialCompletions.TryGetValue(id,out var x))throw new ArgumentException("Surface receipt identity mismatch.");var original=GroupOrderWire.ReadLocation(reader);var assigned=GroupOrderWire.ReadLocation(reader);if(!original.HasValue||!assigned.HasValue||!original.Value.Equals(x.OriginalLocation))throw new ArgumentException("Surface receipt anchor mismatch.");spatialCompletions[id]=new PlayableSpatialCompletion(x.Order,x.GroupId,x.Incarnation,original.Value,assigned.Value,x.ActivationTick,x.CompletionTick);}
         }
-        private void ValidateSpatialCompletions()
+        private void ValidateSpatialCompletions(NavigationSessionState privateNavigation)
         {
-            var checkpoint=navigation.CaptureState();
-            var pendingRequests=checkpoint.PendingRequestIndices.Select(i=>checkpoint.Requests[i]).ToDictionary(r=>r.Entity);
+            using var validationCapture=privateNavigation==null?navigation.CaptureOwnedState():null;
+            var checkpoint=privateNavigation??validationCapture;
+            var pendingRequests=checkpoint.PendingRequestIndices.Concat(checkpoint.AllocationRequestIndices??System.Array.Empty<int>()).Select(i=>checkpoint.Requests[i]).ToDictionary(r=>r.Entity);
             var orderWatermarks=checkpoint.Orders.ToDictionary(o=>o.Entity,o=>o.Order);
             void Validate(PlayableOrderStamp order,long groupId,long incarnation,NavPoint target,long activationTick,bool pending=false){
                 if(order==null||order.Kind!=PlayableCommandKind.Move||!units.TryGetValue(order.UnitId,out var unit)||

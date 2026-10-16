@@ -191,13 +191,21 @@ namespace Spacewars.Runtime
         {
             internal NavGeometry Geometry;internal NavigationProfile Profile;internal double Radius,Speed,Turn;internal SharedFlowRouter Router;
         }
-        private const int ObservedRouteFieldLimit=8;
+        private const int ObservedRouteFieldLimit=64;
         private const int ObservedRouteProfileLimit=8;
+        private sealed class ObservedGeometryCache
+        {
+            internal NavGeometry Authority;
+            internal bool[] Authored;
+            internal readonly List<NavObstacle> Scratch=new List<NavObstacle>();
+            internal readonly Dictionary<PlayableVision,NavGeometry> Views=new Dictionary<PlayableVision,NavGeometry>();
+        }
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PlayableDomain,ObservedGeometryCache> observedGeometryCaches=new System.Runtime.CompilerServices.ConditionalWeakTable<PlayableDomain,ObservedGeometryCache>();
         private SharedFlowRouter ObservedRouter(PlayableOwner owner,NavGeometry observed,NavigationProfile basis,double radius,double speed,double turn)
         {
             var caches=observedRouteCaches.GetValue(this,_=>new Dictionary<PlayableOwner,List<ObservedRouteCache>>());
             if(!caches.TryGetValue(owner,out var pool))caches.Add(owner,pool=new List<ObservedRouteCache>());
-            bool SameGeometry(NavGeometry a,NavGeometry b)=>a.HalfExtent==b.HalfExtent&&a.Obstacles.Count==b.Obstacles.Count&&a.Obstacles.Select((o,i)=>o.GeometryEquals(b.Obstacles[i])).All(x=>x);
+            bool SameGeometry(NavGeometry a,NavGeometry b)=>ReferenceEquals(a,b)||a.HalfExtent==b.HalfExtent&&a.Obstacles.Count==b.Obstacles.Count&&a.Obstacles.Select((o,i)=>o.GeometryEquals(b.Obstacles[i])).All(x=>x);
             // Mixed armies alternate footprints on every review. Retain independent exact
             // predicates/fields instead of discarding the previous unit's whole router.
             var cache=pool.Find(c=>ReferenceEquals(c.Profile,basis)&&c.Radius==radius&&c.Speed==speed&&c.Turn==turn);
@@ -211,6 +219,9 @@ namespace Spacewars.Runtime
                 }
             }
             pool.Add(cache); // Bounded least-recently-used profile ownership, never persisted.
+            // Four-player reviews include more than eight recurring objectives/candidates.
+            // Keep a bounded working set (64 fields per typed observer router), not
+            // a seven-entry cache that cyclically evicts every public objective.
             // A request can add both floor and attachment fields. Evict old fields while
             // retaining exact grid predicates for this unchanged observer geometry/profile.
             if(cache.Router==null)cache.Router=new SharedFlowRouter(cache.Geometry,basis.ForUnit(radius,speed,turn),null);
@@ -221,12 +232,32 @@ namespace Spacewars.Runtime
         {
             // The observer solves on visible solids with the production navigation solver, then
             // checks every segment against authoritative solids. Hidden geometry can only remove proof.
-            var observed=Geometry.Obstacles.Where(o=>IsObservedObstacle(o,vision)).ToArray();
+            var cache=observedGeometryCaches.GetValue(this,_=>new ObservedGeometryCache());
+            // Authoritative geometry and authored map solids are immutable. Resolve the
+            // public-map membership once per geometry, not for every obstacle on every tick.
+            if(!ReferenceEquals(cache.Authority,Geometry)){
+                cache.Authority=Geometry;cache.Authored=new bool[Geometry.Obstacles.Count];
+                for(int i=0;i<cache.Authored.Length;i++)cache.Authored[i]=offline?.Obstacles.Any(a=>a.GeometryEquals(Geometry.Obstacles[i]))==true;
+            }
+            cache.Views.TryGetValue(vision,out var previous);
+            var observed=cache.Scratch;observed.Clear();
+            bool unchanged=previous!=null&&previous.HalfExtent==Geometry.HalfExtent;
+            for(int i=0;i<Geometry.Obstacles.Count;i++){
+                var obstacle=Geometry.Obstacles[i];
+                if(!cache.Authored[i]&&!ObstacleCornersVisible(obstacle,vision))continue;
+                int index=observed.Count;observed.Add(obstacle);
+                if(unchanged&&(index>=previous.Obstacles.Count||!obstacle.GeometryEquals(previous.Obstacles[index])))unchanged=false;
+            }
+            // Exact ordered solids determine reuse, never a hash or a visibility revision.
+            // A hidden authority change must not invalidate an unchanged observer view.
+            if(unchanged&&observed.Count==previous.Obstacles.Count)return previous;
             // This identity depends only on observed solids, never on hidden authority revisions.
             int observedRevision=1;
             unchecked{foreach(var obstacle in observed)observedRevision=observedRevision*31+obstacle.MinX.GetHashCode()+obstacle.MinZ.GetHashCode()+obstacle.MaxX.GetHashCode()+obstacle.MaxZ.GetHashCode();}
             observedRevision=observedRevision==int.MinValue?int.MaxValue:Math.Max(1,Math.Abs(observedRevision));
-            return new NavGeometry(Geometry.HalfExtent,observed,observedRevision);
+            var result=new NavGeometry(Geometry.HalfExtent,observed.ToArray(),observedRevision);
+            if(cache.Views.Count>=8&&!cache.Views.ContainsKey(vision))cache.Views.Clear();
+            cache.Views[vision]=result;return result;
         }
         internal void PreparePublicNavigation(PlayableOwner owner,Func<bool> stopping=null)
         {
@@ -466,9 +497,8 @@ namespace Spacewars.Runtime
         internal bool ArmyWithdrawalSafe(PlayableAiAction action)=>CheckArmyMove(action,true);
         // Authored map blockers are public geography. Dynamic solids remain fog-gated
         // until all four obstacle corners are currently visible.
-        private bool IsObservedObstacle(NavObstacle obstacle,PlayableVision vision)
-            =>offline?.Obstacles.Any(authored=>authored.GeometryEquals(obstacle))==true||
-                vision.IsVisible(new NavPoint(obstacle.MinX,obstacle.MinZ))&&
+        private static bool ObstacleCornersVisible(NavObstacle obstacle,PlayableVision vision)
+            =>vision.IsVisible(new NavPoint(obstacle.MinX,obstacle.MinZ))&&
                 vision.IsVisible(new NavPoint(obstacle.MaxX,obstacle.MinZ))&&
                 vision.IsVisible(new NavPoint(obstacle.MinX,obstacle.MaxZ))&&
                 vision.IsVisible(new NavPoint(obstacle.MaxX,obstacle.MaxZ));
@@ -480,9 +510,10 @@ namespace Spacewars.Runtime
             if(action.Kind==PlayableCommandKind.Follow&&(leader==null||Spacewars.Simulation.Ai.AiRosterCatalog.Initial.For(leader.Kind).lineWeight<=0))return false;
             var target=leader==null?action.Target:PlayableUnitRules.FollowGoal(profile,leader.Position,leader.HullHeading);
             // Move coordinates and own-entity Follow goals remain actionable through fog.
-            var observed=Geometry.Obstacles.Where(x=>IsObservedObstacle(x,vision)).ToArray();
-            var geometry=new NavGeometry(Geometry.HalfExtent,observed,1);
-            var slots=leader==null?navigation.AllocateArrivalSlots(target,action.EntityIds):action.EntityIds.Select(_=>target).ToArray();
+            var geometry=ObservedGeometry(vision);
+            double largest=0,slotSpeed=profile.Navigation.TankSpeed,slotTurn=profile.Navigation.TankTurnSpeed;
+            foreach(int id in action.EntityIds){var own=o.Entities.FirstOrDefault(u=>u.Id==id&&u.Owner==owner&&u.Health>0);if(own==null||!navigation.Crowd.TryGet(id,out var mover))return false;double ownRadius=PlayableUnitRules.Radius(profile,own.Kind);if(ownRadius>largest){largest=ownRadius;slotSpeed=mover.Speed;slotTurn=mover.TurnSpeed;}}
+            var slots=leader==null?NavArrivalAllocator.Allocate(geometry,profile.Navigation.ForUnit(largest,slotSpeed,slotTurn),target,action.EntityIds.Count):action.EntityIds.Select(_=>target).ToArray();
             if(slots.Length!=action.EntityIds.Count||leader==null&&slots.Length==1&&!slots[0].Equals(target))return false;
             for(int index=0;index<action.EntityIds.Count;index++)
             {
@@ -490,9 +521,9 @@ namespace Spacewars.Runtime
                 var unit=o.Entities.FirstOrDefault(u=>u.Id==id&&u.Owner==owner&&u.Health>0);if(unit==null||!navigation.Crowd.TryGet(id,out var nav))return false;
                 var radius=PlayableUnitRules.Radius(profile,unit.Kind);if(!geometry.IsFree(goal,radius))return false;
                 var path=new SharedFlowRouter(geometry,profile.Navigation.ForUnit(radius,nav.Speed,nav.TurnSpeed)).FindPath(unit.Position,goal);
-                if(path.Length==0&&Distance(unit.Position,goal)<=profile.Navigation.ArrivalTolerance&&Geometry.SegmentFree(unit.Position,goal,radius))path=new[]{goal};
+                if(path.Length==0&&Distance(unit.Position,goal)<=profile.Navigation.ArrivalTolerance&&geometry.SegmentFree(unit.Position,goal,radius)&&VisibleSegment(vision,unit.Position,goal))path=new[]{goal};
                 if(path.Length==0||!path.Last().Equals(goal)||!(withdrawal?AiTacticalExecutor.WithdrawalPath(o,unit.Position,path,radius,profile):AiTacticalExecutor.SafePath(o,unit.Position,path,radius,profile)))return false;
-                var at=unit.Position;foreach(var point in path){if(!Geometry.SegmentFree(at,point,radius))return false;at=point;}
+                var at=unit.Position;foreach(var point in path){if(!geometry.SegmentFree(at,point,radius)||!VisibleSegment(vision,at,point))return false;at=point;}
             }
             return true;
         }
