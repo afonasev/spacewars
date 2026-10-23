@@ -1,0 +1,11 @@
+{
+  "schema": "local-evidence-cleanup-publication-v1",
+  "project": "spacewars",
+  "completedPackages": 16,
+  "removedLocalPayloadFiles": 221,
+  "removedLocalPayloadBytes": 369825821,
+  "exactRecoveryVerifiedBeforeAndAfterDeletion": 221,
+  "publicBaseRevision": "8f7e4f3ed978ebb382ab9b50d8e99ca556fcd524",
+  "affectedPayloadPathsPresentInPublicBase": 0,
+  "note": "These historical payloads were already absent from the public source baseline. Cleanup preserves exact original bytes and per-file SHA-256 indexes in the canonical local planning store and local code Git history. Public game sources and current evidence are unchanged."
+}

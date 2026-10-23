@@ -1,3 +1,5 @@
 .local/
 artifacts/
 **/__pycache__/
+
+/.local/

@@ -1,0 +1,10 @@
+version = 1
+name = "Spacewars lightweight worktree"
+
+[setup]
+script = "python3 tools/worktree_storage.py prepare --automatic"
+
+[[actions]]
+name = "Check artifact storage"
+icon = "test"
+command = "make storage-check"

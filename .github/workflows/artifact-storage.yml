@@ -1,0 +1,43 @@
+name: Artifact storage
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'artifacts/**'
+      - 'tools/worktree_storage*'
+      - 'tools/test_worktree_storage.py'
+      - '.codex/environments/environment.toml'
+      - '.github/workflows/artifact-storage.yml'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'artifacts/**'
+      - 'tools/worktree_storage*'
+      - 'tools/test_worktree_storage.py'
+      - '.codex/environments/environment.toml'
+      - '.github/workflows/artifact-storage.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compact-documents:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Test worktree isolation and storage safeguards
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTHONPATH: tools
+        run: python3 -m unittest tools.test_worktree_storage
+      - name: Check added or changed documentation payloads
+        env:
+          EVENT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          base="$EVENT_BASE"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            base="$(git rev-parse HEAD^)"
+          fi
+          python3 tools/worktree_storage.py check --base "$base"
