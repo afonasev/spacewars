@@ -29,7 +29,7 @@ namespace Spacewars.Simulation
         internal void SealPrepared()
         {
             MutableRoot();if(preparingJob!=null)throw new InvalidOperationException("Cannot seal an active scheduler operation.");
-            jobs.Seal();jobsByKey.Seal();subscribers.Seal();submittedEpoch.Seal();providerRefs.Seal();ready.Seal();cachedFields.Seal();lru.Seal();
+            corridorDonor?.Seal();jobs.Seal();jobsByKey.Seal();subscribers.Seal();submittedEpoch.Seal();providerRefs.Seal();ready.Seal();cachedFields.Seal();lru.Seal();
             rootReservation=null;rootFrozen=true;
         }
         internal LayeredNavigationScheduler ForkOwned(INavStorageReservation reservation)
@@ -39,6 +39,7 @@ namespace Spacewars.Simulation
             try{
                 fork.jobs=jobs.ForkOwned(reservation);fork.jobsByKey=jobsByKey.ForkOwned(reservation);fork.subscribers=subscribers.ForkOwned(reservation);fork.submittedEpoch=submittedEpoch.ForkOwned(reservation);
                 fork.providerRefs=providerRefs.ForkOwned(reservation);fork.ready=ready.ForkOwned(reservation);fork.cachedFields=cachedFields.ForkOwned(reservation);fork.lru=lru.ForkOwned(reservation);
+                fork.corridorBookkeeping=corridorBookkeeping;fork.boundedMode=boundedMode;fork.corridorDonor=NavPhysicalMacro.Acquire(fork,corridorDonor);fork.demandV2=demandV2;fork.demandV3=demandV3;fork.demandV4=demandV4;fork.demandV5=demandV5;fork.demandV6=demandV6;fork.demandLazy=demandLazy;fork.demandCertified=demandCertified;fork.demandRectangle=demandRectangle;fork.demandTerminalRectangle=demandTerminalRectangle;fork.demandTerminalCorner=demandTerminalCorner;fork.demandOriginShadow=demandOriginShadow;fork.demandTerminalCost=demandTerminalCost;fork.lazyCatalog=NavPhysicalMacro.Acquire(fork,lazyCatalog);fork.demandCatalog=NavPhysicalMacro.Acquire(fork,demandCatalog);
                 fork.cachedGraphKey=cachedGraphKey;fork.cachedGraphKeyReference=cachedGraphKeyReference;cachedGraphKeyReference.Owner?.Retain();fork.cachedGraph=cachedGraph;fork.cachedGraphCompiler=cachedGraphCompiler;fork.cachedGraphRecipe=cachedGraphRecipe;
                 fork.cachedGraphWork=cachedGraphWork;fork.cachedGraphBytes=cachedGraphBytes;fork.cacheBytes=cacheBytes;fork.peakCacheBytes=peakCacheBytes;
                 fork.lastEpoch=lastEpoch;fork.logicalGraph=logicalGraph;fork.physicalGraph=physicalGraph;fork.logicalField=logicalField;fork.physicalField=physicalField;
@@ -80,6 +81,7 @@ namespace Spacewars.Simulation
         internal override void ReleaseOwner()=>ReleaseStorage();
         protected override void ReleaseEdges()
         {
+            corridorDonor?.Release();corridorDonor=null;demandCatalog?.Release();demandCatalog=null;lazyCatalog?.Release();lazyCatalog=null;
             jobs?.Release();jobsByKey?.Release();subscribers?.Release();submittedEpoch?.Release();providerRefs?.Release();ready?.Release();cachedFields?.Release();lru?.Release();
             cachedGraphKeyReference.Owner?.Release();cachedGraphKeyReference=default;attemptBindingStorage?.Release();attemptBindingStorage=null;cacheGraphRoot?.Release();cacheCompilerRoot?.Release();graphRecipeStorage?.Release();attemptRecipeStorage?.Release();
             cacheGraphRoot=null;cacheCompilerRoot=null;graphRecipeStorage=null;attemptRecipeStorage=null;rootReservation=null;

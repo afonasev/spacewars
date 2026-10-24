@@ -140,6 +140,7 @@ namespace Spacewars.Runtime
                 if(r.ReadInt32()!=0x41525231)throw new ArgumentException("Unknown arrival wire.");
                 int version=r.ReadInt32();if(version!=2&&version!=3&&version!=4)throw new ArgumentException("Unsupported arrival extension version.");
                 if(version==4&&decodedHost==null)throw new ArgumentException("Arrival4 requires the same host BODY.");
+                if(version==4&&catalog==null)foreach(var pair in decodedHost.ArrivalWork)if(pair.Value is NavigationArrivalWork direct&&direct.OwnedArrivalAnchorPolicy)throw new ArgumentException("Owned arrival anchor requires its full-witness catalog leaf.");
                 physicalArrivalEnabled=version==4;
                 arrivalSequence=r.ReadInt64();arrivalCommitSequence=r.ReadInt64();if(arrivalSequence<0||arrivalCommitSequence<0)throw new ArgumentException("Invalid arrival sequence.");
                 int providerCapacity=0,idCapacity=0,leaseCapacity=0;
@@ -164,7 +165,7 @@ namespace Spacewars.Runtime
                         if(a.Retiring&&(string.IsNullOrEmpty(a.RetirementReason)||a.Retirement<1||a.Retirement>arrivalRetirementSequence)||!a.Retiring&&(a.RetirementReason!=""||a.Retirement!=0||a.RestoredRetiringCompute))throw new ArgumentException("Invalid retiring primitive owner.");
                     }else a.LegacyProviderAccounting=true;
                     NavigationArrivalWork physicalWork=null;
-                    if(version==4){if(!decodedHost.ArrivalWork.TryGetValue(a.Id,out var owner)||!(owner is NavigationArrivalWork direct))throw new ArgumentException("Missing direct arrival work.");physicalWork=direct;}
+                    if(version==4){if(!decodedHost.ArrivalWork.TryGetValue(a.Id,out var owner)||!(owner is NavigationArrivalWork direct))throw new ArgumentException("Missing direct arrival work.");physicalWork=direct;if(direct.OwnedArrivalAnchorPolicy){NavigationArrivalAttemptSnapshot witness=null;if(catalog!=null)for(int i=0;i<catalog.AttemptCount;i++)if(catalog.Attempt(i).Data.Id==a.Id){witness=catalog.Attempt(i);break;}if(witness==null||!witness.UsesAnchor||witness.FullFrontier==null||!ReferenceEquals(witness.Work,direct))throw new ArgumentException("Owned arrival anchor requires its full-witness catalog leaf.");}}
                     a.Intents=Array(r,()=>ReadArrivalIntent(r));
                     string topology=String(r),profileIdentity=String(r),sealedInput=String(r),source=String(r);int revision=r.ReadInt32();var requested=ArrivalLocation(r);
                     var candidates=Array(r,()=>ArrivalLocation(r));
@@ -236,12 +237,12 @@ namespace Spacewars.Runtime
                             a.Intents[n]=physical.Request;
                         }
                         a.Intents=originalIntents.Requests;
-                    }else a.Work=ready==null?new NavigationArrivalWork(a.Input):NavigationArrivalWork.RestoreReady(a.Input,ready);
+                    }else a.Work=NavigationArrivalWork.RestoreLegacyJournal(a.Input,ready);
                     if((a.SnapshotStatus==NavArrivalStatus.Ready)!=(ready!=null)||ready!=null&&ready.Epoch!=a.Epoch-1)throw new ArgumentException("Missing or contradictory ready checkpoint.");
                     OwnArrivalInput(a);
                     if(version>=3&&(a.InputProviderId!=inputProviderId||!a.WorkingProviderIds.SequenceEqual(workingProviderIds)))throw new ArgumentException("Inconsistent restored alias identity.");
                     a.Reconstructing=version!=4&&ready==null&&journal.Length>0;
-                    if(!a.Reconstructing&&(ArrivalFrontier(a.Work)!=a.Frontier||a.Work.WorkPhase!=a.SnapshotPhase||a.Work.CandidateCursor!=a.SnapshotCandidate||a.Work.OccupancyCursor!=a.SnapshotOccupancy||a.Work.MemberCursor!=a.SnapshotMember))throw new ArgumentException("Invalid initial arrival frontier.");
+                    if(!a.Reconstructing&&(LiveArrivalFrontier(a.Work)!=a.Frontier||a.Work.WorkPhase!=a.SnapshotPhase||a.Work.CandidateCursor!=a.SnapshotCandidate||a.Work.OccupancyCursor!=a.SnapshotOccupancy||a.Work.MemberCursor!=a.SnapshotMember))throw new ArgumentException("Invalid initial arrival frontier.");
                     return a;
                 });
                 foreach(var original in attempts){if(arrivalAttempts.ContainsKey(original.Id))throw new ArgumentException("Duplicate arrival attempt.");var a=version==4&&catalog==null?RetainPhysicalAttemptEdges(original,original.Work,(NavigationHostArrivalIntents)decodedHost.ArrivalIntentSets[original.Id],original.History):original;try{arrivalAttempts.Add(a.Id,a);}catch{if(version==4&&catalog==null)ReleasePhysicalAttemptEdges(a);throw;}}

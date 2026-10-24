@@ -12,12 +12,14 @@ namespace Spacewars.Runtime
         internal NavigationRoutePort(NavigationSession session)
         { this.session = session ?? throw new ArgumentNullException(nameof(session)); }
 
+        internal NavigationHostRoot CreatePhysicalHostRoot(INavStorageReservation reservation)=>session.CreatePhysicalHostRoot(reservation);
         internal void ReleaseHostForWorldCheckpoint(Action releaseHost)=>session.ReleaseHostForWorldCheckpoint(releaseHost);
         public NavigationAdmission Admission => session.Admission;
         internal NavigationAdmissionPin PinAdmission()=>session.PinAdmission();
         internal bool ContainsCurrent(NavigationRequest request){using(var pin=PinAdmission())return pin.Value!=null&&pin.Value.Contains(request);}
         public long CorridorRetainedBytes=>session.CorridorRetainedBytes;
         internal string ArrivalRetentionDiagnostic=>session.ArrivalRetentionDiagnostic;
+        internal string ArrivalAuthoritySnapshot=>session.ArrivalAuthoritySnapshot;
         internal int QueuedRequestCount=>session.Requests.Count;
         internal event Action Changed {add{session.HostChanged+=value;}remove{session.HostChanged-=value;}}
         public void SignalHost()=>session.SignalHost();
@@ -37,6 +39,8 @@ namespace Spacewars.Runtime
         internal bool UseLegacyHost=>session.UseLegacyHost;
         internal bool TickQuantaEnabled=>session.TickQuantaEnabled;
         internal bool QuantumRunnable=>session.QuantumRunnable;
+        internal long? PhysicalHeldBytes=>session.HasPhysicalHostRoot?session.PhysicalHostBudget.HeldBytes:(long?)null;
+        internal NavigationCreditPromotion TryPromoteAccruedCredit()=>session.TryPromoteAccruedCredit();
         internal void StageRetainedPhysicalArrivals(NavigationHostRoot root,INavStorageReservation reservation)=>session.StageRetainedPhysicalArrivals(root,reservation);
         internal NavigationHostRoot PinCommittedHostRoot()=>session.PinCommittedHostRoot();
         internal void PublishPhysicalHostRoot(NavigationRetentionBudget.Scope scope,

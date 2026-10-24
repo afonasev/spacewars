@@ -4,7 +4,8 @@ namespace Spacewars.Simulation
     public sealed partial class NavArrivalReachabilityProof : INavStorageFacade
     {
         private NavDeclarationStorage ownedProof;
-        internal NavScheduledRequest PhysicalRecipe=>(ownedProof?.Third as NavDeclarationStorage)?.Facade as NavScheduledRequest;
+        internal NavScheduledRequest LogicalRecipe; // Detached logical declaration only; owned BODY keeps its original edges/layout.
+        internal NavScheduledRequest PhysicalRecipe=>(ownedProof?.Third as NavDeclarationStorage)?.Facade as NavScheduledRequest??LogicalRecipe;
         NavOwnedStorage INavStorageFacade.StorageRoot=>ownedProof;
         internal NavOwnedStorage StorageRoot=>ownedProof;
         private static readonly long LayoutBase=Math.Max(512,NavStorageLayout.ObjectBytesBound(typeof(NavDeclarationStorage))+NavStorageLayout.ObjectBytesBound(typeof(NavArrivalReachabilityProof))+160);

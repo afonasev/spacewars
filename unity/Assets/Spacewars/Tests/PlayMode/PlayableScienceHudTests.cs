@@ -1,3 +1,4 @@
+using System.Linq;
 using System;
 using System.Reflection;
 using NUnit.Framework;
@@ -69,4 +70,58 @@ public sealed class PlayableScienceHudTests
         Assert.That(root.Q<Button>("research-slot-0").text,Does.Contain("50%"));Assert.That(root.Q<Button>("research-slot-1").text,Does.Contain("ждёт"));Assert.AreEqual("—",root.Q<Button>("research-slot-5").text);
         Assert.True(root.Q<Button>("research-slot-0").enabledSelf);Assert.False(root.Q<Button>("research-slot-1").enabledSelf);
     }
+    [Test] public void SalvoResearchUsesSixthActionAndExplainsProducerRequirement()
+    {
+        void Availability(bool ready)=>Set("view",new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,900,null,Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,researchAvailability:new[]{new PlayableResearchAvailabilitySnapshot(PlayableResearchKind.HawkSalvoSystems,300,ready,ready?null:"Нужен готовый собственный ангар"),new PlayableResearchAvailabilitySnapshot(PlayableResearchKind.TankChassis,300,ready,ready?null:"Нужна готовая собственная фабрика")}));
+        var center=new PlayableBuildingSnapshot(7,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,default,250,1,0,0,default,lifecycle:new PlayableBuildingLifecycleSnapshot(false,0,false,false,0,0,null,null,1,300,false),research:Array.Empty<PlayableResearchOrderSnapshot>());
+        Availability(false);Call("UpdateScienceHud",center);
+        var salvo=root.Q<Button>("research-HawkSalvoSystems");Assert.NotNull(salvo);Assert.AreEqual("hawk-salvo",salvo.Q<OrbitalGlyph>().Kind);Assert.NotNull(salvo.Q<OrbitalGlyph>().Q<Image>("glyph-artwork").image);Assert.False(salvo.enabledSelf);Assert.That(salvo.tooltip,Does.Contain("ангар"));Assert.That(salvo.tooltip,Does.Contain("300"));Assert.That(salvo.text,Does.Contain("Системы залпового огня"));
+        Assert.False(root.Q<Button>("research-TankChassis").enabledSelf);Assert.That(root.Q<Button>("research-TankChassis").tooltip,Does.Contain("фабрика"));
+        Assert.AreEqual(6,root.Q<VisualElement>("research-queue").Query<Button>().ToList().Count);
+        Availability(true);Call("UpdateScienceHud",center);Assert.True(salvo.enabledSelf);Assert.True(root.Q<Button>("research-TankChassis").enabledSelf);
+        Set("paused",true);Call("UpdateScienceHud",center);Assert.False(salvo.enabledSelf);
+    }
+
+    [Test] public void GamepadSalvoActionUsesOwnerAvailabilityAndExplainsMissingHangar()
+    {
+        var p=PlayableProfile.Default;var center=new PlayableBuildingSnapshot(7,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,default,250,1,0,0,default,lifecycle:new PlayableBuildingLifecycleSnapshot(false,0,false,false,0,0,null,null,1,300,false));
+        foreach(bool ready in new[]{false,true}){
+            var view=new PlayableSnapshot(p.ProfileId,p.Revision,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,900,null,Array.Empty<PlayableEntitySnapshot>(),new[]{center},Array.Empty<PlayableProjectileSnapshot>(),null,null,researchAvailability:new[]{new PlayableResearchAvailabilitySnapshot(PlayableResearchKind.HawkSalvoSystems,300,ready,ready?null:"Нужен готовый собственный ангар")});
+            var action=OfflinePadWorldActions.Building(view,p,7).Single(a=>a.Label=="Системы залпового огня");
+            Assert.AreEqual(ready,action.Sector.Enabled);
+            if(ready){Assert.NotNull(action.Command);Assert.AreEqual(PlayableCommandKind.QueueResearch,action.Command.Kind);Assert.AreEqual(PlayableResearchKind.HawkSalvoSystems,action.Command.Research);CollectionAssert.AreEqual(new[]{7},action.Command.Entities);}
+            else{Assert.IsNull(action.Command);Assert.That(action.Detail,Does.Contain("ангар"));}
+        }
+    }
+
+    [Test] public void SalvoIconLoadsDedicatedTransparentArtworkForMouseAndGamepad()
+    {
+        Assert.AreEqual("hawk-salvo",OrbitalPrecision.ResearchGlyph(PlayableResearchKind.HawkSalvoSystems));
+        Assert.AreEqual("hawk-salvo",OrbitalPrecision.Glyph("7:HawkSalvoSystems"));
+        Assert.AreEqual("guidance",OrbitalPrecision.ResearchGlyph(PlayableResearchKind.ShkvalGuidance));
+        var icon=OrbitalGlyph.TextureFor("hawk-salvo");Assert.NotNull(icon);Assert.AreNotSame(icon,OrbitalGlyph.TextureFor("guidance"));
+        Assert.AreEqual(400,icon.width);Assert.AreEqual(300,icon.height);
+        var previous=RenderTexture.active;var target=RenderTexture.GetTemporary(400,300,0,RenderTextureFormat.ARGB32);
+        var pixels=new Texture2D(400,300,TextureFormat.RGBA32,false);
+        try{
+            Graphics.Blit(icon,target);RenderTexture.active=target;pixels.ReadPixels(new Rect(0,0,400,300),0,0);pixels.Apply();
+            Assert.Less(pixels.GetPixel(0,0).a,.01f,"True transparent canvas, not a black background");
+            Assert.Greater(pixels.GetPixel(155,245).a,.99f,"Rotor hub is opaque");
+            Assert.Less(pixels.GetPixel(155,166).a,.01f,"Cabin window is a transparent cutout");
+            var colors=pixels.GetPixels32();var source=new Texture2D(2,2,TextureFormat.RGBA32,false);
+            try{
+                Assert.True(source.LoadImage(System.IO.File.ReadAllBytes(System.IO.Path.Combine(Application.dataPath,"Spacewars/Content/Resources/OrbitalIcons/hawk-salvo.png"))));
+                CollectionAssert.AreEqual(source.GetPixels32().Select(c=>c.a).ToArray(),colors.Select(c=>c.a).ToArray(),"GPU import/readback preserves every source silhouette alpha pixel");
+            }
+            finally{UnityEngine.Object.DestroyImmediate(source);}
+            // Unity dilates RGB into alpha-zero texels for filtering. Remove only hidden
+            // color from the evidence image so viewers that ignore alpha cannot show it.
+            for(int i=0;i<colors.Length;i++)if(colors[i].a==0)colors[i]=new Color32(0,0,0,0);
+            pixels.SetPixels32(colors);pixels.Apply();
+            string output=System.Environment.GetEnvironmentVariable("SPACEWARS_HAWK_ICON_EVIDENCE");
+            if(!string.IsNullOrEmpty(output)){System.IO.Directory.CreateDirectory(output);System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,"imported-hawk-salvo.png"),pixels.EncodeToPNG());}
+        }
+        finally{RenderTexture.active=previous;RenderTexture.ReleaseTemporary(target);UnityEngine.Object.DestroyImmediate(pixels);}
+    }
+
 }

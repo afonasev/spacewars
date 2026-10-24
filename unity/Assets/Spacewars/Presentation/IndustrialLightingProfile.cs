@@ -29,14 +29,14 @@ namespace Spacewars.Presentation
         public IEnumerable<SurfaceParameter> Parameters()
         {
             foreach(var field in GetType().GetFields())
-            {var a=field.GetCustomAttribute<SurfaceSettingAttribute>();if(a==null)continue;yield return new SurfaceParameter((id=="three-crossings-warm-v1"?"visual.threeCrossings.lighting.":"visual.lighting.")+field.Name,a.Group,a.Label,a.Description,a.Unit,a.Minimum,a.Maximum,a.Step,()=> (float)field.GetValue(this),v=>field.SetValue(this,v));}
+            {var a=field.GetCustomAttribute<SurfaceSettingAttribute>();if(a==null)continue;yield return new SurfaceParameter((id=="white-meridian-warm-v1"?"visual.whiteMeridian.lighting.":id=="three-crossings-warm-v1"?"visual.threeCrossings.lighting.":"visual.lighting.")+field.Name,a.Group,a.Label,a.Description,a.Unit,a.Minimum,a.Maximum,a.Step,()=> (float)field.GetValue(this),v=>field.SetValue(this,v));}
         }
         public void Validate()
         {
-            if((id!="industrial-warm-cool-v1"&&id!="three-crossings-warm-v1")||revision<1)throw new ArgumentException("Invalid lighting identity");
+            if((id!="industrial-warm-cool-v1"&&id!="three-crossings-warm-v1"&&id!="white-meridian-warm-v1")||revision<1)throw new ArgumentException("Invalid lighting identity");
             foreach(var p in Parameters())if(float.IsNaN(p.Read())||float.IsInfinity(p.Read())||p.Read()<p.Minimum||p.Read()>p.Maximum)throw new ArgumentException("Invalid lighting: "+p.Path);
         }
-        public static string ResourceName(string mapId=null)=>mapId=="three-crossings-greybox-v1"?"ThreeCrossingsLightingProfile":"IndustrialLightingProfile";
+        public static string ResourceName(string mapId=null)=>mapId=="white-meridian-astra-v1"?"WhiteMeridianLightingProfile":mapId=="three-crossings-greybox-v1"?"ThreeCrossingsLightingProfile":"IndustrialLightingProfile";
         public static IndustrialLightingProfile Load(string mapId=null)
         {var resource=Resources.Load<TextAsset>(ResourceName(mapId));if(!resource)throw new InvalidOperationException("Missing lighting profile for "+mapId);var p=JsonUtility.FromJson<IndustrialLightingProfile>(resource.text);NativeGraphicsSettings.Apply(p.Parameters());p.Validate();return p;}
         public void ApplyScene(Light sun)

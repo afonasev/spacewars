@@ -36,6 +36,41 @@ namespace Spacewars.Tests.EditMode
         private static NavigationSession Create(){var s=new NavigationSession(1,new NavGeometry(20,Array.Empty<NavObstacle>(),1),PlayableProfile.Default.Navigation);s.Crowd.Add(1,new NavPoint(-5,-2));s.Crowd.Add(2,new NavPoint(-5,2));return s;}
         private static bool Issue(NavigationSession s)=>s.MoveGroup(new[]{1,2},new[]{new NavPoint(5,-2),new NavPoint(5,2)});
         private static void Destroy(NavigationSession s){s.ReleaseCommittedHostRoot();s.DestroyNavigationAuthority();Assert.That(s.PhysicalHostBudget.PhysicalBytes,Is.Zero);Assert.That(s.PhysicalHostBudget.HeldBytes,Is.Zero);Assert.That(s.PhysicalHostBudget.ActiveScopes,Is.Zero);}
+        [TestCase(false)][TestCase(true)] public void LateOrdinaryGuardRefusalRollsBackAndSupportsNextAttempt(bool single)
+        {
+            var s=Create();try{
+                Assert.True(Issue(s));var before=s.Requests.CopyItems();long group=s.GroupFor(1).GroupId;bool changed=false;NavigationAdmission contact=null;
+                s.PhysicalHostBudget.AllocationAdmission=_=>{
+                    if(!changed&&new System.Diagnostics.StackTrace().GetFrames().Any(frame=>frame.GetMethod().Name=="CaptureCrowdNameReferences")){changed=true;s.SetFormationContact(1,false,9);contact=s.Admission;}return true;
+                };
+                try{Assert.False(single?s.Move(1,new NavPoint(6,-2)):s.MoveGroup(new[]{1,2},new[]{new NavPoint(6,-2),new NavPoint(6,2)}));}
+                finally{s.PhysicalHostBudget.AllocationAdmission=null;}
+                Assert.True(changed);Assert.AreEqual(group,s.GroupFor(1).GroupId);Assert.AreEqual(9,s.GroupFor(1).Members.Single(m=>m.Entity==1).ContactTick);Assert.AreSame(contact,s.Admission);CollectionAssert.AreEqual(before,s.Requests.CopyItems());
+                Assert.True((s.LastGroupGuardObservationForQa.Mismatch&NavigationSession.GroupGuardMismatch.Operation)!=0,"late publication guard must be reached");Assert.Zero(s.LastGroupGuardCandidateForQa.References);Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(s),s.PhysicalHostBudget.PhysicalBytes);Assert.Zero(s.PhysicalHostBudget.HeldBytes);Assert.Zero(s.PhysicalHostBudget.ActiveScopes);
+                Assert.True(single?s.Move(1,new NavPoint(6,-2)):s.MoveGroup(new[]{1,2},new[]{new NavPoint(6,-2),new NavPoint(6,2)}));
+            }finally{s.PhysicalHostBudget.AllocationAdmission=null;s.LastGroupGuardCandidateForQa=null;Destroy(s);}
+        }
+        [TestCase(false)][TestCase(true)] public void PlainPrepublicationInvariantIsNeverConvertedOrSwallowed(bool metadata)
+        {
+            var s=Create();try{
+                Assert.True(Issue(s));if(metadata)s.PrepareCommandGroup(new PlayableCommand(1,8,"player-1",PlayableCommandKind.Attack,new[]{2},targetId:99),5,13,1);
+                var marker=new InvalidOperationException("Group command lost its observed authority.");int reached=0;
+                s.PhysicalHostBudget.AllocationAdmission=_=>{if(new System.Diagnostics.StackTrace().GetFrames().Any(frame=>frame.GetMethod().Name=="CaptureCrowdNameReferences")){reached++;throw marker;}return true;};
+                try{Assert.AreSame(marker,Assert.Throws<InvalidOperationException>(()=>{if(metadata)s.FinishCommandGroup(true,new[]{2});else s.Move(1,new NavPoint(6,-2));}));}
+                finally{s.PhysicalHostBudget.AllocationAdmission=null;}
+                Assert.AreEqual(1,reached);Assert.Zero(s.PhysicalHostBudget.HeldBytes);Assert.Zero(s.PhysicalHostBudget.ActiveScopes);Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(s),s.PhysicalHostBudget.PhysicalBytes);
+            }finally{s.PhysicalHostBudget.AllocationAdmission=null;Destroy(s);}
+        }
+        [TestCase(false)][TestCase(true)] public void PostpublicationTypedObserverFaultKeepsItsIdentityAndCommittedState(bool legacyFinish)
+        {
+            var s=Create();Action observer=null;try{
+                if(legacyFinish){Prepare(s);Assert.True(Issue(s));}
+                var marker=new NavigationCommandRefused("postcommit observer invariant");int reached=0;observer=()=>{reached++;throw marker;};s.HostChanged+=observer;
+                Assert.AreSame(marker,Assert.Throws<NavigationCommandRefused>(()=>{if(legacyFinish)s.FinishCommandGroup(true,new[]{1,2});else s.Move(1,new NavPoint(6,-2));}));
+                Assert.AreEqual(1,reached);Assert.NotNull(s.GroupFor(1));if(legacyFinish){Assert.AreEqual(7,s.GroupFor(1).CommandSequence);Assert.AreEqual(2,s.AllocationCount);}else Assert.AreEqual(new NavPoint(6,-2),s.GroupFor(1).Members.Single(m=>m.Entity==1).Goal);
+                Assert.Zero(s.PhysicalHostBudget.HeldBytes);Assert.Zero(s.PhysicalHostBudget.ActiveScopes);Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(s),s.PhysicalHostBudget.PhysicalBytes);
+            }finally{if(observer!=null)s.HostChanged-=observer;Destroy(s);}
+        }
         [TestCase(false)][TestCase(true)] public void FreshStopOrHoldBirthRefusesPrivatelyThenSupportsNextCommand(bool hold)
         {
             var s=Create();try{

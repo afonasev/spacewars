@@ -10,7 +10,7 @@ namespace Spacewars.Presentation
     {
         private int rallyPlacementBuilding;
         private PlayableBuildingSnapshot SelectedRallyProducer()
-            =>view==null||selection.Count!=1?null:view.Buildings.FirstOrDefault(b=>selection.Contains(b.Id)&&b.Owner==view.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState!=null&&b.PrivateState.Lifecycle?.Selling!=true&&(b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost||b.Kind==PlayableBuildingKind.Factory));
+            =>view==null||selection.Count!=1?null:view.Buildings.FirstOrDefault(b=>selection.Contains(b.Id)&&b.Owner==view.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState!=null&&b.PrivateState.Lifecycle?.Selling!=true&&(b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost||b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar));
         private void BeginRallyPlacement(bool controller)
         {
             var producer=SelectedRallyProducer();if(producer==null)return;

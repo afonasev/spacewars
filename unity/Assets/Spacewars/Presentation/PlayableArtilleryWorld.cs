@@ -28,6 +28,7 @@ namespace Spacewars.Presentation
         }
         private void ClearArtilleryEffects()
         {
+            ClearDirectContacts();
             foreach(var g in impactMarkers.Values)Destroy(g);impactMarkers.Clear();foreach(var g in impactEffects.Values)Destroy(g);impactEffects.Clear();
         }
         private void RenderProjectiles()
@@ -48,7 +49,9 @@ namespace Spacewars.Presentation
                 if(!p.Visible)continue;live.Add(p.Id);
                 if(!shells.TryGetValue(p.Id,out var shell))
                 {
-                    if(p.Kind==PlayableEntityKind.Shkval)
+                    if(p.Kind==PlayableEntityKind.Hawk)
+                    {shell=projectileVisuals.Rocket(transform,(float)profile.HawkMissileRadius,(float)profile.HawkMissileLength,ShotColor(p.Faction));}
+                    else if(p.Kind==PlayableEntityKind.Shkval)
                     {
                         shell=projectileVisuals.Rocket(transform,(float)profile.ShkvalProjectileRadius,(float)profile.ShkvalProjectileLength,ShotColor(p.Faction));
                     }
@@ -59,6 +62,7 @@ namespace Spacewars.Presentation
                 }
                 shell.transform.position=new Vector3((float)p.Position.X,(float)p.Height,(float)p.Position.Z);
                 shell.transform.rotation=Quaternion.Euler(0,-(float)p.Heading*Mathf.Rad2Deg,0)*Quaternion.Euler(0,0,(float)p.Pitch*Mathf.Rad2Deg);
+                if(p.Kind==PlayableEntityKind.Hawk)projectileVisuals.Exhaust(shell,(float)profile.HawkMissileLength,(float)profile.HawkMissileRadius,(float)profile.WeaponMuzzleCoreRatio,(float)profile.ShkvalExhaustOpacity);
                 if(p.Kind==PlayableEntityKind.Shkval)
                 {
                     float boost=1+(float)(profile.ShkvalExhaustStartBoost-1)*Mathf.Clamp01(1-(float)(p.Age/profile.ShkvalExhaustStartupSec));

@@ -1,0 +1,14 @@
+{
+  "id": "armored-mine-v1",
+  "revision": 2,
+  "cycleSeconds": 5,
+  "rockerDegrees": 12,
+  "dustRate": 12,
+  "dustLifetime": 0.55,
+  "dustRise": 0.12,
+  "dustSize": 0.18,
+  "dustOpacity": 0.13,
+  "wellEmission": 2.2,
+  "wellLightIntensity": 1.2,
+  "wellLightRange": 1.15
+}

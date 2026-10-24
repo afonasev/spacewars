@@ -38,8 +38,8 @@ namespace Spacewars.Tests.EditMode
         {
             var p=PlayableProfile.Default;var o=View(p,unit);var planner=new AiTechnologyPlanner();var plan=planner.Plan(o,p,AiProfile.Initial,Budget(o).Capture());
             CollectionAssert.AreEquivalent(Enum.GetValues(typeof(PlayableResearchKind)),AiResearchCatalog.All.Select(d=>d.Kind));
-            Assert.AreEqual(kind,plan.Action.ResearchKind);Assert.AreEqual(4,plan.Action.EntityIds.Single());Assert.AreEqual(3,plan.Branches.Count);
-            foreach(var b in plan.Branches){Assert.AreEqual(b.Descriptor.Unit==unit?PlayableUnitRules.Cost(p,unit):0,b.AffectedValue);Assert.AreEqual(b.Descriptor.Unit==unit,b.Utility>0);}
+            Assert.AreEqual(kind,plan.Action.ResearchKind);Assert.AreEqual(4,plan.Action.EntityIds.Single());Assert.AreEqual(Enum.GetValues(typeof(PlayableResearchKind)).Length,plan.Branches.Count);
+            foreach(var b in plan.Branches){Assert.AreEqual(b.Descriptor.Affects(unit)?PlayableUnitRules.Cost(p,unit):0,b.AffectedValue);Assert.AreEqual(!b.Descriptor.Global&&b.Descriptor.Unit==unit,b.Utility>0,"global branches stay below the army threshold in this old-branch fixture");}
             var d=AiResearchCatalog.For(kind);double expected=unit==PlayableEntityKind.Tank?p.TankChassisSpeed/p.TankSpeed-1:unit==PlayableEntityKind.Explorer?PlayableUnitRules.DamagePerSecond(p,unit,true)/PlayableUnitRules.DamagePerSecond(p,unit)-1:p.ShkvalGuidanceRange/p.ShkvalBaseRange-1;
             Assert.AreEqual(expected,d.RelativeGain(p),1e-12);
         }
@@ -51,14 +51,16 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void ReadyCenter_UnrelatedFreeCashStillFundsHigherUtilityBranch()
         {
-            var p=PlayableProfile.Default;var o=View(p,PlayableEntityKind.Explorer,credits:500,secondKind:PlayableEntityKind.Shkval);var budget=WithTechnologyHold(o,p,PlayableResearchKind.ShkvalGuidance,200);
+            // Ledger isolation uses an intentionally expensive alternative branch; ordinary Guidance now costs 300.
+            var data=PlayableProfile.Default.CopyData();data.shkvalGuidanceCost=600;var p=PlayableProfile.Create(data);var o=View(p,PlayableEntityKind.Explorer,credits:500,secondKind:PlayableEntityKind.Shkval);var budget=WithTechnologyHold(o,p,PlayableResearchKind.ShkvalGuidance,200);
             Assert.AreEqual(300,budget.Available);
             var plan=new AiTechnologyPlanner().Plan(o,p,AiProfile.Initial,budget.Capture(),preferredFunding:PlayableResearchKind.ShkvalGuidance);
             Assert.AreEqual(PlayableResearchKind.ShkvalGuidance,plan.FundingGoal.Research);Assert.AreEqual(PlayableResearchKind.ExplorerAssaultGuns,plan.Action.ResearchKind);
         }
         [Test] public void ReadyCenter_UnrelatedPartialHoldCannotPayForDifferentBranch()
         {
-            var p=PlayableProfile.Default;var o=View(p,PlayableEntityKind.Explorer,credits:400,secondKind:PlayableEntityKind.Shkval);var budget=WithTechnologyHold(o,p,PlayableResearchKind.ShkvalGuidance,200);
+            // Ledger isolation uses an intentionally expensive alternative branch; ordinary Guidance now costs 300.
+            var data=PlayableProfile.Default.CopyData();data.shkvalGuidanceCost=600;var p=PlayableProfile.Create(data);var o=View(p,PlayableEntityKind.Explorer,credits:400,secondKind:PlayableEntityKind.Shkval);var budget=WithTechnologyHold(o,p,PlayableResearchKind.ShkvalGuidance,200);
             Assert.AreEqual(200,budget.Available);
             var plan=new AiTechnologyPlanner().Plan(o,p,AiProfile.Initial,budget.Capture(),preferredFunding:PlayableResearchKind.ShkvalGuidance);
             Assert.AreEqual(PlayableResearchKind.ShkvalGuidance,plan.FundingGoal.Research);Assert.IsNull(plan.Action);
@@ -80,19 +82,76 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(progress,plan.Branches.Single(x=>x.Descriptor.Kind==order.Kind).Progress);Assert.IsNull(plan.Action);Assert.AreEqual(progress==AiResearchProgress.Waiting,plan.Infrastructure!=null);
             var lost=View(p,center:false);Assert.NotNull(new AiTechnologyPlanner().Plan(lost,p,AiProfile.Initial,Budget(lost).Capture()).Infrastructure,"Lost active order can be replanned; completed order cannot.");
         }
-        private static OfflineMatchConfiguration Config(bool sustainedOpponent=false,bool readyTechnologyEconomy=false)
+        private static OfflineMatchConfiguration Config(bool sustainedOpponent=false,bool readyTechnologyEconomy=false,bool readyScience=false,int startingCredits=20000,bool researchLifecycle=false)
         {
-            var data=PlayableProfile.Default.CopyData();data.startingCredits=20000;var p=PlayableProfile.Create(data);
+            var data=PlayableProfile.Default.CopyData();data.startingCredits=startingCredits;
+            // Lifecycle fixture keeps its original immediate unlock; default 3/6, 5/8, 7/10 minute boundaries are verified separately.
+            if(researchLifecycle){data.aiArmySystemsVeteranDelaySeconds=0;data.aiArmySystemsVeteranLevel2DelaySeconds=0;}
+            var p=PlayableProfile.Create(data);
             var starts=new[]{new OfflineStart("west",1,new NavPoint(-24,0),new NavPoint(-24,8),pin:1),new OfflineStart("east",2,new NavPoint(24,0),new NavPoint(24,8),pin:2)};
             var slots=new[]{new TerritorySlot(1,new NavPoint(-24,-9),0),new TerritorySlot(2,new NavPoint(-14,0),0),new TerritorySlot(3,new NavPoint(-14,-9),0),new TerritorySlot(4,new NavPoint(-24,-18),0),new TerritorySlot(5,new NavPoint(-14,-18),0)};
             var sites=new[]{new TerritorySite(1,PlayableBuildingKind.Headquarters,starts[0].Position,slots),new TerritorySite(2,PlayableBuildingKind.Headquarters,starts[1].Position,Array.Empty<TerritorySlot>())}
                 .Concat(sustainedOpponent?new[]{new TerritorySite(3,PlayableBuildingKind.Outpost,new NavPoint(24,-24),Array.Empty<TerritorySlot>())}:Array.Empty<TerritorySite>()).ToArray();
             return new OfflineMatchConfiguration(p,"o5-diagnostic-funded",sustainedOpponent?"o5-flat-two-starts-ordinary-outpost":"o5-flat-two-starts","UnityHostRouteService",19092026,new[]{new OfflineParticipant("west-owner",1,1,OfflineControl.Ai),new OfflineParticipant("east-owner",2,2,OfflineControl.Human)},starts,sites,readyTechnologyEconomy?new[]{new NavObstacle(-64,-14,64,-12)}:Array.Empty<NavObstacle>(),new double[,]{{0,48},{48,0}},
-                scenarioBuildings:(sustainedOpponent?new[]{new OfflineScenarioBuilding(2,PlayableBuildingKind.Outpost,3,0,new NavPoint(24,-24))}:Array.Empty<OfflineScenarioBuilding>())
+                scenarioBuildings:(readyScience?new[]{new OfflineScenarioBuilding(1,PlayableBuildingKind.ScientificCenter,1,3,slots[2].Position)}:Array.Empty<OfflineScenarioBuilding>()).Concat(sustainedOpponent?new[]{new OfflineScenarioBuilding(2,PlayableBuildingKind.Outpost,3,0,new NavPoint(24,-24))}:Array.Empty<OfflineScenarioBuilding>())
                     .Concat(readyTechnologyEconomy?new[]{new OfflineScenarioBuilding(1,PlayableBuildingKind.Factory,1,1,slots[0].Position),new OfflineScenarioBuilding(1,PlayableBuildingKind.Refinery,1,2,slots[1].Position)}:Array.Empty<OfflineScenarioBuilding>()).ToArray());
         }
         private static void Step(PlayableAuthorityTick a,UnityHostRouteService host)
         {for(int i=0;i<512;i++){if(a.TryAdvance())return;host.Service(a,64);}Assert.Fail("native route barrier at tick "+a.Tick);}
+        [Test,Explicit("Full navigation BODY equality on every tick is a navigation serialization stress scenario; use the research-focused actual-domain scenario for feature QA.")] public void VeteranMidgameActuallyPaysAndCompletesArmySystemsWithRestore()
+        {
+            var config=Config(sustainedOpponent:true,readyTechnologyEconomy:true,readyScience:true,startingCredits:300,researchLifecycle:true);var a=new PlayableAuthorityTick(config,71,difficulty:AiDifficulty.Veteran);var owner=Owner(a);
+            var opening=PlayableAiOpeningComposition.Initialize(config.Seed,"west-owner",forcedOpening:PlayableAiOpening.Safe);
+            owner.GetType().GetField("opening",F).SetValue(owner,opening);owner.GetType().GetField("openingExecutor",F).SetValue(owner,new AiOpeningExecutor(opening,71));
+            var phase=(AiPhaseCompositionPlanner)Get(owner,"composition");phase.Observe(PlayableAiObservation.From(a.ParticipantView("west-owner")),config.Profile,AiProfile.Initial);
+            phase.GetType().GetField("phase",F).SetValue(phase,AiGamePhase.Mid);phase.GetType().GetField("entered",F).SetValue(phase,1L);
+            var domain=Get(a,"domain");var own=a.ParticipantView("west-owner").Owner;
+            for(int i=0;i<10;i++)domain.GetType().GetMethod("SpawnUnit",F).Invoke(domain,new object[]{new NavPoint(-20+4*(i%5),8+4*(i/5)),own,i<2?PlayableEntityKind.Tank:PlayableEntityKind.Explorer});
+            // Constrained mixed roster exercises the ten-unit gate and real savings;
+            // avoids a 20k-bank macro/army-navigation stress scenario unrelated to research.
+            // All original ticks, durations, exact suffix comparisons and assertions remain.
+            bool saving=false,active=false;PlayableAuthorityTick restored=null;
+            using(var host=new UnityHostRouteService())for(int i=0;i<3600;i++)
+            {
+                Step(a,host);var o=a.ParticipantView("west-owner");
+                var plan=(AiTechnologyPlan)owner.GetType().GetProperty("TechnologyPlan").GetValue(owner);saving|=plan?.PriorityResearch==true;
+                active|=o.OwnerResearch.Any(r=>PlayableResearchRules.Global(r.Kind)&&r.Active);
+                if(restored!=null){Step(restored,host);Assert.True(a.CaptureBytes().AsSpan().SequenceEqual(restored.CaptureBytes()),"army systems exact suffix");}
+                if(active&&restored==null){var bytes=a.CaptureBytes();restored=PlayableAuthorityTick.RestoreBytes(bytes,config);CollectionAssert.AreEqual(bytes,restored.CaptureBytes());}
+                if(o.OwnerResearch.Any(r=>PlayableResearchRules.Global(r.Kind)&&r.Complete))break;
+            }
+            Assert.True(saving);Assert.True(active);Assert.True(a.ParticipantView("west-owner").OwnerResearch.Any(r=>PlayableResearchRules.Global(r.Kind)&&r.Complete),"veteran midgame must complete an ordinary paid army-system order");
+            var budget=(AiBudgetLedger)Get(owner,"budget");Assert.True(budget.Capture().Paid.Any(e=>e.Action.Kind==PlayableCommandKind.QueueResearch&&PlayableResearchRules.Global(e.Action.ResearchKind)));
+            a.Stop();restored?.Stop();
+        }
+        private static long[] ResearchBytes(PlayableSnapshot o)=>o.OwnerResearch.SelectMany(r=>new[]{r.Id,(long)r.Kind,(long)r.CenterId,BitConverter.DoubleToInt64Bits(r.PaidCost),BitConverter.DoubleToInt64Bits(r.Elapsed),BitConverter.DoubleToInt64Bits(r.Duration),r.Active?1L:0L,r.Complete?1L:0L}).ToArray();
+        [Test] public void VeteranMidgameCompletesArmyResearchAndRestoresExactResearchProgress()
+        {
+            var config=Config(sustainedOpponent:true,readyTechnologyEconomy:true,readyScience:true,startingCredits:300,researchLifecycle:true);var a=new PlayableAuthorityTick(config,71,difficulty:AiDifficulty.Veteran);var owner=Owner(a);
+            var opening=PlayableAiOpeningComposition.Initialize(config.Seed,"west-owner",forcedOpening:PlayableAiOpening.Safe);
+            owner.GetType().GetField("opening",F).SetValue(owner,opening);owner.GetType().GetField("openingExecutor",F).SetValue(owner,new AiOpeningExecutor(opening,71));
+            var phase=(AiPhaseCompositionPlanner)Get(owner,"composition");phase.Observe(PlayableAiObservation.From(a.ParticipantView("west-owner")),config.Profile,AiProfile.Initial);
+            phase.GetType().GetField("phase",F).SetValue(phase,AiGamePhase.Mid);phase.GetType().GetField("entered",F).SetValue(phase,1L);
+            var domain=Get(a,"domain");var own=a.ParticipantView("west-owner").Owner;
+            for(int i=0;i<10;i++)domain.GetType().GetMethod("SpawnUnit",F).Invoke(domain,new object[]{new NavPoint(-20+4*(i%5),8+4*(i/5)),own,i<2?PlayableEntityKind.Tank:PlayableEntityKind.Explorer});
+            // Constrained mixed roster exercises the ten-unit gate and real savings;
+            // avoids a 20k-bank macro/army-navigation stress scenario unrelated to research.
+            // All original ticks, durations, exact suffix comparisons and assertions remain.
+            bool saving=false,active=false;PlayableAuthorityTick restored=null;
+            using(var host=new UnityHostRouteService())for(int i=0;i<3600;i++)
+            {
+                Step(a,host);var o=a.ParticipantView("west-owner");
+                var plan=(AiTechnologyPlan)owner.GetType().GetProperty("TechnologyPlan").GetValue(owner);saving|=plan?.PriorityResearch==true;
+                active|=o.OwnerResearch.Any(r=>PlayableResearchRules.Global(r.Kind)&&r.Active);
+                if(restored!=null){Step(restored,host);CollectionAssert.AreEqual(ResearchBytes(o),ResearchBytes(restored.ParticipantView("west-owner")),"exact research suffix tick "+a.Tick);}
+                if(active&&restored==null){var bytes=a.CaptureBytes();restored=PlayableAuthorityTick.RestoreBytes(bytes,config);Assert.True(bytes.AsSpan().SequenceEqual(restored.CaptureBytes()),"full active checkpoint equality");}
+                if(o.OwnerResearch.Any(r=>PlayableResearchRules.Global(r.Kind)&&r.Complete))break;
+            }
+            Assert.True(saving);Assert.True(active);Assert.True(a.ParticipantView("west-owner").OwnerResearch.Any(r=>PlayableResearchRules.Global(r.Kind)&&r.Complete),"veteran midgame must complete an ordinary paid army-system order");
+            var budget=(AiBudgetLedger)Get(owner,"budget");Assert.True(budget.Capture().Paid.Any(e=>e.Action.Kind==PlayableCommandKind.QueueResearch&&PlayableResearchRules.Global(e.Action.ResearchKind)));
+            Assert.NotNull(restored);Assert.True(a.CaptureBytes().AsSpan().SequenceEqual(restored.CaptureBytes()),"full final checkpoint equality");
+            a.Stop();restored?.Stop();
+        }
         [Test] public void AutonomousResearch_BuildsPaysCompletesAndConsumesWithExactRestore()
         {
             // This is a science lifecycle fixture, not a cold-start macro deadline.

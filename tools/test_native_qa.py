@@ -54,7 +54,7 @@ class NativeQaRoutes(unittest.TestCase):
 
 
 class UnityLauncherForwardingTests(unittest.TestCase):
-    def invoke_with_fake_runner(self, arguments, mode='shared'):
+    def invoke_with_fake_runner(self, arguments, mode=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             runner = root / 'fake-unity-runner'
@@ -63,8 +63,11 @@ class UnityLauncherForwardingTests(unittest.TestCase):
                               'open(os.environ["CAPTURE_ARGV"], "w").write(json.dumps(sys.argv[1:]))\n')
             runner.chmod(0o755)
             environment = os.environ.copy()
-            environment.update({'UNITY_RUNNER': str(runner), 'UNITY_RUN_MODE': mode,
+            environment.pop('UNITY_RUN_MODE', None)
+            environment.update({'UNITY_RUNNER': str(runner),
                                 'UNITY_EDITOR': '/fake/Unity', 'CAPTURE_ARGV': str(capture)})
+            if mode is not None:
+                environment['UNITY_RUN_MODE'] = mode
             subprocess.run(['tools/unity.sh', *arguments], cwd=ROOT, env=environment, check=True)
             return json.loads(capture.read_text())
 
@@ -78,6 +81,15 @@ class UnityLauncherForwardingTests(unittest.TestCase):
         command = self.invoke_with_fake_runner(['player', '/fake/Spacewars', '-noaudio', '-muted'])
         player_argv = command[command.index('--') + 1:]
         self.assertEqual(['/fake/Spacewars', '-noaudio', '-muted'], player_argv)
+
+    def test_player_defaults_to_shared_and_respects_explicit_exclusive(self):
+        for override, expected in [(None, '--shared'), ('exclusive', '--exclusive')]:
+            with self.subTest(override=override):
+                command = self.invoke_with_fake_runner(['player', '/fake/Spacewars', '-muted'],
+                                                       mode=override)
+                self.assertEqual(expected, command[0])
+                self.assertEqual(['/fake/Spacewars', '-muted', '-noaudio'],
+                                 command[command.index('--') + 1:])
 
 
 class FullRunApprovalTests(unittest.TestCase):

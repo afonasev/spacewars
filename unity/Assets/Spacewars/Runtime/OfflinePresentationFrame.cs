@@ -23,7 +23,11 @@ namespace Spacewars.Runtime
         public IReadOnlyDictionary<string,PlayableSnapshot> Views { get; }
         public IReadOnlyList<OfflineReceipt> Receipts { get; }
         public long ReceiptOrdinal { get; }
-        internal OfflinePresentationFrame(Dictionary<string,PlayableSnapshot> views, OfflineReceipt[] receipts, long ordinal)
+        private readonly long publishedAt=System.Diagnostics.Stopwatch.GetTimestamp();
+        public double AgeSeconds=>Math.Max(0,(System.Diagnostics.Stopwatch.GetTimestamp()-publishedAt)/(double)System.Diagnostics.Stopwatch.Frequency);
+        private readonly IReadOnlyDictionary<string,PlayableSnapshot> previousViews;
+        public PlayableSnapshot PreviousView(string ownerId)=>previousViews!=null&&previousViews.TryGetValue(ownerId,out var prior)?prior:null;
+        internal OfflinePresentationFrame(Dictionary<string,PlayableSnapshot> views, OfflineReceipt[] receipts, long ordinal, OfflinePresentationFrame previous=null)
         {
             if(views.Count==0)throw new ArgumentException("Missing owner projections.");
             var first=views.Values.First();Generation=first.Generation;Sequence=first.Sequence;Tick=first.Tick;
@@ -32,6 +36,10 @@ namespace Spacewars.Runtime
             if(receipts.Any(r=>r.Receipt.AppliedTick>Tick||!views.ContainsKey(r.Receipt.OwnerId??"")))
                 throw new ArgumentException("Receipt outside frame authority.");
             Views=new ReadOnlyDictionary<string,PlayableSnapshot>(new Dictionary<string,PlayableSnapshot>(views));
+            if(previous!=null&&previous.Generation==Generation){
+                if(previous.Tick==Tick-1)previousViews=previous.Views;
+                else if(previous.Tick==Tick)previousViews=previous.previousViews;
+            }
             Receipts=Array.AsReadOnly((OfflineReceipt[])receipts.Clone());ReceiptOrdinal=ordinal;
         }
     }

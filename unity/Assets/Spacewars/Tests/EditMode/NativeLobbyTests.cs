@@ -1,5 +1,7 @@
 using System;
 using System.Threading;
+using System.Linq;
+using Spacewars.Simulation.Ai;
 using NUnit.Framework;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
@@ -13,7 +15,41 @@ namespace Spacewars.Tests.EditMode
             var setup=new NativeLobbyConfiguration();
             Assert.AreEqual(2,setup.Capacity(PlayableProfile.ThreeCrossingsDefault));
             Assert.IsNull(setup.Validate(PlayableProfile.ThreeCrossingsDefault,true,true));
-            Assert.AreEqual("ИИ Боец 1",setup.MatchAiName);
+            Assert.AreEqual("ИИ",setup.MatchAiName);
+        }
+        [Test] public void MatchBotNamesAreUniqueStableAndDoNotMutateLobby()
+        {
+            var lobby=new NativeLobbyConfiguration{AiTestMap=true};lobby.InitializeParticipants();
+            CollectionAssert.AreEqual(new[]{"Кадет","Боец","Ветеран"},NativeLobbyConfiguration.DifficultyNames);
+            for(int i=0;i<lobby.Participants.Count;i++)lobby.Participants[i].Difficulty=(AiDifficulty)(i%3);
+            for(int launch=0;launch<20;launch++)
+            {
+                var match=lobby.Copy();match.PrepareMatchNames();
+                var names=Enumerable.Range(0,8).Select(match.ParticipantName).ToArray();
+                Assert.AreEqual(8,names.Select(n=>n.Split('(')[0].Trim()).Distinct().Count());
+                for(int i=0;i<8;i++)
+                {
+                    StringAssert.EndsWith(" ("+NativeLobbyConfiguration.DifficultyNames[i%3]+")",names[i]);
+                    Assert.AreEqual(names[i],match.Copy().ParticipantName(i));
+                    Assert.AreEqual("ИИ",lobby.ParticipantName(i));
+                    Assert.AreEqual("ИИ",lobby.Participants[i].Name);
+                }
+            }
+        }
+        [Test] public void RuntimeBindsGeneratedIdentityAndPreservesHumanName()
+        {
+            var lobby=new NativeLobbyConfiguration{HumanName="Командир"};lobby.InitializeParticipants();
+            lobby.Participants[1].Difficulty=AiDifficulty.Recruit;lobby.Participants[1].Name=null;
+            var profile=PlayableProfile.Create(PlayableProfile.Default.CopyData(),new AiTestMap());
+            using(var runtime=PlayableRuntime.CreateLobbyMatch(profile,1,lobby,true))
+            {
+                var match=runtime.LobbyConfiguration;
+                Assert.AreEqual("Командир",match.ParticipantName(0));
+                StringAssert.EndsWith(" (Кадет)",match.ParticipantName(1));
+                Assert.AreEqual(match.ParticipantName(1),match.MatchAiName);
+                Assert.AreEqual(match.MatchAiName,runtime.LobbyConfiguration.MatchAiName);
+                Assert.AreEqual("ИИ",lobby.ParticipantName(1));
+            }
         }
         [Test] public void InvalidRosterCannotLaunch()
         {

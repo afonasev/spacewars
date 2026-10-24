@@ -21,19 +21,28 @@ namespace Spacewars.Simulation.Ai
     {
         private readonly AiRosterDescriptorData[] descriptors;
         public string Hash {get;}
-        public static AiRosterCatalog Initial=>new AiRosterCatalog(new[]{
+        // The catalog owns private copies and every public descriptor accessor returns a deep copy.
+        // Validate/hash the constant catalog once; never share caller-editable descriptor data.
+        public static AiRosterCatalog Initial {get {using var measured=PerformanceProfile.Measure(ProfileStage.RosterAccess);return InitialCatalog.Value;}}
+        private static class InitialCatalog
+        {
+            internal static readonly AiRosterCatalog Value=CreateInitial();
+        }
+        private static AiRosterCatalog CreateInitial()=>new AiRosterCatalog(new[]{
             Descriptor(PlayableEntityKind.Explorer,1,0,0,1,AiMobilityClass.SmallGroundVehicle,PlayableCommandKind.QueueExplorer),
             Descriptor(PlayableEntityKind.Tank,0,1,0,0,AiMobilityClass.GroundVehicle,PlayableCommandKind.QueueTank),
-            Descriptor(PlayableEntityKind.Shkval,0,0,1,0,AiMobilityClass.GroundVehicle,PlayableCommandKind.QueueShkval)});
+            Descriptor(PlayableEntityKind.Shkval,0,0,1,0,AiMobilityClass.GroundVehicle,PlayableCommandKind.QueueShkval),
+            new AiRosterDescriptorData{kind=PlayableEntityKind.Hawk,producer=PlayableBuildingKind.Hangar,productionCommand=PlayableCommandKind.QueueHawk,mobility=AiMobilityClass.GroundVehicle,targetTags=new[]{"air"},unlockDependencies=Array.Empty<PlayableResearchKind>(),exclusionReason="User excludes aircraft construction, production and strategic use by bots (2026-10-23)."}});
         private static AiRosterDescriptorData Descriptor(PlayableEntityKind kind,double recon,double line,double support,double scouting,AiMobilityClass mobility,PlayableCommandKind command)=>new AiRosterDescriptorData{
             kind=kind,reconWeight=recon,lineWeight=line,supportWeight=support,scoutingUtility=scouting,mobility=mobility,producer=PlayableBuildingKind.Factory,
             productionCommand=command,targetTags=new[]{"ground","building"},unlockDependencies=new PlayableResearchKind[0]};
         public static IReadOnlyList<AiProfileField> Metadata {get;}=Array.AsReadOnly(Enum.GetValues(typeof(PlayableEntityKind)).Cast<PlayableEntityKind>().SelectMany(kind=>
             new[]{"reconWeight","lineWeight","supportWeight","scoutingUtility"}.Select(role=>new AiProfileField("roster."+kind+"."+role,"ИИ / Роли",kind+" / "+role,
                 "Относительный вес роли; игровые характеристики берутся из gameplay catalog.","ratio",0,1,.05,InitialWeight(kind,role),false))).ToArray());
-        private static double InitialWeight(PlayableEntityKind kind,string role)=>kind==PlayableEntityKind.Explorer?(role=="reconWeight"||role=="scoutingUtility"?1:0):kind==PlayableEntityKind.Tank?(role=="lineWeight"?1:0):(role=="supportWeight"?1:0);
+        private static double InitialWeight(PlayableEntityKind kind,string role)=>kind==PlayableEntityKind.Hawk?0:kind==PlayableEntityKind.Explorer?(role=="reconWeight"||role=="scoutingUtility"?1:0):kind==PlayableEntityKind.Tank?(role=="lineWeight"?1:0):(role=="supportWeight"?1:0);
         public AiRosterCatalog(IEnumerable<AiRosterDescriptorData> input)
         {
+            using var measured=PerformanceProfile.Measure(ProfileStage.RosterBuild);
             if(input==null)throw new ArgumentNullException(nameof(input));descriptors=input.Select(Copy).OrderBy(d=>(int)d.kind).ToArray();
             if(descriptors.Select(d=>d.kind).Distinct().Count()!=descriptors.Length||!descriptors.Select(d=>d.kind).SequenceEqual(Enum.GetValues(typeof(PlayableEntityKind)).Cast<PlayableEntityKind>().OrderBy(k=>(int)k)))throw new ArgumentException("Every playable kind needs one descriptor or documented exclusion.");
             foreach(var d in descriptors)

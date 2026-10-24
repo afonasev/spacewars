@@ -25,6 +25,7 @@ namespace Spacewars.Runtime
         internal PlayableWorldState CaptureWorldState(long publication,Func<string,long> human)
         {
             foreach(var owner in scheduler.Owners)owner.ReconcileBudget(domain);
+            domain.Navigation.ValidateTickQuantumBoundary(domain.Tick,asynchronousRoutes);
             var state=domain.CaptureWorldState(seed,SourceIdentity);
             try{state.SetAiCapture(w=>{
                 w.Write(0x41495331);bool retry=barrierPhase==RouteBarrierPhase.MaintenancePending;w.Write(retry?PendingBarrierAuthorityVersion:AiStateWire.Version);String(w,EffectiveRouteDeliveryPolicy);w.Write(publication);if(retry)w.Write((byte)barrierPhase);else w.Write(AwaitingRoutes);
@@ -60,16 +61,17 @@ namespace Spacewars.Runtime
             var d=PlayableDomain.RestoreWithNavigationFormat(bytes,profile,seed,source,config,format,true,navigationBudget,transactionFormat:transactionFormat);
             bool complete=false;try{var restored=Unpack(state.AiAuthority,r=>{
                 AiStateWire.Require(r.ReadInt32()==0x41495331,"unsupported authority schema");int version=r.ReadInt32();AiStateWire.Require(version==AiStateWire.Version||version==PendingBarrierAuthorityVersion,"unsupported authority schema");
-                string policy=String(r);AiStateWire.Require(policy==RouteDeliveryPolicy||policy==AsyncRouteDeliveryPolicy||policy==LegacyRouteDeliveryPolicy||policy==LegacyAsyncRouteDeliveryPolicy,"unsupported route policy");
+                string policy=String(r);AiStateWire.Require(policy==RouteDeliveryPolicy||policy==AccruedRouteDeliveryPolicy||policy==AsyncRouteDeliveryPolicy||policy==LegacyRouteDeliveryPolicy||policy==LegacyAsyncRouteDeliveryPolicy,"unsupported route policy");
                 long publication=r.ReadInt64();var phase=version==AiStateWire.Version?(Boolean(r)?RouteBarrierPhase.WaitingForRoutes:RouteBarrierPhase.Idle):(RouteBarrierPhase)r.ReadByte();AiStateWire.Require(publication>=0&&(version!=PendingBarrierAuthorityVersion||phase==RouteBarrierPhase.MaintenancePending),"publication sequence/barrier phase");
-                AiStateWire.Require((policy!=AsyncRouteDeliveryPolicy&&policy!=LegacyAsyncRouteDeliveryPolicy)||phase==RouteBarrierPhase.Idle,"asynchronous policy cannot freeze a tick");
+                AiStateWire.Require((policy!=AccruedRouteDeliveryPolicy&&policy!=AsyncRouteDeliveryPolicy&&policy!=LegacyAsyncRouteDeliveryPolicy)||phase==RouteBarrierPhase.Idle,"asynchronous policy cannot freeze a tick");
                 var h=WorldWire.Array(r,()=>new KeyValuePair<string,long>(String(r),r.ReadInt64()));
                 AiStateWire.Require(h.Select(p=>p.Key).SequenceEqual(d.OwnerIds.OrderBy(x=>x,StringComparer.Ordinal))&&h.All(p=>p.Value>=0),"human watermarks");
                 var scheduler=AiAuthorityScheduler.ReadState(r,profile,ai,state.Generation,seed,state.Tick,owners,legacyAiHash);
                 foreach(var owner in scheduler.Owners)owner.ValidateBudget(d);
-                var result=new PlayableAuthorityTick(d,scheduler,seed,config,policy==AsyncRouteDeliveryPolicy||policy==LegacyAsyncRouteDeliveryPolicy){sequence=publication,barrierPhase=phase,tickQuanta=policy==RouteDeliveryPolicy||policy==AsyncRouteDeliveryPolicy};
-                result.SetRouteDeliveryPolicy(policy==AsyncRouteDeliveryPolicy||policy==LegacyAsyncRouteDeliveryPolicy);
-                d.Navigation.ValidateTickQuantumBoundary(state.Tick,policy==AsyncRouteDeliveryPolicy||policy==LegacyAsyncRouteDeliveryPolicy);
+                var result=new PlayableAuthorityTick(d,scheduler,seed,config,policy==AccruedRouteDeliveryPolicy||policy==AsyncRouteDeliveryPolicy||policy==LegacyAsyncRouteDeliveryPolicy){sequence=publication,barrierPhase=phase,tickQuanta=policy==RouteDeliveryPolicy||policy==AccruedRouteDeliveryPolicy||policy==AsyncRouteDeliveryPolicy};
+                AiStateWire.Require(d.Navigation.AccruedCreditsEnabled==(policy==AccruedRouteDeliveryPolicy),"saved authority mode differs from host/bank");
+                result.SetRouteDeliveryPolicy(policy==AccruedRouteDeliveryPolicy||policy==AsyncRouteDeliveryPolicy||policy==LegacyAsyncRouteDeliveryPolicy);
+                d.Navigation.ValidateTickQuantumBoundary(state.Tick,policy==AccruedRouteDeliveryPolicy||policy==AsyncRouteDeliveryPolicy||policy==LegacyAsyncRouteDeliveryPolicy);
                 foreach(var pair in h)result.humans.Add(pair.Key,pair.Value);
                 result.Latest=d.PlayerSnapshot(publication,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,seed);
                 return result;
@@ -84,7 +86,7 @@ namespace Spacewars.Runtime
             foreach(var owner in scheduler.Owners)owner.ReconcileBudget(domain);
             domain.ApplyBalance(gameplay);scheduler.Rebind(gameplay);if(ai!=null)scheduler.Rebind(ai);return null;
         }
-        public void Stop()=>scheduler.Stop(domain.Tick);
+        public void Stop(){scheduler.Stop(domain.Tick);PerformanceProfile.Flush();}
     }
     public sealed partial class PlayableRuntime
     {
@@ -100,15 +102,15 @@ namespace Spacewars.Runtime
         private void CompleteCapture()
         {
             TaskCompletionSource<byte[]> request;
-            bool capturedPause;long accepted,ordinal;int capturedOutstanding;
+            bool capturedPause,capturedMenuPause;long accepted,ordinal;int capturedOutstanding;
             PlayableCommandReceipt[] queued,history;OfflineReceipt[] offline;
             Dictionary<string,long> watermarks;
             lock(gate){
                 if(captureRequest==null)return;
                 request=captureRequest;captureRequest=null;
-                if(inbox.Count!=0||humanActions.Count!=0||finishRequested!=0||requestedBalance!=null||requestedAiProfile!=null){
-                    request.SetException(new InvalidOperationException("Capture requires an empty command/profile ingress barrier."));return;}
-                capturedPause=paused!=0;accepted=lastAcceptedSequence;capturedOutstanding=outstanding;ordinal=receiptOrdinal;
+                if(inbox.Count!=0||humanActions.Count!=0||campaignTutorialControls.Count!=0||finishRequested!=0||requestedBalance!=null||requestedAiProfile!=null){
+                    request.SetException(new InvalidOperationException("Capture requires an empty command/profile/tutorial ingress barrier."));return;}
+                capturedPause=paused!=0;capturedMenuPause=menuPaused!=0;accepted=lastAcceptedSequence;capturedOutstanding=outstanding;ordinal=receiptOrdinal;
                 queued=receipts.ToArray();history=receiptHistory.ToArray();offline=offlineReceipts.ToArray();
                 watermarks=offlineConfiguration==null?new Dictionary<string,long>{{PlayableDomain.PlayerId,lastAcceptedSequence}}:new Dictionary<string,long>(acceptedByOwner);
             }
@@ -118,7 +120,7 @@ namespace Spacewars.Runtime
                 BeforeCaptureSerialization?.Invoke();
                 using var state=authorityTick.CaptureWorldState(snapshotSequence,id=>watermarks.TryGetValue(id,out var value)?value:0);
                 state.SetTransportCapture(w=>{
-                    w.Write(1);w.Write(capturedPause);w.Write(accepted);w.Write(capturedOutstanding);w.Write(ordinal);
+                    w.Write(2);w.Write(capturedMenuPause);w.Write(capturedPause);w.Write(accepted);w.Write(capturedOutstanding);w.Write(ordinal);
                     WorldWire.Array(w,queued,x=>WorldWire.Write(w,x));WorldWire.Array(w,history,x=>WorldWire.Write(w,x));
                     WorldWire.Array(w,offline,x=>{w.Write(x.Ordinal);WorldWire.Write(w,x.Receipt);});
                 });request.SetResult(state.Encode());
@@ -136,12 +138,16 @@ namespace Spacewars.Runtime
         {
             var state=PlayableWorldState.Decode(bytes);AiStateWire.Require(state.RuntimeTransport.Length>0,"missing runtime transport state");
             domain=restored.Domain;aiScheduler=restored.Scheduler;authorityTick=restored;offlineConfiguration=config;
+            if(config?.CampaignOpening==true&&domain.CampaignNeedsCheckpoint){campaignCheckpoint=(byte[])bytes.Clone();campaignCheckpointStage=domain.CampaignCheckpointStage;}
             seed=state.Seed;Generation=state.Generation;snapshotSequence=restored.PublicationSequence;NativeAiProfile=ai;NativeAiCatalog=AiRosterCatalog.Initial;
             ownerAi=aiScheduler.Owners.SingleOrDefault(o=>o.OwnerId==PlayableDomain.PlayerId);enemyAi=aiScheduler.Owners.SingleOrDefault(o=>o.OwnerId=="enemy-1");
             openingCompositionAuthority=new PlayableAiOpeningCompositionAuthority();openingCompositionAuthority.Initialize(seed,PlayableDomain.PlayerId,aiProfile:ai);OpeningComposition=ownerAi?.Checkpoint.Opening??PlayableAiOpeningComposition.Initialize(seed,PlayableDomain.PlayerId,aiProfile:ai);
             EnemyAiConfig=new AiOwnerConfig("enemy-1",enemyAi?.Checkpoint.Difficulty??AiDifficulty.Fighter,seed,ai);
             Unpack(state.RuntimeTransport,r=>{
-                AiStateWire.Require(r.ReadInt32()==1,"unsupported runtime schema");paused=Boolean(r)?1:0;lastAcceptedSequence=r.ReadInt64();outstanding=r.ReadInt32();receiptOrdinal=r.ReadInt64();
+                int schema=r.ReadInt32();AiStateWire.Require(schema==1||schema==2,"unsupported runtime schema");
+                if(schema==1){bool effective=Boolean(r);campaignTutorialPauseHeld=domain.CampaignTutorialPauseHeld?1:0;menuPaused=effective&&campaignTutorialPauseHeld==0?1:0;paused=effective?1:0;}
+                else{menuPaused=Boolean(r)?1:0;bool effective=Boolean(r);campaignTutorialPauseHeld=domain.CampaignTutorialPauseHeld?1:0;AiStateWire.Require(effective==(menuPaused!=0||campaignTutorialPauseHeld!=0),"runtime pause ownership mismatch");paused=effective?1:0;}
+                lastAcceptedSequence=r.ReadInt64();outstanding=r.ReadInt32();receiptOrdinal=r.ReadInt64();
                 receipts.Clear();foreach(var receipt in WorldWire.Array(r,()=>ReadPlayableCommandReceipt(r)))receipts.Enqueue(receipt);
                 receiptHistory.AddRange(WorldWire.Array(r,()=>ReadPlayableCommandReceipt(r)));
                 offlineReceipts.AddRange(WorldWire.Array(r,()=>new OfflineReceipt(r.ReadInt64(),ReadPlayableCommandReceipt(r))));

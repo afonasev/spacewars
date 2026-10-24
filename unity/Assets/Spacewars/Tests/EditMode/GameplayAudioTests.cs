@@ -18,6 +18,18 @@ namespace Spacewars.Tests.EditMode
         private static GameplayAudioPlan Primed(GameplayAudioProfile profile=null)
         {var p=new GameplayAudioPlan(profile??new GameplayAudioProfile());p.Observe(new[]{Screen(Frame(0))},0,true);return p;}
 
+        [Test] public void ExplorerHitIsQuieterAndStillDeduplicatedAcrossScreens()
+        {
+            var profile=new GameplayAudioProfile();
+            GameplayAudioCue Impact(PlayableEntityKind weapon)
+            {
+                var hit=new PlayableSoundEvent(1,1,PlayableSoundKind.Impact,new NavPoint(0,0),weapon);
+                var view=Frame(1,new[]{hit});return Primed(profile).Observe(new[]{Screen(view),Screen(view)},.1,true).Single();
+            }
+            var explorer=Impact(PlayableEntityKind.Explorer);var tank=Impact(PlayableEntityKind.Tank);
+            Assert.AreEqual("impact",explorer.Clip);Assert.AreEqual(profile.explorerImpactGain,explorer.BaseGain);
+            Assert.Less(explorer.Gain,tank.Gain);Assert.AreEqual(profile.impactGain,tank.BaseGain);
+        }
         [Test] public void DuplicateScreensDoNotMultiplyGainAndHiddenCameraCannotWin()
         {
             var shot=Shot(1,1,20);var allowed=Frame(1,new[]{shot});var hidden=Frame(1,owner:"hidden");

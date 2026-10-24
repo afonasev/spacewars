@@ -12,6 +12,267 @@ namespace Spacewars.Tests.EditMode
             =>new PlayableRouteBinding(geometry,PlayableProfile.Default,session.Admission,session.RoutePort);
         private static byte[] Bytes(NavigationSession session)
         {using(var capture=session.CaptureOwnedState())using(var bytes=WorldWire.PackOwned(w=>WorldWire.Write(w,capture),capture.CaptureBudget))return bytes.TransferPublic();}
+        [Test] public void ImmutableArrangementSharesAcrossChangedGeometryAndHoldButRejectsChangedMap()
+        {
+            var map=ThreeCrossingsMap.Default;var changed=new ThreeCrossingsMap(new ThreeCrossingsProfileData{centralBridgeWidth=16});
+            var geometry=new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision);
+            var moved=new NavGeometry(map.HalfExtent,map.MovementBlockers.Concat(new[]{new NavObstacle(-4,-4,-3,-3)}).ToArray(),map.Revision+1);
+            var source=new PartitionNavigationProvider(map,geometry,null);var dynamicSource=new PartitionNavigationProvider(map,moved,"hold-changed");
+            var different=new PartitionNavigationProvider(changed,new NavGeometry(changed.HalfExtent,changed.MovementBlockers.ToArray(),changed.Revision),null);
+            Assert.True(source.SameArrangement(dynamicSource));Assert.False(source.SameArrangement(different));
+            var budget=new NavigationRetentionBudget();PartitionNavigationProvider first=null,second=null,third=null;
+            try{
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Reconstruction,1,1,out var a));using(a){first=PartitionNavigationProvider.CopyOwned(source,a.OwnedReservation());a.Attach(first);a.Commit(first,_=>{});}
+                long before=budget.PhysicalBytes;
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Reconstruction,1,1,out var b));using(b){second=PartitionNavigationProvider.CopyOwned(dynamicSource,b.OwnedReservation(),first);b.Attach(second);b.Commit(second,_=>{});}
+                Assert.AreSame(first.Seams,second.Seams);Assert.AreSame(first.Surfaces,second.Surfaces);Assert.AreNotEqual(first.Binding,second.Binding);
+                Assert.AreEqual("hold-changed",second.HoldBinding);Assert.AreEqual(moved.Obstacles.Count,second.ExclusionObstacles.Count);Assert.AreNotSame(first.ExclusionObstacles,second.ExclusionObstacles);
+                Assert.Less(budget.PhysicalBytes-before,before,"Second provider retains only dynamic geometry and view headers.");
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Reconstruction,1,1,out var c));using(c){Assert.Throws<ArgumentException>(()=>PartitionNavigationProvider.CopyOwned(different,c.OwnedReservation(),first));third=PartitionNavigationProvider.CopyOwned(different,c.OwnedReservation());c.Attach(third);c.Commit(third,_=>{});}
+                Assert.AreNotSame(first.Seams,third.Seams);Assert.AreNotSame(first.Surfaces,third.Surfaces);
+                Assert.AreEqual(NavigationStorageOwnershipTests.Unique(first.StorageRoot,second.StorageRoot,third.StorageRoot),budget.PhysicalBytes);
+            }finally{first?.StorageRoot.Release();second?.StorageRoot.Release();third?.StorageRoot.Release();Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);}
+        }
+        [Test] public void RepeatedOrdinaryProvidersShareArrangementAndColdContinuationExactly()
+        {
+            var map=new FoundryMap(new FoundryProfileData());var geometry=new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision);
+            var session=new NavigationSession(1,geometry,PlayableProfile.Default.Navigation,terrain:map);var kernel=new CertifiedRouteKernel();
+            try{
+                kernel.PauseAtPhysicalBoundary=()=>kernel.CapturePumpFrontier().Stage==CertifiedRouteKernel.PumpStage.Transfer;
+                try{kernel.Pump(Binding(session,geometry),4);}finally{kernel.PauseAtPhysicalBoundary=null;}
+                for(int i=0;i<2;i++){Assert.NotNull(session.Probe(i+7,1,PlayableProfile.Default.Navigation,new NavPoint(-4,2),new NavPoint(4,2)));Assert.True(kernel.TryRegisterPhysicalOrdinary(Binding(session,geometry)));}
+                void Shared(){var root=session.PinCommittedHostRoot();try{var providers=root.Providers.Select(p=>(PartitionNavigationProvider)((NavigationHostProvider)p.Value).Provider).ToArray();Assert.AreEqual(2,providers.Length);Assert.AreSame(providers[0].Seams,providers[1].Seams);Assert.AreSame(providers[0].Surfaces,providers[1].Surfaces);}finally{root.Release();}Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);}
+                Shared();var bytes=Bytes(session);kernel.Clear();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();
+                session=new NavigationSession(1,geometry,PlayableProfile.Default.Navigation,terrain:map);session.RestoreState(WorldWire.Unpack(bytes,WorldWire.ReadNavigationSessionState));
+                CollectionAssert.AreEqual(bytes,Bytes(session));Shared();
+            }finally{kernel.Clear();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);}
+        }
+        [Test] public void TentativeInstallationProtectionReleasesOnDiscardWithoutHistory()
+        {
+            var budget=new NavigationRetentionBudget();Assert.True(budget.TryProtectLive(1000));
+            Assert.True(budget.TryOpenScope(NavigationPreparationKind.Projection,1,1,out var prepared));NavigationRetentionBudget.Scope pressure=null;
+            try{
+                budget.ProtectInstallation(4000,prepared.OwnedReservation());Assert.AreEqual(4000,budget.LiveHeadroom);
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Solve,1,1,out pressure));Assert.True(pressure.TryReserve(LayeredNavigationScheduler.MaxRetainedBytes-budget.RetainedBytes-budget.LiveHeadroom));Assert.False(pressure.TryReserve(1));
+                prepared.Discard();Assert.AreEqual(1000,budget.LiveHeadroom);Assert.True(pressure.TryReserve(3000),"Discard returns the complete tentative priority credit.");
+            }finally{prepared.Discard();pressure?.Discard();Assert.Zero(budget.HeldBytes);Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.ActiveScopes);}
+        }
+        [Test] public void OrdinaryProjectionCapacityRefusalRollsBackAndRetries()
+        {
+            var geometry=new NavGeometry(20,Array.Empty<NavObstacle>(),1);var session=new NavigationSession(1,geometry,PlayableProfile.Default.Navigation);var kernel=new CertifiedRouteKernel();NavigationRetentionBudget.Scope pressure=null;
+            try{
+                session.Crowd.Add(1,new NavPoint(-5,0));Assert.True(session.Move(1,new NavPoint(5,0)));var binding=Binding(session,geometry);
+                kernel.PauseAtPhysicalBoundary=()=>kernel.CapturePumpFrontier().Stage==CertifiedRouteKernel.PumpStage.Projection;
+                try{kernel.Pump(binding,4);}finally{kernel.PauseAtPhysicalBoundary=null;}
+                bool refused=false;var budget=session.PhysicalHostBudget;
+                for(int i=0;i<100&&!refused;i++){
+                    var before=Bytes(session);long physical=budget.PhysicalBytes,progress=kernel.ProgressSequence;var frame=kernel.CapturePumpFrontier();
+                    Assert.True(budget.TryOpenScope(NavigationPreparationKind.Capture,1,1,out pressure));
+                    budget.AllocationAdmission=bytes=>{
+                        if(!new System.Diagnostics.StackTrace().GetFrames().Any(f=>f.GetMethod().DeclaringType==typeof(NavigationHostAnswer)&&f.GetMethod().Name=="CreateReady"))return true;
+                        budget.AllocationAdmission=null;refused=true;Assert.True(pressure.TryReserve(LayeredNavigationScheduler.MaxRetainedBytes-budget.RetainedBytes-bytes+1));return true;
+                    };
+                    int used;try{used=kernel.ProjectPhysicalOrdinary(binding,64);}finally{budget.AllocationAdmission=null;}
+                    if(refused){Assert.Zero(used);Assert.AreEqual(physical,budget.PhysicalBytes);Assert.AreEqual(progress,kernel.ProgressSequence);Assert.AreEqual(frame,kernel.CapturePumpFrontier());Assert.AreEqual(pressure.HeldBytes,budget.HeldBytes);}
+                    pressure.Discard();pressure=null;
+                    if(refused){CollectionAssert.AreEqual(before,Bytes(session));Assert.AreEqual(1,kernel.ProjectPhysicalOrdinary(binding,64));}
+                }
+                Assert.True(refused,"Reach actual Ready payload capacity.");for(int i=0;i<20000&&session.Answers.Count==0;i++)kernel.Pump(binding,4);Assert.AreEqual(1,session.Answers.Count);
+                Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);Assert.LessOrEqual(budget.PeakRetainedBytes,LayeredNavigationScheduler.MaxRetainedBytes);
+            }finally{session.PhysicalHostBudget.AllocationAdmission=null;pressure?.Discard();kernel.Clear();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);Assert.Zero(session.PhysicalHostBudget.HeldBytes);}
+        }
+        [Test] public void RoutePressureLeavesActualBirthAndReadyInstallationCapacity()
+        {
+            var geometry=new NavGeometry(20,Array.Empty<NavObstacle>(),1);var session=new NavigationSession(1,geometry,PlayableProfile.Default.Navigation);var kernel=new CertifiedRouteKernel();NavigationRetentionBudget.Scope pressure=null;
+            try{
+                session.Crowd.Add(1,new NavPoint(-5,0));Assert.True(session.Move(1,new NavPoint(5,0)));
+                for(int i=0;i<20000&&session.Answers.Count==0;i++)kernel.Pump(Binding(session,geometry),4);
+                Assert.AreEqual(1,session.Answers.Count);var budget=session.PhysicalHostBudget;Assert.Greater(budget.LiveHeadroom,NavigationSession.BirthHeadroom(1));
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Solve,1,1,out pressure));
+                Assert.True(pressure.TryReserve(LayeredNavigationScheduler.MaxRetainedBytes-budget.RetainedBytes-budget.LiveHeadroom));Assert.False(pressure.TryReserve(1));
+                session.Crowd.Add(2,new NavPoint(-5,3));Assert.AreEqual(2,session.Crowd.Units.Count);session.ApplyResults();Assert.AreEqual(1,session.AppliedResults,$"headroom={budget.LiveHeadroom} free={LayeredNavigationScheduler.MaxRetainedBytes-budget.RetainedBytes} names={session.LastAnswerNamesFailure} batch={session.LastResultBatchFailure}/{session.LastResultBatchStage}/{session.LastResultBatchDetail}");Assert.NotNull(session.InstalledExecutionFor(1));
+                pressure.Discard();pressure=null;Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);Assert.LessOrEqual(budget.PeakRetainedBytes,LayeredNavigationScheduler.MaxRetainedBytes);
+            }finally{pressure?.Discard();kernel.Clear();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);Assert.Zero(session.PhysicalHostBudget.HeldBytes);}
+        }
+        [Test] public void FoundryMemoryBudgetDiagnostic()
+        {
+            var map=new FoundryMap(new FoundryProfileData());
+            var geometry=new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision);
+            var provider=new PartitionNavigationProvider(map,geometry,null);
+            var session=new NavigationSession(1,geometry,PlayableProfile.Default.Navigation,terrain:map);
+            var kernel=new CertifiedRouteKernel();
+            try{
+                Assert.AreEqual(512L*1024*1024,LayeredNavigationScheduler.MaxRetainedBytes);
+                Assert.AreEqual(64L*1024*1024,LayeredNavigationScheduler.MaxCacheBytes);
+                TestContext.WriteLine($"FOUNDRY supports={map.Supports.Count} edges={map.Supports.Sum(s=>s.Bounds.Footprint.Vertices.Count)} seams={provider.Seams.Count} traceScratch={provider.TraceScratchBound} construction={NavigationProviderConstructionBound.Estimate(map,geometry)} providerEstimate={provider.EstimatedRetainedBytes}");
+                kernel.Attach(session.RoutePort);Snapshot("initial");
+                for(int n=0;n<2;n++){
+                    Assert.NotNull(session.Probe(7+n,1,PlayableProfile.Default.Navigation,new NavPoint(-4,2),new NavPoint(4,2)));
+                    Assert.True(kernel.TryRegisterPhysicalOrdinary(Binding(session,geometry)));
+                    Snapshot("registered"+(n+1));
+                }
+                kernel.PauseAtPhysicalBoundary=()=>kernel.CapturePumpFrontier().Stage==CertifiedRouteKernel.PumpStage.Solve;
+                try{kernel.Pump(Binding(session,geometry),4);}finally{kernel.PauseAtPhysicalBoundary=null;}
+                int consumed=0;
+                for(int n=0;n<16;n++)consumed+=kernel.AdvancePhysicalOrdinary(Binding(session,geometry),4096);
+                Assert.Greater(consumed,0,"Diagnostic must exercise solver work, not an uninitialized quota.");
+                TestContext.WriteLine("SOLVE consumed="+consumed);
+                Snapshot("after16SolveBatches");
+                Assert.True(session.PhysicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,1,1,out var scope));
+                using(scope){
+                    var actor=NavLiveUnitStorage.CreateOwned(123,new NavPoint(0,0),.25,1,1,scope.OwnedReservation());
+                    try{TestContext.WriteLine("ACTOR bareHeader="+actor.StorageBytes);}finally{actor.Release();}
+                    var spatial=NavCrowdSpatialStorage.Create(40,scope.TryReserve);
+                    try{TestContext.WriteLine("SPATIAL actors=40 bytes="+spatial.StorageBytes);}finally{spatial.Release();}
+                }
+                void Snapshot(string label){
+                    var budget=session.PhysicalHostBudget;
+                    Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);
+                    TestContext.WriteLine($"MEMORY {label} retained={budget.RetainedBytes} physical={budget.PhysicalBytes} held={budget.HeldBytes} peak={budget.PeakRetainedBytes}");
+                    var rows=NavigationStorageOwnershipTests.OwnerShapeWithSession(session).Split('\n').Select(line=>{
+                        int colon=line.LastIndexOf(':'),equal=line.LastIndexOf('=');
+                        return new {Type=line.Substring(0,colon),Bytes=long.Parse(line.Substring(colon+1,equal-colon-1))*int.Parse(line.Substring(equal+1)),Count=int.Parse(line.Substring(equal+1))};
+                    }).GroupBy(row=>row.Type).Select(group=>new{Type=group.Key,Bytes=group.Sum(row=>row.Bytes),Count=group.Sum(row=>row.Count)}).OrderByDescending(row=>row.Bytes).Take(12);
+                    foreach(var row in rows)TestContext.WriteLine($"OWNER {label} {row.Type} bytes={row.Bytes} count={row.Count}");
+                }
+            }finally{kernel.Clear();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);}
+        }
+        [TestCase(false)][TestCase(true)]
+        public void OrdinaryPartitionSeamCapacityRefusalRollsBackAndRetriesAfterCreditRelease(bool foundry)
+        {
+            IPlayableTerrain map=foundry?(IPlayableTerrain)new FoundryMap(new FoundryProfileData()):ThreeCrossingsMap.Default;
+            var geometry=new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision);
+            var profile=PlayableProfile.Default;
+            var session=new NavigationSession(1,geometry,profile.Navigation,terrain:map);
+            var kernel=new CertifiedRouteKernel();NavigationRetentionBudget.Scope pressure=null;
+            NavigationHostRoot original=null;
+            try{
+                kernel.Attach(session.RoutePort);
+                var request=session.Probe(7,1,profile.Navigation,new NavPoint(-4,2),new NavPoint(4,2));Assert.NotNull(request);
+                var binding=new PlayableRouteBinding(geometry,profile,session.Admission,session.RoutePort);
+                kernel.PauseAtPhysicalBoundary=()=>kernel.CapturePumpFrontier().Stage==CertifiedRouteKernel.PumpStage.Transfer;
+                try{kernel.Pump(binding,4);}finally{kernel.PauseAtPhysicalBoundary=null;}
+                Assert.AreEqual(CertifiedRouteKernel.PumpStage.Transfer,kernel.CapturePumpFrontier().Stage);
+                var budget=session.PhysicalHostBudget;var before=Bytes(session);long physical=budget.PhysicalBytes,progress=kernel.ProgressSequence;
+                original=session.PinCommittedHostRoot();var admission=session.Admission;
+                Assert.AreEqual(512L*1024*1024,LayeredNavigationScheduler.MaxRetainedBytes);
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Capture,1,1,out pressure));
+                int seams=0;long refusedBytes=0;
+                budget.AllocationAdmission=bytes=>{
+                    if(!new System.Diagnostics.StackTrace().GetFrames().Any(f=>f.GetMethod().DeclaringType==typeof(NavPartitionSeam)&&f.GetMethod().Name=="CopyOwned"))return true;
+                    budget.AllocationAdmission=null;seams++;refusedBytes=bytes;
+                    // Accept the hook, but occupy real sibling credit so the
+                    // production capacity check rejects this exact seam birth.
+                    Assert.True(pressure.TryReserve(LayeredNavigationScheduler.MaxRetainedBytes-budget.RetainedBytes-bytes+1));
+                    return true;
+                };
+                try{Assert.False(kernel.TryRegisterPhysicalOrdinary(binding));}
+                finally{budget.AllocationAdmission=null;}
+                Assert.AreEqual(1,seams);Assert.Greater(refusedBytes,0);
+                Assert.AreEqual(physical,budget.PhysicalBytes,"discard all copied provider births");
+                Assert.AreEqual(pressure.HeldBytes,budget.HeldBytes,"return construction and copy scratch");
+                Assert.AreEqual(1,budget.ActiveScopes);Assert.LessOrEqual(budget.PeakRetainedBytes,LayeredNavigationScheduler.MaxRetainedBytes);
+                var after=session.PinCommittedHostRoot();try{Assert.AreSame(original,after);}finally{after.Release();}
+                Assert.AreSame(admission,session.Admission);Assert.AreEqual(progress,kernel.ProgressSequence);
+                Assert.AreEqual(1,session.Requests.Count);Assert.AreSame(request,session.Requests.CopyItems()[0]);Assert.Zero(session.RegisteredRouteCount);
+                pressure.Discard();pressure=null;
+                Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);CollectionAssert.AreEqual(before,Bytes(session));
+                Assert.True(kernel.TryRegisterPhysicalOrdinary(binding),"freed capacity must permit registration");
+                Assert.Zero(session.Requests.Count);Assert.AreEqual(1,session.RegisteredRouteCount);
+                original.Release();original=null;
+                Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);
+                var registered=Bytes(session);kernel.Pump(binding,4);var next=Bytes(session);
+                kernel.Clear();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(budget.PhysicalBytes);
+                session=new NavigationSession(1,geometry,profile.Navigation,terrain:map);
+                session.RestoreState(WorldWire.Unpack(registered,WorldWire.ReadNavigationSessionState));
+                CollectionAssert.AreEqual(registered,Bytes(session));kernel=new CertifiedRouteKernel();
+                kernel.Pump(new PlayableRouteBinding(geometry,profile,session.Admission,session.RoutePort),4);
+                CollectionAssert.AreEqual(next,Bytes(session),"current-format cold next Pump");
+            }finally{
+                session.PhysicalHostBudget.AllocationAdmission=null;pressure?.Discard();original?.Release();
+                kernel.Clear();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();
+                Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);Assert.Zero(session.PhysicalHostBudget.HeldBytes);Assert.Zero(session.PhysicalHostBudget.ActiveScopes);
+            }
+        }
+        [Test] public void OrdinaryRegistrationStillPropagatesInvariantFailure()
+        {
+            var geometry=new NavGeometry(20,Array.Empty<NavObstacle>(),1);
+            var session=new NavigationSession(1,geometry,PlayableProfile.Default.Navigation);var kernel=new CertifiedRouteKernel();
+            try{
+                kernel.Attach(session.RoutePort);Assert.NotNull(session.Probe(7,1,PlayableProfile.Default.Navigation,new NavPoint(-4,2),new NavPoint(4,2)));
+                var before=Bytes(session);long physical=session.PhysicalHostBudget.PhysicalBytes;
+                var invariant=new InvalidOperationException("test invariant failure");kernel.BeforePrepare=()=>throw invariant;
+                Assert.AreSame(invariant,Assert.Throws<InvalidOperationException>(()=>kernel.TryRegisterPhysicalOrdinary(Binding(session,geometry))));
+                Assert.AreEqual(physical,session.PhysicalHostBudget.PhysicalBytes);Assert.Zero(session.PhysicalHostBudget.HeldBytes);Assert.Zero(session.PhysicalHostBudget.ActiveScopes);
+                CollectionAssert.AreEqual(before,Bytes(session));
+            }finally{kernel.Clear();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);}
+        }
+        [TestCase(false)][TestCase(true)]
+        public void OrdinaryGraphTraceScratchCapacityRefusalPreservesCursorQuotaAndColdRetry(bool foundry)
+        {
+            IPlayableTerrain map=foundry?(IPlayableTerrain)new FoundryMap(new FoundryProfileData()):ThreeCrossingsMap.Default;
+            var geometry=new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision);var profile=PlayableProfile.Default;
+            var session=new NavigationSession(1,geometry,profile.Navigation,terrain:map);var kernel=new CertifiedRouteKernel();
+            NavigationRetentionBudget.Scope pressure=null;NavigationHostRoot original=null;
+            try{
+                kernel.Attach(session.RoutePort);Assert.NotNull(session.Probe(7,1,profile.Navigation,new NavPoint(-4,2),new NavPoint(4,2)));
+                var binding=new PlayableRouteBinding(geometry,profile,session.Admission,session.RoutePort);
+                kernel.PauseAtPhysicalBoundary=()=>kernel.CapturePumpFrontier().Stage==CertifiedRouteKernel.PumpStage.Solve;
+                try{kernel.Pump(binding,4);}finally{kernel.PauseAtPhysicalBoundary=null;}
+                Assert.AreEqual(CertifiedRouteKernel.PumpStage.Solve,kernel.CapturePumpFrontier().Stage);Assert.AreEqual(1,session.RegisteredRouteCount);
+                var budget=session.PhysicalHostBudget;Assert.AreEqual(512L*1024*1024,LayeredNavigationScheduler.MaxRetainedBytes);
+                bool refused=false;byte[] prefix=null;int resumed=0;
+                for(int n=0;n<256&&!refused;n++){
+                    prefix=Bytes(session);long physical=budget.PhysicalBytes,progress=kernel.ProgressSequence,epoch=kernel.SolverEpoch;
+                    var frame=kernel.CapturePumpFrontier();original=session.PinCommittedHostRoot();
+                    Assert.True(budget.TryOpenScope(NavigationPreparationKind.Capture,1,1,out pressure));
+                    budget.AllocationAdmission=bytes=>{
+                        if(!new System.Diagnostics.StackTrace().GetFrames().Any(f=>f.GetMethod().DeclaringType==typeof(TerrainLocations)&&f.GetMethod().Name=="TraceCore"))return true;
+                        budget.AllocationAdmission=null;refused=true;
+                        Assert.True(pressure.TryReserve(LayeredNavigationScheduler.MaxRetainedBytes-budget.RetainedBytes-bytes+1));
+                        return true; // Real ledger pressure, not a false test-hook result.
+                    };
+                    int used;try{used=kernel.AdvancePhysicalOrdinary(binding,4096);}finally{budget.AllocationAdmission=null;}
+                    if(refused){
+                        Assert.Zero(used);Assert.AreEqual(physical,budget.PhysicalBytes);Assert.AreEqual(pressure.HeldBytes,budget.HeldBytes);Assert.AreEqual(1,budget.ActiveScopes);
+                        Assert.AreEqual(progress,kernel.ProgressSequence);Assert.AreEqual(epoch,kernel.SolverEpoch);Assert.AreEqual(frame,kernel.CapturePumpFrontier());
+                        var current=session.PinCommittedHostRoot();try{Assert.AreSame(original,current);}finally{current.Release();}
+                        Assert.LessOrEqual(budget.PeakRetainedBytes,LayeredNavigationScheduler.MaxRetainedBytes);
+                    }
+                    pressure.Discard();pressure=null;original.Release();original=null;
+                    if(refused){
+                        Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);CollectionAssert.AreEqual(prefix,Bytes(session),"compiler cursor, quota history and published frontier rollback");
+                        resumed=kernel.AdvancePhysicalOrdinary(binding,4096);Assert.Greater(resumed,0,"freed scratch capacity must resume actual work");
+                    }
+                }
+                Assert.True(refused,"must reach real partition graph trace scratch");var next=Bytes(session);
+                kernel.Clear();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(budget.PhysicalBytes);
+                session=new NavigationSession(1,geometry,profile.Navigation,terrain:map);session.RestoreState(WorldWire.Unpack(prefix,WorldWire.ReadNavigationSessionState));
+                CollectionAssert.AreEqual(prefix,Bytes(session));kernel=new CertifiedRouteKernel();binding=new PlayableRouteBinding(geometry,profile,session.Admission,session.RoutePort);
+                // Adopt the saved Pump frontier without spending a new operation.
+                kernel.PauseAtPhysicalBoundary=()=>true;try{kernel.Pump(binding,4);}finally{kernel.PauseAtPhysicalBoundary=null;}
+                CollectionAssert.AreEqual(prefix,Bytes(session));Assert.AreEqual(resumed,kernel.AdvancePhysicalOrdinary(binding,4096));CollectionAssert.AreEqual(next,Bytes(session),"same cold retry and paid work");
+                for(int n=0;n<20000&&session.RegisteredRouteCount>0;n++)kernel.Pump(binding,4);
+                Assert.Zero(session.RegisteredRouteCount,"resumed graph must finish and deliver its registered route");
+                Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+            }finally{
+                session.PhysicalHostBudget.AllocationAdmission=null;pressure?.Discard();original?.Release();kernel.Clear();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();
+                Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);Assert.Zero(session.PhysicalHostBudget.HeldBytes);Assert.Zero(session.PhysicalHostBudget.ActiveScopes);
+            }
+        }
+        [Test] public void OrdinaryGraphSolveStillPropagatesAllocatorInvariant()
+        {
+            var geometry=new NavGeometry(20,Array.Empty<NavObstacle>(),1);var session=new NavigationSession(1,geometry,PlayableProfile.Default.Navigation);var kernel=new CertifiedRouteKernel();
+            try{
+                kernel.Attach(session.RoutePort);Assert.NotNull(session.Probe(7,1,PlayableProfile.Default.Navigation,new NavPoint(-4,2),new NavPoint(4,2)));
+                var binding=Binding(session,geometry);kernel.PauseAtPhysicalBoundary=()=>kernel.CapturePumpFrontier().Stage==CertifiedRouteKernel.PumpStage.Solve;
+                try{kernel.Pump(binding,4);}finally{kernel.PauseAtPhysicalBoundary=null;}
+                var before=Bytes(session);var budget=session.PhysicalHostBudget;long physical=budget.PhysicalBytes;var invariant=new InvalidOperationException("test allocator invariant");
+                budget.AllocationAdmission=bytes=>{if(bytes!=NavigationRetentionBudget.ScopeBytes)throw invariant;return true;};
+                try{Assert.AreSame(invariant,Assert.Throws<InvalidOperationException>(()=>kernel.AdvancePhysicalOrdinary(binding,4096)));}finally{budget.AllocationAdmission=null;}
+                Assert.AreEqual(physical,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);CollectionAssert.AreEqual(before,Bytes(session));
+            }finally{session.PhysicalHostBudget.AllocationAdmission=null;kernel.Clear();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);}
+        }
         // Independent object-identity walk of the concrete newly allocated DTO
         // graph. Immutable borrowed facades and separately owned byte outputs are
         // excluded; neither production's shape formula nor wire size is used.

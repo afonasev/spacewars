@@ -35,7 +35,7 @@ namespace Spacewars.Runtime
             surfaceRoot=NavPhysicalMacro.Acquire(this,surface);
         }
         internal static NavigationHostProvider CopyOwned(ILayeredNavigationProvider provider,NavGeometry geometry,
-            string surfaceProviderId,int logicalReferences,INavStorageReservation reservation)
+            string surfaceProviderId,int logicalReferences,INavStorageReservation reservation,PartitionNavigationProvider shared=null)
         {
             if(provider==null||geometry==null||string.IsNullOrWhiteSpace(surfaceProviderId)||logicalReferences<1||reservation==null)
                 throw new ArgumentException("Invalid host provider entry.");
@@ -50,7 +50,7 @@ namespace Spacewars.Runtime
             try{
                 if(root==null){
                     if(provider is LayeredNavigationProvider layered)copy=LayeredNavigationProvider.CopyOwned(layered,reservation);
-                    else if(provider is PartitionNavigationProvider partition)copy=PartitionNavigationProvider.CopyOwned(partition,reservation);
+                    else if(provider is PartitionNavigationProvider partition)copy=PartitionNavigationProvider.CopyOwned(partition,reservation,shared);
                     else throw new ArgumentException("Unsupported concrete host provider.");
                     root=(copy as INavStorageFacade)?.StorageRoot;newProvider=true;
                 }

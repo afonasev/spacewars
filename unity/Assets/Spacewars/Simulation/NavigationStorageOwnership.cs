@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using System.Collections.Concurrent;
 using System.Threading;
 
 namespace Spacewars.Simulation
@@ -25,6 +26,15 @@ namespace Spacewars.Simulation
     internal static class NavStorageScratch
     {
         internal const long LeaseBytes=64;
+        internal static bool TryReserve(INavStorageReservation reservation,long scratchBytes,out IDisposable lease)
+        {
+            lease=null;
+            if(!(reservation is INavStorageScratchAllocator allocator))throw new InvalidOperationException("Scratch requires its owning allocation scope.");
+            if(scratchBytes<0)throw new ArgumentOutOfRangeException(nameof(scratchBytes));
+            long bytes=checked(LeaseBytes+scratchBytes);
+            if(!reservation.TryReserve(bytes))return false;
+            lease=allocator.ClaimScratch(bytes);return true;
+        }
         internal static IDisposable Reserve(Func<long,bool> reserve,long scratchBytes)
         {
             if(!(reserve?.Target is INavStorageScratchAllocator allocator))throw new InvalidOperationException("Scratch requires its owning allocation scope.");
@@ -39,8 +49,10 @@ namespace Spacewars.Simulation
     }
     // Bind decorated admission explicitly to its physical allocator. The actual
     // owned factories consume this interface, never a naked forecasting callback.
-    internal sealed class NavStorageReservation : INavStorageReservation, INavStorageScratchAllocator, INavStorageLedgerIdentity, INavStorageLocalBirthAllocator
+    internal interface INavStoragePreparationOwner {object PreparationOwner{get;}}
+    internal sealed class NavStorageReservation : INavStorageReservation, INavStorageScratchAllocator, INavStorageLedgerIdentity, INavStorageLocalBirthAllocator, INavStoragePreparationOwner
     {
+        public object PreparationOwner=>(allocator as INavStoragePreparationOwner)?.PreparationOwner;
         private readonly Func<long,bool> reserve;private readonly INavStorageAllocator allocator;
         internal NavStorageReservation(Func<long,bool> reserve,INavStorageAllocator allocator)
         {this.reserve=reserve??throw new ArgumentNullException(nameof(reserve));this.allocator=allocator??throw new ArgumentNullException(nameof(allocator));}
@@ -195,6 +207,12 @@ namespace Spacewars.Simulation
     }
     internal static class NavStorageLayout
     {
+        // CLR type metadata is immutable for the lifetime of this assembly. Cache only
+        // its derived byte bound, never a world object, owned storage or reservation.
+        // Existing charging/ownership checks still run for every actual allocation.
+        private static readonly ConcurrentDictionary<Type,int> valueBytes=new ConcurrentDictionary<Type,int>();
+        private static readonly ConcurrentDictionary<Type,int> objectBytes=new ConcurrentDictionary<Type,int>();
+        private static readonly Func<Type,int> valueSize=ValueBytesCore,objectSize=ObjectBytesCore;
         internal static long Charge(long bytes)=>checked(bytes+NavOwnedStorage.CaptureHeaderBytes);
         internal static Func<long,bool> Before(Func<long,bool> reserve,long bytes)
         {if(reserve!=null&&!reserve(Charge(bytes)))throw new InvalidOperationException("Physical storage exceeds prepared reservation.");return reserve;}
@@ -203,21 +221,33 @@ namespace Spacewars.Simulation
         // Conservative managed x64 layout, including references inside structs.
         internal static int ValueBytes(Type type)
         {
+            using var measured=PerformanceProfile.Measure(ProfileStage.ValueLayout);
+            if(!type.IsValueType||type.IsPrimitive||type.IsEnum)return ValueBytesCore(type);
+            return valueBytes.GetOrAdd(type,valueSize);
+        }
+        private static int ValueBytesCore(Type type)
+        {
             if(!type.IsValueType)return 8;
-            if(type.IsEnum)return ValueBytes(Enum.GetUnderlyingType(type));
+            if(type.IsEnum)return ValueBytesCore(Enum.GetUnderlyingType(type));
             if(type==typeof(bool)||type==typeof(byte)||type==typeof(sbyte))return 1;
             if(type==typeof(short)||type==typeof(ushort)||type==typeof(char))return 2;
             if(type==typeof(int)||type==typeof(uint)||type==typeof(float))return 4;
             if(type==typeof(long)||type==typeof(ulong)||type==typeof(double)||type==typeof(IntPtr)||type==typeof(UIntPtr))return 8;
             int size=0;
             foreach(var field in type.GetFields(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic)){
-                int width=ValueBytes(field.FieldType),align=Math.Min(8,width);size=(size+align-1)/align*align+width;
+                int width=ValueBytesCore(field.FieldType),align=Math.Min(8,width);size=(size+align-1)/align*align+width;
             }
             return (size+7)/8*8;
         }
         internal static int ObjectBytesBound(Type type)
         {
-            if(type.IsValueType)throw new ArgumentException("Object layout bound requires a class.");int bytes=16;
+            using var measured=PerformanceProfile.Measure(ProfileStage.ObjectLayout);
+            if(type.IsValueType)throw new ArgumentException("Object layout bound requires a class.");
+            return objectBytes.GetOrAdd(type,objectSize);
+        }
+        private static int ObjectBytesCore(Type type)
+        {
+            int bytes=16;
             for(Type at=type;at!=null;at=at.BaseType)foreach(var field in at.GetFields(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.DeclaredOnly)){int width=ValueBytes(field.FieldType);bytes=checked(bytes+((width+7)/8)*8);}
             return bytes;
         }

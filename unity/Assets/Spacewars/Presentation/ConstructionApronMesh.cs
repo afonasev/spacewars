@@ -7,6 +7,24 @@ namespace Spacewars.Presentation
     // Designer-controlled dimensions/brightness live in the Environment Art profile.
     public static class ConstructionApronMesh
     {
+        public static List<Vector3> CapturePolygon(Vector2 half,EnvironmentArtProfile art,float progress)
+        {
+            var result=new List<Vector3>();progress=Mathf.Clamp01(progress);if(progress<=0)return result;
+            float w=Mathf.Min(art.apronMarkWidth,Mathf.Min(half.x,half.y)*.09f),trim=w*1.7f;
+            float x=half.x-trim,z=half.y-trim,cut=Mathf.Min(trim,Mathf.Min(half.x,half.y)*.15f);
+            var contour=new[]{new Vector3(-x+cut,0,-z),new Vector3(x-cut,0,-z),new Vector3(x,0,-z+cut),new Vector3(x,0,z-cut),new Vector3(x-cut,0,z),new Vector3(-x+cut,0,z),new Vector3(-x,0,z-cut),new Vector3(-x,0,-z+cut)};
+            float front=Mathf.Lerp(-z,z,progress);
+            var from=contour[contour.Length-1];
+            foreach(var to in contour)
+            {
+                bool fromInside=from.z<=front,toInside=to.z<=front;
+                if(fromInside!=toInside)result.Add(Vector3.Lerp(from,to,(front-from.z)/(to.z-from.z)));
+                if(toInside)result.Add(to);
+                from=to;
+            }
+            return result;
+        }
+
         public static Mesh Build(Vector2 half,EnvironmentArtProfile art)
         {
             var vertices=new List<Vector3>();var colors=new List<Color>();var uv=new List<Vector2>();var triangles=new List<int>();

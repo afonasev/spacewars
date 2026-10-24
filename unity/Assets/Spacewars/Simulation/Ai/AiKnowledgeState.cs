@@ -11,7 +11,7 @@ namespace Spacewars.Simulation.Ai
         public int AreaId{get;}
         public IReadOnlyList<VisionSource> Placement{get;}
         public bool Contains(NavPoint point)=>PlayableVision.Visible(Placement,point);
-        public bool FullyCovered(TeamVisionSnapshot vision)=>vision!=null&&Placement.Count>0&&Placement.All(p=>Covered(vision.Sources,p));
+        public bool FullyCovered(TeamVisionSnapshot vision){using var measured=PerformanceProfile.Measure(ProfileStage.Coverage);return vision!=null&&Placement.Count>0&&Placement.All(p=>Covered(vision.Sources,p));}
         private static bool Covered(IReadOnlyList<VisionSource> sources,VisionSource envelope)
         {
             if(!PlayableVision.Visible(sources,envelope.Position))return false;
@@ -33,14 +33,35 @@ namespace Spacewars.Simulation.Ai
     public sealed class AiIntelDelta
     {
         public AiIntelDelta(long tick,IEnumerable<AiIntelEnvelope> areas,TeamVisionSnapshot vision)
-        {Tick=tick;Areas=Array.AsReadOnly(areas.OrderBy(a=>a.AreaId).Select(a=>new AiAreaCoverage(a,a.FullyCovered(vision))).ToArray());}
+        {Tick=tick;Areas=Array.AsReadOnly(areas.OrderBy(a=>a.AreaId).Select(a=>new AiAreaCoverage(a,vision)).ToArray());}
         public long Tick{get;}
         public IReadOnlyList<AiAreaCoverage> Areas{get;}
     }
     public sealed class AiAreaCoverage
     {
-        public AiAreaCoverage(AiIntelEnvelope envelope,bool full){Envelope=envelope;Full=full;}
-        public AiIntelEnvelope Envelope{get;} public bool Full{get;}
+        private readonly TeamVisionSnapshot vision;
+        private int full;
+        public AiAreaCoverage(AiIntelEnvelope envelope,bool full){Envelope=envelope;this.full=full?1:0;}
+        internal AiAreaCoverage(AiIntelEnvelope envelope,TeamVisionSnapshot vision)
+        {Envelope=envelope;this.vision=vision;full=-1;}
+        public AiIntelEnvelope Envelope{get;}
+        // Threat/team/placement consumers need the observation or envelope, not
+        // its recursive coverage proof. Keep the exact proof on first demand.
+        // Both inputs are immutable detached values; no live fog or authority
+        // is retained. Concurrent reads may repeat the same pure calculation.
+        public bool Full
+        {
+            get
+            {
+                int value=System.Threading.Volatile.Read(ref full);
+                if(value<0)
+                {
+                    value=Envelope.FullyCovered(vision)?1:0;
+                    System.Threading.Interlocked.CompareExchange(ref full,value,-1);
+                }
+                return value!=0;
+            }
+        }
     }
     public sealed class AiKnownContact
     {

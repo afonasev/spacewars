@@ -14,7 +14,7 @@ namespace Spacewars.Presentation
     {
         private VisualElement armyComposition,selectionRoster;
         private readonly Dictionary<int,Button> selectionTiles=new Dictionary<int,Button>();
-        private readonly Label[] armyCounts=new Label[3];
+        private readonly Label[] armyCounts=new Label[4];
         private OrbitalBattleRing battleRing;
         private OfflinePadAction[] battleActions=Array.Empty<OfflinePadAction>();
         private NativeLocalInputProfile battleInputProfile;
@@ -27,7 +27,7 @@ namespace Spacewars.Presentation
         {
             armyComposition=new VisualElement{name="army-composition"};armyComposition.style.position=Position.Absolute;armyComposition.style.right=20;armyComposition.style.top=82;armyComposition.style.width=100;armyComposition.style.minWidth=100;armyComposition.style.maxWidth=100;StyleRegion(armyComposition);armyComposition.style.display=DisplayStyle.None;root.Add(armyComposition);
             OrbitalPrecision.Frame(armyComposition);
-            for(int i=0;i<armyCounts.Length;i++){armyCounts[i]=new Label();armyCounts[i].style.fontSize=16;armyCounts[i].style.marginBottom=8;armyCounts[i].style.paddingLeft=38;var icon=new OrbitalGlyph(i==0?"explorer":i==1?"tank":"shkval");icon.style.position=Position.Absolute;icon.style.left=0;icon.style.top=0;armyCounts[i].Add(icon);armyComposition.Add(armyCounts[i]);}
+            for(int i=0;i<armyCounts.Length;i++){armyCounts[i]=new Label();armyCounts[i].style.fontSize=16;armyCounts[i].style.marginBottom=8;armyCounts[i].style.paddingLeft=38;var icon=new OrbitalGlyph(i==0?"explorer":i==1?"tank":i==2?"shkval":"hawk");icon.style.position=Position.Absolute;icon.style.left=0;icon.style.top=0;armyCounts[i].Add(icon);armyComposition.Add(armyCounts[i]);}
             hudFocusButton.RegisterCallback<PointerEnterEvent>(_=>{armyCompositionHovered=true;ShowArmyComposition(true);});
             hudFocusButton.RegisterCallback<PointerLeaveEvent>(_=>{armyCompositionHovered=false;ShowArmyComposition(root.focusController?.focusedElement==hudFocusButton);});
             hudFocusButton.RegisterCallback<FocusInEvent>(_=>ShowArmyComposition(true));hudFocusButton.RegisterCallback<FocusOutEvent>(_=>ShowArmyComposition(false));
@@ -36,7 +36,7 @@ namespace Spacewars.Presentation
         private void UpdateArmyCompositionCounts()
         {
             if(view==null)return;
-            var kinds=new[]{PlayableEntityKind.Explorer,PlayableEntityKind.Tank,PlayableEntityKind.Shkval};
+            var kinds=new[]{PlayableEntityKind.Explorer,PlayableEntityKind.Tank,PlayableEntityKind.Shkval,PlayableEntityKind.Hawk};
             for(int i=0;i<kinds.Length;i++){int count=view.Entities.Count(e=>e.Owner==view.Owner&&e.Kind==kinds[i]);armyCounts[i].text=count.ToString();armyCounts[i].style.display=mapOpen||count>0||!view.Entities.Any(e=>e.Owner==view.Owner)?DisplayStyle.Flex:DisplayStyle.None;}
             armyComposition.style.top=top.worldBound.yMax-root.worldBound.y+8;
         }
@@ -73,7 +73,7 @@ namespace Spacewars.Presentation
             foreach(var id in selectionTiles.Keys.Where(id=>!units.Any(e=>e.Id==id)).ToArray()){selectionTiles[id].RemoveFromHierarchy();selectionTiles.Remove(id);}
             int columns=Mathf.Max(4,(int)((armyRegion.resolvedStyle.width>0?armyRegion.resolvedStyle.width:500)/50));float width=units.Length>columns*2?Mathf.Max(18,Mathf.Floor((armyRegion.resolvedStyle.width-30)/Mathf.Ceil(units.Length/2f))):46;
             foreach(var entity in units){if(!selectionTiles.TryGetValue(entity.Id,out var tile)){int id=entity.Id;tile=Button("",()=>{runtime?.RecordHumanAction(LocalOwnerId);if((input?.AssignedKeyboard??Keyboard.current)?.shiftKey.isPressed==true||(input?.AssignedKeyboard??Keyboard.current)?.ctrlKey.isPressed==true)selection.Remove(id);else{primarySelection=id;}SelectionMarkerEvent();});tile.name="selection-unit-"+id;tile.style.paddingLeft=2;tile.style.paddingRight=2;tile.style.marginRight=2;tile.style.marginBottom=2;tile.style.unityTextAlign=TextAnchor.MiddleCenter;var hp=new VisualElement{name="unit-health",pickingMode=PickingMode.Ignore};hp.style.position=Position.Absolute;hp.style.left=2;hp.style.bottom=2;hp.style.height=4;hp.style.backgroundColor=Cyan;tile.Add(hp);selectionRoster.Add(tile);selectionTiles.Add(id,tile);}
-                tile.text=UnitSymbol(entity.Kind);tile.style.width=width;tile.style.height=28;tile.style.minHeight=28;tile.style.fontSize=width<30?12:18;tile.tooltip=UnitName(entity.Kind)+" · HP "+entity.Health+" / "+PlayableUnitRules.Health(profile,entity.Kind);tile.Q("unit-health").style.width=Length.Percent((float)(100*entity.Health/PlayableUnitRules.Health(profile,entity.Kind)));
+                tile.text=UnitSymbol(entity.Kind);tile.style.width=width;tile.style.height=28;tile.style.minHeight=28;tile.style.fontSize=width<30?12:18;tile.tooltip=UnitName(entity.Kind)+" · HP "+entity.Health+" / "+PlayableUnitRules.MaximumHealth(profile,entity).ToString("0.#");tile.Q("unit-health").style.width=Length.Percent((float)(100*PlayableUnitRules.HealthRatio(profile,entity)));
             }
             selectionRoster.style.display=units.Length>1?DisplayStyle.Flex:DisplayStyle.None;
             if(building==null&&selectedSite!=0)selectionLabel.text=siteLabel.text;
@@ -95,7 +95,8 @@ namespace Spacewars.Presentation
             // Radius/gestures remain designer-owned by NativeLocalInputProfile. Pixel margins below
             // are packing invariants: keep interactive controls inside their viewport and above the deck.
             float deck=armyRegion.worldBound.yMin>0?armyRegion.worldBound.yMin-root.worldBound.y:h-160;
-            float minY=Mathf.Max(58,top.worldBound.yMax-root.worldBound.y+8);
+            // Short local viewports reserve the measured header rather than a spare fixed row.
+            float minY=Mathf.Max(h<500?32:58,top.worldBound.yMax-root.worldBound.y+(h<500?6:8));
             float maxDiameter=Mathf.Min(battleInputProfile.radialRadius*2,Mathf.Max(100,deck-minY-12));
             float diameter=Mathf.Min(battleActions.Length<=2?210:280,maxDiameter);battleRing.Resize(diameter);
             float maxY=Mathf.Max(minY,Mathf.Min(h-diameter-10,deck-diameter-10));
@@ -112,7 +113,7 @@ namespace Spacewars.Presentation
         }
         private int primarySelection;
         private bool battleHudUnattended;
-        private static string UnitSymbol(PlayableEntityKind kind)=>kind==PlayableEntityKind.Explorer?"◇":kind==PlayableEntityKind.Shkval?"△":"▣";
+        private static string UnitSymbol(PlayableEntityKind kind)=>kind==PlayableEntityKind.Hawk?"✣":kind==PlayableEntityKind.Explorer?"◇":kind==PlayableEntityKind.Shkval?"△":"▣";
         private void ExecuteBattleAction(string id,bool hold,bool controller)
         {
             if(spectatorMode)return;

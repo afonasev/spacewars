@@ -11,15 +11,16 @@ namespace Spacewars.Presentation
         public const string AaPath="visual.cameraAntialiasing.mode";
         public const string BloomKey=Prefix+"bloomEnabled",OcclusionKey=Prefix+"occlusionEnabled";
         public static event Action<string> Changed;
-        // Editor QA gets a per-process namespace instead of touching real device preferences.
-        private static string StoragePrefix=>Prefix+(Application.isEditor?(Environment.GetEnvironmentVariable("SPACEWARS_GRAPHICS_PREFS_NAMESPACE")??""):"");
+        // Editor and Player QA may inject a namespace instead of touching real device preferences.
+        private static string StoragePrefix=>Prefix+(Environment.GetEnvironmentVariable("SPACEWARS_GRAPHICS_PREFS_NAMESPACE")??"");
         private static string Key(string path)=>StoragePrefix+path;
         private static SurfaceParameter[] catalog;
         private static T Raw<T>(string name){var asset=Resources.Load<TextAsset>(name);if(!asset)throw new InvalidOperationException("Missing graphics defaults: "+name);return JsonUtility.FromJson<T>(asset.text);}
         public static IReadOnlyList<SurfaceParameter> Parameters=>catalog??(catalog=Raw<CameraAntialiasingProfile>("CameraAntialiasingProfile").Parameters()
             .Concat(Raw<ContactOcclusionProfile>("ContactOcclusionProfile").Parameters()).Concat(Raw<ActorMaterialProfile>("ActorMaterialProfile").Parameters())
             .Concat(Raw<IndustrialLightingProfile>("IndustrialLightingProfile").Parameters()).Concat(Raw<IndustrialLightingProfile>("ThreeCrossingsLightingProfile").Parameters()).ToArray());
-        public static IEnumerable<string> PreferenceKeys=>Parameters.Select(p=>Key(p.Path)).Concat(new[]{Key("bloomEnabled"),Key("occlusionEnabled")});
+        public static IEnumerable<string> PreferenceKeys=>Parameters.Select(p=>Key(p.Path)).Concat(new[]{Key("bloomEnabled"),Key("occlusionEnabled"),Key("groundTrailsEnabled")});
+        public static bool GroundTrailsEnabled{get=>PlayerPrefs.GetInt(Key("groundTrailsEnabled"),1)!=0;set{NativePreferenceWriter.SetInt(Key("groundTrailsEnabled"),value?1:0);Changed?.Invoke("visual.groundTrails.enabled");}}
         public static bool BloomEnabled{get=>PlayerPrefs.GetInt(Key("bloomEnabled"),1)!=0;set{NativePreferenceWriter.SetInt(Key("bloomEnabled"),value?1:0);Changed?.Invoke("visual.actorFinish.bloomEnabled");}}
         public static bool OcclusionEnabled{get=>PlayerPrefs.GetInt(Key("occlusionEnabled"),1)!=0;set{NativePreferenceWriter.SetInt(Key("occlusionEnabled"),value?1:0);Changed?.Invoke("visual.contactOcclusion.enabled");}}
         public static float Read(SurfaceParameter p)
@@ -45,7 +46,7 @@ namespace Spacewars.Presentation
             if(p.Path.StartsWith("visual.threeCrossings.lighting."))return "Освещение · Three Crossings";
             if(p.Path.StartsWith("visual.lighting."))return "Освещение · остальные карты";
             if(p.Path.StartsWith("visual.contactOcclusion."))return "Контактные тени (SSAO)";
-            return p.Group=="Armor"?"Окрашенная броня":p.Group=="Metal"?"Металлические детали":p.Group=="Structure"?"Тёмные конструкции":p.Group=="Lights"?"Подсветка техники":"Свечение (Bloom)";
+            return p.Group=="Refinery"?"Огни доходного завода":p.Group=="Hangar"?"Платформа ангара":p.Group=="Armor"?"Окрашенная броня":p.Group=="Metal"?"Металлические детали":p.Group=="Structure"?"Тёмные конструкции":p.Group=="Lights"?"Подсветка техники":"Свечение (Bloom)";
         }
         public static string Label(SurfaceParameter p)
         {
@@ -54,6 +55,9 @@ namespace Spacewars.Presentation
                 case "mode":return "Сглаживание";
                 case "armorMetallic":case "metalMetallic":return "Металличность";
                 case "armorSmoothness":case "metalSmoothness":case "structureSmoothness":return "Гладкость";
+                case "buildingLampEmission":return "Яркость огней зданий";
+                case "refineryBeaconEmission":return "Яркость угловых огней завода";
+                case "hangarPlatformGray":return "Светлота платформы ангара";
                 case "darkLift":return "Осветление тёмных деталей";
                 case "emissionGain":return "Яркость системных огней";case "teamEmission":return "Яркость командных огней";
                 case "bloomIntensity":return "Сила свечения";case "bloomThreshold":return "Порог яркости свечения";case "bloomScatter":return "Рассеивание свечения";

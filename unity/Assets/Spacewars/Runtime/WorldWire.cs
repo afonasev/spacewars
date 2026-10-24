@@ -286,6 +286,7 @@ namespace Spacewars.Runtime
             w.Write(v.Incarnation);
             w.Write(v.MobilityRevision);
             w.Write(v.Team);
+            w.Write(v.CanYield);
             w.Write(v.Id);
             w.Write(v.RouteIndex);
             w.Write(v.LocalIndex);
@@ -306,7 +307,7 @@ namespace Spacewars.Runtime
             });
             }
         internal static NavUnitSaveState ReadNavUnitSaveState(BinaryReader r) {if(!Boolean(r))return null;
-            return Record(r,()=>new NavUnitSaveState{Incarnation=r.ReadInt64(),MobilityRevision=r.ReadInt64(),Team=r.ReadInt32(),Id=r.ReadInt32(),RouteIndex=r.ReadInt32(),LocalIndex=r.ReadInt32(),NoProgressTicks=r.ReadInt32(),Position=ReadPoint(r),Goal=ReadPoint(r),Radius=Number(r),Speed=Number(r),TurnSpeed=Number(r),Heading=Number(r),BlockedSeconds=Number(r),Moving=Boolean(r),Held=Boolean(r),Outcome=EnumValue<NavigationOutcome>(r),Route=Array(r,()=>ReadPoint(r)),LocalRoute=Array(r,()=>ReadPoint(r))});
+            return Record(r,()=>new NavUnitSaveState{Incarnation=r.ReadInt64(),MobilityRevision=r.ReadInt64(),Team=r.ReadInt32(),CanYield=Boolean(r),Id=r.ReadInt32(),RouteIndex=r.ReadInt32(),LocalIndex=r.ReadInt32(),NoProgressTicks=r.ReadInt32(),Position=ReadPoint(r),Goal=ReadPoint(r),Radius=Number(r),Speed=Number(r),TurnSpeed=Number(r),Heading=Number(r),BlockedSeconds=Number(r),Moving=Boolean(r),Held=Boolean(r),Outcome=EnumValue<NavigationOutcome>(r),Route=Array(r,()=>ReadPoint(r)),LocalRoute=Array(r,()=>ReadPoint(r))});
             }
         internal static void Write(BinaryWriter w,PlayableVisionState v) {w.Write(v!=null);
             if(v==null)return;
@@ -425,6 +426,30 @@ namespace Spacewars.Runtime
         private static byte[] BindingCore(PlayableProfile p,bool legacyQueue,bool legacyMarch)=>Pack(w=>WriteBinding(w,p,legacyQueue,legacyMarch));
         internal static NavigationCaptureBytes BindingOwned(PlayableProfile p,NavigationRetentionBudget budget)=>PackOwned(w=>WriteBinding(w,p,false,false),budget);
         private static void WriteBinding(BinaryWriter w,PlayableProfile p,bool legacyQueue,bool legacyMarch){w.Write(legacyQueue?9:PlayableCommand.CurrentSchemaVersion);String(w,p.DisplayName);
+            Number(w,p.WeaponSystemsLevel1Cost);
+            Number(w,p.WeaponSystemsLevel1Seconds);
+            Number(w,p.WeaponSystemsLevel1BonusPercent);
+            Number(w,p.WeaponSystemsLevel2Cost);
+            Number(w,p.WeaponSystemsLevel2Seconds);
+            Number(w,p.WeaponSystemsLevel2BonusPercent);
+            Number(w,p.DefensiveSystemsLevel1Cost);
+            Number(w,p.DefensiveSystemsLevel1Seconds);
+            Number(w,p.DefensiveSystemsLevel1BonusPercent);
+            Number(w,p.DefensiveSystemsLevel2Cost);
+            Number(w,p.DefensiveSystemsLevel2Seconds);
+            Number(w,p.DefensiveSystemsLevel2BonusPercent);
+            Number(w,p.ArmySystemsMinimumUnits);
+            Number(w,p.ArmySystemsAiDelaySeconds(Spacewars.Simulation.Ai.AiDifficulty.Recruit));
+            Number(w,p.ArmySystemsAiDelaySeconds(Spacewars.Simulation.Ai.AiDifficulty.Recruit,2));
+            Number(w,p.ArmySystemsAiUtilityScale(Spacewars.Simulation.Ai.AiDifficulty.Recruit));
+            Number(w,p.ArmySystemsAiDelaySeconds(Spacewars.Simulation.Ai.AiDifficulty.Fighter));
+            Number(w,p.ArmySystemsAiDelaySeconds(Spacewars.Simulation.Ai.AiDifficulty.Fighter,2));
+            Number(w,p.ArmySystemsAiUtilityScale(Spacewars.Simulation.Ai.AiDifficulty.Fighter));
+            Number(w,p.ArmySystemsAiDelaySeconds(Spacewars.Simulation.Ai.AiDifficulty.Veteran));
+            Number(w,p.ArmySystemsAiDelaySeconds(Spacewars.Simulation.Ai.AiDifficulty.Veteran,2));
+            Number(w,p.ArmySystemsAiUtilityScale(Spacewars.Simulation.Ai.AiDifficulty.Veteran));
+            Number(w,p.ArmySystemsAiCatchupSeconds(Spacewars.Simulation.Ai.AiDifficulty.Fighter));
+            Number(w,p.ArmySystemsAiCatchupSeconds(Spacewars.Simulation.Ai.AiDifficulty.Veteran));
             w.Write(legacyQueue?14:PlayableAiObservation.CurrentSchemaVersion);
             Number(w,p.MinimapCompactSize);
             Number(w,p.MinimapTacticalSize);
@@ -455,6 +480,13 @@ namespace Spacewars.Runtime
             Number(w,p.FogTintB);
             Number(w,p.FogMemoryBrightness);
             Number(w,p.FogMemoryDesaturation);
+            Number(w,p.HangarHealth);
+            Number(w,p.HangarBuildSeconds);
+            Number(w,p.HangarCreditCost);
+            Number(w,p.HangarVisionRange);
+            Number(w,p.HangarFootprintRadius);
+            Number(w,p.HangarModelHeightMeters);
+            Number(w,p.HangarModelScale);foreach(var field in PlayableProfileMetadata.HawkFields)Number(w,field.Read(p.CopyData()));
             Number(w,p.ScienceHealth);
             Number(w,p.ScienceBuildSeconds);
             Number(w,p.ScienceVisionRange);
@@ -711,7 +743,7 @@ namespace Spacewars.Runtime
             WriteObstacleView(w,m.MovementBlockers);
             WriteObstacleView(w,m.Solids);
             WriteObstacleView(w,crossings.Water);
-            }else if(m is FoundryMap foundry){Number(w,foundry.Scale);Number(w,foundry.UpperHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is BasaltCrownMap basalt){String(w,basalt.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is MossHighlandMap moss){String(w,moss.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is AiTestMap){Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else throw new ArgumentException("Unsupported native terrain binding.");
+            }else if(m is FoundryMap foundry){Number(w,foundry.Scale);Number(w,foundry.UpperHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is BasaltCrownMap basalt){String(w,basalt.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is MossHighlandMap moss){String(w,moss.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is WhiteMeridianMap meridian){Number(w,meridian.Scale);Number(w,meridian.TerraceHeight);Number(w,meridian.RidgeHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is CrimsonGroveMap grove){Number(w,grove.Scale);Number(w,grove.TerraceHeight);Number(w,grove.RidgeHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is AiTestMap||m is CampaignOpeningMap||m is ProvingGroundMap){Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else throw new ArgumentException("Unsupported native terrain binding.");
             w.Write(m.Supports.Count);
             foreach(var s in m.Supports){String(w,s.Id);
             Write(w,s.Bounds);
@@ -721,7 +753,7 @@ namespace Spacewars.Runtime
             Write(w,s.Origin);
             }}if(!legacyQueue){w.Write(p.UnitOrderQueueLimit);Number(w,p.CameraEdgePanSpeed);Number(w,p.CameraEdgePanZonePixels);}
             if(!legacyQueue&&!legacyMarch){Number(w,p.GroupMarchMaximumStretch);Number(w,p.IncomeMarkerFontPixels);Number(w,p.IncomeMarkerRisePixels);Number(w,p.IncomeMarkerDurationSeconds);Number(w,p.RallyFlagHeight);}
-            if(legacyQueue||legacyMarch){if(!p.Navigation.HasCrowdV1Defaults)throw new ArgumentException("Legacy binding requires v1 crowd defaults.");}else p.Navigation.WriteCrowdBinding(w);}
+            if(legacyQueue||legacyMarch){if(!p.Navigation.HasCrowdV1Defaults)throw new ArgumentException("Legacy binding requires v1 crowd defaults.");}else p.Navigation.WriteCrowdBinding(w);if(p.HasAccruedCreditExtension){w.Write(0x41434331);w.Write(p.MaxAccruedCredits);}}
 
 
     }

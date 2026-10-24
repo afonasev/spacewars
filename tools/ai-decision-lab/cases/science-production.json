@@ -1,0 +1,12 @@
+{
+  "Schema": "ai-decision-case-v1",
+  "Name": "science-versus-production-at-603",
+  "Provenance": "Authored owner-decision boundary inspired by retained 2026-10-20 funding capture (603 liquid, factory build/startup competition). Not an exact capture replay: one ready factory/refinery, ten tanks, no previous owner history or settled-income window. See README limitations.",
+  "Seed": 41,
+  "Tick": 10215,
+  "Cash": 603,
+  "Tanks": 10,
+  "ScienceCenter": false,
+  "SettledIncome": 0,
+  "ProtectedFunds": 0
+}

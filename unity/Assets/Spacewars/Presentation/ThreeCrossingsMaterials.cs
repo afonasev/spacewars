@@ -189,13 +189,13 @@ namespace Spacewars.Presentation
         // Raster precision and sample count are technical quality bounds, not visual tuning.
         public const int MaskSize=512;
         public ThreeCrossingsSurfaceProfile Profile{get;}
-        public Texture2D RoadMask{get;}
-        public Texture2D ShoreMask{get;}
-        public Texture2D RockMask{get;}
+        public Texture2D RoadMask{get;private set;}
+        public Texture2D ShoreMask{get;private set;}
+        public Texture2D RockMask{get;private set;}
         public Texture2D ConstructionMask{get;private set;}
         public MineAccess[] MineAccesses{get;private set;}
         public readonly List<HangarAccess> HangarAccesses=new List<HangarAccess>();
-        public EnvironmentArtProfile Art{get;}
+        public EnvironmentArtProfile Art{get;private set;}
         public Texture2D WeatheringMask{get;private set;}
         public readonly struct Segment
         {
@@ -246,12 +246,14 @@ namespace Spacewars.Presentation
             }
             return result.ToArray();
         }
-        private void BuildConstruction(ThreeCrossingsMap map,Material material,PlayableProfile gameplay)
+        private System.Collections.IEnumerator BuildConstruction(ThreeCrossingsMap map,Material material,PlayableProfile gameplay)
         {
+            var budget=new LoadingFrameBudget();
             ConstructionMask=new Texture2D(MaskSize,MaskSize,TextureFormat.RGBA32,false,true){name="Constructed frames and mine yards",wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};
             var pixels=new Color[MaskSize*MaskSize];var platforms=map.Supports.Where(s=>s.Id.StartsWith("platform-")).ToArray();
             for(int y=0;y<MaskSize;y++)for(int x=0;x<MaskSize;x++)
             {
+                if(x==0&&budget.Expired){yield return null;budget.Restart();}
                 var point=new NavPoint(((x+.5)/MaskSize*2-1)*map.HalfExtent,((y+.5)/MaskSize*2-1)*map.HalfExtent);
                 float frame=0,yard=0,edge=0,traffic=0;
                 foreach(var platform in platforms)if(platform.Bounds.Contains(point))
@@ -282,15 +284,23 @@ namespace Spacewars.Presentation
             foreach(var s in Segments(p))
                 if(!map.SupportsSweep(s.A,s.B,p.roadWidth/2))throw new ArgumentException("Road corridor hits unsupported terrain: "+s.A.X+","+s.A.Z+" -> "+s.B.X+","+s.B.Z);
         }
-        public ThreeCrossingsMaterials(ThreeCrossingsSurfaceProfile p,ThreeCrossingsMap map,Material material,PlayableProfile gameplay)
+        public ThreeCrossingsMaterials(ThreeCrossingsSurfaceProfile p,ThreeCrossingsMap map,Material material,PlayableProfile gameplay,bool staged=false)
         {
-            ValidateRoads(p,map);Profile=p;MineAccesses=PlanMineAccess(p,map,gameplay);
+            Profile=p;Preparation=Initialize(p,map,material,gameplay);
+            if(!staged){try{LoadingPreparation.Drain(Preparation);}catch{Dispose();throw;}}
+        }
+        public System.Collections.IEnumerator Preparation{get;}
+        private System.Collections.IEnumerator Initialize(ThreeCrossingsSurfaceProfile p,ThreeCrossingsMap map,Material material,PlayableProfile gameplay)
+        {
+            var budget=new LoadingFrameBudget();
+            ValidateRoads(p,map);MineAccesses=PlanMineAccess(p,map,gameplay);
             RoadMask=new Texture2D(MaskSize,MaskSize,TextureFormat.R8,false,true){name="Three Crossings dirt road mask",wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};
             var pixels=new byte[MaskSize*MaskSize];var segments=Segments(p).ToArray();
             var bridges=map.Supports.Where(s=>s.IsBridge).ToArray();
             var mineReserves=TerritoryRules.Sites(gameplay).Where(s=>s.Kind==PlayableBuildingKind.Mine).ToArray();
             for(int y=0;y<MaskSize;y++)for(int x=0;x<MaskSize;x++)
             {
+                if(x==0&&budget.Expired){yield return null;budget.Restart();}
                 float wx=(float)(((x+.5)/MaskSize*2-1)*map.HalfExtent),wz=(float)(((y+.5)/MaskSize*2-1)*map.HalfExtent);
                 double best=double.MaxValue;
                 foreach(var s in segments)
@@ -369,6 +379,7 @@ namespace Spacewars.Presentation
             var banks=map.Supports.Where(s=>s.Id=="west-bank"||s.Id=="east-bank").ToArray();
             for(int y=0;y<MaskSize;y++)for(int x=0;x<MaskSize;x++)
             {
+                if(x==0&&budget.Expired){yield return null;budget.Restart();}
                 var point=new NavPoint(((x+.5)/MaskSize*2-1)*map.HalfExtent,((y+.5)/MaskSize*2-1)*map.HalfExtent);
                 double distance=double.MaxValue;
                 foreach(var bank in banks)distance=Math.Min(distance,bank.Bounds.BoundaryDistanceSquared(point));
@@ -381,6 +392,7 @@ namespace Spacewars.Presentation
             var rocks=map.Solids.Where(r=>r.Top>=map.WaterDepth&&r.Bottom<=0).ToArray();
             for(int y=0;y<MaskSize;y++)for(int x=0;x<MaskSize;x++)
             {
+                if(x==0&&budget.Expired){yield return null;budget.Restart();}
                 var point=new NavPoint(((x+.5)/MaskSize*2-1)*map.HalfExtent,((y+.5)/MaskSize*2-1)*map.HalfExtent);
                 double distance=double.MaxValue;
                 foreach(var rock in rocks)distance=Math.Min(distance,rock.Contains(point)?0:rock.BoundaryDistanceSquared(point));
@@ -388,16 +400,19 @@ namespace Spacewars.Presentation
             }
             RockMask.LoadRawTextureData(rockPixels);RockMask.Apply(false,false);material.SetTexture("_RockMask",RockMask);
             ShoreMask.LoadRawTextureData(pixels);ShoreMask.Apply(false,false);material.SetTexture("_ShoreMask",ShoreMask);
-            BuildConstruction(map,material,gameplay);
+            yield return BuildConstruction(map,material,gameplay);
         }
-        public void BuildWeathering(ThreeCrossingsMap map,IEnumerable<ThreeCrossingsDetails.Placement> details,Material material)
+        public void BuildWeathering(ThreeCrossingsMap map,IEnumerable<ThreeCrossingsDetails.Placement> details,Material material)=>LoadingPreparation.Drain(PrepareWeathering(map,details,material));
+        public System.Collections.IEnumerator PrepareWeathering(ThreeCrossingsMap map,IEnumerable<ThreeCrossingsDetails.Placement> details,Material material)
         {
+            var budget=new LoadingFrameBudget();
             WeatheringMask=new Texture2D(MaskSize,MaskSize,TextureFormat.RGBA32,false,true){name="Dust contact and wear mask",wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};
             var pixels=new Color[MaskSize*MaskSize];
             var constructions=map.Supports.Where(s=>s.IsBridge||s.Id.StartsWith("platform-")).ToArray();
             var segments=Segments(Profile).Concat(MineAccesses.Select(a=>new Segment(a.Connection,a.Entry))).Concat(HangarAccesses.SelectMany(a=>a.Segments)).ToArray();
             for(int y=0;y<MaskSize;y++)for(int x=0;x<MaskSize;x++)
             {
+                if(x==0&&budget.Expired){yield return null;budget.Restart();}
                 float wx=(float)(((x+.5)/MaskSize*2-1)*map.HalfExtent),wz=(float)(((y+.5)/MaskSize*2-1)*map.HalfExtent);
                 var point=new NavPoint(wx,wz);float dust=0,wear=0,tread=0;
                 foreach(var support in constructions)

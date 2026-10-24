@@ -1,0 +1,20 @@
+{
+  "id": "hawk-motion-preview-v1",
+  "revision": 1,
+  "forwardSpeed": 2.8,
+  "reverseSpeed": 0.7,
+  "strafeSpeed": 1.6,
+  "acceleration": 2,
+  "braking": 2.8,
+  "reverseSeconds": 1,
+  "yawSpeed": 55,
+  "yawAcceleration": 80,
+  "cruisePitch": 5,
+  "accelerationPitch": 10,
+  "strafeBank": 12,
+  "turnBank": 9,
+  "attitudeSpeed": 32,
+  "hoverHeight": 2.5,
+  "cameraSize": 6.5,
+  "rotorSpeed": 900
+}

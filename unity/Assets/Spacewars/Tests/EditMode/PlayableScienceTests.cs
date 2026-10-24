@@ -51,34 +51,79 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void OwnerResearchQueueChargesSequentiallyAndCenterLossDoesNotRefund()
         {
-            int center=Build(PlayableBuildingKind.ScientificCenter,2);double before=Balance();
+            Build(PlayableBuildingKind.Factory,1);int center=Build(PlayableBuildingKind.ScientificCenter,2);double before=Balance();
             Assert.AreEqual(PlayableCommandStatus.Applied,Research(PlayableResearchKind.TankChassis,center));
             Assert.AreEqual(PlayableCommandStatus.Applied,Research(PlayableResearchKind.ExplorerAssaultGuns,center));
             var orders=B(center).PrivateState.Research;Assert.AreEqual(2,orders.Count);Assert.True(orders[0].Active);Assert.False(orders[1].Active);Assert.AreEqual(before-p.TankChassisCost,Balance());
             Call("AdvanceResearch",p.TankChassisSeconds);orders=B(center).PrivateState.Research;Assert.True(orders[0].Complete);Assert.True(orders[1].Active);Assert.AreEqual(before-p.TankChassisCost-p.ExplorerAssaultCost,Balance());
             Call("Damage",center,(int)p.ScienceHealth+1);Assert.AreEqual(before-p.TankChassisCost-p.ExplorerAssaultCost,Balance());
         }
-        [Test] public void GuidanceRequiresSixHundredCreditsAndChargesOnce()
+        [Test] public void GuidanceRequiresThreeHundredCreditsAndChargesOnce()
         {
-            int center=Build(PlayableBuildingKind.ScientificCenter,2);
-            Call("AddCredits",PlayableOwner.Player,599d-Balance());
+            Build(PlayableBuildingKind.Factory,1);int center=Build(PlayableBuildingKind.ScientificCenter,2);
+            Call("AddCredits",PlayableOwner.Player,299d-Balance());
             Assert.AreEqual(PlayableCommandStatus.InsufficientCredits,Research(PlayableResearchKind.ShkvalGuidance,center));
-            Assert.AreEqual(599d,Balance());
+            Assert.AreEqual(299d,Balance());
             Call("AddCredits",PlayableOwner.Player,1d);
             Assert.AreEqual(PlayableCommandStatus.Applied,Research(PlayableResearchKind.ShkvalGuidance,center));
             Assert.Zero(Balance());
-            Assert.AreEqual(600d,B(center).PrivateState.Research.Single().PaidCost);
+            Assert.AreEqual(300d,B(center).PrivateState.Research.Single().PaidCost);
             Call("AdvanceResearch",p.ShkvalGuidanceSeconds);
             Assert.AreEqual(PlayableCommandStatus.Rejected,Research(PlayableResearchKind.ShkvalGuidance,center));
             Assert.Zero(Balance());
         }
         [Test] public void ResearchSaveStateRoundTripKeepsPaidActiveAndWaitingOrders()
         {
-            int center=Build(PlayableBuildingKind.ScientificCenter,2);Research(PlayableResearchKind.TankChassis,center);Research(PlayableResearchKind.ExplorerAssaultGuns,center);
+            Build(PlayableBuildingKind.Factory,1);int center=Build(PlayableBuildingKind.ScientificCenter,2);Research(PlayableResearchKind.TankChassis,center);Research(PlayableResearchKind.ExplorerAssaultGuns,center);
             Call("AdvanceResearch",7d);var saved=(PlayableResearchSaveState)Call("CaptureResearchState");
-            Setup();int restoredCenter=Build(PlayableBuildingKind.ScientificCenter,2);Assert.AreEqual(center,restoredCenter);
+            Setup();Build(PlayableBuildingKind.Factory,1);int restoredCenter=Build(PlayableBuildingKind.ScientificCenter,2);Assert.AreEqual(center,restoredCenter);
             Call("RestoreResearchState",saved);var orders=B(restoredCenter).PrivateState.Research;
             Assert.AreEqual(2,orders.Count);Assert.True(orders[0].Active);Assert.AreEqual(p.TankChassisCost,orders[0].PaidCost);Assert.AreEqual(7d,orders[0].Elapsed);Assert.False(orders[1].Active);Assert.Zero(orders[1].PaidCost);
+        }
+        [TestCase(PlayableResearchKind.TankChassis,PlayableBuildingKind.Factory)]
+        [TestCase(PlayableResearchKind.ExplorerAssaultGuns,PlayableBuildingKind.Factory)]
+        [TestCase(PlayableResearchKind.ShkvalGuidance,PlayableBuildingKind.Factory)]
+        [TestCase(PlayableResearchKind.HawkSalvoSystems,PlayableBuildingKind.Hangar)]
+        public void SpecializedResearchRequiresReadyOwnNonSellingProducer(PlayableResearchKind kind,PlayableBuildingKind producer)
+        {
+            int center=Build(PlayableBuildingKind.ScientificCenter,2);
+            Assert.AreEqual(PlayableCommandStatus.Rejected,Research(kind,center));
+            var blocked=View().ResearchAvailability.Single(a=>a.Kind==kind);Assert.False(blocked.Available);Assert.IsNotEmpty(blocked.BlockedReason);
+            Build(producer,1,true,PlayableOwner.Enemy);Assert.AreEqual(PlayableCommandStatus.Rejected,Research(kind,center));
+            int factory=Build(producer,1,false);Assert.AreEqual(PlayableCommandStatus.Rejected,Research(kind,center));
+            Call("AdvanceFoundations");Call("AdvanceBuildings",TerritoryRules.Duration(p,producer)+1);
+            Assert.True(View().ResearchAvailability.Single(a=>a.Kind==kind).Available);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Research(kind,center));
+            Call("Damage",factory,100000);Call("AdvanceResearch",PlayableResearchRules.Duration(p,kind));
+            Assert.True(View().OwnerResearch.Single(o=>o.Kind==kind).Complete,"Producer loss after start does not interrupt research");
+            Assert.AreEqual(PlayableCommandStatus.Rejected,Research(kind,center));
+            Setup();center=Build(PlayableBuildingKind.ScientificCenter,2);factory=Build(producer,1);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.SellBuilding,factory));
+            Assert.AreEqual(PlayableCommandStatus.Rejected,Research(kind,center));
+        }
+        [Test] public void WaitingResearchRequiresProducerAgainBeforeChargingAndStarting()
+        {
+            int factory=Build(PlayableBuildingKind.Factory,1),center=Build(PlayableBuildingKind.ScientificCenter,2);
+            Research(PlayableResearchKind.TankChassis,center);Research(PlayableResearchKind.ExplorerAssaultGuns,center);
+            double paid=Balance();Call("Damage",factory,100000);Call("AdvanceResearch",p.TankChassisSeconds);
+            var waiting=View().OwnerResearch.Single(o=>o.Kind==PlayableResearchKind.ExplorerAssaultGuns);
+            Assert.False(waiting.Active);Assert.Zero(waiting.PaidCost);Assert.AreEqual(paid,Balance());
+            Build(PlayableBuildingKind.Factory,1);double before=Balance();Call("AdvanceResearch",0d);
+            waiting=View().OwnerResearch.Single(o=>o.Kind==PlayableResearchKind.ExplorerAssaultGuns);
+            Assert.True(waiting.Active);Assert.AreEqual(p.ExplorerAssaultCost,waiting.PaidCost);Assert.AreEqual(before-p.ExplorerAssaultCost,Balance());
+        }
+        [Test] public void HawkUpgradeIsOwnerGlobalAndSurvivesResearchRestoreAndProducerLoss()
+        {
+            int hangar=Build(PlayableBuildingKind.Hangar,1),center=Build(PlayableBuildingKind.ScientificCenter,2);
+            int old=(int)Call("SpawnUnit",new NavPoint(-10,15),PlayableOwner.Player,PlayableEntityKind.Hawk);
+            double before=Balance();Assert.AreEqual(PlayableCommandStatus.Applied,Research(PlayableResearchKind.HawkSalvoSystems,center));
+            Assert.AreEqual(before-300,Balance());Call("AdvanceResearch",30d);
+            int fresh=(int)Call("SpawnUnit",new NavPoint(-12,15),PlayableOwner.Player,PlayableEntityKind.Hawk);
+            int enemy=(int)Call("SpawnUnit",new NavPoint(-3,15),PlayableOwner.Enemy,PlayableEntityKind.Hawk);
+            foreach(int id in new[]{old,fresh})Assert.AreEqual(1.5d,Call("HawkPreparation",((System.Collections.IDictionary)Domain.GetField("units",Flags).GetValue(domain))[id]));
+            Assert.AreEqual(3d,Call("HawkPreparation",((System.Collections.IDictionary)Domain.GetField("units",Flags).GetValue(domain))[enemy]));
+            Call("Damage",hangar,100000);var saved=(PlayableResearchSaveState)Call("CaptureResearchState");Call("RestoreResearchState",saved);
+            Assert.True((bool)Call("HawkSalvo",PlayableOwner.Player));Assert.False((bool)Call("HawkSalvo",PlayableOwner.Enemy));
         }
         [Test] public void UpgradePaysOnceCancellationRefundsExactlyOnceAndRejectsOtherOwner()
         {

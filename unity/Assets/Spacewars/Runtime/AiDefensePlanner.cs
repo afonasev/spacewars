@@ -43,15 +43,17 @@ namespace Spacewars.Runtime
         }
         public static PlayableEntitySnapshot[] Threats(PlayableAiObservation o,PlayableProfile p)
         {
-            var centers=o.Buildings.Where(b=>b.Owner==o.Owner&&b.Health>0&&(b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost)).ToArray();
-            return o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0&&centers.Any(c=>Distance(e.Position,c.Position)<=(c.Kind==PlayableBuildingKind.Headquarters?p.HeadquartersVisionRange:p.OutpostVisionRange)))
+            var centers=o.Buildings.Where(b=>b.Owner==o.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready).ToArray();
+            return o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0&&centers.Any(c=>Distance(e.Position,c.Position)<=(DefenseRange(c,p))))
                 .Concat(LastHeadquartersAttackers(o)).GroupBy(e=>e.Id).Select(g=>g.First()).OrderBy(e=>e.Id).ToArray();
         }
         private static PlayableEntitySnapshot[] LocalThreats(PlayableAiObservation o,PlayableProfile p,PlayableEntitySnapshot target)
         {
-            var centers=o.Buildings.Where(b=>b.Owner==o.Owner&&b.Health>0&&(b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost)&&Distance(target.Position,b.Position)<=(b.Kind==PlayableBuildingKind.Headquarters?p.HeadquartersVisionRange:p.OutpostVisionRange)).ToArray();
-            return Threats(o,p).Where(e=>centers.Any(c=>Distance(e.Position,c.Position)<=(c.Kind==PlayableBuildingKind.Headquarters?p.HeadquartersVisionRange:p.OutpostVisionRange))).ToArray();
+            var centers=o.Buildings.Where(b=>b.Owner==o.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&Distance(target.Position,b.Position)<=(DefenseRange(b,p))).ToArray();
+            return Threats(o,p).Where(e=>centers.Any(c=>Distance(e.Position,c.Position)<=(DefenseRange(c,p)))).ToArray();
         }
+        // Infrastructure uses the existing base perimeter, not a new hidden query/radius.
+        private static double DefenseRange(PlayableBuildingSnapshot b,PlayableProfile p)=>b.Kind==PlayableBuildingKind.Headquarters?p.HeadquartersVisionRange:p.OutpostVisionRange;
         private static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
         private static double RouteDistance(PlayableRouteProof r)
         {var at=r.Origin;double result=0;foreach(var point in r.Path){result+=Distance(at,point);at=point;}return result;}
@@ -63,7 +65,7 @@ namespace Spacewars.Runtime
             return units.Where(u=>c.For(u.Kind).targetTags.Contains("ground")).Sum(u=>
                 (u.Kind==PlayableEntityKind.Tank?p.TankWeaponDamage*1000d/p.TankWeaponReloadMilliseconds:
                  u.Kind==PlayableEntityKind.Explorer?p.ExplorerDamage*p.ExplorerBurstSize*1000d/(p.ExplorerBurstPauseMs+p.ExplorerBurstSize*p.ExplorerBurstShotIntervalMs):
-                 p.ShkvalDamage*1000d/p.ShkvalFireIntervalMs)*ai.Value("utility.forceHorizonSeconds")*Math.Min(1,u.Health/(double)PlayableUnitRules.Health(p,u.Kind)));
+                 p.ShkvalDamage*1000d/p.ShkvalFireIntervalMs)*ai.Value("utility.forceHorizonSeconds")*Math.Min(1,PlayableUnitRules.HealthRatio(p,u)));
         }
         public bool Observe(PlayableAiObservation o,AiArmyRegistry registry,PlayableProfile p)
         {
@@ -210,14 +212,14 @@ namespace Spacewars.Runtime
             var survival=LastHeadquartersAttackers(o);
             if(survival.Length>0)return ProposeSurvival(o,registry,survival);
             var threats=Threats(o,p);if(threats.Length==0)return null;
-            var own=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0).ToArray();
+            var own=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&!u.Held&&!(u.CurrentOrder!=null&&u.OrderStamp?.Origin==PlayableOrderOrigin.Human)).ToArray();
             var groups=registry.Capture().Armies.Where(a=>a.Major&&a.Phase!=AiArmyPhase.Disbanded&&(Active?a.Id==armyId:true)).Select(a=>new
                 {Id=a.Id,Units=own.Where(u=>a.Members.Contains(u.Id)&&(!Active||!a.Reinforcements.Contains(u.Id))).ToArray()}).ToList();
             if(!Active&&groups.Count<registry.MajorCap)
             {
                 // Scout/transport members are never recruited through a combat loophole.
                 var free=own.Where(u=>registry.ArmyFor(u.Id)==0&&AiRosterCatalog.Initial.For(u.Kind).lineWeight>0).ToArray();
-                if(free.Length>=ai.Value("armies.minimumUnits"))groups.Add(new{Id=0L,Units=free});
+                if(free.Length>0)groups.Add(new{Id=0L,Units=free});
             }
             var choices=groups.SelectMany(g=>threats.Select(t=>
             {
@@ -225,7 +227,7 @@ namespace Spacewars.Runtime
                 if(g.Id!=0&&reachable.Length!=g.Units.Length)return null; // Whole-group atomic ownership.
                 if(g.Id==0)
                 {
-                    int count=(int)ai.Value("armies.minimumUnits");if(reachable.Length<count)return null;
+                    int count=Math.Min(reachable.Length,(int)ai.Value("armies.minimumUnits"));if(count==0)return null; // Small available forces defend when actually sufficient.
                     while(count<reachable.Length&&Force(reachable.Take(count).ToArray(),p,ai)<Force(LocalThreats(o,p,t),p,ai))count++;
                     reachable=reachable.Take(count).ToArray();
                 }

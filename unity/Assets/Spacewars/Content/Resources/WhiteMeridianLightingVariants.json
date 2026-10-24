@@ -1,0 +1,98 @@
+{
+  "id": "white-meridian-lighting-variants-v1",
+  "revision": 1,
+  "variants": [
+    {
+      "id": "soft-daylight-v1",
+      "label": "Мягкий день",
+      "lighting": {
+        "id": "white-meridian-warm-v1",
+        "revision": 2,
+        "sunHue": 0.10000000149011612,
+        "sunSaturation": 0.10000000149011612,
+        "sunIntensity": 1.25,
+        "sunElevation": 60.0,
+        "sunAzimuth": -30.0,
+        "ambientHue": 0.6000000238418579,
+        "ambientSaturation": 0.11999999731779099,
+        "ambientValue": 0.6000000238418579,
+        "shadowStrength": 0.550000011920929,
+        "shadowDistance": 90.0,
+        "shadowCoveragePadding": 0.30000001192092896,
+        "steelHighlight": 0.18000000715255737,
+        "steelExponent": 24.0,
+        "concreteHighlight": 0.029999999329447746,
+        "concreteExponent": 12.0
+      }
+    },
+    {
+      "id": "amber-side-light-v1",
+      "label": "Янтарный боковой",
+      "lighting": {
+        "id": "white-meridian-warm-v1",
+        "revision": 2,
+        "sunHue": 0.07500000298023224,
+        "sunSaturation": 0.3799999952316284,
+        "sunIntensity": 1.649999976158142,
+        "sunElevation": 24.0,
+        "sunAzimuth": -105.0,
+        "ambientHue": 0.6000000238418579,
+        "ambientSaturation": 0.2800000011920929,
+        "ambientValue": 0.46000000834465027,
+        "shadowStrength": 0.800000011920929,
+        "shadowDistance": 90.0,
+        "shadowCoveragePadding": 0.30000001192092896,
+        "steelHighlight": 0.18000000715255737,
+        "steelExponent": 24.0,
+        "concreteHighlight": 0.029999999329447746,
+        "concreteExponent": 12.0
+      }
+    },
+    {
+      "id": "cold-morning-v1",
+      "label": "Холодное утро",
+      "lighting": {
+        "id": "white-meridian-warm-v1",
+        "revision": 2,
+        "sunHue": 0.5799999833106995,
+        "sunSaturation": 0.20000000298023224,
+        "sunIntensity": 1.5,
+        "sunElevation": 40.0,
+        "sunAzimuth": 48.0,
+        "ambientHue": 0.6299999952316284,
+        "ambientSaturation": 0.3400000035762787,
+        "ambientValue": 0.4300000071525574,
+        "shadowStrength": 0.75,
+        "shadowDistance": 90.0,
+        "shadowCoveragePadding": 0.30000001192092896,
+        "steelHighlight": 0.18000000715255737,
+        "steelExponent": 24.0,
+        "concreteHighlight": 0.029999999329447746,
+        "concreteExponent": 12.0
+      }
+    },
+    {
+      "id": "gold-blue-backlight-v1",
+      "label": "Золотой контровой",
+      "lighting": {
+        "id": "white-meridian-warm-v1",
+        "revision": 2,
+        "sunHue": 0.09000000357627869,
+        "sunSaturation": 0.3199999928474426,
+        "sunIntensity": 1.600000023841858,
+        "sunElevation": 36.0,
+        "sunAzimuth": 140.0,
+        "ambientHue": 0.6399999856948853,
+        "ambientSaturation": 0.36000001430511475,
+        "ambientValue": 0.5,
+        "shadowStrength": 0.75,
+        "shadowDistance": 90.0,
+        "shadowCoveragePadding": 0.30000001192092896,
+        "steelHighlight": 0.18000000715255737,
+        "steelExponent": 24.0,
+        "concreteHighlight": 0.029999999329447746,
+        "concreteExponent": 12.0
+      }
+    }
+  ]
+}

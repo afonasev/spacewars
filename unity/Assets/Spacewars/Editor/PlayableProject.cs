@@ -18,10 +18,18 @@ namespace Spacewars.Editor
             if(string.IsNullOrEmpty(version))throw new BuildFailedException("SPACEWARS_RELEASE_VERSION required");
             var date=System.Environment.GetEnvironmentVariable("SPACEWARS_RELEASE_DATE")??System.DateTime.UtcNow.ToString("yyyy-MM-dd",System.Globalization.CultureInfo.InvariantCulture);
             if(!System.DateTime.TryParseExact(date,"yyyy-MM-dd",System.Globalization.CultureInfo.InvariantCulture,System.Globalization.DateTimeStyles.None,out _))throw new BuildFailedException("SPACEWARS_RELEASE_DATE must be yyyy-MM-dd");
-            PlayableAssets.Prepare();
-            var scene=EditorSceneManager.NewScene(NewSceneSetup.EmptyScene,NewSceneMode.Single);
-            new GameObject("Spacewars").AddComponent<PlayableBootstrap>();
-            EditorSceneManager.SaveScene(scene,ScenePath);
+            if(System.Environment.GetEnvironmentVariable("SPACEWARS_RELEASE_COMMITTED_ASSETS")=="1")
+            {
+                if(!File.Exists(ScenePath))throw new BuildFailedException("Committed playable scene missing");
+                Debug.Log("RELEASE_ASSETS committed scene and resources; regeneration disabled");
+            }
+            else
+            {
+                PlayableAssets.Prepare();
+                var scene=EditorSceneManager.NewScene(NewSceneSetup.EmptyScene,NewSceneMode.Single);
+                new GameObject("Spacewars").AddComponent<PlayableBootstrap>();
+                EditorSceneManager.SaveScene(scene,ScenePath);
+            }
             PlayerSettings.productName="Spacewars";PlayerSettings.bundleVersion=version;
             var icon=AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Spacewars/Content/Brand/Icon.png");
             if(icon==null)throw new BuildFailedException("Spacewars icon missing");
@@ -68,7 +76,10 @@ namespace Spacewars.Editor
             PlayerSettings.runInBackground=true;
             AssetDatabase.SaveAssets();
             Directory.CreateDirectory(Path.GetDirectoryName(output));
-            var report=BuildPipeline.BuildPlayer(new BuildPlayerOptions{scenes=new[]{ScenePath},locationPathName=output,target=target,options=BuildOptions.Development|BuildOptions.DetailedBuildReport});
+            var timing=PlayerSettings.enableFrameTimingStats;UnityEditor.Build.Reporting.BuildReport report;
+            try{if(System.Environment.GetEnvironmentVariable("SPACEWARS_PRECISE_PROFILE")=="1")PlayerSettings.enableFrameTimingStats=true;
+                report=BuildPipeline.BuildPlayer(new BuildPlayerOptions{scenes=new[]{ScenePath},locationPathName=output,target=target,options=BuildOptions.Development|BuildOptions.DetailedBuildReport});}
+            finally{PlayerSettings.enableFrameTimingStats=timing;}
             if(report.summary.result!=BuildResult.Succeeded)throw new BuildFailedException(report.summary.result.ToString());
             Debug.Log("PLAYABLE_BUILD_PASS bytes="+report.summary.totalSize);
         }

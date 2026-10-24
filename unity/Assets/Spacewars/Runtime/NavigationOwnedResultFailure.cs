@@ -43,7 +43,15 @@ namespace Spacewars.Runtime
         private bool ResultBatchAttemptsCurrent(PreparedResultBatch c)
         {
             if(c.Arrival.Count!=c.Attempts.Length||arrivalProjectionLeases.Count!=0||(liveArrivalLeaseTable?.Count??0)!=0)return false;
-            for(int i=0;i<c.Attempts.Length;i++){var f=c.Attempts[i];var a=f.Owner.Record;if(!ReferenceEquals(c.Arrival.Attempts.OwnerFor(c.Arrival.SortedId(i)),f.Owner)||f.Owner.Revision!=f.Revision||a.Working!=f.Working||a.Reconstructing!=f.Reconstructing||a.Retiring!=f.Retiring||a.RestoredRetiringCompute!=f.Restored||a.Retirement!=f.Retirement)return false;}return true;
+            for(int i=0;i<c.Attempts.Length;i++){
+                var f=c.Attempts[i];var a=f.Owner.Record;
+                if(!ReferenceEquals(c.Arrival.Attempts.OwnerFor(c.Arrival.SortedId(i)),f.Owner))return false;
+                // Untouched attempts are read-only inputs to the paid motion
+                // frame. Derived worker progress can commute; a planned removal
+                // or retirement still needs its exact revision and Working state.
+                if(c.PhysicalCommutation&&!f.Removed&&!f.PlannedRetiring){if(!MovementArrivalSourceCurrent(f,c.FrameObserved))return false;}
+                else if(f.Owner.Revision!=f.Revision||a.Working!=f.Working||a.Reconstructing!=f.Reconstructing||a.Retiring!=f.Retiring||a.RestoredRetiringCompute!=f.Restored||a.Retirement!=f.Retirement)return false;
+            }return true;
         }
         private bool PrepareResultBatchPrune(PreparedResultBatch c,NavigationRetentionBudget.Scope scope)
         {

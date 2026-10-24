@@ -101,7 +101,19 @@ namespace Spacewars.Tests.EditMode
             int nearer=Spawn(a,PlayableOwner.Enemy,PlayableEntityKind.Tank,new NavPoint(-7,-10));Unit(a,nearer).GetType().GetField("Reload").SetValue(Unit(a,nearer),1000d);a.Step(1d/30);Assert.AreEqual(enemy,Field<int>(Unit(a,follower),"BurstTarget"),"Keep the valid in-progress source burst target even when another is closer.");
             // Move along existing leader heading so the next delivered route really moves.
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(a,1,PlayableCommandKind.Move,new[]{leader},point:new NavPoint(-5,-8),owner:"owner-45").Status);
-            bool moved=false;for(int tick=0;tick<4;tick++){Assert.Greater(Field<int>(Unit(a,follower),"BurstRemaining"),0,"Exercise an active burst at movement onset.");OfflineParticipantAuthorityTests.Deliver(a,tick);a.Step(1d/30);var velocity=Field<NavPoint>(Unit(a,leader),"Velocity");if(Math.Sqrt(velocity.X*velocity.X+velocity.Z*velocity.Z)>.0001){moved=true;break;}}Assert.True(moved,"Exercise actual leader movement before its pending burst completes.");
+            bool moved=false;var routes=new CertifiedRouteKernel();
+            try{for(int tick=0;tick<4;tick++){
+                Assert.Greater(Field<int>(Unit(a,follower),"BurstRemaining"),0,"Exercise an active burst at movement onset.");
+                // Prepare the current typed certificate without spending another game tick.
+                // Point-only legacy answers cannot activate the physical execution.
+                var nav=a.Navigation;Assert.True(nav.PrepareDeliveryBarrier());
+                var geometry=(NavGeometry)OfflineParticipantAuthorityTests.D.GetProperty("Geometry",OfflineParticipantAuthorityTests.F).GetValue(OfflineParticipantAuthorityTests.Domain(a));
+                var binding=new PlayableRouteBinding(geometry,a.Configuration.Profile,nav.Admission,nav.RoutePort);
+                for(int work=0;work<20000&&!nav.DeliveryBarrierReady;work++)routes.Pump(binding,64);
+                Assert.True(nav.DeliveryBarrierReady);nav.ApplyResults();a.Step(1d/30);
+                var velocity=Field<NavPoint>(Unit(a,leader),"Velocity");if(Math.Sqrt(velocity.X*velocity.X+velocity.Z*velocity.Z)>.0001){moved=true;break;}
+            }}finally{routes.Clear();}
+            Assert.True(moved,"Exercise actual leader movement before its pending burst completes.");
             Assert.AreEqual(0,Field<int>(Unit(a,follower),"BurstRemaining"));Assert.AreEqual(0,Field<double>(Unit(a,follower),"Reload"),1e-9,"SOURCE removes Follow burst without inventing a pause.");
         }
 
@@ -131,7 +143,7 @@ namespace Spacewars.Tests.EditMode
                 completedBurst|=kind==PlayableEntityKind.Explorer&&Field<int>(Unit(wall,follower),"BurstSequence")>0&&Field<int>(Unit(wall,follower),"BurstRemaining")==0&&Field<double>(Unit(wall,follower),"Reload")>0;
             }
             Assert.Greater((int)allocator.GetValue(OfflineParticipantAuthorityTests.Domain(wall)),initial);if(kind==PlayableEntityKind.Explorer)Assert.True(completedBurst,"Complete an actual burst and enter its normal pause.");
-            Assert.AreEqual(PlayableProfile.Default.TankHealth,Field<int>(Unit(wall,enemy),"Health"),"Existing native static collision is retained; source damage-through-wall parity remains OPEN.");Assert.Less(Field<int>(Unit(clear,enemy),"Health"),PlayableProfile.Default.TankHealth);
+            Assert.AreEqual(PlayableProfile.Default.TankHealth,Field<double>(Unit(wall,enemy),"Health"),"Existing native static collision is retained; source damage-through-wall parity remains OPEN.");Assert.Less(Field<double>(Unit(clear,enemy),"Health"),PlayableProfile.Default.TankHealth);
             wall.Navigation.Crowd.TryGet(follower,out var nav);Assert.AreEqual(-10,nav.Position.X,1e-8);Assert.AreEqual(-10,nav.Position.Z,1e-8);Assert.AreEqual(PlayableTacticalOrderKind.Follow,Order(wall,follower).Kind);Assert.False(wall.Navigation.Requests.TryDequeue(out _));
         }
 

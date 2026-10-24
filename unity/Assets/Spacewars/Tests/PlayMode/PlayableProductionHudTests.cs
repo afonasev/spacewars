@@ -20,16 +20,33 @@ public sealed class PlayableProductionHudTests
     {
         host=new GameObject("production HUD test");hud=host.AddComponent<PlayableBootstrap>();hud.enabled=false;
         root=new VisualElement();Set("root",root);Set("profile",PlayableProfile.Default);
-        Set("shkvalButton",new Button());Set("explorerButton",new Button());Set("tankButton",new Button());Set("queueLabel",new Label());Set("selectionLabel",new Label());Set("progress",new ProgressBar());
+        Set("hawkButton",new Button());Set("shkvalButton",new Button());Set("explorerButton",new Button());Set("tankButton",new Button());Set("queueLabel",new Label());Set("selectionLabel",new Label());Set("progress",new ProgressBar());
         Call("CreateProductionHud",root);
     }
     [TearDown] public void Cleanup()=>UnityEngine.Object.DestroyImmediate(host);
-    private void Show(long[] ids,bool paused=false,PlayableEntityKind kind=PlayableEntityKind.Tank)
+    private void Show(long[] ids,bool paused=false,PlayableEntityKind kind=PlayableEntityKind.Tank,bool hangar=false,int phase=0,bool repeat=false)
     {
         var orders=ids.Select((id,i)=>new PlayableProductionOrderSnapshot(id,kind,150,3,15,i==0?7.5:15,i==0)).ToArray();
-        var factory=new PlayableBuildingSnapshot(5,PlayableOwner.Player,PlayableBuildingKind.Factory,default,250,1,ids.Length,0.5,default,orders:orders);
+        var factory=new PlayableBuildingSnapshot(5,PlayableOwner.Player,hangar?PlayableBuildingKind.Hangar:PlayableBuildingKind.Factory,default,250,1,ids.Length,0.5,default,orders:orders,launchPhase:phase,repeat:repeat,repeatKind:kind);
         var view=new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,paused,PlayableMatchOutcome.Playing,900,null,Array.Empty<PlayableEntitySnapshot>(),new[]{factory},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(9,ids.Length>0?3:0,100));
         Set("view",view);Set("paused",paused);((Label)Get("selectionLabel")).text="ФАБРИКА";Call("UpdateProductionHud",factory);
+    }
+    [Test] public void HangarShowsHawkIconAndActualReleasePhase()
+    {
+        Show(new long[]{20,21},kind:PlayableEntityKind.Hawk,hangar:true,phase:2);var slot=root.Query<Button>().First();Assert.AreEqual("hawk",slot.Q<OrbitalGlyph>().Kind);Assert.AreEqual("Подъём платформы",((ProgressBar)Get("progress")).title);Assert.That(((Label)Get("queueLabel")).text,Does.Not.Contain("места в армии"));Assert.AreEqual(DisplayStyle.None,((Button)Get("tankButton")).style.display.value);Assert.AreEqual(DisplayStyle.Flex,((Button)Get("hawkButton")).style.display.value);
+    }
+    [Test] public void HangarQueueRetainsSixSlotsOrderIdentityRepeatAndPausedCancellation()
+    {
+        Show(new long[]{20,21,22},kind:PlayableEntityKind.Hawk,hangar:true,repeat:true);
+        var slots=root.Query<Button>().ToList();Assert.AreEqual(6,slots.Count);
+        Assert.AreEqual("50%\n8с",slots[0].text);Assert.AreEqual("Ждёт",slots[1].text);
+        Assert.True(slots.All(s=>s.Q<OrbitalGlyph>().Kind=="hawk"));
+        Assert.That(((Button)Get("hawkButton")).text,Does.Contain("Повтор ВКЛ"));
+        Show(new long[]{21,22},kind:PlayableEntityKind.Hawk,hangar:true,repeat:false);
+        Assert.AreSame(slots[0],root.Query<Button>().First());Assert.That(slots[0].tooltip,Does.Contain("№21"));
+        Assert.That(((Button)Get("hawkButton")).text,Does.Not.Contain("Повтор ВКЛ"));
+        Show(new long[]{21,22},paused:true,kind:PlayableEntityKind.Hawk,hangar:true);
+        Assert.True(slots.All(s=>!s.enabledSelf));Assert.False(((Button)Get("hawkButton")).enabledSelf);
     }
     [Test] public void ShkvalQueueShowsActualKindAndPause()
     {

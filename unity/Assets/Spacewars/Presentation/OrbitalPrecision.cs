@@ -54,6 +54,7 @@ namespace Spacewars.Presentation
             Spacewars.Simulation.PlayableBuildingKind.Headquarters=>"headquarters",
             Spacewars.Simulation.PlayableBuildingKind.Outpost=>"outpost",
             Spacewars.Simulation.PlayableBuildingKind.Mine=>"mine",
+            Spacewars.Simulation.PlayableBuildingKind.Hangar=>"hangar",
             Spacewars.Simulation.PlayableBuildingKind.Factory=>"factory",
             Spacewars.Simulation.PlayableBuildingKind.Refinery=>"refinery",
             Spacewars.Simulation.PlayableBuildingKind.ScientificCenter=>"science",
@@ -63,6 +64,11 @@ namespace Spacewars.Presentation
             Spacewars.Simulation.PlayableResearchKind.TankChassis=>"chassis",
             Spacewars.Simulation.PlayableResearchKind.ExplorerAssaultGuns=>"assault",
             Spacewars.Simulation.PlayableResearchKind.ShkvalGuidance=>"guidance",
+            Spacewars.Simulation.PlayableResearchKind.HawkSalvoSystems=>"hawk-salvo",
+            Spacewars.Simulation.PlayableResearchKind.ImprovedWeaponSystems=>"weapon-systems-1",
+            Spacewars.Simulation.PlayableResearchKind.AdvancedWeaponSystems=>"weapon-systems-2",
+            Spacewars.Simulation.PlayableResearchKind.ImprovedDefensiveSystems=>"defensive-systems-1",
+            Spacewars.Simulation.PlayableResearchKind.AdvancedDefensiveSystems=>"defensive-systems-2",
             _=>"science"
         };
         public static string Glyph(string id)
@@ -72,8 +78,10 @@ namespace Spacewars.Presentation
             if(id.StartsWith("build:",StringComparison.Ordinal)&&Enum.TryParse<Spacewars.Simulation.PlayableBuildingKind>(suffix,out var building))return BuildingGlyph(building);
             return suffix switch {
                 "rally"=>"rally", "sale"=>"sale", "repair"=>"repair", "upgrade"=>"upgrade",
-                "tank"=>"tank", "explorer"=>"explorer", "shkval"=>"shkval",
-                "tank-chassis"=>"chassis", "explorer-assault-guns"=>"assault", "shkval-guidance"=>"guidance",
+                "tank"=>"tank", "explorer"=>"explorer", "shkval"=>"shkval", "hawk"=>"hawk",
+                "tank-chassis"=>"chassis", "explorer-assault-guns"=>"assault", "shkval-guidance"=>"guidance", "HawkSalvoSystems"=>"hawk-salvo",
+                "ImprovedWeaponSystems"=>"weapon-systems-1", "AdvancedWeaponSystems"=>"weapon-systems-2",
+                "ImprovedDefensiveSystems"=>"defensive-systems-1", "AdvancedDefensiveSystems"=>"defensive-systems-2",
                 _=>"building"
             };
         }
@@ -92,16 +100,48 @@ namespace Spacewars.Presentation
                 p.strokeColor=outline??OrbitalTheme.Cyan;p.BeginPath();p.MoveTo(new Vector2(flush?0:9,0));p.LineTo(new Vector2(Mathf.Min(w-9,58),0));p.Stroke();
             };
         }
-        public static void QueueCard(Button button,string glyph,double progress,bool filled,bool repeat=false)
+        public static void QueueCard(Button button,string glyph,double progress,bool filled,bool repeat=false,string title=null,string status=null)
         {
-            button.style.height=filled?44:22;button.style.minHeight=filled?44:22;
-            button.style.alignSelf=Align.Center;button.style.flexGrow=filled?1:0;button.style.flexBasis=filled?new StyleLength(0f):new StyleLength(14);
-            button.style.fontSize=11;button.style.unityTextAlign=TextAnchor.LowerCenter;button.style.paddingBottom=filled?3:0;button.style.paddingTop=filled?18:0;button.style.paddingLeft=button.style.paddingRight=filled?2:1;button.style.marginRight=3;button.style.marginBottom=0;
-            button.style.backgroundColor=filled?OrbitalTheme.Panel:Color.clear;
-            button.style.borderTopColor=button.style.borderBottomColor=button.style.borderLeftColor=button.style.borderRightColor=progress>=0?OrbitalTheme.Cyan:OrbitalTheme.Line;
-            var icon=button.Q<OrbitalGlyph>();if(icon==null){icon=new OrbitalGlyph(glyph);icon.style.position=Position.Absolute;icon.style.left=Length.Percent(50);icon.style.marginLeft=-10;icon.style.top=2;icon.style.width=20;icon.style.height=15;button.Add(icon);}
-            icon.style.display=filled?DisplayStyle.Flex:DisplayStyle.None;icon.Set(glyph,OrbitalTheme.Ink,progress);
-            var badge=button.Q<Label>("repeat-badge");if(badge==null){badge=new Label("∞"){name="repeat-badge",pickingMode=PickingMode.Ignore};badge.style.position=Position.Absolute;badge.style.right=3;badge.style.top=0;badge.style.color=OrbitalTheme.Cyan;button.Add(badge);}badge.style.display=repeat?DisplayStyle.Flex:DisplayStyle.None;
+            bool active=filled&&progress>=0;
+            button.AddToClassList("dock-order");button.EnableInClassList("dock-spare",!filled);
+            // Fixed round waiting wells keep their shape; narrow queues wrap instead of squeezing portraits.
+            float width=active?172:filled?64:28,height=active?76:filled?64:28;
+            button.style.width=width;button.style.minWidth=width;button.style.maxWidth=width;
+            button.style.height=height;button.style.minHeight=height;button.style.maxHeight=height;
+            button.style.alignSelf=Align.Center;button.style.flexGrow=0;button.style.flexShrink=0;button.style.flexBasis=StyleKeyword.Auto;
+            button.style.color=Color.clear;button.style.fontSize=active?11:9;button.style.unityTextAlign=active?TextAnchor.MiddleRight:TextAnchor.LowerCenter;
+            button.style.paddingBottom=filled?5:0;button.style.paddingTop=active?14:0;
+            button.style.paddingLeft=active?36:1;button.style.paddingRight=active?8:1;
+            button.style.marginLeft=0;button.style.marginRight=4;button.style.marginTop=button.style.marginBottom=0;
+            button.style.backgroundColor=active?new Color(.14f,.27f,.31f,.55f):new Color(.2f,.3f,.35f,filled?.10f:0);
+            button.style.borderTopLeftRadius=button.style.borderTopRightRadius=button.style.borderBottomLeftRadius=button.style.borderBottomRightRadius=height/2;
+            var edge=active?new Color(.4f,.78f,.85f,.45f):new Color(.5f,.65f,.7f,filled?.16f:.10f);
+            button.style.borderTopColor=button.style.borderBottomColor=button.style.borderLeftColor=button.style.borderRightColor=edge;
+            button.style.borderTopWidth=button.style.borderBottomWidth=button.style.borderLeftWidth=button.style.borderRightWidth=1;
+            var icon=button.Q<OrbitalGlyph>();if(icon==null){icon=new OrbitalGlyph(glyph);icon.style.position=Position.Absolute;button.Add(icon);}
+            var portrait=button.Q<Image>("order-portrait");if(portrait==null){portrait=new Image{name="order-portrait",pickingMode=PickingMode.Ignore,scaleMode=ScaleMode.ScaleToFit};portrait.style.position=Position.Absolute;button.Add(portrait);}
+            var texture=filled?DockArtwork.TextureFor(glyph):null;
+            portrait.image=texture;portrait.style.display=texture!=null?DisplayStyle.Flex:DisplayStyle.None;
+            icon.style.display=filled&&texture==null?DisplayStyle.Flex:DisplayStyle.None;icon.Set(glyph,OrbitalTheme.Ink,progress);icon.Q("glyph-progress").style.display=DisplayStyle.None;
+            foreach(var art in new VisualElement[]{icon,portrait})
+            {
+                float size=active?76:64;
+                art.style.left=active?new StyleLength(0f):new StyleLength(Length.Percent(50));
+                art.style.marginLeft=active?0:-size/2;art.style.top=0;art.style.width=size;art.style.height=size;
+            }
+            // Repeat is part of the title, so it follows short names without a vacant fixed-width gap.
+            var titleRow=button.Q("order-title-row");if(titleRow==null){titleRow=new VisualElement{name="order-title-row",pickingMode=PickingMode.Ignore};titleRow.style.position=Position.Absolute;titleRow.style.flexDirection=FlexDirection.Row;titleRow.style.alignItems=Align.Center;titleRow.style.height=18;button.Add(titleRow);}
+            titleRow.style.left=active?76:14;titleRow.style.right=active?8:14;titleRow.style.top=active?14:42;titleRow.style.display=active||repeat?DisplayStyle.Flex:DisplayStyle.None;
+            var caption=button.Q<Label>("order-name");if(caption==null){caption=new Label{name="order-name",pickingMode=PickingMode.Ignore};caption.style.flexShrink=1;caption.style.flexGrow=0;caption.style.minWidth=0;caption.style.marginLeft=caption.style.marginRight=caption.style.marginTop=caption.style.marginBottom=0;caption.style.paddingLeft=caption.style.paddingRight=0;caption.style.unityTextAlign=TextAnchor.MiddleLeft;caption.style.fontSize=10;caption.style.color=OrbitalTheme.Ink;caption.style.whiteSpace=WhiteSpace.NoWrap;caption.style.overflow=Overflow.Hidden;caption.style.textOverflow=TextOverflow.Ellipsis;titleRow.Add(caption);}
+            caption.text=title??glyph;
+            var state=button.Q<Label>("order-status");if(state==null){state=new Label{name="order-status",pickingMode=PickingMode.Ignore};state.style.position=Position.Absolute;state.style.whiteSpace=WhiteSpace.NoWrap;button.Add(state);}
+            state.text=active?status??button.text:filled?"":"·";state.style.display=filled&&!active?DisplayStyle.None:DisplayStyle.Flex;state.style.color=active?OrbitalTheme.Ink:OrbitalTheme.Muted;
+            state.style.fontSize=active?11:9;state.style.unityTextAlign=active?TextAnchor.MiddleLeft:TextAnchor.MiddleCenter;
+            state.style.left=active?76:0;state.style.right=active?5:0;state.style.top=active?37:5;
+            var rail=button.Q("order-progress-rail");if(rail==null){rail=new VisualElement{name="order-progress-rail",pickingMode=PickingMode.Ignore};rail.style.position=Position.Absolute;rail.style.left=28;rail.style.right=28;rail.style.bottom=10;rail.style.overflow=Overflow.Hidden;rail.style.borderTopLeftRadius=rail.style.borderTopRightRadius=rail.style.borderBottomLeftRadius=rail.style.borderBottomRightRadius=2;rail.style.height=3;rail.style.backgroundColor=OrbitalTheme.Line;var fill=new VisualElement{name="order-progress",pickingMode=PickingMode.Ignore};fill.style.height=3;fill.style.backgroundColor=OrbitalTheme.Cyan;rail.Add(fill);button.Add(rail);}
+            rail.style.display=active?DisplayStyle.Flex:DisplayStyle.None;rail[0].style.width=Length.Percent((float)(Math.Max(0,Math.Min(1,progress))*100));
+            var badge=button.Q<Label>("repeat-badge");if(badge==null){badge=new Label("∞"){name="repeat-badge",pickingMode=PickingMode.Ignore};badge.style.flexShrink=0;badge.style.width=14;badge.style.fontSize=13;badge.style.marginLeft=3;badge.style.marginRight=badge.style.marginTop=badge.style.marginBottom=0;badge.style.paddingLeft=badge.style.paddingRight=0;badge.style.color=OrbitalTheme.Cyan;titleRow.Add(badge);}badge.style.display=repeat?DisplayStyle.Flex:DisplayStyle.None;
+
         }
     }
 }

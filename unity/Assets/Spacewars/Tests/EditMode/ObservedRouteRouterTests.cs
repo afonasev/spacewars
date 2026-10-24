@@ -9,6 +9,33 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class ObservedRouteRouterTests
     {
+        [Test]public void ReportPreparedFrontierCostWithoutThreshold()
+        {
+            var geometry=new NavGeometry(100,new[]{new NavObstacle(-.8,-60,.8,60)},1);
+            var profile=NavigationProfile.Default.ForUnit(.72,4,4.5);
+            var router=new SharedFlowRouter(geometry,profile,null);router.PrepareGridPredicates();
+            router.FindPath(new NavPoint(-70,-21),new NavPoint(70,21));long expanded=router.ExpandedCells;int ready=0;
+            var watch=System.Diagnostics.Stopwatch.StartNew();
+            for(int i=0;i<100;i++){router.TrimFields(0);if(router.FindPath(new NavPoint(-70-i*.002,-20+i*.4),new NavPoint(70,20-i*.4)).Length>0)ready++;}
+            watch.Stop();Assert.AreEqual(100,ready);Assert.Greater(router.ExpandedCells-expanded,1000000);
+            TestContext.WriteLine("PREPARED_FRONTIER_100 ms="+watch.Elapsed.TotalMilliseconds+" expanded="+(router.ExpandedCells-expanded)+" ready="+ready+" payload="+router.PreparedGeometryBytes);
+        }
+        [Test]public void PreparedFrontierDistanceAllocationFailureKeepsSparsePathsAndWork()
+        {
+            var geometry=Geometry(new NavObstacle(-.8,-5,.8,5));var profile=NavigationProfile.Default;
+            var dense=new SharedFlowRouter(geometry,profile,null);var fallback=new SharedFlowRouter(geometry,profile,null);
+            dense.PrepareGridPredicates();fallback.PrepareGridPredicates();int refused=0;
+            try{
+                for(int i=0;i<12;i++){
+                    var from=new NavPoint(-5-i*.01,-3);var to=new NavPoint(5,-4+i*.5);
+                    var expected=dense.FindPath(from,to);SetRouterTestSeam("testDistanceAllocator",(Func<int,int[]>)(n=>{refused++;throw new OutOfMemoryException("Prepared frontier test allocation refusal");}));
+                    var actual=fallback.FindPath(from,to);SetRouterTestSeam("testDistanceAllocator",null);
+                    CollectionAssert.AreEqual(expected,actual);Assert.AreEqual(dense.ExpandedCells,fallback.ExpandedCells);Assert.AreEqual(dense.CachedCells,fallback.CachedCells);
+                    Assert.AreEqual(dense.PreparedGeometryBytes,fallback.PreparedGeometryBytes);Assert.AreEqual(dense.PreparedCellComputations,fallback.PreparedCellComputations);Assert.AreEqual(dense.PreparedEdgeComputations,fallback.PreparedEdgeComputations);
+                }
+                Assert.Greater(refused,0);
+            }finally{SetRouterTestSeam("testDistanceAllocator",null);}
+        }
         const BindingFlags F=BindingFlags.Instance|BindingFlags.NonPublic;
         static readonly Type D=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.PlayableDomain",true);
         object New()=>Activator.CreateInstance(D,F,null,new object[]{PlayableProfile.Default,1L,false},null);

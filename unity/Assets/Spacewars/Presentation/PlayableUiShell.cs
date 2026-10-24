@@ -177,6 +177,7 @@ namespace Spacewars.Presentation
             noticeLabel.style.alignSelf=left?Align.FlexStart:Align.FlexEnd;
             buildRegion.style.display=commandRegion.style.display=DisplayStyle.None;
             buildRegion.RemoveFromHierarchy();commandRegion.RemoveFromHierarchy();
+            LayoutBuildingDock(panelWidth);
             UpdateResponsiveVisibility();
         }
         private void UpdateResponsiveVisibility()

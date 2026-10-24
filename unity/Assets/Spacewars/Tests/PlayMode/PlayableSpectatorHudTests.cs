@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -19,21 +20,63 @@ public sealed class PlayableSpectatorHudTests
     void Call(string n,params object[] args)=>typeof(PlayableBootstrap).GetMethods(Flags).Single(m=>m.Name==n&&m.GetParameters().Length==args.Length).Invoke(hud,args);
     [SetUp] public void Setup(){host=new GameObject("spectator HUD fixture");hud=host.AddComponent<PlayableBootstrap>();hud.enabled=false;Set("profile",PlayableProfile.Default);Call("CreateHud");Call("CreateSpectatorHud");Set("spectatorMode",true);Set("notice","");}
     [TearDown] public void Cleanup(){UnityEngine.Object.DestroyImmediate(host);}
-    PlayableSpectatorFrame Fixture(int count)
+    PlayableSpectatorFrame Fixture(int count,bool armySystems=false,bool allCompleted=false,bool hawks=false)
     {
         Set("matchSetup",new NativeLobbyConfiguration{Participants=Enumerable.Range(0,count).Select(i=>new NativeLobbyParticipant{Name="Игрок "+(i+1),Team=i%2,Color=i,Human=false}).ToList()});
         var players=Enumerable.Range(0,count).Select(i=>{
-            var owner=(PlayableOwner)i;var units=new[]{new PlayableEntitySnapshot(100+i,owner,PlayableEntityKind.Tank,new NavPoint(i*4,0),150,false,0,0,0)};
+            var owner=(PlayableOwner)i;var units=new[]{new PlayableEntitySnapshot(100+i,owner,hawks?PlayableEntityKind.Hawk:PlayableEntityKind.Tank,new NavPoint(i*4,0),150,false,0,0,0)};
             var research=new[]{new PlayableResearchOrderSnapshot(1,PlayableResearchKind.TankChassis,10+i,300,30,30,false,true),new PlayableResearchOrderSnapshot(2,PlayableResearchKind.ExplorerAssaultGuns,10+i,300,12,30,true,false),new PlayableResearchOrderSnapshot(3,PlayableResearchKind.ShkvalGuidance,10+i,0,0,30,false,false)};
             if(i==0)research=new[]{new PlayableResearchOrderSnapshot(1,PlayableResearchKind.TankChassis,70+i,300,12,30,true,false),new PlayableResearchOrderSnapshot(2,PlayableResearchKind.ExplorerAssaultGuns,70+i,0,0,30,false,false),new PlayableResearchOrderSnapshot(3,PlayableResearchKind.ShkvalGuidance,70+i,0,0,30,false,false)};
-            var orders=new[]{new PlayableProductionOrderSnapshot(1,PlayableEntityKind.Tank,150,3,20,10,true),new PlayableProductionOrderSnapshot(2,PlayableEntityKind.Explorer,100,2,20,20,false)};
-            var buildings=new[]{new PlayableBuildingSnapshot(50+i,owner,PlayableBuildingKind.Headquarters,new NavPoint(i*4,12),1000,1,0,0,default),new PlayableBuildingSnapshot(10+i,owner,PlayableBuildingKind.Factory,new NavPoint(i*4,4),250,1,2,.5,default,orders:orders,repeat:true),new PlayableBuildingSnapshot(30+i,owner,PlayableBuildingKind.Refinery,new NavPoint(i*4,8),250,.4,0,0,default,phase:ConstructionPhase.Constructing),new PlayableBuildingSnapshot(70+i,owner,PlayableBuildingKind.ScientificCenter,new NavPoint(i*4,16),250,1,0,0,default,research:research)};
+            if(armySystems)research=i==0?new[]{
+                new PlayableResearchOrderSnapshot(11,PlayableResearchKind.ImprovedWeaponSystems,70+i,300,30,30,false,true),
+                new PlayableResearchOrderSnapshot(12,PlayableResearchKind.AdvancedWeaponSystems,70+i,500,9,45,true,false)}:new[]{
+                new PlayableResearchOrderSnapshot(13,PlayableResearchKind.ImprovedDefensiveSystems,70+i,300,30,30,false,true),
+                new PlayableResearchOrderSnapshot(14,PlayableResearchKind.AdvancedDefensiveSystems,70+i,500,45,45,false,true)};
+            if(allCompleted)research=Enum.GetValues(typeof(PlayableResearchKind)).Cast<PlayableResearchKind>().Select((k,n)=>new PlayableResearchOrderSnapshot(n+1,k,70+i,PlayableResearchRules.Cost(PlayableProfile.Default,k),PlayableResearchRules.Duration(PlayableProfile.Default,k),PlayableResearchRules.Duration(PlayableProfile.Default,k),false,true)).ToArray();
+            var orders=new[]{new PlayableProductionOrderSnapshot(1,hawks?PlayableEntityKind.Hawk:PlayableEntityKind.Tank,150,3,20,10,true),new PlayableProductionOrderSnapshot(2,hawks?PlayableEntityKind.Hawk:PlayableEntityKind.Explorer,100,2,20,20,false)};
+            var buildings=new[]{new PlayableBuildingSnapshot(50+i,owner,PlayableBuildingKind.Headquarters,new NavPoint(i*4,12),1000,1,0,0,default),new PlayableBuildingSnapshot(10+i,owner,hawks?PlayableBuildingKind.Hangar:PlayableBuildingKind.Factory,new NavPoint(i*4,4),250,1,2,.5,default,orders:orders,repeat:true,repeatKind:hawks?PlayableEntityKind.Hawk:PlayableEntityKind.Tank),new PlayableBuildingSnapshot(30+i,owner,PlayableBuildingKind.Refinery,new NavPoint(i*4,8),250,.4,0,0,default,phase:ConstructionPhase.Constructing),new PlayableBuildingSnapshot(70+i,owner,PlayableBuildingKind.ScientificCenter,new NavPoint(i*4,16),250,1,0,0,default,research:research)};
             var vision=new PlayableVision(i%2,64,64,4,PlayableProfile.Default.FogEdgeFeather);vision.Refresh(new[]{new VisionSource(new NavPoint(i*4,0),12)},Array.Empty<KnownBuilding>());
-            return new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,15660,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,840+i*100,null,units,buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,incomePerSecond:12,population:new PlayablePopulationSnapshot(3,3,100),ownerResearch:i==1?Array.Empty<PlayableResearchOrderSnapshot>():research,owner:owner,ownerId:"Игрок "+(i+1),team:i%2,ownerEliminated:i==7,vision:vision.Snapshot(),activeProfile:PlayableProfile.Default);
+            return new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,15660,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,840+i*100,null,units,buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,incomePerSecond:12,population:new PlayablePopulationSnapshot(3,3,100),ownerResearch:i==1&&!armySystems?Array.Empty<PlayableResearchOrderSnapshot>():research,owner:owner,ownerId:"Игрок "+(i+1),team:i%2,ownerEliminated:i==7,vision:vision.Snapshot(),activeProfile:PlayableProfile.Default);
         }).ToArray();
         return (PlayableSpectatorFrame)Activator.CreateInstance(typeof(PlayableSpectatorFrame),Flags,null,new object[]{players[0],players},null);
     }
     void Show(PlayableSpectatorFrame frame){Set("spectatorFrame",frame);Set("view",frame.Overview);Call("UpdateHud");Call("UpdateSpectatorHud");}
+    [Test] public void HangarQueueAndLivingHawksAppearInSpectatorSummary()
+    {
+        Show(Fixture(2,hawks:true));
+        var rows=Get<VisualElement>("spectatorRows");Assert.AreEqual(2,rows.childCount);
+        foreach(var row in rows.Children())
+        {
+            Assert.AreEqual("hawk",row[3].Q<OrbitalGlyph>().Kind);
+            var queue=row[4].Query<OrbitalGlyph>().ToList();Assert.AreEqual(3,queue.Count);
+            Assert.AreEqual(2,queue.Count(g=>g.Kind=="hawk"));
+            Assert.That(row[4].Query<Label>().ToList().Select(x=>x.text),Does.Contain("∞"));
+        }
+    }
+    [Test] public void ArmySystemsShowCompletedLevelsAndActiveProgressForTheirOwnPlayers()
+    {
+        Show(Fixture(2,armySystems:true));
+        var rows=Get<Dictionary<string,VisualElement>>("spectatorRowCache");
+        var weapons=rows["Игрок 1"][5];var defense=rows["Игрок 2"][5];
+        Assert.AreEqual(2,weapons.childCount);Assert.AreEqual(2,defense.childCount);
+        CollectionAssert.AreEqual(new[]{"weapon-systems-1","weapon-systems-2"},weapons.Query<OrbitalGlyph>().ToList().Select(g=>g.Kind));
+        CollectionAssert.AreEqual(new[]{"defensive-systems-1","defensive-systems-2"},defense.Query<OrbitalGlyph>().ToList().Select(g=>g.Kind));
+        Assert.That(weapons[0].tooltip,Does.Contain("Улучшенные оружейные системы").And.Contain("15%"));
+        Assert.That(weapons[1].tooltip,Does.Contain("Передовые оружейные системы").And.Contain("30%"));
+        Assert.That(defense[1].tooltip,Does.Contain("Передовые защитные системы").And.Contain("30%"));
+        Assert.True(weapons[0].Query<Label>().ToList().Any(l=>l.text=="✓"));
+        Assert.False(weapons[1].Query<Label>().ToList().Any(l=>l.text=="✓"));
+        Assert.AreEqual(20,weapons[1].Children().Last().style.width.value.value,.001,"active level 2 has 9 / 45 progress");
+        Call("SetSpectatorPerspective",PlayableOwner.Enemy);Call("UpdateHud");Call("UpdateSpectatorHud");
+        Assert.AreEqual(2,rows["Игрок 1"][5].childCount);Assert.That(rows["Игрок 1"][5][0].tooltip,Does.Contain("оружейные"));
+    }
+    [Test] public void CompletedArmySystemsRemainDiscoverableWhenUpgradeColumnOverflows()
+    {
+        Show(Fixture(2,allCompleted:true));var upgrades=Get<Dictionary<string,VisualElement>>("spectatorRowCache")["Игрок 1"][5];
+        Assert.AreEqual(7,upgrades.childCount);Assert.AreEqual("+4",upgrades[3].Q<Label>().text);
+        foreach(var name in new[]{"Улучшенные оружейные системы","Передовые оружейные системы","Улучшенные защитные системы","Передовые защитные системы"})Assert.That(upgrades[3].tooltip,Does.Contain(name));
+        Assert.AreEqual(DisplayStyle.None,upgrades[4].style.display.value);
+    }
     [Test] public void AllRowsSurvivePerspectiveCollapseAndInspectionIsReadOnly()
     {
         var frame=Fixture(8);Show(frame);var root=Get<VisualElement>("root");Assert.AreEqual(8,Get<VisualElement>("spectatorRows").childCount);

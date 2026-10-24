@@ -1,0 +1,200 @@
+{
+  "source": "combined0d5 + observedmetadata firstprefixQA03f/PDB exact; planning7e287fd0 raw.zip",
+  "seed": -515260688,
+  "profile": "shipped NativeBalanceStore release Default@1 + shippedThreeCrossings",
+  "geometry_commands": "sites/slots/targets fromNAV_SCOUTactualApply,metadata fromPRESENTATION_AI. ParentId2/1 fromactualHeadquarters IDs andunchangedproducer site.CenterId source. AiOwnerLoop uses jobId=actionId.",
+  "commands": [
+    {
+      "metadata": {
+        "Policy": "economy",
+        "Kind": 9,
+        "ReceiptIdentity": {
+          "Generation": 1,
+          "OwnerId": "foundry-2",
+          "DecisionOrdinal": 1,
+          "ActionOrdinal": 1,
+          "Id": "1:9:foundry-2:1:1"
+        },
+        "ObservationIdentity": "observation-17:unity-owner-research-queue-u6-v1@1:foundry-2:1:436:15:-515260688",
+        "OwnerId": "foundry-2",
+        "SourceIdentity": "native-strategic-ai:opening-v1",
+        "ActionId": 1,
+        "DueTick": 24,
+        "CommandSequence": 2305843009213693952,
+        "ApplicationTick": 24,
+        "Status": 2,
+        "RuntimeStatus": 1,
+        "Message": "Construction ordered."
+      },
+      "tick": 24,
+      "owner": "foundry-2",
+      "sequence": 2305843009213693952,
+      "actionId": 1,
+      "source": "native-strategic-ai:opening-v1",
+      "site": 2,
+      "slot": 1,
+      "parent": 2,
+      "building": "Factory",
+      "kind": "BuildAt",
+      "ids": [],
+      "target": [
+        0,
+        0
+      ]
+    },
+    {
+      "metadata": {
+        "Policy": "economy",
+        "Kind": 9,
+        "ReceiptIdentity": {
+          "Generation": 1,
+          "OwnerId": "foundry-2",
+          "DecisionOrdinal": 2,
+          "ActionOrdinal": 1,
+          "Id": "1:9:foundry-2:2:1"
+        },
+        "ObservationIdentity": "observation-17:unity-owner-research-queue-u6-v1@1:foundry-2:1:451:30:-515260688",
+        "OwnerId": "foundry-2",
+        "SourceIdentity": "native-strategic-ai:opening-v1",
+        "ActionId": 2,
+        "DueTick": 39,
+        "CommandSequence": 2305843009213693953,
+        "ApplicationTick": 39,
+        "Status": 2,
+        "RuntimeStatus": 1,
+        "Message": "Construction ordered."
+      },
+      "tick": 39,
+      "owner": "foundry-2",
+      "sequence": 2305843009213693953,
+      "actionId": 2,
+      "source": "native-strategic-ai:opening-v1",
+      "site": 2,
+      "slot": 2,
+      "parent": 2,
+      "building": "Refinery",
+      "kind": "BuildAt",
+      "ids": [],
+      "target": [
+        0,
+        0
+      ]
+    },
+    {
+      "metadata": {
+        "Policy": "economy",
+        "Kind": 9,
+        "ReceiptIdentity": {
+          "Generation": 1,
+          "OwnerId": "player-1",
+          "DecisionOrdinal": 1,
+          "ActionOrdinal": 1,
+          "Id": "1:8:player-1:1:1"
+        },
+        "ObservationIdentity": "observation-17:unity-owner-research-queue-u6-v1@1:player-1:1:466:45:-515260688",
+        "OwnerId": "player-1",
+        "SourceIdentity": "native-strategic-ai:opening-v1",
+        "ActionId": 3,
+        "DueTick": 75,
+        "CommandSequence": 2305843009213693954,
+        "ApplicationTick": 75,
+        "Status": 2,
+        "RuntimeStatus": 1,
+        "Message": "Construction ordered."
+      },
+      "tick": 75,
+      "owner": "player-1",
+      "sequence": 2305843009213693954,
+      "actionId": 3,
+      "source": "native-strategic-ai:opening-v1",
+      "site": 1,
+      "slot": 1,
+      "parent": 1,
+      "building": "Refinery",
+      "kind": "BuildAt",
+      "ids": [],
+      "target": [
+        0,
+        0
+      ]
+    },
+    {
+      "metadata": {
+        "Policy": "scout",
+        "Kind": 4,
+        "ReceiptIdentity": {
+          "Generation": 1,
+          "OwnerId": "player-1",
+          "DecisionOrdinal": 1,
+          "ActionOrdinal": 2,
+          "Id": "1:8:player-1:1:2"
+        },
+        "ObservationIdentity": "observation-17:unity-owner-research-queue-u6-v1@1:player-1:1:466:45:-515260688",
+        "OwnerId": "player-1",
+        "SourceIdentity": "native-strategic-ai:opening-v1",
+        "ActionId": 4,
+        "DueTick": 75,
+        "CommandSequence": 2305843009213693955,
+        "ApplicationTick": 75,
+        "Status": 2,
+        "RuntimeStatus": 1,
+        "Message": "Order accepted."
+      },
+      "tick": 75,
+      "owner": "player-1",
+      "sequence": 2305843009213693955,
+      "actionId": 4,
+      "source": "native-strategic-ai:opening-v1",
+      "kind": "Move",
+      "ids": [
+        3
+      ],
+      "target": [
+        -37.58,
+        0
+      ],
+      "site": 7,
+      "slot": 0,
+      "parent": 0,
+      "building": "Headquarters"
+    },
+    {
+      "metadata": {
+        "Policy": "economy",
+        "Kind": 9,
+        "ReceiptIdentity": {
+          "Generation": 1,
+          "OwnerId": "player-1",
+          "DecisionOrdinal": 2,
+          "ActionOrdinal": 1,
+          "Id": "1:8:player-1:2:1"
+        },
+        "ObservationIdentity": "observation-17:unity-owner-research-queue-u6-v1@1:player-1:1:511:90:-515260688",
+        "OwnerId": "player-1",
+        "SourceIdentity": "native-strategic-ai:opening-v1",
+        "ActionId": 5,
+        "DueTick": 120,
+        "CommandSequence": 2305843009213693956,
+        "ApplicationTick": 120,
+        "Status": 2,
+        "RuntimeStatus": 1,
+        "Message": "Construction ordered."
+      },
+      "tick": 120,
+      "owner": "player-1",
+      "sequence": 2305843009213693956,
+      "actionId": 5,
+      "source": "native-strategic-ai:opening-v1",
+      "site": 1,
+      "slot": 2,
+      "parent": 1,
+      "building": "Refinery",
+      "kind": "BuildAt",
+      "ids": [],
+      "target": [
+        0,
+        0
+      ]
+    }
+  ]
+}

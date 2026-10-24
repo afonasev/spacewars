@@ -11,11 +11,14 @@ namespace Spacewars.Presentation
         private ThreeCrossingsMaterials surfaceMaterials;
         public string SurfaceRevision=>surfaceMaterials==null?"none":surfaceMaterials.Profile.id+"@"+surfaceMaterials.Profile.revision;
         public string EnvironmentRevision=>surfaceMaterials==null?"none":surfaceMaterials.Art.id+"@"+surfaceMaterials.Art.revision;
-        private void CreateThreeCrossings(ThreeCrossingsMap map)
+        private System.Collections.IEnumerator CreateThreeCrossings(ThreeCrossingsMap map)
         {
-            surfaceMaterials=new ThreeCrossingsMaterials(ThreeCrossingsSurfaceProfile.Load(),map,material,profile);
+            var budget=new LoadingFrameBudget();
+            surfaceMaterials=new ThreeCrossingsMaterials(ThreeCrossingsSurfaceProfile.Load(),map,material,profile,staged:true);
+            yield return surfaceMaterials.Preparation;
             foreach(var support in map.Supports)
             {
+                if(budget.Expired){yield return null;budget.Restart();}
                 double depth=support.IsBridge?map.DeckThickness*.18:map.WaterDepth;
                 MapPrism(support.Id,support.Bounds,-depth,support.Height,support.IsBridge||support.Id.StartsWith("platform-")?BridgeColor:BankColor,support.HeightAt,support.IsBridge||support.Id.StartsWith("platform-")?3:1);
                 if(support.IsBridge)
@@ -33,6 +36,7 @@ namespace Spacewars.Presentation
             foreach(var water in map.Water)MapPrism("River — no support",water,-map.WaterDepth-map.DeckThickness,-map.WaterDepth,WaterColor,null,5);
             foreach(var rock in map.Solids)
             {
+                if(budget.Expired){yield return null;budget.Restart();}
                 if(IsPlatformFence(rock))
                 {
                     float deck=(float)map.Supports.First(s=>s.Id.StartsWith("platform-")&&!s.Id.EndsWith("-ramp")).Height;
@@ -52,14 +56,16 @@ namespace Spacewars.Presentation
             details=ThreeCrossingsServiceScenery.ReserveServicePockets(details,servicePlacements,serviceMesh.bounds,profile,surfaceMaterials);
             foreach(var placement in servicePlacements)
             {
+                if(budget.Expired){yield return null;budget.Restart();}
                 var obj=new GameObject("Detail — parked service equipment");obj.transform.SetParent(root,false);obj.transform.localPosition=placement.Position;obj.transform.localRotation=Quaternion.Euler(0,placement.Rotation,0);obj.transform.localScale=Vector3.one*placement.Scale;
                 obj.AddComponent<MeshFilter>().sharedMesh=serviceMesh;var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=material;
                 var block=new MaterialPropertyBlock();block.SetFloat("_SurfaceRole",3);block.SetFloat("_Dressing",2);block.SetColor("_BaseColor",Color.white);renderer.SetPropertyBlock(block);
             }
-            surfaceMaterials.PaintHangarAccesses(map,material);
-            surfaceMaterials.BuildWeathering(map,details,material);
+            yield return surfaceMaterials.PrepareHangarAccesses(map,material);
+            yield return surfaceMaterials.PrepareWeathering(map,details,material);
             foreach(int group in new[]{0,1,2,3,4})
             {
+                if(budget.Expired){yield return null;budget.Restart();}
                 bool stones=group==0;
                 var mesh=ThreeCrossingsDetails.Build(details,surfaceMaterials.Art,stones,group==2,surfaceMaterials.Profile.tractorScale,group==3,surfaceMaterials.Profile.industrialScale,group==4,surfaceMaterials.Profile.mineUtilityScale);terrainMeshes.Add(mesh);
                 var obj=new GameObject(stones?"Detail — geological debris":group==2?"Detail — heavy tractor wrecks":group==3?"Detail — corporate extraction scenery":group==4?"Detail — perimeter building compounds":"Detail — service infrastructure");obj.transform.SetParent(root,false);
@@ -161,11 +167,13 @@ namespace Spacewars.Presentation
                 foreach(var slot in site.Slots){var pad=Part("Reserved slot",root,Point(slot.Position)+Vector3.up*(profile.AuthoredMap is FoundryMap?.14f:.02f),new Vector3((float)profile.OrdinaryPadRadius*2,.04f,(float)profile.OrdinaryPadRadius*2),color);pad.transform.rotation=Quaternion.Euler(0,-(float)slot.Heading*Mathf.Rad2Deg,0);}
             }
         }
-        public void InspectionHide()=>material.SetTexture("_FogMask",Texture2D.whiteTexture);
+        public void InspectionHide(){if(groveMaterial)groveMaterial.SetTexture("_FogMask",Texture2D.whiteTexture);material.SetTexture("_FogMask",Texture2D.whiteTexture);if(meridianMaterial)meridianMaterial.SetTexture("_FogMask",Texture2D.whiteTexture);}
         public void InspectionReveal()
         {
             // Explicit diagnostic material override; gameplay fog/domain are unchanged.
             material.SetTexture("_FogMask",Texture2D.blackTexture);
+            if(groveMaterial)groveMaterial.SetTexture("_FogMask",Texture2D.blackTexture);
+            if(meridianMaterial)meridianMaterial.SetTexture("_FogMask",Texture2D.blackTexture);
         }
     }
 }

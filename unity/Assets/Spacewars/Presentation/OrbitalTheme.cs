@@ -11,6 +11,9 @@ namespace Spacewars.Presentation
         public static readonly Color Ink = new Color(.89f,.94f,.97f);
         public static readonly Color Muted = new Color(.53f,.64f,.70f);
         public static readonly Color Cyan = new Color(.27f,.85f,.94f);
+        public static readonly Color Amber = new Color(.93f,.73f,.38f);
+        public static readonly Color RepeatFill = new Color(.235f,.173f,.098f,.98f);
+        public static readonly Color HoldFill = new Color(.31f,.225f,.115f,.98f);
         public static readonly Color Line = new Color(.23f,.33f,.39f);
         // One scale authority for installed menu routes and HUD, including Retina backing pixels.
         public static float ReadableScale(int width,int height)=>Mathf.Max(1f,Mathf.Min(width/1280f,height/800f));
@@ -79,24 +82,7 @@ namespace Spacewars.Presentation
             if(inline){footer.style.position=Position.Relative;footer.style.left=footer.style.right=StyleKeyword.Auto;footer.style.bottom=StyleKeyword.Auto;footer.style.marginTop=12;}
             parent.Add(footer);return footer;
         }
-        public static VisualElement Loading(VisualElement root,string status)
-        {
-            var screen=Screen(root,"loading-screen",true);screen.AddToClassList("orbital-loading");
-            var shade=new VisualElement{pickingMode=PickingMode.Ignore};shade.AddToClassList("orbital-loading-shade");screen.Insert(0,shade);
-            var stack=new VisualElement();stack.AddToClassList("orbital-loading-stack");screen.Add(stack);
-            stack.Add(Text("SPACEWARS","orbital-logo"));
-            var label=Text(status,"orbital-loading-status");label.name="loading-status";stack.Add(label);
-            var line=new VisualElement{pickingMode=PickingMode.Ignore};line.AddToClassList("orbital-loading-line");stack.Add(line);
-            line.generateVisualContent+=ctx=>{
-                float w=line.contentRect.width,h=line.contentRect.height;if(w<=0||h<=0)return;
-                var painter=ctx.painter2D;painter.lineWidth=h;painter.strokeColor=Line;
-                painter.BeginPath();painter.MoveTo(new Vector2(0,h/2));painter.LineTo(new Vector2(w,h/2));painter.Stroke();
-                float phase=(Mathf.Sin(Time.realtimeSinceStartup*1.8f)+1)/2;
-                float start=phase*w*.72f;painter.strokeColor=Cyan;
-                painter.BeginPath();painter.MoveTo(new Vector2(start,h/2));painter.LineTo(new Vector2(start+w*.28f,h/2));painter.Stroke();
-            };
-            line.schedule.Execute(line.MarkDirtyRepaint).Every(33);return screen;
-        }
+        public static VisualElement Loading(VisualElement root,string status)=>OrbitalLoadingView.Create(root,status);
         public static VisualElement Card(VisualElement parent,string name=null)
         {var card=new VisualElement{name=name};card.AddToClassList("orbital-card");parent.Add(card);return card;}
         public static Label Text(string text,string style="orbital-body")

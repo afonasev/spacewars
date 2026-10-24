@@ -21,7 +21,7 @@ namespace Spacewars.Runtime
         private sealed class NavigationPreparedReady : NavOwnedStorage,IDisposable
         {
             private static long Align(long bytes)=>checked((bytes+7)/8*8);
-            private static long Layout(int actors,int attempts,int leases)=>checked(NavStorageLayout.ObjectBytesBound(typeof(NavigationPreparedReady))+9*32L+Align(actors*NavStorageLayout.ValueBytes(typeof(ReadyActorFact)))+8L*actors+16L*attempts+Align(4L*attempts)+Align(attempts)+16L*leases+16L);
+            internal static long Layout(int actors,int attempts,int leases)=>checked(NavStorageLayout.ObjectBytesBound(typeof(NavigationPreparedReady))+9*32L+Align(actors*NavStorageLayout.ValueBytes(typeof(ReadyActorFact)))+8L*actors+16L*attempts+Align(4L*attempts)+Align(attempts)+16L*leases+16L);
             internal readonly ReadyActorFact[] Actors;internal readonly NavOwnedStorage[] ActorPins,IntentPins;
             internal readonly ArrivalAttempt[] Attempts;internal readonly int[] AttemptRevisions;internal readonly bool[] PrunedAttempts;internal readonly ArrivalProviderLease[] Leases;
             internal readonly long[] LeaseRequests;internal readonly NavOwnedStorage[] MailboxRetired;

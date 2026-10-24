@@ -20,6 +20,7 @@ namespace Spacewars.Runtime
         private PlayableArtillerySupportSnapshot[] ProjectArtilleryCore(PlayableOwner owner,PlayableVision vision,
             IReadOnlyList<PlayableEntitySnapshot> entities,IReadOnlyList<PlayableBuildingSnapshot> projectedBuildings,AiArmyRegistryState armyState)
         {
+            using var measured=PerformanceProfile.Measure(ProfileStage.Artillery);
             if(Tick%45!=0)return Array.Empty<PlayableArtillerySupportSnapshot>();
             var guns=entities.Where(e=>e.Owner==owner&&e.Kind==PlayableEntityKind.Shkval&&e.Health>0).OrderBy(e=>e.Id).ToArray();
             if(guns.Length==0)return Array.Empty<PlayableArtillerySupportSnapshot>();
@@ -66,7 +67,7 @@ namespace Spacewars.Runtime
                 }
                 if(home!=null)candidates.Add(home.Position);
                 var radius=PlayableUnitRules.Radius(profile,PlayableEntityKind.Shkval);
-                var nav=navigation.Crowd.TryGet(gun.Id,out var n)?n:null;
+                var nav=TryActor(gun.Id,out var n)?n:null;
                 NavPoint? chosen=null;bool chosenUseful=false;
                 if(nav!=null)
                 {

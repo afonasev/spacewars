@@ -30,6 +30,9 @@ namespace Spacewars.Simulation
         {var target=new PlayableProfileData();foreach(var f in Fields.Values)f.SetValue(target,f.GetValue(source));return target;}
         public static void Write(PlayableProfileField descriptor,PlayableProfileData data,double value)
         {
+            // Zero is absence of the new extension in an explicit exact profile.
+            // Preserve writing that unchanged old field; it is not a quality setting.
+            if(descriptor.FieldName==nameof(PlayableProfileData.groupCorridorMaximumExcessPercent)&&data.groupCorridorMaximumExcessPercent==0&&value==0)return;
             if(double.IsNaN(value)||double.IsInfinity(value)||value<descriptor.Minimum||value>descriptor.Maximum)throw new ArgumentOutOfRangeException(descriptor.Path);
             if(!Fields.TryGetValue(descriptor.FieldName??"",out var field))throw new InvalidOperationException("Missing native field writer: "+descriptor.Path);
             if(field.FieldType==typeof(int)){if(value!=Math.Truncate(value))throw new ArgumentException("Введите целое число.");field.SetValue(data,(int)value);}
@@ -37,11 +40,13 @@ namespace Spacewars.Simulation
         }
         public static bool Editable(PlayableProfileField field)
         {
+            if(ReferenceEquals(field,PlayableProfileMetadata.AccruedCreditField))return true;
             string name=field.FieldName??"";
             if(field.Group=="Arena"||field.Group=="Slots"||field.Group=="Minimap"||field.Group=="Fog presentation"||field.Group=="Camera"||field.Group=="Navigation"||field.Group=="Rendering"||field.Group=="Input"||field.Group=="Presentation")return false;
             if(name.StartsWith("minimap")||name.StartsWith("fog")||name=="visionCellSize"||name=="startingCredits"||name=="matchScoreEarnedCreditsDivisor"||name=="ballisticWallHeight"||name=="factoryExitDistance"||name=="defaultRallyDistance"||name=="evacuationClearance"||name=="shkvalBuildingCollisionHeight"||name=="shkvalProjectileRadius")return false;
             if(name=="shkvalMarkerStartRadius"||name=="shkvalMarkerOpacity")return true;
             if(name.Contains("Marker")||name.Contains("Tracer")||name.Contains("Muzzle")||name=="shkvalArcHeight"||name=="shkvalLaunchHeight")return false;
+            if(name=="hawkRadius")return false; // Immutable physical envelope, like the other unit collision radii.
             if(name.Contains("CollisionRadius")||name.Contains("FootprintRadius")||name.Contains("ModelRadius")||name.Contains("ModelScale")||name.Contains("ModelHeight"))return false;
             return true;
         }

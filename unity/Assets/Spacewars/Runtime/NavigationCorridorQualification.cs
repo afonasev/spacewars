@@ -140,6 +140,21 @@ namespace Spacewars.Runtime
             if(prepared!=null&&prepared.TryQualified(answer,out bool valid,out var reason)){LastCorridorFailure=reason;return valid;}
             return QualifyCorridor(answer.Request,answer.ReadOnlyRouteBacking,answer.Corridor,cache,true);
         }
+        internal static long ReadyInstallationHeadroom(NavigationAnswer answer,int actors,int barrier,long publication)
+        {
+            var provider=answer.StorageOwner?.CorridorOwner?.ProviderOwner?.Provider;
+            long qualifier=provider==null||answer.Corridor==null?0:CorridorQualificationScratch(answer.Request,answer.Corridor,provider,answer.RouteLength);
+            // One complete single-answer installation (the authority already has
+            // a FIFO single fallback), plus a birth and the complete live carrier.
+            // Historical request/corridor/provider owners are shared, never copied.
+            return checked(BirthHeadroom(actors)+publication+NavigationRetentionBudget.ScopeBytes+
+                NavStorageLayout.Charge(NavigationPreparedAnswerNames.Layout(1,barrier))+
+                NavStorageLayout.Charge(NavigationPreparedCrowdNameWrite.Layout)+
+                NavStorageLayout.Charge(NavPreparedUnitRoute.Layout)+
+                NavStorageLayout.Charge(96L+16L*(answer.RouteLength+1L))+
+                NavStorageLayout.Charge(NavigationInstalledExecutionOwner.Layout)+
+                2*NavStorageScratch.LeaseBytes+32L+8L*barrier+qualifier);
+        }
         private static long CorridorQualificationScratch(NavigationRequest request,NavCorridorDescriptor corridor,ILayeredNavigationProvider provider,int routeCount)
         {
             long profileWire=checked(NavContract.StringWireBytes(request.Profile.ProfileId)+4L+8L*request.Profile.WireValueCount);

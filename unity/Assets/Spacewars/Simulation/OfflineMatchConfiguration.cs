@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 namespace Spacewars.Simulation
 {
-    public enum OfflineControl { Human, Ai }
+    public enum OfflineControl { Human, Ai, Scenario }
     public sealed class OfflineParticipant
     {
         public string Id{get;} public int LogicalPlayer{get;} public int Team{get;} public OfflineControl Control{get;}
@@ -28,12 +28,16 @@ namespace Spacewars.Simulation
     // opts in with matching sites, solids, support geometry and map identity.
     public sealed class OfflineMatchConfiguration
     {
+        public ProvingGroundSetup ProvingGround{get;}
+        public string MissionId{get;} public bool CampaignOpening=>MissionId==CampaignReconOpening.Id;
         public string SourceIdentity{get;} public string MapIdentity{get;} public string RouteProvenance{get;} public int Seed{get;}
         public IReadOnlyList<OfflineParticipant> Roster{get;} public IReadOnlyList<string> Spectators{get;} public IReadOnlyList<OfflineStart> Starts{get;}
         public IReadOnlyList<TerritorySite> Sites{get;} public IReadOnlyList<NavObstacle> Obstacles{get;} public IReadOnlyList<OfflineScenarioUnit> ScenarioUnits{get;} public IReadOnlyList<int> Assignments{get;} public IReadOnlyList<OfflineScenarioBuilding> ScenarioBuildings{get;}
         private readonly double[,] routeCosts;
-        public OfflineMatchConfiguration(PlayableProfile profile,string source,string map,string routeProvenance,int seed,OfflineParticipant[] roster,OfflineStart[] starts,TerritorySite[] sites,NavObstacle[] obstacles,double[,] costs,string[] spectators=null,OfflineScenarioUnit[] scenario=null,string terrain="flat-ground-v1",OfflineScenarioBuilding[] scenarioBuildings=null)
+        public OfflineMatchConfiguration(PlayableProfile profile,string source,string map,string routeProvenance,int seed,OfflineParticipant[] roster,OfflineStart[] starts,TerritorySite[] sites,NavObstacle[] obstacles,double[,] costs,string[] spectators=null,OfflineScenarioUnit[] scenario=null,string terrain="flat-ground-v1",OfflineScenarioBuilding[] scenarioBuildings=null,string missionId=null,ProvingGroundSetup provingGround=null)
         {
+            ProvingGround=provingGround;if(provingGround!=null&&(source!=ProvingGroundSetup.Identity||!(profile.AuthoredMap is ProvingGroundMap)))throw new ArgumentException("Invalid proving ground binding.");
+            MissionId=missionId;if(missionId!=null&&missionId!=CampaignReconOpening.Id)throw new ArgumentException("Unknown mission identity.");
             if(profile==null||(profile.AuthoredMap==null?terrain!="flat-ground-v1":terrain!=profile.AuthoredMap.Id)||string.IsNullOrWhiteSpace(source)||string.IsNullOrWhiteSpace(map)||string.IsNullOrWhiteSpace(routeProvenance))throw new ArgumentException("Unsupported source/map/terrain binding.");
             if(roster==null||starts==null||sites==null||obstacles==null||costs==null)throw new ArgumentException("Missing authored binding.");
             if(roster.Any(x=>x==null||string.IsNullOrWhiteSpace(x.Id)||x.LogicalPlayer<1||x.LogicalPlayer>starts.Length||x.Team<1||x.Team>8||!Enum.IsDefined(typeof(OfflineControl),x.Control))||roster.Count(x=>x.Control==OfflineControl.Human)>4)throw new ArgumentException("Invalid offline roster.");
@@ -48,7 +52,7 @@ namespace Spacewars.Simulation
             var geometry=new NavGeometry(profile.ArenaHalfExtent,obstacles,1);var envelopes=new List<Tuple<NavPoint,double,int,bool>>();
             foreach(var site in sites){if(site==null||site.Id<1||(site.Kind!=PlayableBuildingKind.Headquarters&&site.Kind!=PlayableBuildingKind.Outpost&&site.Kind!=PlayableBuildingKind.Mine)||!Finite(site.Position.X)||!Finite(site.Position.Z)||site.Slots.Select(x=>x.Id).Distinct().Count()!=site.Slots.Count||site.Slots.Select((x,i)=>x.Id!=i+1||!Finite(x.Position.X)||!Finite(x.Position.Z)||!Finite(x.Heading)).Any(x=>x))throw new ArgumentException("Null site.");envelopes.Add(Tuple.Create(site.Position,TerritoryRules.Radius(profile,site.Kind),site.Id,true));foreach(var slot in site.Slots)envelopes.Add(Tuple.Create(slot.Position,Math.Max(profile.ScienceFootprintRadius,Math.Max(profile.FactoryFootprintRadius,profile.RefineryFootprintRadius)),site.Id,false));}
             for(int i=0;i<envelopes.Count;i++){var e=envelopes[i];if(!geometry.IsFree(e.Item1,e.Item2*Math.Sqrt(2)+profile.ExplorerCollisionRadius))throw new ArgumentException("Unsupported site envelope.");for(int j=0;j<i;j++)if(!(e.Item3==envelopes[j].Item3&&(e.Item4||envelopes[j].Item4))&&Distance(e.Item1,envelopes[j].Item1)<e.Item2+envelopes[j].Item2)throw new ArgumentException("Overlapping authored envelopes.");}
-            foreach(var start in starts){var site=sites.SingleOrDefault(x=>x.Id==start.SiteId);if(!Finite(start.Position.X)||!Finite(start.Position.Z)||!Finite(start.ExplorerAnchor.X)||!Finite(start.ExplorerAnchor.Z)||site==null||site.Kind!=PlayableBuildingKind.Headquarters||!site.Position.Equals(start.Position)||!Finite(start.Heading)||(start.PinnedLogicalPlayer.HasValue&&(start.PinnedLogicalPlayer<1||start.PinnedLogicalPlayer>starts.Length))||!geometry.IsFree(start.ExplorerAnchor,profile.ExplorerCollisionRadius)||envelopes.Any(e=>Distance(e.Item1,start.ExplorerAnchor)<e.Item2+profile.ExplorerCollisionRadius))throw new ArgumentException("Invalid start/anchor/pin.");}
+            foreach(var start in starts){var site=sites.SingleOrDefault(x=>x.Id==start.SiteId);if(!Finite(start.Position.X)||!Finite(start.Position.Z)||!Finite(start.ExplorerAnchor.X)||!Finite(start.ExplorerAnchor.Z)||(!CampaignOpening&&(site==null||site.Kind!=PlayableBuildingKind.Headquarters||!site.Position.Equals(start.Position)))||!Finite(start.Heading)||(start.PinnedLogicalPlayer.HasValue&&(start.PinnedLogicalPlayer<1||start.PinnedLogicalPlayer>starts.Length))||!geometry.IsFree(start.ExplorerAnchor,profile.ExplorerCollisionRadius)||envelopes.Any(e=>Distance(e.Item1,start.ExplorerAnchor)<e.Item2+profile.ExplorerCollisionRadius))throw new ArgumentException("Invalid start/anchor/pin.");}
             foreach(var unit in scenario)if(unit==null||!Finite(unit.Position.X)||!Finite(unit.Position.Z)||unit.LogicalPlayer<1||unit.LogicalPlayer>starts.Length||!Enum.IsDefined(typeof(PlayableEntityKind),unit.Kind)||!Finite(unit.Heading)||!geometry.IsFree(unit.Position,PlayableUnitRules.Radius(profile,unit.Kind))||envelopes.Any(e=>Distance(e.Item1,unit.Position)<e.Item2+PlayableUnitRules.Radius(profile,unit.Kind)))throw new ArgumentException("Unsupported scenario unit.");
             for(int a=0;a<starts.Length;a++)for(int b=0;b<starts.Length;b++)if(costs[a,b]<0||!Finite(costs[a,b])||costs[a,b]!=costs[b,a]||(a==b&&costs[a,b]!=0))throw new ArgumentException("Invalid route-cost binding.");
             SourceIdentity=source;MapIdentity=map;RouteProvenance=routeProvenance;Seed=seed;Roster=Array.AsReadOnly((OfflineParticipant[])roster.Clone());Spectators=Array.AsReadOnly((string[])spectators.Clone());Starts=Array.AsReadOnly((OfflineStart[])starts.Clone());Sites=Array.AsReadOnly((TerritorySite[])sites.Clone());Obstacles=Array.AsReadOnly((NavObstacle[])obstacles.Clone());ScenarioUnits=Array.AsReadOnly((OfflineScenarioUnit[])scenario.Clone());routeCosts=(double[,])costs.Clone();Assignments=Array.AsReadOnly(OfflineStartAssignment.Resolve(Starts,Roster,seed,routeCosts));Profile=profile;ScenarioBuildings=Array.AsReadOnly((OfflineScenarioBuilding[])scenarioBuildings.Clone());
@@ -66,7 +70,7 @@ namespace Spacewars.Simulation
                 }
             }
             var placements=scenario.Select(u=>Tuple.Create(u.Position,PlayableUnitRules.Radius(profile,u.Kind))).ToArray();
-            for(int i=0;i<placements.Length;i++){for(int j=0;j<i;j++)if(Distance(placements[i].Item1,placements[j].Item1)<placements[i].Item2+placements[j].Item2)throw new ArgumentException("Overlapping scenario units.");foreach(var start in starts)if(Distance(placements[i].Item1,start.ExplorerAnchor)<placements[i].Item2+profile.ExplorerCollisionRadius)throw new ArgumentException("Scenario unit overlaps automatic Explorer.");}
+            for(int i=0;i<placements.Length;i++){for(int j=0;j<i;j++)if(Distance(placements[i].Item1,placements[j].Item1)<placements[i].Item2+placements[j].Item2)throw new ArgumentException("Overlapping scenario units.");foreach(var start in starts)if(!CampaignOpening&&ProvingGround==null&&Distance(placements[i].Item1,start.ExplorerAnchor)<placements[i].Item2+profile.ExplorerCollisionRadius)throw new ArgumentException("Scenario unit overlaps automatic Explorer.");}
 
         }
         private static bool SameSite(TerritorySite a,TerritorySite b)=>a!=null&&a.Id==b.Id&&a.Kind==b.Kind&&a.Position.Equals(b.Position)&&a.Slots.Count==b.Slots.Count&&a.Slots.Zip(b.Slots,(x,y)=>x.Id==y.Id&&x.Position.Equals(y.Position)&&x.Heading==y.Heading).All(equal=>equal);

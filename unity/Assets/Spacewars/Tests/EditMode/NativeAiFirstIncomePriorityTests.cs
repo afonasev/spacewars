@@ -58,7 +58,7 @@ namespace Spacewars.Tests.EditMode
         {
             var ai=AiProfile.Initial;var state=PlayableAiOpeningComposition.Initialize(7,"player-1",aiProfile:ai,forcedOpening:PlayableAiOpening.GreedySafe);
             var opening=new AiOpeningExecutor(state,71);int refineries=readyHome?opening.RequiredHomeRefineryCount(ai):0;
-            return (PlayableAiObservation)Call(typeof(NativeAiOpeningTests),"HomeEconomyObservation",tick,refineries,readyHome,readyNonhome);
+            return (PlayableAiObservation)Call(typeof(NativeAiOpeningTests),"HomeEconomyObservation",tick,refineries,readyHome,readyNonhome,false,0);
         }
         private static AiOpeningExecutor Opening()=>new AiOpeningExecutor(
             PlayableAiOpeningComposition.Initialize(7,"player-1",aiProfile:AiProfile.Initial,forcedOpening:PlayableAiOpening.GreedySafe),71);

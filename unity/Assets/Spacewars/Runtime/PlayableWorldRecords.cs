@@ -20,7 +20,7 @@ namespace Spacewars.Runtime
             w.Write(v.BurstSequence);
             w.Write(v.BurstSize);
             Number(w,v.BurstSpread);
-            Number(w,v.BurstDelay);
+            Number(w,v.BurstDelay);Number(w,v.HawkBurstReload);
             w.Write(v.ExplicitTarget);
             WorldWire.Write(w,v.PreviousPosition);
             WorldWire.Write(w,v.Velocity);
@@ -35,7 +35,7 @@ namespace Spacewars.Runtime
             WorldWire.Write(w,v.AttackMove);
             w.Write(v.HasAttackMove);
             w.Write(v.PatrolStarted);
-            WorldWire.Write(w,v.CurrentOrder);WriteOrderStamp(w,v.LastOrder);
+            WorldWire.Write(w,v.CurrentOrder);WriteOrderStamp(w,v.LastOrder);WriteAir(w,v.Air);
             }
         private static Unit ReadUnit(BinaryReader r) {if(!Boolean(r))return null;
             var v=Record(r,()=>new Unit());
@@ -45,12 +45,12 @@ namespace Spacewars.Runtime
             v.BurstSequence=r.ReadInt32();
             v.BurstSize=r.ReadInt32();
             v.BurstSpread=Number(r);
-            v.BurstDelay=Number(r);
+            v.BurstDelay=Number(r);v.HawkBurstReload=Number(r);
             v.ExplicitTarget=Boolean(r);
             v.PreviousPosition=ReadPoint(r);
             v.Velocity=ReadPoint(r);
             v.Id=r.ReadInt32();
-            v.Health=r.ReadInt32();
+            v.Health=Number(r);
             v.Target=r.ReadInt32();
             v.Owner=EnumValue<PlayableOwner>(r);
             v.Turret=Number(r);
@@ -60,7 +60,7 @@ namespace Spacewars.Runtime
             v.AttackMove=ReadPoint(r);
             v.HasAttackMove=Boolean(r);
             v.PatrolStarted=Boolean(r);
-            v.CurrentOrder=ReadPlayableTacticalOrderSnapshot(r);v.LastOrder=ReadOrderStamp(r);
+            v.CurrentOrder=ReadPlayableTacticalOrderSnapshot(r);v.LastOrder=ReadOrderStamp(r);v.Air=ReadAir(r);
             return v;
             }
         private static void WriteRecord(BinaryWriter w,Building v) {w.Write(v!=null);
@@ -93,7 +93,7 @@ namespace Spacewars.Runtime
             Array(w,v.Orders.ToArray(),x=>{WriteRecord(w,x);
             });
             w.Write(v.RepeatTank);
-            w.Write((int)v.RepeatKind);
+            w.Write((int)v.RepeatKind);w.Write(v.LaunchPhase);w.Write(v.LaunchedId);Number(w,v.LaunchTime);
             }
         private static Building ReadBuilding(BinaryReader r) {if(!Boolean(r))return null;
             var v=Record(r,()=>new Building());v.TermsRevision=r.ReadInt32();
@@ -121,7 +121,7 @@ namespace Spacewars.Runtime
             v.Ready=Boolean(r);
             v.Orders.AddRange(Array(r,()=>ReadProductionOrder(r)));
             v.RepeatTank=Boolean(r);
-            v.RepeatKind=EnumValue<PlayableEntityKind>(r);
+            v.RepeatKind=EnumValue<PlayableEntityKind>(r);v.LaunchPhase=r.ReadInt32();v.LaunchedId=r.ReadInt32();v.LaunchTime=Number(r);
             return v;
             }
         private static void WriteRecord(BinaryWriter w,Projectile v) {w.Write(v!=null);
@@ -141,7 +141,7 @@ namespace Spacewars.Runtime
             Number(w,v.DirectionZ);
             Number(w,v.Height);
             Number(w,v.VerticalSlope);
-            w.Write((int)v.Faction);
+            w.Write((int)v.Faction);w.Write(v.Spatial);Number(w,v.DirectionY);w.Write(v.Hawk!=null);if(v.Hawk!=null){w.Write(v.Hawk.Target);WorldWire.Write(w,v.Hawk.Position);WorldWire.Write(w,v.Hawk.Direction);Number(w,v.Hawk.Speed);Number(w,v.Hawk.TurnSpeed);Number(w,v.Hawk.RemainingLife);}
             }
         private static Projectile ReadProjectile(BinaryReader r) {if(!Boolean(r))return null;
             var v=Record(r,()=>new Projectile());v.TermsRevision=r.ReadInt32();
@@ -151,7 +151,7 @@ namespace Spacewars.Runtime
             v.Target=r.ReadInt32();
             v.Position=ReadPoint(r);
             v.Kind=EnumValue<PlayableEntityKind>(r);
-            v.Damage=r.ReadInt32();
+            v.Damage=Number(r);
             v.Speed=Number(r);
             v.Radius=Number(r);
             v.Remaining=Number(r);
@@ -159,7 +159,7 @@ namespace Spacewars.Runtime
             v.DirectionZ=Number(r);
             v.Height=Number(r);
             v.VerticalSlope=Number(r);
-            v.Faction=EnumValue<PlayableOwner>(r);
+            v.Faction=EnumValue<PlayableOwner>(r);v.Spatial=Boolean(r);v.DirectionY=Number(r);if(Boolean(r))v.Hawk=HawkRocketFlight.Restore(r.ReadInt32(),ReadBallisticPoint(r),ReadBallisticPoint(r),Number(r),Number(r),Number(r));
             return v;
             }
         private static void WriteRecord(BinaryWriter w,ProductionOrder v) {w.Write(v!=null);

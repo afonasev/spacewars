@@ -74,21 +74,33 @@ public sealed class NativeLobbyUiTests
     [UnityTest] public IEnumerator MapAtmosphereMatchesTerrainAndFitsBelowPreview()
     {
         Call("ShowLobby");var root=Get<VisualElement>("root");var lobby=Get<VisualElement>("lobbyScreen");
-        var choice=lobby.Q<DropdownField>("lobby-map-choice");CollectionAssert.AreEqual(new[]{"Переправа","Огненный разлом","ИИ-полигон · 8",BasaltCrownMap.DisplayName,MossHighlandMap.DisplayName},choice.choices);
+        var choice=lobby.Q<DropdownField>("lobby-map-choice");CollectionAssert.AreEqual(new[]{"Дальний берег (2)",BasaltCrownMap.DisplayName,MossHighlandMap.DisplayName,WhiteMeridianMap.DisplayName,"Огненный разлом (6)","Полигон (8)"},choice.choices);
+        var terrainTypes=new[]{typeof(ThreeCrossingsMap),typeof(BasaltCrownMap),typeof(MossHighlandMap),typeof(WhiteMeridianMap),typeof(FoundryMap),typeof(AiTestMap)};
+        var capacities=new[]{2,2,4,4,6,8};
+        var capacityLabels=new[]{"2 игровых места","2 игровых места","4 игровых места","4 игровых места · 2×2","6 игровых мест","8 игровых мест"};
+        var descriptions=new[]{
+            "Переселенцам обещали, что за рекой начнётся безопасная территория. Последний транспорт ушёл туда перед самым прекращением связи.",
+            "Первые колонисты назвали эти чёрные скалы короной нового мира. Позже здесь возвели крепость, и название осталось уже за ней.",
+            "После ухода гарнизона мох скрыл следы дорог и старые опознавательные знаки. Когда в эфире вновь прозвучал позывной заставы, на него ответили сразу несколько армий.",
+            "Белый меридиан появился в навигационных сводках после крушения корабля, чей сигнал стал ориентиром среди соляных бурь. Передатчик всё ещё работает; принадлежность корабля засекречена.",
+            "Заводы у разлома снабжали оружием весь сектор. Их владельцы давно исчезли, но подземный жар до сих пор питает аварийные печи.",
+            "Здесь испытывали автономные боевые соединения для войны, которая тогда казалась далёкой. Приказ о завершении испытаний так и не поступил."};
+        string[] names={"crossings","basalt","moss","meridian","foundry","polygon"};
         var panel=host.GetComponent<UIDocument>().panelSettings;
         foreach(var size in new[]{new Vector2Int(1280,800),new Vector2Int(1600,1000)})
         {
             var image=new RenderTexture(size.x,size.y,24);image.Create();panel.targetTexture=image;root.style.width=1280;root.style.height=800;
             try
             {
-                for(int index=0;index<2;index++)
+                for(int index=0;index<choice.choices.Count;index++)
                 {
                     choice.value=choice.choices[index];for(int frame=0;frame<8;frame++)yield return null;
-                    Assert.AreEqual(index==1,Get<NativeLobbyConfiguration>("lobbySetup").Foundry);
-                    Assert.True(index==1?Get<PlayableProfile>("profile").AuthoredMap is FoundryMap:Get<PlayableProfile>("profile").AuthoredMap is ThreeCrossingsMap);
-                    Assert.AreEqual(index==1?"6 игровых мест":"2 игровых места",lobby.Q<Label>("lobby-map-capacity").text);
+                    Assert.AreEqual(index==4,Get<NativeLobbyConfiguration>("lobbySetup").Foundry);
+                    Assert.AreEqual(terrainTypes[index],Get<PlayableProfile>("profile").AuthoredMap.GetType());
+                    Assert.AreEqual(capacities[index],Get<NativeLobbyConfiguration>("lobbySetup").Capacity(Get<PlayableProfile>("profile")));
+                    Assert.AreEqual(capacityLabels[index],lobby.Q<Label>("lobby-map-capacity").text);
                     var description=lobby.Q<Label>("lobby-map-description");
-                    Assert.AreEqual(index==1?"Над остывшими промышленными площадками дрожит жар лавовой реки. Между шахтами и укреплёнными высотами тишина держится лишь до первых выстрелов.":"Холодная река рассекает каменное плато, оставляя лишь три пути на другой берег. Среди скал и высоких уступов каждый проход становится рубежом, который нельзя отдать.",description.text);
+                    Assert.AreEqual(descriptions[index],description.text);
                     Assert.AreEqual(DisplayStyle.Flex,description.resolvedStyle.display);
                     Assert.GreaterOrEqual(description.worldBound.yMin,Get<PlayableMapSurface>("lobbyPreview").worldBound.yMax);
                     Assert.LessOrEqual(description.worldBound.yMax,Get<VisualElement>("mapPanel").worldBound.yMax);
@@ -98,12 +110,55 @@ public sealed class NativeLobbyUiTests
                     if(!string.IsNullOrEmpty(output))
                     {
                         var prior=RenderTexture.active;RenderTexture.active=image;var png=new Texture2D(size.x,size.y,TextureFormat.RGB24,false);png.ReadPixels(new Rect(0,0,size.x,size.y),0,0);png.Apply();
-                        System.IO.Directory.CreateDirectory(output);System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,(index==1?"foundry":"crossings")+"-"+size.x+"x"+size.y+".png"),png.EncodeToPNG());RenderTexture.active=prior;UnityEngine.Object.Destroy(png);
+                        System.IO.Directory.CreateDirectory(output);System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,names[index]+"-"+size.x+"x"+size.y+".png"),png.EncodeToPNG());RenderTexture.active=prior;UnityEngine.Object.Destroy(png);
                     }
                 }
             }
             finally{panel.targetTexture=null;image.Release();UnityEngine.Object.Destroy(image);}
         }
+    }
+    [UnityTest] public IEnumerator CaptureCurrentMinimapGallery()
+    {
+        string output=Environment.GetEnvironmentVariable("MINIMAP_GALLERY_EVIDENCE");
+        if(string.IsNullOrWhiteSpace(output))Assert.Ignore("Set MINIMAP_GALLERY_EVIDENCE for an explicit visual capture.");
+        Call("ShowLobby");var root=Get<VisualElement>("root");var lobby=Get<VisualElement>("lobbyScreen");
+        var choice=lobby.Q<DropdownField>("lobby-map-choice");var preview=Get<PlayableMapSurface>("lobbyPreview");
+        var panel=host.GetComponent<UIDocument>().panelSettings;
+        var image=new RenderTexture(1280,800,24);image.Create();panel.targetTexture=image;root.style.width=1280;root.style.height=800;
+        string[] names={"three-crossings","basalt-crown","moss-highland","white-meridian","foundry","ai-test"};
+        try
+        {
+            for(int index=0;index<names.Length;index++)
+            {
+                choice.value=choice.choices[index];
+                preview.style.width=180;preview.style.height=180;preview.style.minHeight=180;preview.style.maxHeight=180;preview.style.flexGrow=0;preview.style.flexShrink=0;
+                for(int frame=0;frame<8;frame++)yield return null;
+                var bounds=preview.worldBound;int x=Mathf.RoundToInt(bounds.xMin),y=Mathf.RoundToInt(800-bounds.yMax);
+                if(bounds.width<179||bounds.height<179||x<0||y<0||x+180>1280||y+180>800)throw new InvalidOperationException("Minimap capture bounds: "+bounds);
+                var prior=RenderTexture.active;RenderTexture.active=image;
+                var png=new Texture2D(180,180,TextureFormat.RGB24,false);
+                try{png.ReadPixels(new Rect(x,y,180,180),0,0);png.Apply();System.IO.Directory.CreateDirectory(output);System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,names[index]+".png"),png.EncodeToPNG());}
+                finally{RenderTexture.active=prior;UnityEngine.Object.Destroy(png);}
+            }
+            choice.value=WhiteMeridianMap.DisplayName;
+            for(int frame=0;frame<8;frame++)yield return null;
+            var profile=Get<PlayableProfile>("profile");var sites=profile.AuthoredMap.Sites(profile);
+            var outposts=sites.Where(s=>s.Kind==PlayableBuildingKind.Outpost).ToArray();
+            var marks=sites.Select(s=>new PlayableMapMark(s.Id,s.Position,s.Kind,MapMarkState.Ready,
+                s.Kind==PlayableBuildingKind.Headquarters&&s.Id<=4?(PlayableOwner?)(s.Id-1):
+                s.Id==outposts[0].Id?PlayableOwner.Player:s.Id==outposts[1].Id?PlayableOwner.Enemy:null)).ToList();
+            foreach(var pair in new[]{(site:sites.First(s=>s.Kind==PlayableBuildingKind.Headquarters),owner:PlayableOwner.Player),
+                                      (site:outposts[0],owner:PlayableOwner.Player),(site:outposts[1],owner:PlayableOwner.Enemy)})
+                foreach(var slot in pair.site.Slots.Take(2))marks.Add(new PlayableMapMark(1000+marks.Count,slot.Position,
+                    slot.Id==1?PlayableBuildingKind.Factory:PlayableBuildingKind.Refinery,MapMarkState.Ready,pair.owner));
+            preview.SetPublic(marks,profile.ArenaHalfExtent);
+            for(int frame=0;frame<4;frame++)yield return null;
+            var sample=preview.worldBound;var old=RenderTexture.active;RenderTexture.active=image;
+            var occupied=new Texture2D(180,180,TextureFormat.RGB24,false);
+            try{occupied.ReadPixels(new Rect(Mathf.RoundToInt(sample.xMin),Mathf.RoundToInt(800-sample.yMax),180,180),0,0);occupied.Apply();System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,"white-meridian-occupied.png"),occupied.EncodeToPNG());}
+            finally{RenderTexture.active=old;UnityEngine.Object.Destroy(occupied);}
+        }
+        finally{panel.targetTexture=null;image.Release();UnityEngine.Object.Destroy(image);}
     }
     [UnityTest] public IEnumerator BasaltCrownSelectsTwoDiagonalSeatsAndPublicPreview()
     {
@@ -118,7 +173,7 @@ public sealed class NativeLobbyUiTests
         Assert.AreEqual(2,setup.Capacity(p));Assert.AreEqual(2,setup.Participants.Count);Assert.IsNull(Get<PlayableRuntime>("runtime"));
         Assert.True(p.AuthoredMap is BasaltCrownMap);Assert.AreEqual(new NavPoint(-40,-32),p.Headquarters(PlayableOwner.Player));
         Assert.AreEqual("2 игровых места",lobby.Q<Label>("lobby-map-capacity").text);
-        StringAssert.Contains("двум шахтам на центральной высоте",lobby.Q<Label>("lobby-map-description").text);
+        StringAssert.Contains("Первые колонисты",lobby.Q<Label>("lobby-map-description").text);
         Assert.Greater(Get<PlayableMapTerrain>("lobbyTerrain").Texture.GetPixels32().Distinct().Count(),2);
         Assert.True(Get<Button>("launchButton").enabledSelf);
         Call("LaunchLobbyMatch");
@@ -144,7 +199,7 @@ public sealed class NativeLobbyUiTests
         Assert.AreEqual(4,setup.Capacity(p));Assert.AreEqual(4,setup.Participants.Count);Assert.IsNull(Get<PlayableRuntime>("runtime"));
         Assert.True(p.AuthoredMap is MossHighlandMap);Assert.AreEqual(new NavPoint(-38,-38),p.Headquarters(PlayableOwner.Player));
         Assert.AreEqual("4 игровых места",lobby.Q<Label>("lobby-map-capacity").text);
-        StringAssert.Contains("Влажный мох",lobby.Q<Label>("lobby-map-description").text);
+        StringAssert.Contains("После ухода гарнизона",lobby.Q<Label>("lobby-map-description").text);
         Assert.Greater(Get<PlayableMapTerrain>("lobbyTerrain").Texture.GetPixels32().Distinct().Count(),2);
         Assert.True(Get<Button>("launchButton").enabledSelf);
         Call("LaunchLobbyMatch");
@@ -163,8 +218,12 @@ public sealed class NativeLobbyUiTests
         Assert.IsNull(Get<Spacewars.Runtime.PlayableRuntime>("runtime"));
         Assert.False(Get<Spacewars.Input.PlayableInput>("input").WorldInputEnabled);
         var lobby=Get<VisualElement>("lobbyScreen");
-        Assert.AreEqual(2,lobby.Query<TextField>().ToList().Count);
-        Assert.AreEqual(7,lobby.Query<DropdownField>().ToList().Count);
+        Assert.AreEqual(1,lobby.Query<TextField>().ToList().Count);
+        Assert.IsNull(lobby.Q<TextField>("lobby-ai-name"));
+        Assert.AreEqual("ИИ",lobby.Q<Label>("lobby-ai-label-1").text);
+        CollectionAssert.AreEqual(new[]{"Кадет","Боец","Ветеран"},lobby.Q<DropdownField>("lobby-ai-difficulty").choices);
+        Assert.AreEqual(5,lobby.Query<DropdownField>().ToList().Count);
+        Assert.AreEqual(2,lobby.Query<LobbyColorField>().ToList().Count);
         var launch=lobby.Q<Button>("lobby-launch");Assert.IsNotNull(launch);StringAssert.Contains("Start",launch.Children().OfType<Label>().Single().text);
         Assert.AreEqual(2,launch.style.borderLeftWidth.value);Assert.AreEqual(FontStyle.Bold,launch.style.unityFontStyleAndWeight.value);
         Assert.Zero(lobby.Query<Label>().ToList().Count(label=>label.text=="Настройки"));
@@ -174,13 +233,120 @@ public sealed class NativeLobbyUiTests
         var difficulty=lobby.Q<DropdownField>("lobby-ai-difficulty");Assert.IsNotNull(difficulty);
         difficulty.value="Ветеран";
         Assert.AreEqual(Spacewars.Simulation.Ai.AiDifficulty.Veteran,Get<NativeLobbyConfiguration>("lobbySetup").Difficulty);
-        Assert.AreEqual("ИИ Ветеран 1",Get<NativeLobbyConfiguration>("lobbySetup").MatchAiName);
+        Assert.AreEqual("ИИ",Get<NativeLobbyConfiguration>("lobbySetup").MatchAiName);
         Call("RebuildRoster");Assert.AreEqual("Ветеран",lobby.Q<DropdownField>("lobby-ai-difficulty").value);
         Assert.Greater(Get<PlayableMapTerrain>("lobbyTerrain").Texture.GetPixels32().Distinct().Count(),2,"Public terrain must be uploaded before first lobby frame");
         lobby.Q<TextField>("lobby-human-name").value=" ";
         Assert.False(lobby.Q<Button>("lobby-launch").enabledSelf);
         StringAssert.Contains("имена",Get<Label>("lobbyStatus").text);
         Assert.AreEqual(DisplayStyle.None,Get<VisualElement>("top").style.display.value);
+    }
+    [UnityTest] public IEnumerator LobbyRowsAlignWithoutRoleCaptionsAndUseSquareColourSamples()
+    {
+        Call("ShowLobby");var root=Get<VisualElement>("root");root.style.width=1280;root.style.height=800;
+        yield return null;yield return null;
+        var lobby=Get<VisualElement>("lobbyScreen");
+        Assert.False(lobby.Query<Label>().ToList().Any(l=>l.text=="Человек"||l.text=="Бот"));
+        var human=lobby.Q<TextField>("lobby-human-name");var bot=lobby.Q<Label>("lobby-ai-label-1");
+        Assert.AreEqual(human.worldBound.height,bot.worldBound.height,.5f);
+        foreach(var row in lobby.Query<VisualElement>(className:"premium-participant").ToList())
+        {
+            var color=row.Q<LobbyColorField>();var swatch=color.Q("lobby-color-swatch");
+            Assert.AreEqual(swatch.worldBound.width,swatch.worldBound.height,.5f);
+            Assert.Less(color.worldBound.width,color.worldBound.height*2);
+            Assert.AreEqual(row[0].worldBound.center.y,color.worldBound.center.y,.5f);
+            Assert.LessOrEqual(row[0].worldBound.yMax,row.worldBound.yMax+.5f);
+        }
+    }
+    [UnityTest] public IEnumerator LobbyColorSwatchesChooseCancelAndBlockTakenColors()
+    {
+        Call("ShowLobby");var lobby=Get<VisualElement>("lobbyScreen");var root=Get<VisualElement>("root");
+        var navigation=Get<NativeMenuNavigation>("menuNavigation");var field=lobby.Q<LobbyColorField>("lobby-color-0");
+        Assert.NotNull(field);Assert.AreEqual(0,field.value);
+        Assert.False(field.Query<Label>().ToList().Any(l=>NativeLobbyConfiguration.ColorNames.Contains(l.text)));
+        ColorUtility.TryParseHtmlString(NativeLobbyConfiguration.ColorHex[0],out var initial);
+        Assert.AreEqual(initial,field.Q("lobby-color-swatch").style.backgroundColor.value);
+        yield return CaptureViewerFrame("color-swatches-closed",false);
+        navigation.ActivateElement(field.Trigger);yield return null;yield return null;
+        var palette=root.Q<VisualElement>("lobby-color-palette");Assert.NotNull(palette);
+        Assert.AreEqual(8,palette.Query<Button>().ToList().Count);
+        Assert.False(palette.Q<Button>("lobby-color-option-1").enabledSelf);
+        Assert.True(palette.Q<Button>("lobby-color-option-4").enabledSelf);
+        for(int i=0;i<8;i++)
+        {
+            var option=palette.Q<Button>("lobby-color-option-"+i);ColorUtility.TryParseHtmlString(NativeLobbyConfiguration.ColorHex[i],out var paint);
+            Assert.AreEqual(paint,option.Q("lobby-color-option-swatch").style.backgroundColor.value);
+            StringAssert.Contains(NativeLobbyConfiguration.ColorNames[i],option.tooltip);
+        }
+        Assert.False(palette.Query<Label>().ToList().Any(l=>NativeLobbyConfiguration.ColorNames.Contains(l.text)));
+        yield return CaptureViewerFrame("color-swatches-open",false);
+        Assert.True((bool)typeof(PlayableBootstrap).GetMethod("StartLobbyMatchFromGamepad",Flags).Invoke(app,new object[]{null}));
+        Assert.IsNull(Get<PlayableRuntime>("runtime"));Assert.NotNull(root.Q("lobby-color-overlay"));
+        navigation.Back();Assert.IsNull(root.Q("lobby-color-overlay"));Assert.AreEqual(0,field.value);
+        Assert.AreSame(lobby,navigation.Scope);Assert.AreSame(field,root.focusController.focusedElement);
+        navigation.Activate();Assert.NotNull(root.Q("lobby-color-overlay"));navigation.ActivateElement(root.Q<Button>("lobby-color-option-4"));
+        Assert.IsNull(root.Q("lobby-color-overlay"));Assert.AreEqual(4,field.value);
+        Assert.AreEqual(4,Get<NativeLobbyConfiguration>("lobbySetup").Participants[0].Color);
+        ColorUtility.TryParseHtmlString(NativeLobbyConfiguration.ColorHex[4],out var chosen);
+        Assert.AreEqual(chosen,field.Q("lobby-color-swatch").style.backgroundColor.value);
+        Assert.AreEqual(chosen,lobby.Q("lobby-participant-0").style.borderLeftColor.value);
+        yield return CaptureViewerFrame("color-swatches-selected",false);
+        var other=lobby.Q<LobbyColorField>("lobby-color-1");navigation.ActivateElement(other.Trigger);
+        Assert.False(root.Q<Button>("lobby-color-option-4").enabledSelf);
+        Assert.True(root.Q<Button>("lobby-color-option-0").enabledSelf);navigation.Back();
+        foreach(var size in new[]{new Vector2Int(1280,800),new Vector2Int(800,620),new Vector2Int(760,900)})
+        {
+            root.style.width=size.x;root.style.height=size.y;yield return null;yield return null;
+            navigation.ActivateElement(field.Trigger);yield return null;yield return null;
+            palette=root.Q("lobby-color-palette");Assert.NotNull(palette);
+            Assert.GreaterOrEqual(palette.worldBound.xMin,root.worldBound.xMin-.5f);
+            Assert.GreaterOrEqual(palette.worldBound.yMin,root.worldBound.yMin-.5f);
+            Assert.LessOrEqual(palette.worldBound.xMax,root.worldBound.xMax+.5f);
+            Assert.LessOrEqual(palette.worldBound.yMax,root.worldBound.yMax+.5f);navigation.Back();
+        }
+    }
+    [UnityTest] public IEnumerator BotNamesFlowFromLobbyThroughMatchAndResults()
+    {
+        void Set(string name,object value)=>typeof(PlayableBootstrap).GetField(name,Flags).SetValue(app,value);
+        IEnumerator Wait(Func<bool> ready)
+        {float deadline=Time.realtimeSinceStartup+12;while(!ready()&&Time.realtimeSinceStartup<deadline)yield return null;Assert.True(ready(),"bot identity flow deadline");}
+        Call("ShowLobby");var lobby=Get<VisualElement>("lobbyScreen");
+        lobby.Q<DropdownField>("lobby-map-choice").value="Полигон (8)";
+        var draft=Get<NativeLobbyConfiguration>("lobbySetup");
+        for(int i=0;i<8;i++)draft.Participants[i].Difficulty=(AiDifficulty)(i%3);
+        Call("RebuildRoster");
+        Assert.Zero(lobby.Query<TextField>().ToList().Count);
+        Assert.AreEqual(8,lobby.Query<Label>().ToList().Count(l=>l.text=="ИИ"));
+        yield return CaptureViewerFrame("bot-names-lobby",false);
+        try
+        {
+            Call("LaunchLobbyMatch");yield return Wait(()=>Get<PlayableRuntime>("runtime")!=null&&!Get<bool>("preparing"));
+            var runtime=Get<PlayableRuntime>("runtime");Call("UpdateFrame");
+            var match=Get<NativeLobbyConfiguration>("matchSetup");
+            var names=Enumerable.Range(0,8).Select(match.ParticipantName).ToArray();
+            Assert.AreEqual(8,names.Select(n=>n.Split('(')[0]).Distinct().Count());
+            for(int i=0;i<8;i++)StringAssert.EndsWith(" ("+NativeLobbyConfiguration.DifficultyNames[i%3]+")",names[i]);
+            CollectionAssert.AreEquivalent(names,Get<VisualElement>("spectatorRows").Query<Button>().ToList().Select(b=>b.text));
+            yield return null;yield return null;
+            foreach(var row in Get<VisualElement>("spectatorRows").Children())
+            {
+                var name=(Button)row[0];Assert.AreEqual(WhiteSpace.NoWrap,name.resolvedStyle.whiteSpace);
+                float text=name.MeasureTextSize(name.text,0,VisualElement.MeasureMode.Undefined,0,VisualElement.MeasureMode.Undefined).x;
+                Assert.LessOrEqual(text,name.contentRect.width+.5f,name.text+" fits without clipping");
+                Assert.LessOrEqual(name.worldBound.xMax,row[1].worldBound.xMin+.5f,name.text+" does not overlap credits");
+                Assert.AreEqual(Get<VisualElement>("spectatorHead")[0].worldBound.width,name.worldBound.width,.5f);
+            }
+            CollectionAssert.AreEqual(names,Enumerable.Range(0,8).Select(runtime.LobbyConfiguration.ParticipantName));
+            yield return CaptureViewerFrame("bot-names-match",true);
+            runtime.RequestFinish();yield return Wait(()=>runtime.Result!=null);Call("UpdateFrame");
+            var result=Get<PostMatchResultsView>("postMatch").Root;
+            foreach(var name in names)Assert.True(result.Query<Label>().ToList().Any(l=>l.text==name),name);
+            yield return CaptureViewerFrame("bot-names-results",true);
+            Call("ReturnToLobby");yield return Wait(()=>runtime.IsStopped);Call("UpdateFrame");
+            Assert.True(Get<bool>("inLobby"));Assert.True(draft.Participants.All(p=>p.Name=="ИИ"));
+            Assert.Zero(lobby.Query<TextField>().ToList().Count);
+        }
+        finally{Get<PlayableRuntime>("runtime")?.RequestStop();Set("runtime",null);}
     }
     [Test] public void MouseJoinAddsKeyboardMouseSeatOnlyOnce()
     {
@@ -398,7 +564,7 @@ public sealed class NativeLobbyUiTests
         SetFirstSeatAi();
         var draft=Get<NativeLobbyConfiguration>("lobbySetup");Assert.True(draft.Spectator);
         Assert.IsNull(lobby.Q<Button>("lobby-bind-devices"));
-        Assert.AreEqual("ИИ Ветеран 1",draft.ParticipantName(0));Assert.AreEqual("ИИ Боец 2",draft.ParticipantName(1));
+        Assert.AreEqual("ИИ",draft.ParticipantName(0));Assert.AreEqual("ИИ",draft.ParticipantName(1));
         yield return CaptureViewerFrame("all-ai-lobby",false);
         Set("preparing",true);Set("matchSetup",draft.Copy());Call("StartSession");
         var runtime=Get<PlayableRuntime>("runtime");yield return Wait(()=>runtime.Latest.Paused);
@@ -431,7 +597,7 @@ public sealed class NativeLobbyUiTests
     {
         void Set(string name,object value)=>typeof(PlayableBootstrap).GetField(name,Flags).SetValue(app,value);
         Call("ShowLobby");var lobby=Get<VisualElement>("lobbyScreen");
-        lobby.Q<DropdownField>("lobby-map-choice").value="ИИ-полигон · 8";
+        lobby.Q<DropdownField>("lobby-map-choice").value="Полигон (8)";
         var setup=Get<NativeLobbyConfiguration>("lobbySetup");var profile=Get<PlayableProfile>("profile");
         Assert.True(setup.AiTestMap);Assert.False(setup.Foundry);Assert.True(setup.Spectator);
         Assert.AreEqual(8,setup.Participants.Count);Assert.AreEqual("8 игровых мест",lobby.Q<Label>("lobby-map-capacity").text);
@@ -503,6 +669,8 @@ public sealed class NativeLobbyUiTests
             root.style.width=size.x;root.style.height=size.y;yield return null;yield return null;
             foreach(var control in lobby.Query<VisualElement>().ToList().Where(e=>e is Button||e is TextField||e is DropdownField))
             {Assert.Greater(control.worldBound.width,0,control.name);Assert.LessOrEqual(control.worldBound.xMax,root.worldBound.xMax+.5f,control.name);Assert.LessOrEqual(control.worldBound.yMax,root.worldBound.yMax+.5f,control.name);}
+            foreach(var label in lobby.Query<Label>().ToList().Where(l=>l.name!=null&&l.name.StartsWith("lobby-ai-label-")))
+                Assert.LessOrEqual(label.parent.worldBound.yMax,label.parent.parent.worldBound.yMax+.5f,"Bot identity must fit its row");
             Assert.LessOrEqual(Get<VisualElement>("rosterPanel").worldBound.yMax,Get<Label>("lobbyStatus").worldBound.yMin+.5f);
         }
     }
@@ -526,7 +694,7 @@ public sealed class NativeLobbyUiTests
         var keyboard=UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Keyboard>();var mouse=UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Mouse>();
         try
         {
-            Call("BindLobbyDevices");Call("ShowLobby");var lobby=Get<VisualElement>("lobbyScreen");lobby.Q<DropdownField>("lobby-map-choice").value="Огненный разлом";
+            Call("BindLobbyDevices");Call("ShowLobby");var lobby=Get<VisualElement>("lobbyScreen");lobby.Q<DropdownField>("lobby-map-choice").value="Огненный разлом (6)";
             var setup=Get<NativeLobbyConfiguration>("lobbySetup");setup.HasExplicitSeed=true;setup.ExplicitSeed=19092026;Call("RefreshLobbyValidation");
             Assert.True(Get<Button>("launchButton").enabledSelf);Assert.True(Get<PlayableProfile>("profile").AuthoredMap is FoundryMap);
             yield return Shot("lobby-foundry");
@@ -544,11 +712,11 @@ public sealed class NativeLobbyUiTests
             yield return Wait(()=>runtime.Latest.Buildings.Any(b=>b.Owner==PlayableOwner.Player&&b.Kind==PlayableBuildingKind.Factory));
             Assert.IsNull(runtime.Latest.Failure);
             runtime.RequestFinish();yield return Wait(()=>runtime.Result!=null);Call("UpdateFrame");
-            Assert.AreEqual(6,runtime.Result.Players.Count);Assert.AreEqual(6,runtime.Result.Players.Select(p=>setup.ParticipantName(p.Slot)).Distinct().Count());
+            Assert.AreEqual(6,runtime.Result.Players.Count);Assert.AreEqual(6,runtime.Result.Players.Select(p=>runtime.LobbyConfiguration.ParticipantName(p.Slot)).Distinct().Count());
             yield return Shot("foundry-results");var generation=runtime.Generation;Call("Restart");yield return Wait(()=>runtime.IsStopped);Call("UpdateFrame");
             var next=Get<PlayableRuntime>("runtime");Assert.Greater(next.Generation,generation);Assert.AreEqual(6,next.Latest.Participants.Count);Assert.True(next.Latest.ActiveProfile.AuthoredMap is FoundryMap);
             Call("ReturnToLobby");yield return Wait(()=>next.IsStopped);Call("UpdateFrame");Assert.True(Get<bool>("inLobby"));
-            lobby.Q<DropdownField>("lobby-map-choice").value="Переправа";Assert.AreEqual(2,Get<NativeLobbyConfiguration>("lobbySetup").Capacity(Get<PlayableProfile>("profile")));
+            lobby.Q<DropdownField>("lobby-map-choice").value="Дальний берег (2)";Assert.AreEqual(2,Get<NativeLobbyConfiguration>("lobbySetup").Capacity(Get<PlayableProfile>("profile")));
             Get<Button>("launchButton").Focus();Get<NativeMenuNavigation>("menuNavigation").Activate();yield return Wait(()=>Get<PlayableRuntime>("runtime")!=null&&!Get<bool>("preparing"));
             var two=Get<PlayableRuntime>("runtime");Assert.True(two.Latest.ActiveProfile.AuthoredMap is ThreeCrossingsMap);Assert.AreEqual(2,two.LobbyConfiguration.Capacity(two.Latest.ActiveProfile));Assert.False(two.LobbyConfiguration.Foundry);two.RequestStop();yield return Wait(()=>two.IsStopped);Set("runtime",null);
         }
@@ -573,7 +741,7 @@ public sealed class NativeLobbyUiTests
         }
         try
         {
-            Call("BindLobbyDevices");Call("ShowLobby");var lobby=Get<VisualElement>("lobbyScreen");lobby.Q<DropdownField>("lobby-map-choice").value="Огненный разлом";
+            Call("BindLobbyDevices");Call("ShowLobby");var lobby=Get<VisualElement>("lobbyScreen");lobby.Q<DropdownField>("lobby-map-choice").value="Огненный разлом (6)";
             var setup=Get<NativeLobbyConfiguration>("lobbySetup");setup.Participants.RemoveRange(3,3);
             otherPad.MakeCurrent();typeof(PlayableBootstrap).GetMethod("AddLobbyParticipant",Flags).Invoke(app,new object[]{true,pressedPad});
             Assert.AreEqual(pressedPad.deviceId,setup.Participants.Last().DeviceId);Assert.AreEqual(4,setup.Participants.Count);

@@ -20,7 +20,7 @@ namespace Spacewars.Runtime
         public int Count{get{int count=0;if(crowd!=null)for(int i=0;i<crowd.Units.Count;i++)if(State(crowd.Units[i])!=null)count++;return count;}}
         public bool IsReadOnly=>false;
         internal bool IsDetached(int entity)=>crowd.TryGet(entity,out var actor)&&actor.StorageOwner.InstalledDetached;
-        internal void SetDetachedNoThrow(int entity,bool detached){if(crowd.TryGet(entity,out var actor)){actor.StorageOwner.InstalledDetached=detached;if(actor.StorageOwner.LegacyInstalledExecution is NavigationInstalledExecutionState legacy)legacy.Detached=detached;}}
+        internal void SetDetachedNoThrow(int entity,bool detached){if(crowd.TryGet(entity,out var actor))actor.StorageOwner.SetInstalledDetachedNoThrow(detached);}
         internal NavigationInstalledExecutionOwner OwnerFor(int entity)=>crowd.TryGet(entity,out var actor)?actor.StorageOwner.InstalledExecution as NavigationInstalledExecutionOwner:null;
         public bool TryGetValue(int key,out NavigationInstalledExecutionState value){value=crowd.TryGet(key,out var actor)?State(actor):null;return value!=null;}
         public bool ContainsKey(int key)=>TryGetValue(key,out _);

@@ -6,10 +6,12 @@ namespace Spacewars.Runtime
 {
     // A committed projection step owns its exact cursor and paged output.
     // Forks copy only the page touched by the next leg or replay trace.
-    internal sealed class NavigationHostProjection : NavOwnedStorage, INavPhysicalBody
+    internal class NavigationHostProjection : NavOwnedStorage, INavPhysicalBody
     {
         private static readonly long LayoutBytes=Math.Max(256,
             NavStorageLayout.ObjectBytesBound(typeof(NavigationHostProjection)));
+        private static readonly bool ReplayLayoutMatches=
+            NavStorageLayout.ObjectBytesBound(typeof(ReplayOnlyProjection))==NavStorageLayout.ObjectBytesBound(typeof(NavigationHostProjection));
         private NavPagedList<NavPoint> points;
         private NavPagedList<NavNameReference> typed,observed;
         internal int LegCursor {get;private set;}
@@ -24,14 +26,21 @@ namespace Spacewars.Runtime
         internal string ObservedPortal(int index)=>observed[index].Resolve();
         private bool sealedProjection,released;
         internal override bool IsImmutableCaptureRoot=>sealedProjection;
-        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(NavPhysicalStorageKind.HostProjection);
+        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(NavPhysicalStorageKind.HostProjection,value:ReplayOnly?NavPhysicalValueKind.ReplayOnlyProjectionV1:NavPhysicalValueKind.None);
 
+        private sealed class ReplayOnlyProjection : NavigationHostProjection
+        {
+            internal ReplayOnlyProjection(bool ownerReference):base(ownerReference){}
+        }
+        internal bool ReplayOnly=>this is ReplayOnlyProjection;
         private NavigationHostProjection(bool ownerReference):base(LayoutBytes)
         {if(ownerReference)Retain();}
-        private static NavigationHostProjection Allocate(INavStorageReservation reservation,bool ownerReference)
+        private static NavigationHostProjection Allocate(INavStorageReservation reservation,bool ownerReference,bool replayOnly=false)
         {
             using(var allocation=new NavStorageAllocationContext(reservation.TryReserve)){
-                allocation.Reserve(LayoutBytes);var value=new NavigationHostProjection(ownerReference);allocation.Register(value);return value;
+                if(replayOnly&&!ReplayLayoutMatches)
+                    throw new InvalidOperationException("Replay projection layout changed.");
+                allocation.Reserve(LayoutBytes);var value=replayOnly?new ReplayOnlyProjection(ownerReference):new NavigationHostProjection(ownerReference);allocation.Register(value);return value;
             }
         }
 
@@ -50,11 +59,11 @@ namespace Spacewars.Runtime
             else{At.NameReference.Owner?.Release();At=location;}
         }
         internal static NavigationHostProjection CreateOwned(NavLocation origin,
-            INavStorageReservation reservation)
+            INavStorageReservation reservation,bool replayOnly=false)
         {
             if(reservation==null)throw new ArgumentNullException(nameof(reservation));
             origin.RequireName(reservation);
-            var value=Allocate(reservation,true);
+            var value=Allocate(reservation,true,replayOnly);
             try{
                 value.points=NavPhysicalMacro.Acquire(value,NavPagedList<NavPoint>.CreateOwned(reservation,4));value.points.Release();
                 value.typed=NavPhysicalMacro.Acquire(value,NavPagedList<NavNameReference>.CreateOwned(reservation,4));value.typed.Release();
@@ -66,7 +75,7 @@ namespace Spacewars.Runtime
         {
             NavStorageAdmission.RequireOwned(reservation,this);
             if(!sealedProjection)throw new InvalidOperationException("Mutable physical projection cannot fork.");
-            var value=Allocate(reservation,true);
+            var value=Allocate(reservation,true,ReplayOnly);
             try{
                 value.points=NavPhysicalMacro.Acquire(value,points.ForkOwned(reservation));value.points.Release();
                 value.typed=NavPhysicalMacro.Acquire(value,typed.ForkOwned(reservation));value.typed.Release();
@@ -75,13 +84,28 @@ namespace Spacewars.Runtime
                 value.LegCursor=LegCursor;value.ReplayCursor=ReplayCursor;return value;
             }catch{value.ReleaseStorage();throw;}
         }
-        internal void AdvanceLeg(NavTypedLeg leg,NavNameReference portal)
+        // Exact local guard: zero legs and every non-Surface boundary break a run.
+        internal static bool CanMerge(NavTypedLeg previous,NavTypedLeg current)
+        {
+            if(previous==null||current==null||previous.Kind!=NavTypedLegKind.Surface||
+                current.Kind!=NavTypedLegKind.Surface||!previous.To.Equals(current.From)||
+                previous.From.SurfaceId!=previous.To.SurfaceId||
+                previous.To.SurfaceId!=current.To.SurfaceId)return false;
+            var a=previous.From.Position;var b=previous.To.Position;var c=current.To.Position;
+            return a.X==b.X&&b.X==c.X&&(a.Z<b.Z&&b.Z<c.Z||a.Z>b.Z&&b.Z>c.Z)||
+                a.Z==b.Z&&b.Z==c.Z&&(a.X<b.X&&b.X<c.X||a.X>b.X&&b.X>c.X);
+        }
+        internal void AdvanceLeg(NavTypedLeg leg,NavNameReference portal,NavTypedLeg previous=null)
         {
             if(sealedProjection||leg==null||!leg.From.Equals(Expected))
                 throw new ArgumentException("Invalid physical projection leg step.");
             if(leg.Kind==NavTypedLegKind.Surface){
                 if(portal.Owner!=null)throw new ArgumentException("Surface leg has a portal owner.");
-                points.Add(leg.To.Position);
+                if(ReplayOnly&&CanMerge(previous,leg)){
+                    if(points.Count==0||!points[points.Count-1].Equals(leg.From.Position))
+                        throw new ArgumentException("Compact projection lost its adjacent endpoint.");
+                    points.Set(points.Count-1,leg.To.Position);
+                }else points.Add(leg.To.Position);
             }else{
                 if(leg.Kind!=NavTypedLegKind.Portal||portal.Owner==null||
                     !ReferenceEquals(portal.Resolve(),leg.PortalId))
@@ -126,7 +150,8 @@ namespace Spacewars.Runtime
             for(int i=0;i<LegCursor;i++){
                 var leg=route.Legs[i];
                 if(leg.Kind==NavTypedLegKind.Surface){
-                    if(surfaces>=points.Count||!points[surfaces++].Equals(leg.To.Position))
+                    if((!ReplayOnly||i+1==LegCursor||!CanMerge(leg,route.Legs[i+1]))&&
+                        (surfaces>=points.Count||!points[surfaces++].Equals(leg.To.Position)))
                         throw new ArgumentException("Physical projection point prefix changed.");
                 }else{
                     if(portals>=typed.Count||!ReferenceEquals(typed[portals++].Resolve(),leg.PortalId))
@@ -151,10 +176,10 @@ namespace Spacewars.Runtime
                   ReferenceEquals(seam.Id,reference.Resolve()));
         internal void ValidateReplay(NavigationHostRow row,INavStorageReservation reservation)
         {
-            ValidateAgainst(row);
-            if(!(row.Provider is PartitionNavigationProvider partition))return;
+            if(!(row.Provider is PartitionNavigationProvider partition)){ValidateAgainst(row);return;}
             using(NavStorageScratch.Reserve(reservation,checked(512L+
                 partition.TraceScratchBound+8L*partition.TracePortalBound))){
+                ValidateAgainst(row);
                 var at=row.Scheduled.Subscription.Origin;
                 int seen=0;
                 for(int i=0;i<ReplayCursor;i++){
@@ -188,7 +213,7 @@ namespace Spacewars.Runtime
             NavPhysicalMacro.WriteEdge(writer,this,typed);
             NavPhysicalMacro.WriteEdge(writer,this,observed);
         }
-        internal static NavigationHostProjection ReadPhysicalBody(NavPhysicalBodyReader reader)
+        internal static NavigationHostProjection ReadPhysicalBody(NavPhysicalBodyReader reader,bool replayOnly=false)
         {
             int leg=reader.Input.ReadInt32(),replay=reader.Input.ReadInt32();
             var expected=NavPhysicalNamedValue.ReadLocation(reader);
@@ -199,7 +224,7 @@ namespace Spacewars.Runtime
             if(leg<0||replay<0||replay>points.Count||!points.IsFrozen||
                 !typed.IsFrozen||!observed.IsFrozen)
                 throw new ArgumentException("Invalid physical projection BODY fields.");
-            var value=Allocate(reader.Reservation,false);
+            var value=Allocate(reader.Reservation,false,replayOnly);
             value.points=NavPhysicalMacro.Acquire(value,points);
             value.typed=NavPhysicalMacro.Acquire(value,typed);
             value.observed=NavPhysicalMacro.Acquire(value,observed);

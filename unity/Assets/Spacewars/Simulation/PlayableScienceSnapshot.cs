@@ -2,7 +2,7 @@ using System;
 
 namespace Spacewars.Simulation
 {
-    public enum PlayableResearchKind { TankChassis, ExplorerAssaultGuns, ShkvalGuidance }
+    public enum PlayableResearchKind { TankChassis, ExplorerAssaultGuns, ShkvalGuidance, ImprovedWeaponSystems, AdvancedWeaponSystems, ImprovedDefensiveSystems, AdvancedDefensiveSystems, HawkSalvoSystems }
 
     // Save/replay code owns this authority-only payload. It deliberately is not
     // projected to opponents: research progress is private until its effect is visible.
@@ -36,9 +36,9 @@ namespace Spacewars.Simulation
     // Owner-safe legal research surface: cost and availability, never opponent progress.
     public sealed class PlayableResearchAvailabilitySnapshot
     {
-        public PlayableResearchAvailabilitySnapshot(PlayableResearchKind kind,double cost,bool available)
-        {Kind=kind;Cost=cost;Available=available;}
-        public PlayableResearchKind Kind{get;} public double Cost{get;} public bool Available{get;}
+        public PlayableResearchAvailabilitySnapshot(PlayableResearchKind kind,double cost,bool available,string blockedReason=null)
+        {Kind=kind;Cost=cost;Available=available;BlockedReason=blockedReason;}
+        public PlayableResearchKind Kind{get;} public double Cost{get;} public bool Available{get;} public string BlockedReason{get;}
     }
     public sealed class PlayableRefineryUpgradeSnapshot
     {

@@ -15,17 +15,28 @@ namespace Spacewars.Tests.EditMode
         private object domain;
         private PlayableProfile profile;
         private long sequence;
+        private CertifiedRouteKernel routes;
         private object Call(string name,params object[] args)=>Domain.GetMethod(name,Flags).Invoke(domain,args);
         private PlayableSnapshot View(PlayableOwner owner=PlayableOwner.Player)=>(PlayableSnapshot)Call("PlayerSnapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7,owner);
         private NavigationSession Nav=>(NavigationSession)Domain.GetProperty("Navigation",Flags).GetValue(domain);
         private IDictionary Units=>(IDictionary)Domain.GetField("units",Flags).GetValue(domain);
-        [SetUp] public void Create(){profile=PlayableProfile.Default;domain=Activator.CreateInstance(Domain,Flags,null,new object[]{profile,1L},null);sequence=0;}
+        [SetUp] public void Create(){profile=PlayableProfile.Default;domain=Activator.CreateInstance(Domain,Flags,null,new object[]{profile,1L},null);sequence=0;routes=new CertifiedRouteKernel();}
+        [TearDown] public void Cleanup(){routes.Clear();Nav.ReleaseCommittedHostRoot();Nav.DestroyNavigationAuthority();}
         private void Clear(){foreach(int id in Units.Keys.Cast<int>().ToArray()){Nav.Remove(id);Units.Remove(id);}}
         private int Spawn(PlayableOwner owner,PlayableEntityKind kind,double x,double z)=>(int)Call("SpawnUnit",new NavPoint(x,z),owner,kind);
         private PlayableCommandStatus Send(PlayableCommandKind kind,int id,PlayableEntityKind unitKind=PlayableEntityKind.Tank,long order=0,NavPoint target=default(NavPoint))=>(PlayableCommandStatus)Call("Apply",new PlayableCommand(1,++sequence,"player-1",kind,new[]{id},target,productionOrderId:order,unitKind:unitKind),null);
         private int Factory(int slot=1){Call("AddCredits",PlayableOwner.Player,10000d);Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,slot,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));Call("AdvanceFoundations");Call("AdvanceBuildings",100d);return View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.Factory&&b.SlotId==slot).Id;}
         private PlayableBuildingPrivateState State(int id)=>View().Buildings.Single(b=>b.Id==id).PrivateState;
-        private void Tick(int count){for(int i=0;i<count;i++){while(Nav.Requests.TryDequeue(out var r))Nav.Answers.TryEnqueue(new NavigationAnswer(r,new SharedFlowRouter(r.Geometry,r.Profile).FindPath(r.Start,r.Goal)));Nav.ApplyResults();Call("Step",1d/30);}}
+        private void Tick(int count){for(int i=0;i<count;i++){
+            // Prepare the current route/corridor certificate before advancing simulation time.
+            // Handcrafted point-only legacy answers cannot activate a retained physical execution.
+            Assert.True(Nav.PrepareDeliveryBarrier());
+            var geometry=(NavGeometry)Domain.GetProperty("Geometry",Flags).GetValue(domain);
+            var binding=new PlayableRouteBinding(geometry,profile,Nav.Admission,Nav.RoutePort);
+            for(int work=0;work<20000&&!Nav.DeliveryBarrierReady;work++)routes.Pump(binding,64);
+            Assert.True(Nav.DeliveryBarrierReady,"fixture route preparation must finish without consuming a game tick");
+            Nav.ApplyResults();Call("Step",1d/30);
+        }}
         [Test] public void StartsHaveFreeTypedScoutAndOwnPopulation()
         {
             var p=View();var e=View(PlayableOwner.Enemy);Assert.AreEqual(1,p.Entities.Count);Assert.AreEqual(PlayableEntityKind.Explorer,p.Entities.Single().Kind);Assert.AreEqual(profile.ExplorerHealth,p.Entities.Single().Health);
@@ -61,7 +72,7 @@ namespace Spacewars.Tests.EditMode
         {
             Clear();int scout=Spawn(PlayableOwner.Player,PlayableEntityKind.Explorer,-10,0);int enemy=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-4,0);
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.Move,scout,target:new NavPoint(-8.5,0)));Tick(2);
-            Assert.True(Nav.Crowd.TryGet(scout,out var actor));Assert.True(actor.Moving);Assert.Greater(actor.Position.X,-10);Assert.True(View().Projectiles.Any(p=>p.Kind==PlayableEntityKind.Explorer));
+            Assert.True(Nav.Crowd.TryGet(scout,out var actor));Assert.True(actor.Moving,"moving="+actor.Moving+" position="+actor.Position+" outcome="+actor.Outcome+" projectiles="+View().Projectiles.Count);Assert.Greater(actor.Position.X,-10);Assert.True(View().Projectiles.Any(p=>p.Kind==PlayableEntityKind.Explorer),"moving scout must emit before tick 2");
             var unit=Units[scout];Assert.Greater((int)unit.GetType().GetField("BurstRemaining").GetValue(unit),0);Send(PlayableCommandKind.Stop,scout);Assert.Zero((int)unit.GetType().GetField("BurstRemaining").GetValue(unit));Assert.True(View().Projectiles.Any(),"Already emitted projectiles survive command cancellation.");
         }
         [Test] public void BurstStopsWhenTargetLeavesRange()

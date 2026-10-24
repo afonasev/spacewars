@@ -9,7 +9,7 @@ namespace Spacewars.Presentation
     [Serializable] public sealed class EnvironmentArtProfile
     {
         public string id="natural-frontier-v1";
-        public int revision=11;
+        public int revision=12;
         [SurfaceSetting("Маркеры приказов","Радиус","Радиус контурного маркера в игровом поле; миникарта использует тот же относительный масштаб.","px",4,16,.5f)] public float orderMarkerRadius=8;
         [SurfaceSetting("Маркеры приказов","Толщина контура","Толщина красного/зелёного кольца без заливки.","px",.5f,3,.25f)] public float orderMarkerWidth=1.25f;
         [SurfaceSetting("Маркеры приказов","Размер номера","Размер цифры внутри контурного маркера.","px",8,18,.5f)] public float orderMarkerFontSize=11;
@@ -18,6 +18,7 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Construction aprons","Marking width","Width of perimeter dashes and corner brackets.","m",.03f,.2f,.01f)] public float apronMarkWidth=.07f;
         [SurfaceSetting("Construction aprons","Concrete value","Neutral apron concrete brightness before scene lighting.","ratio",.2f,.8f,.01f)] public float apronConcreteValue=.43f;
         [SurfaceSetting("Construction aprons","Surface height","Flush technical apron elevation above terrain; no collision.","m",.02f,.15f,.01f)] public float apronHeight=.04f;
+        [SurfaceSetting("Construction aprons","Прозрачность захвата","Непрозрачность заливки всей площадки цветом захватывающего игрока; бетон и разметка остаются видны.","ratio",0,1,.01f)] public float captureFillOpacity=.72f;
         [SurfaceSetting("Textures","Relief slope limit","Maximum micro-normal slope; prevents dark derivative spikes while retaining fine relief.","ratio",.05f,.8f,.05f)] public float reliefSlopeLimit=.35f;
         [SurfaceSetting("Textures","Earth tile","World-space size of one earth texture tile.","m",1,20,.25f)] public float earthTile=7;
         [SurfaceSetting("Textures","Rock tile","World-space size of one cliff texture tile.","m",1,20,.25f)] public float rockTile=6;

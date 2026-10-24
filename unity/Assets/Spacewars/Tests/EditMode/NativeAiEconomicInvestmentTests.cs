@@ -19,12 +19,29 @@ namespace Spacewars.Tests.EditMode
                 sites:new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,1,true)},population:new PlayablePopulationSnapshot(0,0,p.ArmyCapacity),incomePerSecond:income));
         }
         private static AiProductionCapacity Capacity(string reason="income within sustained spend capacity")=>new AiProductionCapacity(6,10,.9,900,0,0,600,reason);
-        [Test] public void IncomeInvestmentAccumulatesBeforeAnAffordableUnitWithoutRequiringAnArmy()
+        [Test] public void IncomeInvestmentAccumulatesAfterInitialOpeningCommitmentWithoutRequiringAStandingArmy()
         {
-            var p=PlayableProfile.Default;var plan=AiEconomicInvestmentPlanner.Plan(View(),p,AiProfile.Initial,Capacity(),true,false);
+            var p=PlayableProfile.Default;var plan=AiEconomicInvestmentPlanner.Plan(View(),p,AiProfile.Initial,Capacity(),true,false,initialOpeningCommitmentPending:false);
             Assert.NotNull(plan);Assert.AreEqual(PlayableBuildingKind.Refinery,plan.Candidate.Action.BuildingKind);Assert.AreEqual(p.RefineryCreditCost,plan.Credits);
             Assert.AreEqual("insufficient credits",plan.Candidate.Reason);Assert.False(plan.AllowsProduction(p.TankCreditCost,p.TankCreditCost));
             Assert.True(plan.AllowsProduction(p.RefineryCreditCost+p.TankCreditCost,p.TankCreditCost));Assert.True(plan.AllowsProduction(0,p.TankCreditCost,acceptedStartup:true));
+        }
+        [Test] public void InitialOpeningCommitmentBlocksAnOtherwiseQualifiedGrowthQuote()
+        {
+            var plan=AiEconomicInvestmentPlanner.Plan(View(),PlayableProfile.Default,AiProfile.Initial,Capacity(),true,false,initialOpeningCommitmentPending:true);
+            Assert.IsNull(plan,"a growth quote must not preempt initial opening work after the home economy is ready");
+        }
+        [Test] public void MissingScoutQuoteCanFundOneReplacementWithoutFundingDiscretionaryInvestment()
+        {
+            var p=PlayableProfile.Default;int scout=PlayableUnitRules.Cost(p,PlayableEntityKind.Explorer);
+            var plan=AiEconomicInvestmentPlanner.Plan(View(1000),p,AiProfile.Initial,Capacity(),true,false,additionalProductionProtection:scout,availableCredits:p.RefineryCreditCost+scout);
+            Assert.NotNull(plan);Assert.AreEqual(p.RefineryCreditCost,plan.Credits);
+            Assert.True(plan.AllowsProduction(p.RefineryCreditCost+scout,scout,maySpendProtectedProductionQuote:true),"the one saved Explorer quote funds its replacement");
+            Assert.False(plan.AllowsProduction(p.RefineryCreditCost+scout,scout),"other production must leave the replacement Explorer quote intact");
+            var blocked=AiEconomicInvestmentPlanner.Plan(View(1000),p,AiProfile.Initial,Capacity(),true,false,additionalProductionProtection:scout,availableCredits:p.RefineryCreditCost+scout-1);
+            Assert.AreEqual(0,blocked.Credits);Assert.False(blocked.Candidate.Legal,"investment must not consume the only replacement quote");
+            Assert.AreEqual("useful scout replacement takes priority over discretionary investment",blocked.Candidate.Reason);
+            Assert.True(blocked.AllowsProduction(scout,scout,maySpendProtectedProductionQuote:true),"the replacement remains fundable without charging a second quote");
         }
         [Test] public void OverflowFundsFactoryButDoesNotBypassExistingUtilizationAdmission()
         {
@@ -62,6 +79,18 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void PaidIncomeConstructionFinishesBeforeAnotherInvestment()
         {Assert.IsNull(AiEconomicInvestmentPlanner.Plan(View(pending:true),PlayableProfile.Default,AiProfile.Initial,Capacity(),true,false));}
+        [Test] public void IncomeLeavesTunableSlotsForUsefulProductionAndMissingScience()
+        {
+            var before=View(1000);var site=before.Sites.Single();var slots=site.Site.Slots;
+            var buildings=before.Buildings.Concat(slots.Skip(1).Take(slots.Count-3).Select(slot=>
+                new PlayableBuildingSnapshot(100+slot.Id,before.Owner,PlayableBuildingKind.Refinery,slot.Position,PlayableProfile.Default.RefineryHealth,1,0,0,default,siteId:site.Site.Id,slotId:slot.Id,parentId:1))).ToArray();
+            var o=PlayableAiObservation.From(new PlayableSnapshot(before.ProfileId,before.ProfileRevision,before.Generation,before.Seed,before.Tick,before.Tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,
+                before.Entities.ToArray(),buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:before.Sites.ToArray(),population:before.Population,incomePerSecond:6));
+            Assert.False(AiEconomicInvestmentPlanner.HasIncomeSlot(o,AiProfile.Initial));
+            Assert.IsNull(AiEconomicInvestmentPlanner.Plan(o,PlayableProfile.Default,AiProfile.Initial,Capacity(),true,false));
+            var tuned=AiProfile.Initial.CopyData();foreach(var f in tuned.fields.Where(f=>f.path=="economy.reservedProductionSlots"||f.path=="economy.reservedScienceSlots"))f.value=0;
+            Assert.True(AiEconomicInvestmentPlanner.HasIncomeSlot(o,new AiProfile(tuned)));Assert.NotNull(AiEconomicInvestmentPlanner.Plan(o,PlayableProfile.Default,new AiProfile(tuned),Capacity(),true,false));
+        }
         [Test] public void OccupiedSlotsDoNotCreateAnUnfundableSavingGoal()
         {Assert.IsNull(AiEconomicInvestmentPlanner.Plan(View(full:true),PlayableProfile.Default,AiProfile.Initial,Capacity(),true,false));}
     }

@@ -39,7 +39,7 @@ namespace Spacewars.Tests.PlayMode
         private static void Legacy(string path,float value)=>PlayerPrefs.SetFloat(NativeGraphicsSettings.PreferenceKeys.Single(k=>k.EndsWith(path)),value);
         [Test] public void DeveloperMetadataStaysInLabAndLegacyPlayerOverridesAreIgnored()
         {
-            var parameters=NativeGraphicsSettings.Parameters;Assert.AreEqual(45,parameters.Count);Assert.AreEqual(45,parameters.Select(p=>p.Path).Distinct().Count());
+            var parameters=NativeGraphicsSettings.Parameters;Assert.AreEqual(47,parameters.Count);Assert.AreEqual(47,parameters.Select(p=>p.Path).Distinct().Count());
             var resources=new[]{"CameraAntialiasingProfile","ContactOcclusionProfile","ActorMaterialProfile","IndustrialLightingProfile","ThreeCrossingsLightingProfile"};var originals=resources.Select(x=>Resources.Load<TextAsset>(x).text).ToArray();
             foreach(var p in parameters){Assert.IsNotEmpty(NativeGraphicsSettings.Label(p));Assert.IsNotEmpty(NativeGraphicsSettings.Group(p));Assert.Greater(p.Step,0);
                 if(p.Path!=NativeGraphicsSettings.AaPath){Legacy(p.Path,p.Maximum);Assert.Throws<ArgumentException>(()=>NativeGraphicsSettings.Set(p.Path,p.Maximum));Assert.AreEqual(p.Read(),NativeGraphicsSettings.Read(p));}}
@@ -70,14 +70,14 @@ namespace Spacewars.Tests.PlayMode
                 var page=NativeSettingsView.Open(doc.rootVisualElement,nav,()=>{},new NativeLocalControlSettings());nav.ActivateElement(page.Q<Button>("settings-tab-Графика"));yield return null;yield return null;
                 Assert.IsNull(page.Q("settings-graphics-advanced"));Assert.Zero(page.Query<Slider>().ToList().Count(s=>s.name.StartsWith("settings-graphics-")),"No fine graphics tuning in player menu");
                 var aa=page.Q<DropdownField>("settings-graphics-aa");CollectionAssert.AreEqual(new[]{"Выключено","MSAA 4×","SMAA · высокое качество"},aa.choices);Assert.AreEqual(1,aa.index);aa.index=0;
-                page.Q<Toggle>("settings-graphics-ssao").value=false;page.Q<Toggle>("settings-graphics-bloom").value=false;
+                page.Q<Toggle>("settings-graphics-ssao").value=false;page.Q<Toggle>("settings-graphics-bloom").value=false;page.Q<Toggle>("settings-graphics-trails").value=false;
                 nav.Back();page=NativeSettingsView.Open(doc.rootVisualElement,nav,()=>{},new NativeLocalControlSettings());nav.ActivateElement(page.Q<Button>("settings-tab-Графика"));yield return null;yield return null;
-                Assert.Zero(page.Q<DropdownField>("settings-graphics-aa").index);Assert.False(page.Q<Toggle>("settings-graphics-ssao").value);Assert.False(page.Q<Toggle>("settings-graphics-bloom").value);
+                Assert.Zero(page.Q<DropdownField>("settings-graphics-aa").index);Assert.False(page.Q<Toggle>("settings-graphics-ssao").value);Assert.False(page.Q<Toggle>("settings-graphics-bloom").value);Assert.False(page.Q<Toggle>("settings-graphics-trails").value);
                 foreach(var size in new[]{new Vector2Int(800,620),new Vector2Int(1280,800)}){
                     panel.targetTexture=null;target.Release();target.width=size.x;target.height=size.y;target.Create();panel.targetTexture=target;yield return null;yield return null;
                     var bloom=page.Q<Toggle>("settings-graphics-bloom");bloom.Focus();page.Q<ScrollView>("settings-scroll").ScrollTo(bloom);yield return null;yield return null;nav.Activate();Assert.True(bloom.value);nav.Activate();Assert.False(bloom.value);Save(target,"player-graphics-"+size.x+"x"+size.y);
                 }
-                var restore=NativePreferenceWriter.Capture();try {nav.ActivateElement(page.Q<Button>("settings-reset-all"));nav.ActivateElement(doc.rootVisualElement.Q<Button>("settings-confirm-accept"));nav.ActivateElement(doc.rootVisualElement.Q<Button>("settings-confirm-accept"));Assert.AreEqual(1,page.Q<DropdownField>("settings-graphics-aa").index);Assert.True(page.Q<Toggle>("settings-graphics-bloom").value);Assert.True(page.Q<Toggle>("settings-graphics-ssao").value);}finally{restore();PlayerPrefs.Save();}
+                var restore=NativePreferenceWriter.Capture();try {nav.ActivateElement(page.Q<Button>("settings-reset-all"));nav.ActivateElement(doc.rootVisualElement.Q<Button>("settings-confirm-accept"));nav.ActivateElement(doc.rootVisualElement.Q<Button>("settings-confirm-accept"));Assert.AreEqual(1,page.Q<DropdownField>("settings-graphics-aa").index);Assert.True(page.Q<Toggle>("settings-graphics-bloom").value);Assert.True(page.Q<Toggle>("settings-graphics-ssao").value);Assert.True(page.Q<Toggle>("settings-graphics-trails").value);}finally{restore();PlayerPrefs.Save();}
             }finally{panel.targetTexture=null;target.Release();UnityEngine.Object.Destroy(target);}}yield return null;
         }
         private static Color TeamPaint(PlayableWorld.Actor actor)

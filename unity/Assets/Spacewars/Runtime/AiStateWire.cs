@@ -10,7 +10,8 @@ namespace Spacewars.Runtime
     // Private authority wire, explicit schema. Never included in an owner snapshot.
     internal static class AiStateWire
     {
-        internal const int Version=13;
+        // Inner AI schema 14 is reserved by the outer pending-route maintenance envelope.
+        internal const int Version=15;
         internal static bool CallbackGenerationMatches(PlayableAiTraceRecord record,long generation)
         {
             if(record.ReceiptIdentity!=null)return record.ReceiptIdentity.Generation==generation;
@@ -292,6 +293,7 @@ namespace Spacewars.Runtime
             {
                 AiStateWire.Require(!string.IsNullOrWhiteSpace(p.Key)&&p.Value.FirstTick>=0&&p.Value.FirstTick<=tick&&p.Value.NextRetry>=0&&p.Value.Failures>=0&&!history.ContainsKey(p.Key),"arbiter history");
                 if(p.Key==AiExpansionFinancial.MemoKey)AiStateWire.Require(p.Value.FirstTick==0&&p.Value.NextRetry==0&&p.Value.Failures==0&&!string.IsNullOrWhiteSpace(p.Value.Conditions),"site finance memo requires typed payload and no hidden clock or retry counter");
+                if(p.Key.StartsWith(ArmyResearchMemoPrefix,StringComparison.Ordinal))AiStateWire.Require(Enum.TryParse<PlayableResearchKind>(p.Value.Conditions,out var armyKind)&&PlayableResearchRules.Global(armyKind)&&p.Value.Conditions==armyKind.ToString()&&p.Key==ArmyResearchMemoPrefix+armyKind&&p.Value.NextRetry==0&&p.Value.Failures==0,"observed army research fact");
                 if(p.Key==FundingMemoKey){AiStateWire.Require(p.Value.Failures==0,"funding memo is not retry history");AiTechnologyFunding.ValidateMemory(p.Value.Conditions,p.Value.FirstTick,p.Value.NextRetry,tick,owner,generation,profile,ai);}
             }
             foreach(var p in entries)history.Add(p.Key,p.Value);

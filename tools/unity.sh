@@ -27,7 +27,7 @@ case "${1:-}" in
     exec "$runner" "--$mode" --project "$project_dir" -- "$editor" -projectPath "$project_dir" "$@" ;;
   player)
     shift
-    mode=${UNITY_RUN_MODE:-exclusive}
+    mode=${UNITY_RUN_MODE:-shared}
     [ "$mode" = shared ] || [ "$mode" = exclusive ] || exit 2
     [ "$#" -gt 0 ] || { echo "Provide direct Player executable" >&2; exit 2; }
     exec "$runner" "--$mode" -- "$@" ;;

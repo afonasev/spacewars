@@ -5,17 +5,22 @@ namespace Spacewars.Simulation
 {
     internal interface INavCrowdStorageSource
     {
+        NavUnit Add(NavCrowd source,int id,NavPoint point,double radius,double speed,double turn,NavLocation? assignedLocation,bool canYield);
+        bool Remove(int id);
         NavMotionWorkspace CreateMotionWorkspace(NavCrowd source);
-        NavUnit CreateUnit(int id,NavPoint point,double radius,double speed,double turn);
+        NavUnit CreateUnit(int id,NavPoint point,double radius,double speed,double turn,bool canYield);
         NavCrowdSpatialStorage CreateSpatialStorage(int actors);
         NavLocalRepairWorkspace CreateRepairWorkspace(int radius,NavOwnedStorage surfaceNames);
         NavRetainedArray<NavPoint> CopyRoute(IReadOnlyList<NavPoint> points,NavPoint? tail);
     }
+    // Only compatibility DTO roles implement this mutable flag. Current owned
+    // installed payloads remain immutable; their role lives on the actor.
+    internal interface INavInstalledExecutionRole { void SetDetachedNoThrow(bool detached); }
     // Actual actor header and its current immutable routes. Empty route roles
     // use the process-wide immutable empty constant and have no private array.
     internal sealed class NavLiveUnitStorage : NavOwnedStorage
     {
-        private static readonly long Layout=NavStorageLayout.ObjectBytesBound(typeof(NavLiveUnitStorage))+NavStorageLayout.ObjectBytesBound(typeof(NavUnit));
+        internal static readonly long Layout=NavStorageLayout.ObjectBytesBound(typeof(NavLiveUnitStorage))+NavStorageLayout.ObjectBytesBound(typeof(NavUnit));
         internal NavUnit Unit{get;private set;}
         internal NavRetainedArray<NavPoint> Global,Local;
         internal NavOwnedStorage InstalledExecution;
@@ -24,11 +29,11 @@ namespace Spacewars.Simulation
         // owned historical edge above; this slot has no independent index.
         internal object LegacyInstalledExecution;
         private NavLiveUnitStorage():base(Layout){Retain();}
-        internal static NavLiveUnitStorage CreateOwned(int id,NavPoint position,double radius,double speed,double turn,INavStorageReservation reservation)
+        internal static NavLiveUnitStorage CreateOwned(int id,NavPoint position,double radius,double speed,double turn,INavStorageReservation reservation,bool canYield=false)
         {
             using(var allocation=new NavStorageAllocation(reservation.TryReserve)){
                 allocation.Reserve(Layout);var root=allocation.Register(new NavLiveUnitStorage());
-                try{root.Unit=new NavUnit(id,position,radius,speed,turn);root.Unit.BindStorage(root);return root;}catch{root.Release();throw;}
+                try{root.Unit=new NavUnit(id,position,radius,speed,turn,canYield);root.Unit.BindStorage(root);return root;}catch{root.Release();throw;}
             }
         }
         internal void SetGlobalNoThrow(NavRetainedArray<NavPoint> next,out NavRetainedArray<NavPoint> previous,out NavRetainedArray<NavPoint> local)
@@ -36,9 +41,11 @@ namespace Spacewars.Simulation
         internal void SetLocalNoThrow(NavRetainedArray<NavPoint> next,out NavRetainedArray<NavPoint> previous)
         {previous=Local;Local=next;Unit.localRoute=next?.ReadOnlyBacking??Array.Empty<NavPoint>();}
         internal void ClearNoThrow(out NavRetainedArray<NavPoint> global,out NavRetainedArray<NavPoint> local)
-        {global=Global;local=Local;Global=Local=null;Unit.BindRouteBackingNoThrow(null,null);}
+        {global=Global;local=Local;Global=Local=null;Unit.BindRouteBackingNoThrow(null,null);if(InstalledExecution!=null||LegacyInstalledExecution!=null)SetInstalledDetachedNoThrow(true);}
+        internal void SetInstalledDetachedNoThrow(bool detached)
+        {InstalledDetached=detached;if(LegacyInstalledExecution is INavInstalledExecutionRole legacy)legacy.SetDetachedNoThrow(detached);}
         internal void SetInstalledNoThrow(NavOwnedStorage next,bool detached,object legacy,out NavOwnedStorage retired)
-        {retired=InstalledExecution;InstalledExecution=next;InstalledDetached=(next!=null||legacy!=null)&&detached;LegacyInstalledExecution=legacy;}
+        {retired=InstalledExecution;InstalledExecution=next;LegacyInstalledExecution=legacy;SetInstalledDetachedNoThrow((next!=null||legacy!=null)&&detached);}
         internal void Hydrate(NavRetainedArray<NavPoint> global,NavRetainedArray<NavPoint> local)
         {
             if(Global!=null||Local!=null)throw new InvalidOperationException("Actor route destination is not empty.");
@@ -50,7 +57,7 @@ namespace Spacewars.Simulation
     // both retired route edges survive until publication has left its gate.
     internal sealed class NavPreparedUnitRoute : NavOwnedStorage,IDisposable
     {
-        private static readonly long Layout=NavStorageLayout.ObjectBytesBound(typeof(NavPreparedUnitRoute));
+        internal static readonly long Layout=NavStorageLayout.ObjectBytesBound(typeof(NavPreparedUnitRoute));
         internal NavLiveUnitStorage Actor;internal NavRetainedArray<NavPoint> Route;
         private NavRetainedArray<NavPoint> expectedGlobal,expectedLocal,retiredGlobal,retiredLocal;
         private NavNameReference terminalName;

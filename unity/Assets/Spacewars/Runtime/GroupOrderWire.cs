@@ -44,7 +44,7 @@ namespace Spacewars.Runtime
         private const int Tag=0x47525031;
         internal static void WriteExtension(BinaryWriter w,NavigationSessionState state)
         {
-            w.Write(Tag);w.Write(state.HostAuthority==null?8:9);w.Write(state.GroupSequence);
+            w.Write(Tag);bool v2=System.Linq.Enumerable.Any(state.Groups??System.Array.Empty<GroupOrderState>(),g=>g.MarchVersion==2)||System.Linq.Enumerable.Any(state.InstalledExecutions??System.Array.Empty<NavigationInstalledExecutionState>(),e=>e.ExecutionGeometryIndex>=0);w.Write(v2?10:state.HostAuthority==null?8:9);w.Write(state.GroupSequence);
             Array(w,state.Groups??System.Array.Empty<GroupOrderState>(),g=>{
                 w.Write(g.WorldGeneration);w.Write(g.GroupId);w.Write(g.OrderRevision);w.Write(g.CommandSequence);w.Write(g.IssuedTick);w.Write(g.MembershipRevision);
                 String(w,g.OwnerId);w.Write(g.TeamId);w.Write((int)g.Origin);w.Write((int)g.Kind);String(w,g.Source);w.Write(g.JobId);w.Write(g.ActionId);WorldWire.Write(w,g.OriginalGoal);w.Write(g.TargetId);
@@ -71,10 +71,10 @@ namespace Spacewars.Runtime
                 Array(w,e.InstalledRoute??System.Array.Empty<NavPoint>(),p=>WorldWire.Write(w,p));
                 String(w,e.ProfileId);w.Write(e.ProfileRevision);
                 Array(w,e.ProfileValues??System.Array.Empty<double>(),v=>Number(w,v));
-                String(w,e.HeldIdentity);w.Write(e.GeometryIndex);w.Write(e.BaseGeometryIndex);});
+                String(w,e.HeldIdentity);w.Write(e.GeometryIndex);w.Write(e.BaseGeometryIndex);if(v2)w.Write(e.ExecutionGeometryIndex);});
             Array(w,state.Groups,g=>{w.Write(g.GroupId);w.Write(g.MarchVersion);w.Write(g.MarchProfileRevision);
                 Number(w,g.MarchStretch);Number(w,g.MarchAnchor);w.Write(g.MarchInitialized);
-                Array(w,g.Members,m=>{w.Write(m.Entity);w.Write(m.ProgressRequest);});});
+                Array(w,g.Members,m=>{w.Write(m.Entity);w.Write(m.ProgressRequest);if(v2){w.Write(m.ProgressVersion);Number(w,m.ProgressOffset);}});});
             Array(w,state.AllocationRequestIndices??System.Array.Empty<int>(),i=>w.Write(i));
             w.Write(state.ArrivalAuthority!=null);
             if(state.ArrivalAuthority!=null){w.Write(state.ArrivalAuthority.Length);w.Write(state.ArrivalAuthority);}
@@ -84,7 +84,7 @@ namespace Spacewars.Runtime
         {
             if(r.BaseStream.Position==r.BaseStream.Length){LegacyAnswerStatuses(state);return;}
             if(r.ReadInt32()!=Tag)throw new ArgumentException("Unsupported navigation group extension.");
-            int version=r.ReadInt32();if(version<1||version>9)throw new ArgumentException("Unsupported navigation surface extension.");
+            int version=r.ReadInt32();if(version<1||version>10)throw new ArgumentException("Unsupported navigation surface extension.");
             if(version==8&&legacyFormat==NavigationV8Format.Unspecified)throw new ArgumentException("Navigation v8 requires explicit A5Arrival or MainInstalledLayout import format.");
             if(legacyFormat<NavigationV8Format.Unspecified||legacyFormat>NavigationV8Format.MainInstalledLayout)throw new ArgumentException("Unknown navigation v8 import format.");
             state.GroupSequence=r.ReadInt64();state.Groups=Array(r,()=>Record(r,()=>new GroupOrderState{
@@ -133,7 +133,7 @@ namespace Spacewars.Runtime
                     Entity=r.ReadInt32(),Detached=Boolean(r),Corridor=ReadCorridor(r),
                     InstalledRoute=Array(r,()=>ReadPoint(r)),ProfileId=String(r),ProfileRevision=r.ReadInt32(),
                     ProfileValues=Array(r,()=>Number(r)),HeldIdentity=String(r),
-                    GeometryIndex=r.ReadInt32(),BaseGeometryIndex=r.ReadInt32()}));
+                    GeometryIndex=r.ReadInt32(),BaseGeometryIndex=r.ReadInt32(),ExecutionGeometryIndex=version>=10?r.ReadInt32():-1}));
             }else{state.CorridorWireVersion=0;state.InstalledExecutions=System.Array.Empty<NavigationInstalledExecutionState>();}
             if(version>=7){
                 int count=r.ReadInt32();if(count!=state.Groups.Length)throw new ArgumentException("March group count mismatch.");
@@ -142,7 +142,7 @@ namespace Spacewars.Runtime
                     group.MarchVersion=r.ReadInt32();group.MarchProfileRevision=r.ReadInt32();
                     group.MarchStretch=Number(r);group.MarchAnchor=Number(r);group.MarchInitialized=Boolean(r);
                     int members=r.ReadInt32();if(members!=group.Members.Length)throw new ArgumentException("March member count mismatch.");
-                    foreach(var member in group.Members){if(r.ReadInt32()!=member.Entity)throw new ArgumentException("March member identity mismatch.");member.ProgressRequest=r.ReadInt64();}
+                    foreach(var member in group.Members){if(r.ReadInt32()!=member.Entity)throw new ArgumentException("March member identity mismatch.");member.ProgressRequest=r.ReadInt64();if(version>=10){member.ProgressVersion=r.ReadInt32();member.ProgressOffset=Number(r);}}
                 }
             }
 

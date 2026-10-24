@@ -11,6 +11,7 @@ namespace Spacewars.Runtime
         {
             get{using(EnterTransport())return tickQuantaEnabled||committedHostRoot?.TickQuantum==true;}
             set{using(EnterTransport()){
+                if(accruedCreditsEnabled&&!value)throw new ArgumentException("Accrued prebirth policy cannot be downgraded.");
                 if(committedHostRoot?.TickQuantum==true&&(!value||committedHostRoot.QuantumGeneration!=Generation))throw new ArgumentException("Saved quantum differs from the authority policy/generation.");
                 tickQuantaEnabled=value;
             }}
@@ -21,13 +22,14 @@ namespace Spacewars.Runtime
         internal void ValidateTickQuantumBoundary(long worldTick,bool asynchronous)
         {
             using(EnterTransport()){
-                var root=committedHostRoot;if(root?.TickQuantum!=true)return;
+                var root=committedHostRoot;if(accruedCreditsEnabled){if(!asynchronous||!tickQuantaEnabled)throw new ArgumentException("Accrued policy requires asynchronous tick quanta.");NavigationAccruedCredits.Validate(creditBank,root,Generation,requestSequence,worldTick);return;}if(root?.TickQuantum!=true)return;
                 if(!tickQuantaEnabled||root.QuantumGeneration!=Generation||root.AdmissionPrefix>requestSequence||root.QuantumTick>worldTick+1||root.QuantumSerial==root.ConsumedQuantum&&root.QuantumTick>worldTick||!asynchronous&&root.QuantumSerial>root.ConsumedQuantum&&root.QuantumTick!=worldTick+1)
                     throw new ArgumentException("Saved quantum does not bind to the world tick/request prefix.");
             }
         }
         internal bool PrepareTickQuantum(long upcomingTick,int budget,bool asynchronous)
         {
+            if(AccruedCreditsEnabled)throw new InvalidOperationException("Accrued policy requires explicit authority credit operands.");
             InitializePhysicalHostForCapture();
             NavigationHostRoot source=PinCommittedHostRoot(),next=null;
             NavigationRetentionBudget.Scope scope=null;bool changed=false;

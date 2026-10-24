@@ -104,7 +104,12 @@ namespace Spacewars.Runtime
                     c.Lease=NavigationLiveArrivalLease.CreateOwned(new NavigationArrivalLeaseValues(row.ArrivalToken,checked(c.AcquisitionSequence+1),0,ingress.Session,attemptId,ingress.Request,ingress.Entity,ingress.MemberIdentity.Incarnation,ingress.Order,provider.Id,false),this,row.Provider,r);
                     c.Leases.AddPreparing(c.Lease);c.Leases.SealPrepared();c.Arrival.SealPrepared();
                 }
-                c.Admission=PrepareAdmissionProjection(groups,c.Probe?pending:c.Pending,requestSequence,checked(c.SourceAdmission.Value.PublicationIdentity+1),c.Operation,scope,c.SourceAdmission,sourceProbes:c.Probe?c.Pending:probes);
+                // Paid off-gate preparation can race an ordinary authority command
+                // after the last source check. Refuse only that typed stale read;
+                // invariant/factory failures must still reach the caller.
+                try{
+                    c.Admission=PrepareAdmissionProjection(groups,c.Probe?pending:c.Pending,requestSequence,checked(c.SourceAdmission.Value.PublicationIdentity+1),c.Operation,scope,c.SourceAdmission,sourceProbes:c.Probe?c.Pending:probes);
+                }catch(StaleAdmissionProjection){return false;}
                 c.SealDestinations();scope.Attach(c);
                 Action<object> publish=_=>{long before=GC.GetAllocatedBytesForCurrentThread();using(var mailbox=Requests.EnterPreparedWrite()){
                     if(!IngressSourceCurrent(c,observed,ingress))throw new PhysicalIngressRefused("Prepared physical ingress lost its final source.");

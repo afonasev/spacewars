@@ -41,7 +41,10 @@ namespace Spacewars.Runtime
         internal long Progress {get;private set;}
         internal long NextProviderIdentity {get;private set;}=1;
         internal OperationDescriptor Operation {get;private set;}
-        private bool sealedRoot,released,faulted;
+        private byte lifecycle=8;
+        private bool sealedRoot {get=>(lifecycle&1)!=0;set=>lifecycle=(byte)(value?lifecycle|1:lifecycle&~1);}
+        private bool released {get=>(lifecycle&2)!=0;set=>lifecycle=(byte)(value?lifecycle|2:lifecycle&~2);}
+        private bool faulted {get=>(lifecycle&4)!=0;set=>lifecycle=(byte)(value?lifecycle|4:lifecycle&~4);}
         internal override bool IsImmutableCaptureRoot=>sealedRoot&&!faulted;
         // The quantum and its consumed watermark travel with this exact Host BODY.
         internal bool TickQuantum {get;private set;}
@@ -52,6 +55,13 @@ namespace Spacewars.Runtime
         internal long AdmissionPrefix {get;private set;}
         internal int QuantumBudget {get;private set;}
         internal bool QuantumCompleted {get;private set;}
+        private bool fairArrivalPolicy {get=>(lifecycle&8)!=0;set=>lifecycle=(byte)(value?lifecycle|8:lifecycle&~8);}
+        internal long LastServedArrival {get;private set;}
+        internal long ArrivalRoundEnd {get;private set;}
+        internal bool FairArrivals=>TickQuantum&&fairArrivalPolicy;
+        internal bool ReplayOnlyProjection=>(lifecycle&16)!=0;
+        internal bool AccruedCredits=>(lifecycle&32)!=0;
+        internal void MarkAccruedCredits(){if(sealedRoot||TickQuantum)throw new InvalidOperationException("Accrued mode must precede first quantum.");lifecycle|=32;}
         internal bool QuantumRunnable=>TickQuantum&&QuantumSerial>ConsumedQuantum&&!QuantumCompleted;
         internal void IssueQuantum(long generation,long tick,int budget,long prefix)
         {
@@ -60,7 +70,23 @@ namespace Spacewars.Runtime
         }
         internal void CompleteQuantum(){if(sealedRoot||!QuantumRunnable)throw new InvalidOperationException("Invalid quantum completion.");QuantumCompleted=true;}
         internal void ConsumeQuantum(){if(sealedRoot||!QuantumCompleted||QuantumSerial<=ConsumedQuantum)throw new InvalidOperationException("Invalid quantum consumption.");ConsumedQuantum=QuantumSerial;}
-        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(TickQuantum?NavPhysicalStorageKind.HostRootQuantum:NavPhysicalStorageKind.HostRoot);
+        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(fairArrivalPolicy?NavPhysicalStorageKind.HostRootFairArrivalV1:TickQuantum?NavPhysicalStorageKind.HostRootQuantum:NavPhysicalStorageKind.HostRoot,value:AccruedCredits?NavPhysicalValueKind.AccruedAuthorityCreditsV1:ReplayOnlyProjection?NavPhysicalValueKind.ReplayOnlyProjectionV1:NavPhysicalValueKind.None);
+        internal void MarkArrivalPrepared()
+        {
+            if(sealedRoot||!FairArrivals||Frontier.Stage!=CertifiedRouteKernel.PumpStage.ArrivalAdvance||Frontier.PhaseUsed!=0)throw new InvalidOperationException("Invalid arrival preparation boundary.");
+            SetArrivalPhase(CertifiedRouteKernel.PumpStage.ArrivalAdvance,1);
+            SetOperation(new OperationDescriptor(CertifiedRouteKernel.PumpStage.ArrivalAdvance,1,false,false,default));
+        }
+        internal void CommitArrivalService(long attempt,long roundEnd)
+        {
+            if(sealedRoot||!FairArrivals||attempt<0||roundEnd<attempt||Frontier.Stage!=CertifiedRouteKernel.PumpStage.ArrivalAdvance)throw new InvalidOperationException("Invalid arrival service boundary.");
+            LastServedArrival=attempt;ArrivalRoundEnd=roundEnd;SetArrivalPhase(CertifiedRouteKernel.PumpStage.PreFlush,0);
+            SetOperation(new OperationDescriptor(CertifiedRouteKernel.PumpStage.PreFlush,0,false,false,default));
+        }
+        private void SetArrivalPhase(CertifiedRouteKernel.PumpStage stage,int phase)
+        {
+            var f=Frontier;Frontier=new CertifiedRouteKernel.PumpFrontier(stage,f.OriginalBudget,f.ScansUsed,f.TransfersUsed,f.ReadyUsed,f.ProjectionUsed,f.ProjectionAllowance,f.SolveWorkLimit,f.SolveConsumed,f.AllocationFloor,phase,f.ScanAllowance);
+        }
         private NavigationHostRoot(bool ownerReference):base(LayoutBytes)
         {if(ownerReference)Retain();}
         private static NavigationHostRoot Allocate(INavStorageReservation reservation,bool ownerReference=true)
@@ -70,6 +96,10 @@ namespace Spacewars.Runtime
             }
         }
 
+        internal static NavigationHostRoot CreateReplayOnlyOwned(INavStorageReservation reservation)
+        {
+            var root=CreateOwned(reservation);root.lifecycle|=16;return root;
+        }
         internal static NavigationHostRoot CreateOwned(INavStorageReservation reservation)
         {
             var root=Allocate(reservation);
@@ -91,6 +121,7 @@ namespace Spacewars.Runtime
         }
         internal NavigationHostRoot ForkOwned(INavStorageReservation reservation)
         {
+            using var measured=PerformanceProfile.Measure(ProfileStage.HostFork);
             NavStorageAdmission.RequireOwned(reservation,this);
             if(!sealedRoot)throw new InvalidOperationException("Host root is still mutable.");
             var fork=Allocate(reservation);
@@ -110,6 +141,7 @@ namespace Spacewars.Runtime
                 fork.AuthorityGeometry=NavPhysicalMacro.Acquire(fork,AuthorityGeometry);
                 fork.Frontier=Frontier;fork.Epoch=Epoch;fork.Progress=Progress;fork.NextProviderIdentity=NextProviderIdentity;
                 fork.TickQuantum=TickQuantum;fork.QuantumGeneration=QuantumGeneration;fork.QuantumTick=QuantumTick;fork.QuantumSerial=QuantumSerial;fork.ConsumedQuantum=ConsumedQuantum;fork.AdmissionPrefix=AdmissionPrefix;fork.QuantumBudget=QuantumBudget;fork.QuantumCompleted=QuantumCompleted;
+                if(AccruedCredits)fork.lifecycle|=32;fork.fairArrivalPolicy=fairArrivalPolicy;if(ReplayOnlyProjection)fork.lifecycle|=16;fork.LastServedArrival=LastServedArrival;fork.ArrivalRoundEnd=ArrivalRoundEnd;
                 fork.SetOperation(Operation);return fork;
             }catch{fork.ReleaseStorage();throw;}
         }
@@ -126,6 +158,12 @@ namespace Spacewars.Runtime
         // The caller owns a fork and discards its scope on any exception. A
         // successful call stages scheduler, request, provider, row and scan
         // together before the short Session publication boundary.
+        private PartitionNavigationProvider SharedPartition(ILayeredNavigationProvider provider)
+        {
+            if(!(provider is PartitionNavigationProvider partition))return null;
+            foreach(var entry in Providers)if(((NavigationHostProvider)entry.Value).Provider is PartitionNavigationProvider candidate&&partition.SameArrangement(candidate))return candidate;
+            return null;
+        }
         internal NavNameKey RegisterOrdinary(NavigationRequest request,NavScheduledRequest prepared,
             string surfaceProviderId,INavStorageReservation reservation,NavGeometry currentAuthority=null)
         {
@@ -145,8 +183,8 @@ namespace Spacewars.Runtime
                 }
                 input=NavigationHostRequest.CopyOwned(request,prepared.Provider.Binding,reservation,authority);
                 provider=NavigationHostProvider.CopyOwned(prepared.Provider,input.Request.Geometry,
-                    surfaceProviderId,1,reservation);
-                row=NavigationHostRow.CreateRegistered(input,provider,NextProviderIdentity,prepared,reservation);
+                    surfaceProviderId,1,reservation,SharedPartition(prepared.Provider));
+                row=NavigationHostRow.CreateRegistered(input,provider,NextProviderIdentity,prepared,reservation,ReplayOnlyProjection);
                 var key=NavNameKey.Subscription(row.Scheduled.Subscription);
                 if(Requests.ContainsKey(key)||Rows.ContainsKey(key)||!Scheduler.Submit(row.Scheduled))
                     throw new InvalidOperationException("Physical host registration declined; discard prepared fork.");
@@ -164,8 +202,8 @@ namespace Spacewars.Runtime
             NavigationHostRequest input=null;NavigationHostProvider provider=null;NavigationHostRow row=null,projected=null;NavScheduledCompletion solved=null;
             try{
                 input=NavigationHostRequest.CopyOwned(request,prepared.Provider.Binding,reservation);
-                provider=NavigationHostProvider.CopyOwned(prepared.Provider,input.Request.Geometry,surfaceProviderId,1,reservation);
-                row=NavigationHostRow.CreateRegistered(input,provider,NextProviderIdentity,prepared,reservation);row.SetArrivalToken(token);
+                provider=NavigationHostProvider.CopyOwned(prepared.Provider,input.Request.Geometry,surfaceProviderId,1,reservation,SharedPartition(prepared.Provider));
+                row=NavigationHostRow.CreateRegistered(input,provider,NextProviderIdentity,prepared,reservation,ReplayOnlyProjection);row.SetArrivalToken(token);
                 solved=new NavScheduledCompletion(row.Scheduled,NavSolveStatus.Ready,route,0,0,reservation.TryReserve);
                 projected=row.WithSolved(solved,reservation);
                 var key=NavNameKey.Subscription(projected.Scheduled.Subscription);
@@ -248,6 +286,29 @@ namespace Spacewars.Runtime
             catch{faulted=true;throw;}
             finally{next?.ReleaseStorage();}
         }
+        internal void StageProjectionTransition(NavNameKey key,NavigationHostRow.ProjectionTransition transition,
+            NavNameReference portal,NavLocation reached,NavNameReference[] observed,INavStorageReservation reservation)
+        {
+            if(sealedRoot||faulted||reservation==null||
+                !Rows.TryGetValue(key,out var entry)||!(entry is NavigationHostRow row)||
+                row.Answer!=null||row.ProjectionOwner==null||Projection.Count==0||
+                Projection.First.Value!=key.Value||
+                !ReferenceEquals(Projection.First.Reference.Owner,row.Scheduled.StorageRoot))
+                throw new ArgumentException("Missing sealed local projection head.");
+            NavStorageAdmission.RequireOwned(reservation,this);
+            NavigationHostRow next=null;
+            try{next=row.AdvanceProjection(transition,portal,reached,observed,reservation);Rows[key]=next;}
+            catch{faulted=true;throw;}
+            finally{next?.ReleaseStorage();}
+        }
+        internal void StageReplayFailure(NavNameKey key,INavStorageReservation reservation)
+        {
+            if(!Rows.TryGetValue(key,out var entry)||!(entry is NavigationHostRow row)||row.ProjectionOwner==null)
+                throw new ArgumentException("Missing Replay failure head.");
+            if(row.ProjectionOwner.ReplayOnly)
+                StageProjectionTransition(key,NavigationHostRow.ProjectionTransition.LegacyReset,default,default,null,reservation);
+            else StageProjectionFailure(key,reservation);
+        }
         // The final answer is built from the retained prefix; a caller cannot
         // inject a fresh route array or skip an admitted leg/replay step.
         internal void StageReady(NavNameKey key,INavStorageReservation reservation)
@@ -271,8 +332,10 @@ namespace Spacewars.Runtime
                 throw new ArgumentException("Physical projection is not complete.");
             NavigationHostCorridor corridor=null;NavigationHostAnswer answer=null;NavigationHostRow next=null;
             try{
-                using(NavStorageScratch.Reserve(reservation,checked(256L+16L*state.PointCount))){
-                    var points=state.CopyPoints();
+                int originalCount=0;foreach(var leg in row.Solved.Route.Legs)if(leg.Kind==NavTypedLegKind.Surface)originalCount++;
+                using(NavStorageScratch.Reserve(reservation,checked(256L+16L*originalCount))){
+                    var points=new NavPoint[originalCount];int i=0;
+                    foreach(var leg in row.Solved.Route.Legs)if(leg.Kind==NavTypedLegKind.Surface)points[i++]=leg.To.Position;
                     corridor=NavigationHostCorridor.CreateOwned(row.RequestOwner,row.ProviderOwner,
                         row.Scheduled,row.Solved.Route,reservation);
                     answer=NavigationHostAnswer.CreateReady(row.RequestOwner,corridor,points,reservation);
@@ -355,7 +418,7 @@ namespace Spacewars.Runtime
             Operation=operation;old?.Release();
         }
         internal void SealPrepared()
-        {if(sealedRoot||faulted)throw new InvalidOperationException("Host root cannot be sealed.");ValidateCatalog();Scheduler.SealPrepared();Requests.Seal();ArrivalIntentSets.Seal();ArrivalHistory.Seal();ArrivalIntents.Seal();ArrivalWork.Seal();Providers.Seal();Rows.Seal();Delivered.Seal();Scan.Seal();Projection.Seal();Completion.Seal();sealedRoot=true;}
+        {using var measured=PerformanceProfile.Measure(ProfileStage.HostSeal);if(sealedRoot||faulted)throw new InvalidOperationException("Host root cannot be sealed.");ValidateCatalog();Scheduler.SealPrepared();Requests.Seal();ArrivalIntentSets.Seal();ArrivalHistory.Seal();ArrivalIntents.Seal();ArrivalWork.Seal();Providers.Seal();Rows.Seal();Delivered.Seal();Scan.Seal();Projection.Seal();Completion.Seal();sealedRoot=true;}
         internal void StageAuthorityGeometry(NavGeometry current,INavStorageReservation reservation)
         {
             if(sealedRoot||current==null)throw new ArgumentException("Invalid current authority snapshot.");
@@ -426,7 +489,7 @@ namespace Spacewars.Runtime
                 if(entry.Key<1||entry.Key>=NextProviderIdentity||!(entry.Value is NavigationHostProvider))
                     throw new ArgumentException("Invalid physical host provider catalog.");
             foreach(var entry in Rows){
-                if(!(entry.Value is NavigationHostRow row)||
+                if(!(entry.Value is NavigationHostRow row)||row.ReplayOnly&&!ReplayOnlyProjection||
                     !Requests.TryGetValue(entry.Key,out var request)||
                     !Providers.TryGetValue(row.ProviderIdentity,out var provider)||
                     !row.MatchesCatalog(entry.Key,request,provider))
@@ -434,7 +497,7 @@ namespace Spacewars.Runtime
             }
             foreach(var entry in Delivered)
                 if(Rows.ContainsKey(entry.Key)||Requests.ContainsKey(entry.Key)||
-                    !(entry.Value is NavigationHostRow row)||row.Answer==null||
+                    !(entry.Value is NavigationHostRow row)||row.ReplayOnly&&!ReplayOnlyProjection||row.Answer==null||
                     !row.MatchesDelivered(entry.Key))
                     throw new ArgumentException("Invalid delivered physical host answer.");
         }
@@ -442,7 +505,10 @@ namespace Spacewars.Runtime
         {
             if(!sealedRoot||StorageBytes!=NavStorageLayout.Charge(LayoutBytes))throw new ArgumentException("Mutable or undercharged host BODY.");
             ValidateCatalog();
+            if(AccruedCredits)writer.Output.Write(ReplayOnlyProjection);
+            if(fairArrivalPolicy)writer.Output.Write(TickQuantum);
             if(TickQuantum){writer.Output.Write(QuantumGeneration);writer.Output.Write(QuantumTick);writer.Output.Write(QuantumSerial);writer.Output.Write(ConsumedQuantum);writer.Output.Write(AdmissionPrefix);writer.Output.Write(QuantumBudget);writer.Output.Write(QuantumCompleted);}
+            if(fairArrivalPolicy){writer.Output.Write(LastServedArrival);writer.Output.Write(ArrivalRoundEnd);}
             writer.Output.Write((int)Frontier.Stage);writer.Output.Write(Frontier.OriginalBudget);
             writer.Output.Write(Frontier.ScansUsed);writer.Output.Write(Frontier.TransfersUsed);
             writer.Output.Write(Frontier.ReadyUsed);writer.Output.Write(Frontier.ProjectionUsed);
@@ -467,11 +533,14 @@ namespace Spacewars.Runtime
             NavPhysicalMacro.WriteEdge(writer,this,Projection);
             NavPhysicalMacro.WriteEdge(writer,this,Completion);
         }
-        internal static NavigationHostRoot ReadPhysicalBody(NavPhysicalBodyReader reader,bool quantum=false)
+        internal static NavigationHostRoot ReadPhysicalBody(NavPhysicalBodyReader reader,bool quantum=false,bool fairArrival=false,bool replayOnly=false,bool accrued=false)
         {
+            if(accrued)replayOnly=NavPhysicalMacro.ReadBoolean(reader);
+            if(fairArrival)quantum=NavPhysicalMacro.ReadBoolean(reader);
             long generation=0,tick=0,serial=0,consumed=0,prefix=0;int grant=0;bool complete=false;
             if(quantum){generation=reader.Input.ReadInt64();tick=reader.Input.ReadInt64();serial=reader.Input.ReadInt64();consumed=reader.Input.ReadInt64();prefix=reader.Input.ReadInt64();grant=reader.Input.ReadInt32();complete=NavPhysicalMacro.ReadBoolean(reader);
                 if(generation<1||tick<1||serial<1||consumed<0||consumed>serial||serial-consumed>1||prefix<0||grant<1||grant>int.MaxValue/1024||consumed==serial&&!complete)throw new ArgumentException("Invalid saved tick quantum.");}
+            long lastArrival=fairArrival?reader.Input.ReadInt64():0,roundEnd=fairArrival?reader.Input.ReadInt64():0;if(lastArrival<0||roundEnd<lastArrival||!quantum&&(lastArrival!=0||roundEnd!=0))throw new ArgumentException("Invalid saved arrival service cursor.");
             int stage=reader.Input.ReadInt32();if(!Enum.IsDefined(typeof(CertifiedRouteKernel.PumpStage),stage))throw new ArgumentException("Invalid host pump stage.");
             int budget=reader.Input.ReadInt32(),scans=reader.Input.ReadInt32(),transfers=reader.Input.ReadInt32(),ready=reader.Input.ReadInt32(),projection=reader.Input.ReadInt32();
             int allowance=reader.Input.ReadInt32(),solveLimit=reader.Input.ReadInt32(),solveConsumed=reader.Input.ReadInt32();
@@ -505,6 +574,8 @@ namespace Spacewars.Runtime
                 root.Frontier=new CertifiedRouteKernel.PumpFrontier((CertifiedRouteKernel.PumpStage)stage,budget,scans,transfers,ready,projection,allowance,solveLimit,solveConsumed,floor,phaseUsed,scanAllowance);
                 if(quantum&&(complete&&stage!=(int)CertifiedRouteKernel.PumpStage.Idle||stage!=(int)CertifiedRouteKernel.PumpStage.Idle&&budget!=grant))throw new ArgumentException("Quantum/frontier mismatch.");
                 root.TickQuantum=quantum;root.QuantumGeneration=generation;root.QuantumTick=tick;root.QuantumSerial=serial;root.ConsumedQuantum=consumed;root.AdmissionPrefix=prefix;root.QuantumBudget=grant;root.QuantumCompleted=complete;
+                if(accrued)root.lifecycle|=32;root.fairArrivalPolicy=fairArrival;if(replayOnly)root.lifecycle|=16;root.LastServedArrival=lastArrival;root.ArrivalRoundEnd=roundEnd;
+                if(fairArrival&&quantum&&stage==(int)CertifiedRouteKernel.PumpStage.ArrivalAdvance&&phaseUsed>1)throw new ArgumentException("Invalid saved arrival preparation count.");
                 root.Epoch=epoch;root.Progress=progress;root.NextProviderIdentity=nextProvider;root.SetOperation(operation);root.sealedRoot=true;
                 root.ValidateCatalog();return root;
             }catch{throw;}
@@ -518,7 +589,11 @@ namespace Spacewars.Runtime
         internal static readonly NavigationHostBodyExtension Instance=new NavigationHostBodyExtension();
         private NavigationHostBodyExtension(){}
         public NavOwnedStorage Read(NavPhysicalTag tag,NavPhysicalBodyReader reader)
-            =>tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityCatalogLedgerLayout))?NavigationAuthorityOwners.ReadPhysicalBody(reader,ledgerLayout:true):
+            =>tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostEnvelopePublication,value:NavPhysicalValueKind.AccruedAuthorityCreditsV1))?NavigationAccruedHostEnvelope.Read(reader):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostRootFairArrivalV1,value:NavPhysicalValueKind.AccruedAuthorityCreditsV1))?NavigationHostRoot.ReadPhysicalBody(reader,false,true,false,true):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostEnvelopeTraffic))?NavigationHostEnvelope.ReadPhysicalBody(reader,traffic:true):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.TrafficAuthority))?NavigationTrafficAuthority.ReadPhysicalBody(reader):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityCatalogLedgerLayout))?NavigationAuthorityOwners.ReadPhysicalBody(reader,ledgerLayout:true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityCatalogAnswers))?NavigationAuthorityOwners.ReadPhysicalBody(reader,answerTracking:true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.LegacyProbeAnswer))?NavigationHostAnswer.ReadPhysicalBody(reader,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityCatalogProbes))?NavigationAuthorityOwners.ReadPhysicalBody(reader,true,true,true,true,false,true):
@@ -527,17 +602,26 @@ namespace Spacewars.Runtime
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalLeaseSnapshot))?NavigationArrivalLeaseSnapshot.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityCatalogArrival))?NavigationAuthorityOwners.ReadPhysicalBody(reader,true,true,true,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalCatalog))?NavigationArrivalCatalog.ReadPhysicalBody(reader):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalAttemptSnapshot,value:NavPhysicalValueKind.OwnedArrivalAnchorV1))?NavigationArrivalAttemptSnapshot.ReadPhysicalBody(reader,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalAttemptSnapshot))?NavigationArrivalAttemptSnapshot.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalProviderSnapshot))?NavigationArrivalProviderSnapshot.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityCatalogRoutes))?NavigationAuthorityOwners.ReadPhysicalBody(reader,true,true,true):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.InstalledExecution,value:NavPhysicalValueKind.InstalledGeometryMemberV2))?InstalledGeometryMemberV2.Read(reader):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.InstalledExecution,value:NavPhysicalValueKind.InstalledGeometryCertificateV2))?InstalledGeometryCertificateV2.Read(reader):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.InstalledExecution,value:NavPhysicalValueKind.InstalledExecutionV2))?NavigationInstalledExecutionOwner.ReadPhysicalBody(reader,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.InstalledExecution))?NavigationInstalledExecutionOwner.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityCatalogTerrain))?NavigationAuthorityOwners.ReadPhysicalBody(reader,true,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityCatalog))?NavigationAuthorityOwners.ReadPhysicalBody(reader,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityGroup))?NavigationAuthorityGroup.ReadPhysicalBody(reader):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityMember,value:NavPhysicalValueKind.GroupMarchProgressV2))?NavigationAuthorityMember.ReadPhysicalBody(reader,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityMember))?NavigationAuthorityMember.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostAuthority))?NavigationAuthorityOwners.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostEnvelopePublication))?NavigationHostEnvelope.ReadPhysicalBody(reader,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostEnvelope))?NavigationHostEnvelope.ReadPhysicalBody(reader):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostRootFairArrivalV1,value:NavPhysicalValueKind.ReplayOnlyProjectionV1))?NavigationHostRoot.ReadPhysicalBody(reader,false,true,true):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostRow,value:NavPhysicalValueKind.ReplayOnlyProjectionV1))?NavigationHostRow.ReadPhysicalBody(reader,true):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostProjection,value:NavPhysicalValueKind.ReplayOnlyProjectionV1))?NavigationHostProjection.ReadPhysicalBody(reader,true):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostRootFairArrivalV1))?NavigationHostRoot.ReadPhysicalBody(reader,false,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostRootQuantum))?NavigationHostRoot.ReadPhysicalBody(reader,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostRoot))?NavigationHostRoot.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostRequest))?NavigationHostRequest.ReadPhysicalBody(reader):

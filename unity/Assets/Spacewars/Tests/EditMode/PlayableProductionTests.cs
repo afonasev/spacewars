@@ -38,7 +38,45 @@ namespace Spacewars.Tests.EditMode
             =>(PlayableCommandStatus)Call("Apply",new PlayableCommand(1,++sequence,player,kind,new[]{id},productionOrderId:order),null);
         private void Pay(int amount=10000)=>Call("AddCredits",PlayableOwner.Player,(double)amount);
         private void Advance(double seconds=0.1)=>Call("AdvanceProduction",seconds);
+        // Economic fixtures settle the new physical release explicitly; the separate
+        // FactoryReleaseLifecycleTests assert its timing, protection and blocked corridor.
+        private void Release(int id,bool park=false)
+        {
+            var nav=(NavigationSession)Domain.GetProperty("Navigation",Flags).GetValue(domain);
+            var ids=nav.Crowd.Units.Select(u=>u.Id).ToArray();
+            for(int i=0;i<180&&View().Buildings.Single(b=>b.Id==id).LaunchPhase!=FactoryReleaseRules.Closing;i++)Advance(1d/30);
+            Assert.AreEqual(FactoryReleaseRules.Closing,View().Buildings.Single(b=>b.Id==id).LaunchPhase);
+            if(park)foreach(var born in nav.Crowd.Units.Where(u=>!ids.Contains(u.Id)))
+            {
+                var factory=View().Buildings.Single(b=>b.Id==id).Position;
+                var position=(from x in Enumerable.Range(-7,15) from z in Enumerable.Range(-7,15) let point=new NavPoint(x*4,z*4) where Math.Pow(point.X-factory.X,2)+Math.Pow(point.Z-factory.Z,2)>36&&nav.Crowd.CanPlace(point,born.Radius) select point).First();
+                Assert.True(nav.Crowd.CanPlace(position,born.Radius));born.Position=position;born.Location=new NavLocation(position,NavLocation.FlatSurface);
+                typeof(NavCrowd).GetMethod("BuildIndex",Flags).Invoke(nav.Crowd,null);
+            }
+            for(int i=0;i<30&&View().Buildings.Single(b=>b.Id==id).LaunchPhase!=0;i++)Advance(1d/30);
+            Assert.AreEqual(0,View().Buildings.Single(b=>b.Id==id).LaunchPhase);
+        }
 
+
+        [Test] public void RealBirthCapacityRefusalKeepsPaidHeadAndRetriesExactlyOnce()
+        {
+            Create();int factory=Factory();Pay();Send(PlayableCommandKind.QueueTank,factory);Advance();var order=State(factory).Orders.Single();
+            var session=(NavigationSession)Domain.GetField("navigation",Flags).GetValue(domain);var budget=session.PhysicalHostBudget;
+            int count=session.Crowd.Units.Count,credits=View().Credits;var beforeIds=session.Crowd.Units.Select(u=>u.Id).ToArray();
+            Assert.True(budget.TryOpenScope(NavigationPreparationKind.Capture,1,1,out var pressure));
+            try{
+                budget.AllocationAdmission=bytes=>{
+                    if(!new System.Diagnostics.StackTrace().GetFrames().Any(f=>f.GetMethod().DeclaringType==typeof(NavCrowdSpatialStorage)&&f.GetMethod().Name=="Create"))return true;
+                    budget.AllocationAdmission=null;Assert.True(pressure.TryReserve(LayeredNavigationScheduler.MaxRetainedBytes-budget.RetainedBytes-bytes+1));return true;
+                };
+                Advance(profile.TankProductionSeconds);Advance(FactoryReleaseRules.Duration(profile,PlayableEntityKind.Tank));
+                Assert.AreEqual(order.Id,State(factory).Orders.Single().Id);Assert.Zero(State(factory).Orders.Single().Remaining);
+                Assert.AreEqual(credits,View().Credits);CollectionAssert.AreEqual(beforeIds,session.Crowd.Units.Select(u=>u.Id).ToArray());Assert.AreEqual(count,session.Crowd.Units.Count);
+                pressure.Discard();Advance();Assert.IsEmpty(State(factory).Orders);Assert.AreEqual(count+1,session.Crowd.Units.Count);
+                var born=session.Crowd.Units.Select(u=>u.Id).Except(beforeIds).Single();Advance();Assert.AreEqual(1,session.Crowd.Units.Count(u=>u.Id==born));Assert.AreEqual(count+1,session.Crowd.Units.Count);Assert.AreEqual(credits,View().Credits);
+                Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);
+            }finally{budget.AllocationAdmission=null;pressure.Discard();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);}
+        }
         [Test] public void SixPaidSlotsRemainWaitingAtCapacityAndCancelRefundsOnce()
         {
             Create(1);int f=Factory();Pay();int before=View().Credits;
@@ -66,36 +104,89 @@ namespace Spacewars.Tests.EditMode
             Advance();Assert.True(State(a).Orders[0].Active);Assert.AreEqual(3,View().Population.Reserved);
         }
 
-        [Test] public void RepeatRefundsPaidQueueWaitsForCapacityAndDisablingKeepsPaidHead()
+        [Test] public void RepeatPreservesPaidQueueProgressAndDisablingKeepsPaidOrders()
         {
             Create(3);int f=Factory();Pay();int before=View().Credits;
             Send(PlayableCommandKind.QueueTank,f);Send(PlayableCommandKind.QueueTank,f);Advance();
+            var paid=State(f).Orders.ToArray();int reserved=View().Population.Reserved;
             Send(PlayableCommandKind.ToggleRepeatProduction,f);Assert.True(State(f).Repeat);
-            Assert.IsEmpty(State(f).Orders);Assert.AreEqual(before,View().Credits);Assert.Zero(View().Population.Reserved);
-            Advance();var head=State(f).Orders.Single();Assert.True(head.Active);
-            Assert.AreEqual(before-profile.TankCreditCost,View().Credits);
+            CollectionAssert.AreEqual(paid.Select(o=>o.Id),State(f).Orders.Select(o=>o.Id));
+            Assert.AreEqual(paid[0].Remaining,State(f).Orders[0].Remaining);
+            Assert.AreEqual(before-2*profile.TankCreditCost,View().Credits);Assert.AreEqual(reserved,View().Population.Reserved);
             Send(PlayableCommandKind.ToggleRepeatProduction,f);Assert.False(State(f).Repeat);
-            Assert.AreEqual(head.Id,State(f).Orders.Single().Id);
-            Advance(profile.TankProductionSeconds);Assert.IsEmpty(State(f).Orders);
+            CollectionAssert.AreEqual(paid.Select(o=>o.Id),State(f).Orders.Select(o=>o.Id));
+            Advance(profile.TankProductionSeconds);Release(f);Assert.AreEqual(paid[1].Id,State(f).Orders.Single().Id);
             Assert.AreEqual(3+profile.ExplorerPopulationCost,View().Population.Living);Assert.Zero(View().Population.Reserved);
+            Send(PlayableCommandKind.CancelProductionOrder,f,paid[1].Id);
             Send(PlayableCommandKind.ToggleRepeatProduction,f);Advance();
             Assert.True(State(f).Repeat);Assert.IsEmpty(State(f).Orders);
             Assert.AreEqual(before-profile.TankCreditCost,View().Credits,"Repeat intent does not spend while capacity is full.");
         }
 
-        [Test] public void PaidManualHeadHasPriorityOverRepeatAndManualClickDisablesRepeat()
+        [Test] public void PaidManualHeadHasPriorityOverRepeatAndManualClickPreservesRepeat()
         {
             Create(3);int a=Factory(),b=Factory(2);Pay();
             Send(PlayableCommandKind.ToggleRepeatProduction,a);Send(PlayableCommandKind.QueueTank,b);Advance();
             Assert.IsEmpty(State(a).Orders);Assert.True(State(a).Repeat);Assert.True(State(b).Orders.Single().Active);
-            Send(PlayableCommandKind.QueueTank,a);Assert.False(State(a).Repeat);Assert.False(State(a).Orders.Single().Active);
+            Send(PlayableCommandKind.QueueTank,a);Assert.True(State(a).Repeat);Assert.False(State(a).Orders.Single().Active);
+        }
+
+        [Test] public void MixedManualOrdersFollowActiveRepeatThenSeriesResumes()
+        {
+            Create();int f=Factory();Pay();Send(PlayableCommandKind.ToggleRepeatProduction,f);Advance();
+            var active=State(f).Orders.Single();int before=View().Credits;
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.QueueExplorer,f));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.QueueTank,f));
+            var paid=State(f).Orders.ToArray();Assert.True(State(f).Repeat);
+            CollectionAssert.AreEqual(new[]{PlayableEntityKind.Tank,PlayableEntityKind.Explorer,PlayableEntityKind.Tank},paid.Select(o=>o.Kind));
+            Assert.AreEqual(active.Id,paid[0].Id);Assert.AreEqual(active.Remaining,paid[0].Remaining);
+            Advance(active.Remaining);Release(f,park:true);CollectionAssert.AreEqual(paid.Skip(1).Select(o=>o.Id),State(f).Orders.Select(o=>o.Id));
+            Assert.AreEqual(before-profile.ExplorerCreditCost-profile.TankCreditCost,View().Credits);
+            Advance(profile.ExplorerProductionDurationSec);Release(f,park:true);Assert.AreEqual(paid[2].Id,State(f).Orders.Single().Id);
+            Advance(profile.TankProductionSeconds);Release(f,park:true);Assert.IsEmpty(State(f).Orders);Assert.True(State(f).Repeat);
+            Advance();var resumed=State(f).Orders.Single();Assert.AreEqual(PlayableEntityKind.Tank,resumed.Kind);Assert.True(resumed.Active);Assert.Greater(resumed.Id,paid[2].Id);
+            Assert.AreEqual(before-profile.ExplorerCreditCost-2*profile.TankCreditCost,View().Credits);
+        }
+
+        [TestCase(false)][TestCase(true)] public void CancellationPreservesRepeatAndRefundsOnlySelectedOrder(bool active)
+        {
+            Create();int f=Factory();Pay();Send(PlayableCommandKind.ToggleRepeatProduction,f);Advance();
+            Send(PlayableCommandKind.QueueExplorer,f);var paid=State(f).Orders.ToArray();int before=View().Credits;
+            var cancelled=paid[active?0:1];var kept=paid[active?1:0];
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.CancelProductionOrder,f,cancelled.Id));
+            Assert.True(State(f).Repeat);Assert.AreEqual(kept.Id,State(f).Orders.Single().Id);Assert.AreEqual(kept.Remaining,State(f).Orders.Single().Remaining);
+            Assert.AreEqual(before+(int)Math.Floor(cancelled.PaidCost*profile.UnitCancellationRefundRatio),View().Credits);
+            Assert.AreEqual(active?0:profile.TankPopulationCost,View().Population.Reserved);
+            int after=View().Credits;Assert.AreEqual(PlayableCommandStatus.InvalidTarget,Send(PlayableCommandKind.CancelProductionOrder,f,cancelled.Id));
+            Assert.True(State(f).Repeat);Assert.AreEqual(after,View().Credits);Assert.AreEqual(kept.Id,State(f).Orders.Single().Id);
+        }
+
+        [Test] public void ChangingRepeatKindPreservesPaidHeadAndUsesNewKindAfterManualQueue()
+        {
+            Create();int f=Factory();Pay();Send(PlayableCommandKind.ToggleRepeatProduction,f);Advance();Send(PlayableCommandKind.QueueTank,f);
+            var paid=State(f).Orders.ToArray();int before=View().Credits;
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("ToggleRepeat",f,PlayableOwner.Player,null,PlayableEntityKind.Explorer));
+            Assert.True(State(f).Repeat);Assert.AreEqual(PlayableEntityKind.Explorer,State(f).RepeatKind);
+            CollectionAssert.AreEqual(paid.Select(o=>o.Id),State(f).Orders.Select(o=>o.Id));Assert.AreEqual(paid[0].Remaining,State(f).Orders[0].Remaining);Assert.AreEqual(before,View().Credits);
+            Advance(profile.TankProductionSeconds);Release(f,park:true);Advance(profile.TankProductionSeconds);Release(f,park:true);Assert.IsEmpty(State(f).Orders);
+            Advance();Assert.AreEqual(PlayableEntityKind.Explorer,State(f).Orders.Single().Kind);
+        }
+
+        [Test] public void FullQueueRejectsManualOrderWithoutChangingRepeatOrPaidTerms()
+        {
+            Create(1);int f=Factory();Pay();Send(PlayableCommandKind.ToggleRepeatProduction,f);
+            for(int i=0;i<6;i++)Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.QueueTank,f));
+            var paid=State(f).Orders.ToArray();int before=View().Credits;
+            Assert.AreEqual(PlayableCommandStatus.Overflow,Send(PlayableCommandKind.QueueExplorer,f));Assert.True(State(f).Repeat);
+            CollectionAssert.AreEqual(paid.Select(o=>o.Id),State(f).Orders.Select(o=>o.Id));Assert.AreEqual(before,View().Credits);
+            Advance();Assert.True(State(f).Orders.All(o=>!o.Active));Assert.Zero(View().Population.Reserved);
         }
 
         [Test] public void BlockedReadyOrderKeepsReserveAndProducerRemovalDoesNotRefund()
         {
             Create(100);int f=Factory();Pay();
             Send(PlayableCommandKind.QueueTank,f);Send(PlayableCommandKind.QueueTank,f);
-            Advance(profile.TankProductionSeconds);
+            Advance(profile.TankProductionSeconds);Release(f);
             // Block every currently safe typed candidate, preserving the all-exits wait invariant.
             var all=(IDictionary)Domain.GetField("buildings",Flags).GetValue(domain);
             var nav=(NavigationSession)Domain.GetProperty("Navigation",Flags).GetValue(domain);
@@ -118,8 +209,8 @@ namespace Spacewars.Tests.EditMode
             Send(PlayableCommandKind.ToggleRepeatProduction,f);Advance();
             Assert.True(State(f).Repeat);Assert.IsEmpty(State(f).Orders);Assert.Zero(View().Credits);
             Pay(profile.TankCreditCost);Advance();Assert.AreEqual(1,State(f).Orders.Count);Assert.Zero(View().Credits);
-            Send(PlayableCommandKind.QueueTank,f);Assert.False(State(f).Repeat);
-            Assert.AreEqual(1,State(f).Orders.Count,"A failed manual purchase still turns repeat off, preserving the paid head.");
+            Assert.AreEqual(PlayableCommandStatus.InsufficientCredits,Send(PlayableCommandKind.QueueTank,f));Assert.True(State(f).Repeat);
+            Assert.AreEqual(1,State(f).Orders.Count,"A failed manual purchase preserves repeat and the paid head.");
         }
 
         [TestCase(0)][TestCase(1001)] public void ArmyCapacityUsesMetadataRange(int invalid)

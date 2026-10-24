@@ -9,7 +9,7 @@ namespace Spacewars.Presentation
     {
         private static string BuildingName(PlayableBuildingKind kind)
         {
-            switch(kind){case PlayableBuildingKind.ScientificCenter:return "НАУЧНЫЙ ЦЕНТР";case PlayableBuildingKind.Headquarters:return "ШТАБ";case PlayableBuildingKind.Outpost:return "ФОРПОСТ";case PlayableBuildingKind.Mine:return "ШАХТА";case PlayableBuildingKind.Factory:return "ФАБРИКА";default:return "ПЕРЕРАБОТКА";}
+            switch(kind){case PlayableBuildingKind.Hangar:return "АНГАР";case PlayableBuildingKind.ScientificCenter:return "НАУЧНЫЙ ЦЕНТР";case PlayableBuildingKind.Headquarters:return "ШТАБ";case PlayableBuildingKind.Outpost:return "ФОРПОСТ";case PlayableBuildingKind.Mine:return "ШАХТА";case PlayableBuildingKind.Factory:return "ФАБРИКА";default:return "ПЕРЕРАБОТКА";}
         }
         private bool PickPad(NavPoint point)
         {
@@ -60,6 +60,7 @@ namespace Spacewars.Presentation
             bool owned=!sellingCenter&&state!=null&&(ordinary?state.Ready&&state.Owner==LocalOwner:state.Progress>=1&&state.Claimant==LocalOwner&&(!state.Owner.HasValue||state.Owner==LocalOwner));
             var discovered=view.DiscoveredSites.FirstOrDefault(s=>s.Id==selectedSite);
             siteLabel.text=state==null?(discovered==null?"Выберите площадку для стройки":BuildingName(discovered.Kind)+" · Разведана, вне обзора"):ordinary?"ПЛОЩАДКА · "+selectedSlot:BuildingName(state.Site.Kind)+" · "+(state.Contested?"СПОРНАЯ":state.Claimant.HasValue?(state.Claimant==view.Owner?"Ваша · ":IsOpponent(state.Claimant.Value)?"Вражеская · ":"Союзная · ")+(int)(state.Progress*100)+"%":"Нейтральная");
+            ConfigureBuild(buildHangar,PlayableBuildingKind.Hangar,ordinary,active&&owned&&request==null);
             ConfigureBuild(buildFactory,PlayableBuildingKind.Factory,ordinary,active&&owned&&request==null);
             ConfigureBuild(buildScience,PlayableBuildingKind.ScientificCenter,ordinary,active&&owned&&request==null);
             ConfigureBuild(buildRefinery,PlayableBuildingKind.Refinery,ordinary,active&&owned&&request==null);

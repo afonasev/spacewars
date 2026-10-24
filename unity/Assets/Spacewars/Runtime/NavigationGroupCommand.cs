@@ -5,11 +5,30 @@ using Spacewars.Simulation;
 
 namespace Spacewars.Runtime
 {
+    internal class NavigationCommandRefused : InvalidOperationException
+    {
+        internal enum Cause { ReadsetChanged,Capacity,Cancelled }
+        internal readonly Cause Reason;
+        internal NavigationCommandRefused(string message,Cause reason=Cause.ReadsetChanged,Exception inner=null):base(message,inner){Reason=reason;}
+        // Existing storage APIs expose these two capacity failures as InvalidOperationException.
+        // Translate only that boundary; programming/ownership failures must escape.
+        internal static bool IsStorageCapacity(Exception error)=>error.GetType()==typeof(InvalidOperationException)&&
+            (error.Message=="Physical storage exceeds prepared reservation."||error.Message=="Scratch exceeds prepared reservation.");
+        internal static bool IsExpected(Exception error,NavigationRetentionBudget.Scope scope=null)=>error is NavigationCommandRefused||IsStorageCapacity(error)||error is OperationCanceledException&&scope?.IsCancelled==true;
+        internal static NavigationCommandRefused Expected(Exception error,NavigationRetentionBudget.Scope scope=null)=>error as NavigationCommandRefused??
+            (IsStorageCapacity(error)?new NavigationCommandRefused(error.Message,Cause.Capacity,error):error is OperationCanceledException&&scope?.IsCancelled==true?new NavigationCommandRefused(error.Message,Cause.Cancelled,error):null);
+    }
     internal readonly struct NavigationCommandSourcePins : IDisposable
     {
-        private readonly NavOwnedStorage host,authority,backing;
-        internal NavigationCommandSourcePins(NavOwnedStorage host,NavOwnedStorage authority,NavOwnedStorage backing){this.host=host;this.authority=authority;this.backing=backing;host?.Retain();authority?.Retain();backing?.Retain();}
-        public void Dispose(){host?.Release();authority?.Release();backing?.Release();}
+        private readonly NavOwnedStorage host,authority,backing,admission;
+        internal NavigationCommandSourcePins(NavOwnedStorage host,NavOwnedStorage authority,NavOwnedStorage backing,NavOwnedStorage admission=null)
+        {
+            NavOwnedStorage h=null,a=null,b=null,d=null;
+            try{host?.Retain();h=host;authority?.Retain();a=authority;backing?.Retain();b=backing;admission?.Retain();d=admission;}
+            catch{d?.Release();b?.Release();a?.Release();h?.Release();throw;}
+            this.host=h;this.authority=a;this.backing=b;this.admission=d;
+        }
+        public void Dispose(){host?.Release();authority?.Release();backing?.Release();admission?.Release();}
     }
     // Session lifetime backing. Prepared actor/birth/issued arrays stay in the
     // command carrier and retire after publication, never after a later order.
@@ -47,6 +66,10 @@ namespace Spacewars.Runtime
         internal readonly NavOwnedStorage[] RetiredActorRoutes;
         internal NavigationRequest[] Mailbox=>Committed.Mailbox;internal NavigationRequest[] Issued;internal NavUnit[] Actors;internal long[] ActorMobility;internal NavigationInstalledExecutionState[] Installed;
         internal readonly bool[] InstalledDetached;
+        internal readonly long[] ActorIncarnation;
+        internal NavigationCommandAuthority StopBacking;internal NavigationAdmissionStorage StopAdmission;internal IDictionary<long,NavigationArrivalReservation> StopLedger;internal long StopAttachment;
+        internal PlayableDomain.PreparedTacticalCommit DomainCommit;
+        internal NavigationSession.MovementReadSet MovementInputs;
         internal NavigationAdmissionStorage AdmissionOwner;
         internal NavigationAdmission Admission=>AdmissionOwner.Value;
         private NavOwnedStorage[] mailboxOwners=>Committed.MailboxOwners;private NavOwnedStorage[] issuedOwners;
@@ -56,14 +79,15 @@ namespace Spacewars.Runtime
         internal GroupOrderState CommandContext;internal bool Arrival,IsStop,StopHold,IsRemoval;internal int RemovalSourceCount;internal NavCrowdSpatialStorage RemovalSpatial;internal long StopCorridorBytes,StopGeometryBytes;internal int AllocationThread;internal CertifiedRouteKernel Worker;
         internal IDictionary<long,GroupOrderState> OldGroups;internal IDictionary<int,long> OldMembers,OldOrders;
         internal IDictionary<int,NavigationRequest> OldPending,OldAllocating;internal IDictionary<int,NavSolveStatus> OldFailures;internal IDictionary<int,NavPoint> OldReservations,OldGoals;internal IDictionary<int,string> OldIdentities;
-        internal void PinObservation(){ExpectedHost=NavPhysicalMacro.Acquire(this,ExpectedHost);ExpectedAuthority=NavPhysicalMacro.Acquire(this,ExpectedAuthority);}
-        internal void ReleaseObservationPins(){ExpectedHost?.Release();ExpectedAuthority?.Release();ExpectedHost=null;ExpectedAuthority=null;OldGroups=null;OldMembers=OldOrders=null;OldPending=OldAllocating=null;OldFailures=null;OldReservations=OldGoals=null;OldIdentities=null;CommandContext=null;Budget=null;}
+        internal void PinObservation(){ExpectedHost=NavPhysicalMacro.Acquire(this,ExpectedHost);ExpectedAuthority=NavPhysicalMacro.Acquire(this,ExpectedAuthority);StopBacking=NavPhysicalMacro.Acquire(this,StopBacking);StopAdmission=NavPhysicalMacro.Acquire(this,StopAdmission);}
+        internal void ReleaseObservationPins(){ExpectedHost?.Release();ExpectedAuthority?.Release();StopBacking?.Release();StopAdmission?.Release();StopBacking=null;StopAdmission=null;StopLedger=null;ExpectedHost=null;ExpectedAuthority=null;OldGroups=null;OldMembers=OldOrders=null;OldPending=OldAllocating=null;OldFailures=null;OldReservations=OldGoals=null;OldIdentities=null;CommandContext=null;Budget=null;}
+        internal int[] MetadataRecipients;
         internal int MailboxCount;internal long RequestSequence,GroupSequence,Publication;
         private bool released;internal bool Published;
         internal override bool IsImmutableCaptureRoot=>false;
-        private static long Layout(int issuedCount,int birthCapacity)=>checked(NavStorageLayout.ObjectBytesBound(typeof(NavigationGroupCommand))+8*32L+64L*issuedCount+8L*((issuedCount+7)/8)+8L*birthCapacity);
+        private static long Layout(int issuedCount,int birthCapacity)=>checked(NavStorageLayout.ObjectBytesBound(typeof(NavigationGroupCommand))+9*32L+72L*issuedCount+8L*((issuedCount+7)/8)+8L*birthCapacity);
         private NavigationGroupCommand(int issuedCount,int birthCapacity):base(Layout(issuedCount,birthCapacity))
-        {RetiredActorRoutes=new NavOwnedStorage[issuedCount*3];Issued=new NavigationRequest[issuedCount];issuedOwners=new NavOwnedStorage[issuedCount];Births=new NavigationLiveGroup[birthCapacity];Actors=new NavUnit[issuedCount];ActorMobility=new long[issuedCount];Installed=new NavigationInstalledExecutionState[issuedCount];InstalledDetached=new bool[issuedCount];Retain();}
+        {RetiredActorRoutes=new NavOwnedStorage[issuedCount*3];Issued=new NavigationRequest[issuedCount];issuedOwners=new NavOwnedStorage[issuedCount];Births=new NavigationLiveGroup[birthCapacity];Actors=new NavUnit[issuedCount];ActorMobility=new long[issuedCount];ActorIncarnation=new long[issuedCount];Installed=new NavigationInstalledExecutionState[issuedCount];InstalledDetached=new bool[issuedCount];Retain();}
         internal void ObserveInstalled(int index,NavigationInstalledExecutionState state,bool detached)
         {if(state?.StorageOwner!=null){RequireEdge(state.StorageOwner);state.StorageOwner.Retain();}Installed[index]=state;InstalledDetached[index]=detached;}
         internal static NavigationGroupCommand CreateOwned(int capacity,int issuedCount,INavStorageReservation reservation,int birthCapacity=-1)
@@ -77,7 +101,7 @@ namespace Spacewars.Runtime
         internal void AppendMailbox(NavigationRequest request){var owner=request.StorageOwner;if(owner!=null){RequireEdge(owner);owner.Retain();}Mailbox[MailboxCount]=request;mailboxOwners[MailboxCount++]=owner;}
         internal void ReleaseStorage(){if(released)return;released=true;Release();}
         internal override void ReleaseOwner()=>ReleaseStorage();
-        protected override void ReleaseEdges(){RemovalSpatial?.Release();RemovalSpatial=null;AdmissionOwner?.Release();AdmissionOwner=null;foreach(var route in RetiredActorRoutes)route?.Release();for(int i=0;i<issuedOwners.Length;i++){issuedOwners[i]?.Release();issuedOwners[i]=null;Issued[i]=null;Actors[i]=null;Installed[i]?.StorageOwner?.Release();Installed[i]=null;}ReleaseObservationPins();if(Committed!=null){if(!Published)Committed.ReleaseStorage();Committed.Release();Committed=null;}Groups=null;MemberGroups=Orders=null;Pending=Allocating=null;Reservations=Goals=null;Identities=null;Failures=null;Ledger=null;}
+        protected override void ReleaseEdges(){DomainCommit?.Release();DomainCommit=null;MovementInputs?.Release();MovementInputs=null;RemovalSpatial?.Release();RemovalSpatial=null;AdmissionOwner?.Release();AdmissionOwner=null;foreach(var route in RetiredActorRoutes)route?.Release();for(int i=0;i<issuedOwners.Length;i++){issuedOwners[i]?.Release();issuedOwners[i]=null;Issued[i]=null;Actors[i]=null;Installed[i]?.StorageOwner?.Release();Installed[i]=null;}ReleaseObservationPins();if(Committed!=null){if(!Published)Committed.ReleaseStorage();Committed.Release();Committed=null;}Groups=null;MemberGroups=Orders=null;Pending=Allocating=null;Reservations=Goals=null;Identities=null;Failures=null;Ledger=null;}
 
     }
     public sealed partial class NavigationSession
@@ -87,12 +111,12 @@ namespace Spacewars.Runtime
         private bool commandMoveRefused;
         private NavigationCommandSlots<TKey,TValue> CopyCommandMap<TKey,TValue>(IDictionary<TKey,TValue> map,int added,NavigationRetentionBudget.Scope scope,long operation,Func<TValue,NavOwnedStorage> owner=null,int exactCapacity=-1)
         {
-            int layoutLength;using(EnterTransport()){if(operation!=authorityOperationIdentity)throw new InvalidOperationException("Map source operation changed.");layoutLength=NavigationCommandLayout.Length(map);}
+            int layoutLength;using(EnterTransport()){if(operation!=authorityOperationIdentity)throw new NavigationCommandRefused("Map source operation changed.");layoutLength=NavigationCommandLayout.Length(map);}
             using(NavStorageScratch.Reserve(scope.OwnedReservation(),checked(128L+2*(32L+4L*layoutLength)))){
-                using(EnterTransport()){if(operation!=authorityOperationIdentity)throw new InvalidOperationException("Map source operation changed.");}
+                using(EnterTransport()){if(operation!=authorityOperationIdentity)throw new NavigationCommandRefused("Map source operation changed.");}
                 int capacity=exactCapacity<0?Math.Max(4,checked(NavigationCommandLayout.Capture(map)[0]+added)):exactCapacity;
                 var result=NavigationCommandSlots<TKey,TValue>.CreateOwned(capacity,scope.OwnedReservation());
-                try{using(EnterTransport()){if(operation!=authorityOperationIdentity)throw new InvalidOperationException("Map source operation changed.");}result.CopyLayoutFrom(map,owner);return result;}catch{result.ReleaseStorage();throw;}
+                try{using(EnterTransport()){if(operation!=authorityOperationIdentity)throw new NavigationCommandRefused("Map source operation changed.");}result.CopyLayoutFrom(map,owner);return result;}catch{result.ReleaseStorage();throw;}
             }
         }
         private static NavigationLiveGroup CopyCommandGroup(GroupOrderState record,NavigationRetentionBudget.Scope scope)
@@ -109,23 +133,41 @@ namespace Spacewars.Runtime
         }
         // Returns null while command activation/arrival cancellation is still on
         // the older path. Those seams remain part of the open A5-a work.
-        private bool? TryPreparedOrdinaryMoveGroup(int[] ids,NavPoint[] goals,bool legacySingle=false)
+#if UNITY_INCLUDE_TESTS
+        internal Action AfterMovementSourcePinsForTests;
+#endif
+        private bool? TryPreparedOrdinaryMoveGroup(int[] ids,NavPoint[] goals,bool legacySingle=false,MovementReadSet sourceInputs=null)
         {
             NavigationRetentionBudget budget;NavigationHostRoot observedHost;NavigationAuthorityOwners observedAuthority;
             IDictionary<long,GroupOrderState> oldGroups;IDictionary<int,long> oldMembers,oldOrders;
             IDictionary<int,NavigationRequest> oldPending,oldAllocating;IDictionary<int,NavPoint> oldReservations,oldGoals;IDictionary<int,string> oldIdentities;IDictionary<int,NavSolveStatus> oldFailures;
-            long operation,publication,oldRequestSequence,oldGroupSequence,mailboxRevision;int mailboxCount;GroupOrderState context;NavigationCommandSourcePins sourcePins;int allocationThread;CertifiedRouteKernel worker;
+            StopSource source;long operation,publication,oldRequestSequence,oldGroupSequence,mailboxRevision;int mailboxCount;GroupOrderState context;NavigationCommandSourcePins sourcePins;int allocationThread;CertifiedRouteKernel worker;
             using(EnterTransport()){
                 RejectTransferCallbackReentry();
                 if(preparedCommandGroup!=null)return null;
                 context=commandGroup;
                 if(ids==null||goals==null||ids.Length==0||ids.Length!=goals.Length||Requests.Count+RegisteredRouteCount+ids.Length>RouteRequestCapacity)return false;
                 allocationThread=hostAllocationThread;worker=certifiedHost;budget=physicalHostBudget;observedHost=committedHostRoot;observedAuthority=authorityOwners;operation=authorityOperationIdentity;publication=admissionPublicationIdentity;oldRequestSequence=requestSequence;oldGroupSequence=groupSequence;Requests.ObserveState(out mailboxRevision,out mailboxCount);
-                oldGroups=groups;oldMembers=memberGroups;oldOrders=orders;oldPending=pending;oldAllocating=allocating;oldReservations=reservations;oldGoals=retainedGoals;oldIdentities=movementIdentities;oldFailures=technicalFailures;if(observedAuthority==null||!observedAuthority.BelongsTo(budget)||observedHost!=null&&!observedHost.BelongsTo(budget)||groupCommandBacking!=null&&!groupCommandBacking.BelongsTo(budget))throw new ArgumentException("Group source belongs to another ledger.");sourcePins=new NavigationCommandSourcePins(observedHost,observedAuthority,groupCommandBacking);
+                oldGroups=groups;oldMembers=memberGroups;oldOrders=orders;oldPending=pending;oldAllocating=allocating;oldReservations=reservations;oldGoals=retainedGoals;oldIdentities=movementIdentities;oldFailures=technicalFailures;if(observedAuthority==null||!observedAuthority.BelongsTo(budget)||observedHost!=null&&!observedHost.BelongsTo(budget)||groupCommandBacking!=null&&!groupCommandBacking.BelongsTo(budget))throw new ArgumentException("Group source belongs to another ledger.");source=new StopSource(this);sourcePins=new NavigationCommandSourcePins(observedHost,observedAuthority,groupCommandBacking,source.Admission);
             }
             using(sourcePins){
+#if UNITY_INCLUDE_TESTS
+            AfterMovementSourcePinsForTests?.Invoke();
+#endif
             if(!budget.TryOpenScope(NavigationPreparationKind.Admission,Generation,publication,out var scope))return false;
-            bool staged=false;try{
+            MovementReadSet inputs=null;bool staged=false;
+            try{
+            using(EnterTransport())if(operation!=authorityOperationIdentity||!ReferenceEquals(observedAuthority,authorityOwners)||!ReferenceEquals(context,commandGroup)||!source.CurrentForMovement(this,observedHost,sourceInputs,legacySingle))return false;
+            try{
+                if(sourceInputs!=null){inputs=sourceInputs;inputs.Retain();}
+                else if(!legacySingle&&context!=null&&(context.Kind==PlayableCommandKind.Move||context.Kind==PlayableCommandKind.AttackMove))inputs=MovementReadSet.CreateOwned(this,scope.OwnedReservation());
+            }catch(Exception error)when(NavigationCommandRefused.IsStorageCapacity(error)){return false;}
+            // QA-only rendezvous after paid semantic observation and source pins.
+            // The default null path is inert.
+            AfterMovementObservationForQa?.Invoke();
+            // Reject changed declarations/actors before constructing a projection from them.
+            using(EnterTransport())if(operation!=authorityOperationIdentity||!ReferenceEquals(observedAuthority,authorityOwners)||!source.CurrentForMovement(this,observedHost,inputs,legacySingle)||inputs!=null&&!inputs.Current(this,budget))return false;
+            try{
                 NavigationGroupCommand candidate=null;
                 NavigationCommandSlots<long,GroupOrderState> nextGroups=null;NavigationCommandSlots<int,long> nextMembers=null,nextOrders=null;
                 NavigationCommandSlots<int,NavigationRequest> nextPending=null,nextAllocating=null;NavigationCommandSlots<int,NavPoint> nextReservations=null,nextGoals=null;NavigationCommandSlots<int,string> nextIdentities=null;NavigationCommandSlots<int,NavSolveStatus> nextFailures=null;NavigationCommandSlots<long,NavigationArrivalReservation> nextLedger=null;
@@ -151,13 +193,13 @@ namespace Spacewars.Runtime
                     long projectionScratch=checked(1024L+NavStorageLayout.ObjectBytesBound(typeof(GroupOrderState))+32L+ids.Length*(NavStorageLayout.ObjectBytesBound(typeof(GroupMemberState))+128L)+(oldMemberCount+ids.Length)*64L+(oldGroups.Count+1)*256L+(oldPending.Count+probes.Count+ids.Length)*64L);
                     using(NavStorageScratch.Reserve(scope.OwnedReservation(),projectionScratch)){
                         var next=legacySingle&&oldGroups.TryGetValue(groupId,out var existingRecord)?existingRecord.CopyHeader():context==null?new GroupOrderState{WorldGeneration=Generation,GroupId=groupId,OrderRevision=groupId,MembershipRevision=1,Kind=PlayableCommandKind.Move,Origin=PlayableOrderOrigin.Unknown,OriginalGoal=goals[0]}:context.CopyHeader();next.Members=new GroupMemberState[ids.Length];
-                        if(marchConfigured){next.MarchVersion=1;next.MarchProfileRevision=marchProfileRevision;next.MarchStretch=marchStretch;}
+                        if(marchConfigured&&!legacySingle){next.MarchVersion=2;next.MarchProfileRevision=marchProfileRevision;next.MarchStretch=marchStretch;}
                         // Preparation scratch holds DTOs only until concrete owners
                         // have copied them; it is never a live authority owner.
                         var indices=Enumerable.Range(0,ids.Length).OrderBy(i=>ids[i]).ToArray();
                         for(int j=0;j<indices.Length;j++){
                             int i=indices[j],id=ids[i];Crowd.TryGet(id,out var actor);Crowd.Locate(goals[i],actor.Radius,out var location);oldOrders.TryGetValue(id,out long previousOrder);
-                            next.Members[j]=new GroupMemberState{Entity=id,Incarnation=actor.Incarnation,OrderRevision=context==null?groupId:commandActivationRevision,MobilityRevision=actor.MobilityRevision,Goal=goals[i],GoalLocation=location,HasGoal=true,Reservation=arrival?0:id,Phase=arrival?GroupMemberPhase.Allocating:actor.Held?GroupMemberPhase.Held:GroupMemberPhase.PendingRoute};
+                            next.Members[j]=new GroupMemberState{ProgressVersion=next.MarchVersion==2?2:0,Entity=id,Incarnation=actor.Incarnation,OrderRevision=context==null?groupId:commandActivationRevision,MobilityRevision=actor.MobilityRevision,Goal=goals[i],GoalLocation=location,HasGoal=true,Reservation=arrival?0:id,Phase=arrival?GroupMemberPhase.Allocating:actor.Held?GroupMemberPhase.Held:GroupMemberPhase.PendingRoute};
                             if(legacySingle&&oldGroups.TryGetValue(groupId,out var previousRecord)){
                                 var original=previousRecord.Members.Single(m=>m.Entity==id);var replacement=original.Copy();replacement.Goal=goals[i];replacement.GoalLocation=location;replacement.HasGoal=true;replacement.Reservation=id;replacement.Phase=actor.Held?GroupMemberPhase.Held:replacement.FormationReleased?GroupMemberPhase.Combat:GroupMemberPhase.PendingRoute;replacement.MobilityRevision=actor.MobilityRevision;next.Members[j]=replacement;
                             }
@@ -176,18 +218,19 @@ namespace Spacewars.Runtime
                             if(remaining.CommandSequence!=next.CommandSequence||remaining.OrderRevision!=next.OrderRevision)throw new InvalidOperationException("Issuance collision.");
                             next.MarchVersion=remaining.MarchVersion;next.MarchProfileRevision=remaining.MarchProfileRevision;next.MarchStretch=remaining.MarchStretch;next.MarchAnchor=0;next.MarchInitialized=false;
                             int slot=remaining.Members.Max(m=>m.Slot)+1;foreach(var member in SpatialSlotOrder(next.Members,next.OriginalGoal))member.Slot=slot++;
+                            foreach(var member in next.Members){member.ProgressVersion=next.MarchVersion==2?2:0;if(next.MarchVersion==2)member.Progress=member.ProgressOffset=Math.Max(0,remaining.MarchAnchor);}
                             next.Members=remaining.Members.Concat(next.Members).OrderBy(m=>m.Entity).ToArray();next.MembershipRevision=remaining.MembershipRevision+1;
                         }else {int slot=0;foreach(var member in SpatialSlotOrder(next.Members,next.OriginalGoal))member.Slot=slot++;}
                         var live=CopyCommandGroup(next,scope);liveBirths.Add(live);next=live.PreparedRecord(scope);nextGroups.SetPreparing(groupId,next,live);
                         foreach(int id in ids)nextMembers.SetPreparing(id,groupId);
                         candidate=NavigationGroupCommand.CreateOwned(Requests.InstanceCapacity,ids.Length,scope.OwnedReservation());
                         candidate.Groups=nextGroups;candidate.MemberGroups=nextMembers;candidate.Orders=nextOrders;candidate.Pending=nextPending;candidate.Allocating=nextAllocating;candidate.Reservations=nextReservations;candidate.Goals=nextGoals;candidate.Identities=nextIdentities;candidate.Failures=nextFailures;candidate.Ledger=nextLedger;candidate.OwnMaps();
-                        using(NavStorageScratch.Reserve(scope.OwnedReservation(),32L+8L*mailboxCount)){foreach(var queued in Requests.CopyItemsAtRevision(mailboxRevision))candidate.AppendMailbox(queued);}
+                        PrepareCommandMailbox(candidate,mailboxRevision,mailboxCount,scope,CommandMailboxKind.Movement);
                         long sequence=oldRequestSequence;int issued=0;
                         foreach(int i in indices){int id=ids[i];Crowd.TryGet(id,out var actor);Crowd.Locate(goals[i],actor.Radius,out var location);
                             NavigationHostRequest requestOwner=null;var unitProfile=NavigationProfile.CreateForUnitOwned(profile,actor.Radius,actor.Speed,actor.TurnSpeed,scope.OwnedReservation());
                             try{requestOwner=NavigationHostRequest.CreateOwned(Generation,checked(++sequence),id,nextOrders[id],unitProfile,MovementGeometry(id),actor.Position,goals[i],navigationGeometry,HeldIdentity(id),new NavigationMemberIdentity(actor.Incarnation,actor.MobilityRevision,groupId,legacySingle?next.Members.Single(m=>m.Entity==id).OrderRevision:context==null?groupId:commandActivationRevision,next.MembershipRevision),actor.Location,location,null,scope.OwnedReservation());
-                            try{var request=requestOwner.Request;if(arrival){nextPending.Remove(id);nextAllocating.SetPreparing(id,request,requestOwner);}else nextPending.SetPreparing(id,request,requestOwner);nextIdentities.SetPreparing(id,request.HeldIdentity,requestOwner.HeldOwner);if(!arrival)candidate.AppendMailbox(request);candidate.Actors[issued]=actor;using(EnterTransport()){if(operation!=authorityOperationIdentity)throw new InvalidOperationException("Installed observation source changed.");installedExecutions.TryGetValue(id,out var observedInstalled);candidate.ObserveInstalled(issued,observedInstalled,installedExecutions.IsDetached(id));}candidate.OwnIssued(issued,requestOwner);candidate.Issued[issued++]=request;}finally{requestOwner.ReleaseStorage();}
+                            try{var request=requestOwner.Request;if(arrival){nextPending.Remove(id);nextAllocating.SetPreparing(id,request,requestOwner);}else nextPending.SetPreparing(id,request,requestOwner);nextIdentities.SetPreparing(id,request.HeldIdentity,requestOwner.HeldOwner);if(!arrival)candidate.AppendMailbox(request);candidate.Actors[issued]=actor;using(EnterTransport()){if(operation!=authorityOperationIdentity)throw new NavigationCommandRefused("Installed observation source changed.");installedExecutions.TryGetValue(id,out var observedInstalled);candidate.ObserveInstalled(issued,observedInstalled,installedExecutions.IsDetached(id));}candidate.OwnIssued(issued,requestOwner);candidate.Issued[issued++]=request;}finally{requestOwner.ReleaseStorage();}
                             }finally{unitProfile.StorageRoot.Release();}
                         }
                         candidate.RequestSequence=sequence;candidate.GroupSequence=Math.Max(oldGroupSequence,groupId);candidate.Publication=checked(publication+1);
@@ -195,6 +238,7 @@ namespace Spacewars.Runtime
                     }
                     nextGroups.Seal();nextMembers.Seal();nextOrders.Seal();nextPending.Seal();nextAllocating.Seal();nextReservations.Seal();nextGoals.Seal();nextIdentities.Seal();nextFailures.Seal();nextLedger.Seal();
                     candidate.Committed.CrowdNames=CaptureCrowdNameReferences(scope.OwnedReservation());foreach(var actor in candidate.Actors)candidate.Committed.CrowdNames.ClearFailedPreparing(actor.Id);
+                    if(inputs!=null){source.Bind(candidate);candidate.MovementInputs=NavPhysicalMacro.Acquire(candidate,inputs);}
                     candidate.Budget=budget;candidate.ExpectedHost=observedHost;candidate.ExpectedAuthority=observedAuthority;candidate.PinObservation();
                     candidate.Operation=operation;candidate.ExpectedPublication=publication;candidate.ExpectedRequestSequence=oldRequestSequence;candidate.ExpectedGroupSequence=oldGroupSequence;candidate.MailboxRevision=mailboxRevision;candidate.CommandContext=context;candidate.Arrival=arrival;candidate.AllocationThread=allocationThread;candidate.Worker=worker;
                     candidate.OldGroups=oldGroups;candidate.OldMembers=oldMembers;candidate.OldOrders=oldOrders;candidate.OldPending=oldPending;candidate.OldAllocating=oldAllocating;candidate.OldReservations=oldReservations;candidate.OldGoals=oldGoals;candidate.OldIdentities=oldIdentities;candidate.OldFailures=oldFailures;
@@ -202,20 +246,21 @@ namespace Spacewars.Runtime
                     foreach(var pin in sourceGroupPins)pin?.Release();sourceGroupPins=null;sourceScratch.Dispose();sourceScratch=null;scope.Attach(candidate);
                     if(context!=null){using(EnterTransport()){ValidatePreparedGroup(candidate,scope);preparedCommandGroup=candidate;preparedCommandScope=scope;staged=true;}return true;}
                     PublishPreparedGroup(candidate,scope);return true;
-                }catch(InvalidOperationException){if(candidate?.Published==true)throw;return false;}
-                catch(Exception exception)when(exception is ArgumentException||exception is NullReferenceException||exception is IndexOutOfRangeException){using(EnterTransport()){if(candidate?.Published!=true&&(operation!=authorityOperationIdentity||!ReferenceEquals(observedAuthority,authorityOwners)||!ReferenceEquals(observedHost,committedHostRoot)))return false;}throw;}
+                }catch(Exception error)when(NavigationCommandRefused.IsExpected(error,scope)){if(candidate?.Published==true)throw;return false;}
                 finally{if(!staged)candidate?.ReleaseStorage();nextGroups?.ReleaseStorage();nextMembers?.ReleaseStorage();nextOrders?.ReleaseStorage();nextPending?.ReleaseStorage();nextAllocating?.ReleaseStorage();nextReservations?.ReleaseStorage();nextGoals?.ReleaseStorage();nextIdentities?.ReleaseStorage();nextFailures?.ReleaseStorage();nextLedger?.ReleaseStorage();if(liveBirths!=null)foreach(var birth in liveBirths)birth.ReleaseStorage();if(sourceGroupPins!=null)foreach(var pin in sourceGroupPins)pin?.Release();sourceScratch?.Dispose();}
             }finally{if(!staged)scope.Dispose();}
+            }finally{inputs?.ReleaseOwner();if(!staged)scope.Dispose();}
             }
         }
         // Rebinding a tactical issuance changes group metadata only. Prepare
         // owned records/maps before publication, just as for a movement command;
         // never place a detached DTO into an already owned group map.
-        private void FinishOwnedMetadataGroup(int[] ids)
+        private void FinishOwnedMetadataGroup(int[] ids,out bool published,bool stageOnly=false,MovementReadSet sourceInputs=null)
         {
+            published=false;
             NavigationGroupCommand c=null;NavigationCommandSourcePins pins;var births=new List<NavigationLiveGroup>();
             long operation,publication;GroupOrderState context;
-            NavigationHostRoot host;NavigationAuthorityOwners authority;NavigationRetentionBudget budget;int allocationThread;CertifiedRouteKernel worker;
+            StopSource source;NavigationHostRoot host;NavigationAuthorityOwners authority;NavigationRetentionBudget budget;int allocationThread;CertifiedRouteKernel worker;
             IDictionary<long,GroupOrderState> oldGroups;IDictionary<int,long> oldMembers,oldOrders;
             IDictionary<int,NavigationRequest> oldPending,oldAllocating;IDictionary<int,NavPoint> oldReservations,oldGoals;IDictionary<int,string> oldIdentities;IDictionary<int,NavSolveStatus> oldFailures;
             long oldRequestSequence,oldGroupSequence;IDictionary<long,NavigationArrivalReservation> oldLedger;
@@ -224,14 +269,15 @@ namespace Spacewars.Runtime
                 host=committedHostRoot;authority=authorityOwners;budget=physicalHostBudget;allocationThread=hostAllocationThread;worker=certifiedHost;
                 oldGroups=groups;oldMembers=memberGroups;oldOrders=orders;oldPending=pending;oldAllocating=allocating;oldReservations=reservations;oldGoals=retainedGoals;oldIdentities=movementIdentities;oldFailures=technicalFailures;oldLedger=arrivalLedger;
                 oldRequestSequence=requestSequence;oldGroupSequence=groupSequence;
-                pins=new NavigationCommandSourcePins(host,authority,groupCommandBacking);
+                source=new StopSource(this);pins=new NavigationCommandSourcePins(host,authority,groupCommandBacking,source.Admission);
             }
             using(pins){
                 AfterMetadataObservationForQa?.Invoke();
-                if(!budget.TryOpenScope(NavigationPreparationKind.Admission,Generation,publication,out var scope))throw new InvalidOperationException("Metadata group admission refused.");
-                using(scope)try{
+                if(!budget.TryOpenScope(NavigationPreparationKind.Admission,Generation,publication,out var scope))throw new NavigationCommandRefused("Metadata group admission refused.");
+                bool staged=false;try{
                     c=NavigationGroupCommand.CreateOwned(Requests.InstanceCapacity,0,scope.OwnedReservation(),ids.Length+1);
-                    c.Budget=budget;c.ExpectedHost=host;c.ExpectedAuthority=authority;c.PinObservation();
+                    source.Bind(c);c.Budget=budget;c.ExpectedHost=host;c.ExpectedAuthority=authority;c.PinObservation();
+                    if(stageOnly){var inputs=sourceInputs??MovementReadSet.CreateOwned(this,scope.OwnedReservation());if(sourceInputs!=null)inputs.Retain();try{c.MovementInputs=NavPhysicalMacro.Acquire(c,inputs);}finally{inputs.ReleaseOwner();}}
                     c.Operation=operation;c.ExpectedPublication=publication;c.ExpectedRequestSequence=oldRequestSequence;c.ExpectedGroupSequence=oldGroupSequence;c.CommandContext=context;c.AllocationThread=allocationThread;c.Worker=worker;
                     c.OldGroups=oldGroups;c.OldMembers=oldMembers;c.OldOrders=oldOrders;c.OldPending=oldPending;c.OldAllocating=oldAllocating;c.OldReservations=oldReservations;c.OldGoals=oldGoals;c.OldIdentities=oldIdentities;c.OldFailures=oldFailures;
                     c.Groups=CopyCommandMap(oldGroups,1,scope,operation);c.MemberGroups=CopyCommandMap(oldMembers,ids.Length,scope,operation);
@@ -258,10 +304,11 @@ namespace Spacewars.Runtime
                             if(existing.CommandSequence!=next.CommandSequence||existing.OrderRevision!=next.OrderRevision)throw new InvalidOperationException("Issuance collision.");
                             next.MarchVersion=existing.MarchVersion;next.MarchProfileRevision=existing.MarchProfileRevision;next.MarchStretch=existing.MarchStretch;next.MarchAnchor=0;next.MarchInitialized=false;
                             int slot=existing.Members.Max(m=>m.Slot)+1;foreach(var member in SpatialSlotOrder(members,next.OriginalGoal))member.Slot=slot++;
+                            foreach(var member in members){member.ProgressVersion=next.MarchVersion==2?2:0;if(next.MarchVersion==2)member.Progress=member.ProgressOffset=Math.Max(0,existing.MarchAnchor);}
                             next.Members=existing.Members.Concat(members).OrderBy(m=>m.Entity).ToArray();next.MembershipRevision=existing.MembershipRevision+1;
                         }else{
-                            if(marchConfigured){next.MarchVersion=1;next.MarchProfileRevision=marchProfileRevision;next.MarchStretch=marchStretch;}
-                            int slot=0;foreach(var member in SpatialSlotOrder(members,next.OriginalGoal))member.Slot=slot++;next.Members=members.ToArray();
+                            if(marchConfigured){next.MarchVersion=2;next.MarchProfileRevision=marchProfileRevision;next.MarchStretch=marchStretch;}
+                            int slot=0;foreach(var member in SpatialSlotOrder(members,next.OriginalGoal))member.Slot=slot++;foreach(var member in members)member.ProgressVersion=next.MarchVersion==2?2:0;next.Members=members.ToArray();
                         }
                         Install(next);foreach(int id in ids)c.MemberGroups.SetPreparing(id,next.GroupId);
                         // Intermediate detached-subset births need not be activated.
@@ -269,16 +316,21 @@ namespace Spacewars.Runtime
                         c.RequestSequence=oldRequestSequence;c.GroupSequence=Math.Max(oldGroupSequence,next.GroupId);c.Publication=checked(publication+1);
                         c.AdmissionOwner=PrepareAdmissionProjection(c.Groups,c.Pending,c.RequestSequence,c.Publication,operation,scope,admissionOwner);
                     }
-                    Requests.ObserveState(out c.MailboxRevision,out var count);using(NavStorageScratch.Reserve(scope.OwnedReservation(),32L+8L*count))foreach(var queued in Requests.CopyItemsAtRevision(c.MailboxRevision))c.AppendMailbox(queued);
+                    Requests.ObserveState(out c.MailboxRevision,out var count);PrepareCommandMailbox(c,c.MailboxRevision,count,scope,CommandMailboxKind.Metadata);
                     c.Groups.Seal();c.MemberGroups.Seal();c.Orders.Seal();c.Pending.Seal();c.Allocating.Seal();c.Reservations.Seal();c.Goals.Seal();c.Identities.Seal();c.Failures.Seal();c.Ledger.Seal();
-                    c.Committed.CrowdNames=CaptureCrowdNameReferences(scope.OwnedReservation());scope.Attach(c);PublishPreparedGroup(c,scope,ids);
+                    c.Committed.CrowdNames=CaptureCrowdNameReferences(scope.OwnedReservation());scope.Attach(c);
+                    if(stageOnly){c.MetadataRecipients=ids;using(EnterTransport()){ValidateMetadataGroupSource(c,scope);preparedCommandGroup=c;preparedCommandScope=scope;staged=true;}}else PublishPreparedGroup(c,scope,ids);
                 }finally{
-                    c?.Groups?.ReleaseStorage();c?.MemberGroups?.ReleaseStorage();c?.Orders?.ReleaseStorage();c?.Pending?.ReleaseStorage();c?.Allocating?.ReleaseStorage();c?.Reservations?.ReleaseStorage();c?.Goals?.ReleaseStorage();c?.Identities?.ReleaseStorage();c?.Failures?.ReleaseStorage();c?.Ledger?.ReleaseStorage();c?.ReleaseStorage();foreach(var birth in births)birth.ReleaseStorage();
+                    // Copy phase before releasing the candidate, including exceptional exits.
+                    published=c?.Published==true;
+                    c?.Groups?.ReleaseStorage();c?.MemberGroups?.ReleaseStorage();c?.Orders?.ReleaseStorage();c?.Pending?.ReleaseStorage();c?.Allocating?.ReleaseStorage();c?.Reservations?.ReleaseStorage();c?.Goals?.ReleaseStorage();c?.Identities?.ReleaseStorage();c?.Failures?.ReleaseStorage();c?.Ledger?.ReleaseStorage();if(!staged)c?.ReleaseStorage();foreach(var birth in births)birth.ReleaseStorage();if(!staged)scope.Dispose();
                 }
             }
         }
         // QA-only rendezvous runs outside the transport gate, after observation pins exist.
         internal Action AfterMetadataObservationForQa;
+        // QA-only movement source rendezvous; null in production and outside all gates.
+        internal Action AfterMovementObservationForQa;
         internal NavigationGroupCommand LastGroupGuardCandidateForQa;
         [Flags] internal enum GroupGuardMismatch : ulong
         {
@@ -335,11 +387,202 @@ namespace Spacewars.Runtime
             public PlayableCommandKind CommandKind;public long CommandSequence,CommandGroupId;
         }
         internal GroupGuardObservation LastGroupGuardObservationForQa;
+        // This readset is transient preparation storage, never capture/wire state.
+        // Solver payload is neither consumed nor replaced by command publication.
+        internal sealed class MovementReadSet : NavOwnedStorage
+        {
+            private struct Actor {internal NavUnit Owner;internal NavPoint Position;internal NavLocation Location;internal long Incarnation,Mobility;internal double Radius,Speed,TurnSpeed;internal bool Held;internal int Team;}
+            private readonly Actor[] actors;
+            private readonly KeyValuePair<int,NavigationRequest>[] probeRows;
+            private readonly IDictionary<int,NavigationRequest> probes;
+            private readonly NavigationCommandAuthority backing;
+            private readonly NavigationAdmissionStorage admission;
+            private readonly IDictionary<long,NavigationArrivalReservation> ledger;
+            private readonly NavGeometry geometry,baseGeometry;private readonly NavigationProfile profile;private readonly IPlayableTerrain terrain;private readonly NavRetainedArray<NavNameReference> terrainNames;
+            private readonly long attachment,generation;private readonly int geometryRevision,baseRevision;
+            private readonly bool march;private readonly int marchRevision;private readonly double marchStretch;private readonly GroupOrderState context,contextHeader;private readonly long activation;
+            private bool sealedInputs;
+            internal override bool IsImmutableCaptureRoot=>sealedInputs;
+            private MovementReadSet(NavigationSession s,long bytes):base(bytes)
+            {
+                march=s.marchConfigured;marchRevision=s.marchProfileRevision;marchStretch=s.marchStretch;context=s.commandGroup;contextHeader=context?.CopyHeader();activation=s.commandActivationRevision;
+                actors=new Actor[s.Crowd.Units.Count];probeRows=new KeyValuePair<int,NavigationRequest>[s.probes.Count];probes=s.probes;
+                backing=s.groupCommandBacking;admission=s.admissionOwner;ledger=s.arrivalLedger;geometry=s.geometry;baseGeometry=s.navigationGeometry;profile=s.profile;terrain=s.terrain;terrainNames=s.terrainNameOwners;attachment=s.certifiedHostAttachmentIdentity;generation=s.Generation;geometryRevision=geometry.Revision;baseRevision=baseGeometry.Revision;
+                for(int i=0;i<actors.Length;i++){var u=s.Crowd.Units[i];actors[i]=new Actor{Owner=u,Position=u.Position,Location=u.Location,Incarnation=u.Incarnation,Mobility=u.MobilityRevision,Radius=u.Radius,Speed=u.Speed,TurnSpeed=u.TurnSpeed,Held=u.Held,Team=u.Team};}
+                int n=0;foreach(var row in s.probes)probeRows[n++]=row;
+                Retain();sealedInputs=true;
+            }
+            internal static MovementReadSet CreateOwned(NavigationSession s,INavStorageReservation r)
+            {
+                long bytes=checked(NavStorageLayout.ObjectBytesBound(typeof(MovementReadSet))+NavStorageLayout.ObjectBytesBound(typeof(GroupOrderState))+64+128L*s.Crowd.Units.Count+32L*s.probes.Count);
+                using(var a=new NavStorageAllocation(r.TryReserve)){a.Reserve(bytes);return a.Register(new MovementReadSet(s,bytes));}
+            }
+            internal static bool SamePoint(NavPoint a,NavPoint b)=>a.X.Equals(b.X)&&a.Z.Equals(b.Z);
+            internal static bool SameLocationValue(NavLocation a,NavLocation b)=>SamePoint(a.Position,b.Position)&&a.SurfaceId==b.SurfaceId;
+            private static bool SameLocation(NavLocation a,NavLocation b)=>SameLocationValue(a,b)&&ReferenceEquals(a.NameReference.Owner,b.NameReference.Owner)&&a.NameReference.Role==b.NameReference.Role&&a.NameReference.Index==b.NameReference.Index;
+            private static bool HeaderSame(GroupOrderState a,GroupOrderState b)
+            {if(a==null||b==null)return a==null&&b==null;return a.WorldGeneration==b.WorldGeneration&&a.GroupId==b.GroupId&&a.OrderRevision==b.OrderRevision&&a.CommandSequence==b.CommandSequence&&a.IssuedTick==b.IssuedTick&&a.MembershipRevision==b.MembershipRevision&&a.MarchVersion==b.MarchVersion&&a.MarchProfileRevision==b.MarchProfileRevision&&a.MarchStretch==b.MarchStretch&&a.MarchAnchor==b.MarchAnchor&&a.MarchInitialized==b.MarchInitialized&&a.OwnerId==b.OwnerId&&a.Source==b.Source&&a.TeamId==b.TeamId&&a.TargetId==b.TargetId&&a.Origin==b.Origin&&a.Kind==b.Kind&&a.JobId==b.JobId&&a.ActionId==b.ActionId&&SamePoint(a.OriginalGoal,b.OriginalGoal)&&a.OriginalLocation.HasValue==b.OriginalLocation.HasValue&&(!a.OriginalLocation.HasValue||SameLocation(a.OriginalLocation.Value,b.OriginalLocation.Value))&&ReferenceEquals(a.Members,b.Members);}
+            internal bool Current(NavigationSession s,NavigationGroupCommand c)=>Current(s,c.Budget);
+            internal bool Current(NavigationSession s,NavigationRetentionBudget budget)
+            {
+                if(!HeaderSame(contextHeader,s.commandGroup)||march!=s.marchConfigured||marchRevision!=s.marchProfileRevision||marchStretch!=s.marchStretch||!ReferenceEquals(context,s.commandGroup)||activation!=s.commandActivationRevision||!sealedInputs||References<=0||!IsRegistered||!BelongsTo(budget)||generation!=s.Generation||attachment!=s.certifiedHostAttachmentIdentity||
+                    !ReferenceEquals(backing,s.groupCommandBacking)||!ReferenceEquals(admission,s.admissionOwner)||!ReferenceEquals(ledger,s.arrivalLedger)||!ReferenceEquals(probes,s.probes)||
+                    !ReferenceEquals(geometry,s.geometry)||!ReferenceEquals(baseGeometry,s.navigationGeometry)||!ReferenceEquals(profile,s.profile)||!ReferenceEquals(terrain,s.terrain)||!ReferenceEquals(terrainNames,s.terrainNameOwners)||geometryRevision!=s.geometry.Revision||baseRevision!=s.navigationGeometry.Revision||
+                    actors.Length!=s.Crowd.Units.Count||probeRows.Length!=s.probes.Count)return false;
+                for(int i=0;i<actors.Length;i++){var a=actors[i];if(!s.Crowd.TryGet(a.Owner.Id,out var u)||!ReferenceEquals(u,a.Owner)||u.Incarnation!=a.Incarnation||u.MobilityRevision!=a.Mobility||u.Radius!=a.Radius||u.Speed!=a.Speed||u.TurnSpeed!=a.TurnSpeed||u.Held!=a.Held||u.Team!=a.Team||!SamePoint(u.Position,a.Position)||!SameLocation(u.Location,a.Location))return false;}
+                for(int i=0;i<probeRows.Length;i++){var row=probeRows[i];if(!s.probes.TryGetValue(row.Key,out var v)||!ReferenceEquals(v,row.Value))return false;}
+                return true;
+            }
+            internal override void ReleaseOwner()=>Release();
+            protected override void ReleaseEdges(){}
+        }
+        // These two adjacent worker boundaries do not consume a semantic Move's
+        // inputs. Recognize only the same live, runnable quantum; never publish
+        // a root, close an allocation, or change the bank from command validation.
+        private bool SameActiveMovementQuantum(NavigationRetentionBudget budget,NavigationHostRoot before,CertifiedRouteKernel worker,long attachment)
+        {
+            var current=committedHostRoot;
+            return before!=null&&current!=null&&!ReferenceEquals(before,current)&&worker!=null&&ReferenceEquals(worker,certifiedHost)&&attachment==certifiedHostAttachmentIdentity&&ReferenceEquals(budget,physicalHostBudget)&&
+                before.IsImmutableCaptureRoot&&current.IsImmutableCaptureRoot&&before.References>0&&current.References>0&&before.BelongsTo(budget)&&current.BelongsTo(budget)&&ReferenceEquals(before.AuthorityGeometry,current.AuthorityGeometry)&&
+                before.TickQuantum&&current.TickQuantum&&before.QuantumGeneration==Generation&&current.QuantumGeneration==Generation&&before.QuantumTick==current.QuantumTick&&before.QuantumSerial==current.QuantumSerial&&
+                before.QuantumRunnable&&current.QuantumRunnable&&!before.QuantumCompleted&&!current.QuantumCompleted&&before.QuantumBudget==current.QuantumBudget&&before.AdmissionPrefix==current.AdmissionPrefix&&before.ConsumedQuantum==current.ConsumedQuantum&&
+                before.FairArrivals==current.FairArrivals&&before.ReplayOnlyProjection==current.ReplayOnlyProjection&&before.AccruedCredits==current.AccruedCredits&&before.PhysicalTag.Equals(current.PhysicalTag)&&before.Epoch==current.Epoch&&
+                SameMovementPhaseCounters(before.Frontier,current.Frontier);
+        }
+        private static bool SameMovementPhaseCounters(CertifiedRouteKernel.PumpFrontier a,CertifiedRouteKernel.PumpFrontier b)
+            =>a.OriginalBudget==b.OriginalBudget&&a.ScansUsed==b.ScansUsed&&a.TransfersUsed==b.TransfersUsed&&a.ReadyUsed==b.ReadyUsed&&a.ProjectionUsed==b.ProjectionUsed&&a.ProjectionAllowance==b.ProjectionAllowance&&
+                a.SolveWorkLimit==b.SolveWorkLimit&&a.SolveConsumed==b.SolveConsumed&&a.AllocationFloor==b.AllocationFloor&&a.PhaseUsed==0&&b.PhaseUsed==0&&a.ScanAllowance==b.ScanAllowance;
+        private bool SameQuantumPostFlushCompletion(NavigationRetentionBudget budget,NavigationHostRoot before,CertifiedRouteKernel worker,long attachment,int allocationThread)
+        {
+            var current=committedHostRoot;
+            return allocationThread!=0&&hostAllocationThread==0&&SameActiveMovementQuantum(budget,before,worker,attachment)&&worker.CompletedAllocationOnThread(allocationThread)&&
+                before.Frontier.Stage==CertifiedRouteKernel.PumpStage.Projection&&current.Frontier.Stage==CertifiedRouteKernel.PumpStage.PostFlush&&
+                before.Projection.Count==0&&current.Projection.Count==0&&before.Progress==current.Progress;
+        }
+        private bool ArrivalPhaseSemanticMovementMatches(NavigationGroupCommand c)
+        {
+            var before=c.ExpectedHost;var current=committedHostRoot;
+            return c.MovementInputs!=null&&c.Arrival&&!c.IsStop&&!c.IsRemoval&&c.MetadataRecipients==null&&c.CommandContext!=null&&
+                (c.CommandContext.Kind==PlayableCommandKind.Move||c.CommandContext.Kind==PlayableCommandKind.AttackMove)&&c.AllocationThread==0&&hostAllocationThread==0&&
+                SameActiveMovementQuantum(c.Budget,before,c.Worker,c.StopAttachment)&&before.FairArrivals&&
+                before.Frontier.Stage==CertifiedRouteKernel.PumpStage.ArrivalAdvance&&current.Frontier.Stage==CertifiedRouteKernel.PumpStage.PreFlush&&
+                current.Progress>=before.Progress&&current.Progress-before.Progress<=1&&c.MovementInputs.Current(this,c);
+        }
+        // Caller owns transportGate. Observe certified completion; never publish,
+        // consume, issue, close or replace a host/credit/solver frontier here.
+        private bool SameQuantumAllocationCompleted(NavigationRetentionBudget budget,NavigationHostRoot before,CertifiedRouteKernel worker,long attachment,int allocationThread)
+        {
+            if(SameQuantumPostFlushCompletion(budget,before,worker,attachment,allocationThread))return true;
+            var current=committedHostRoot;
+            return before!=null&&current!=null&&!ReferenceEquals(before,current)&&worker!=null&&ReferenceEquals(worker,certifiedHost)&&attachment==certifiedHostAttachmentIdentity&&allocationThread!=0&&hostAllocationThread==0&&
+                before.IsImmutableCaptureRoot&&current.IsImmutableCaptureRoot&&before.References>0&&current.References>0&&before.BelongsTo(budget)&&current.BelongsTo(budget)&&ReferenceEquals(budget,physicalHostBudget)&&ReferenceEquals(before.AuthorityGeometry,current.AuthorityGeometry)&&
+                before.Frontier.Stage>=CertifiedRouteKernel.PumpStage.Scan&&before.Frontier.Stage<=CertifiedRouteKernel.PumpStage.EndAllocation&&current.Frontier.Stage==CertifiedRouteKernel.PumpStage.Idle&&
+                before.TickQuantum&&current.TickQuantum&&before.QuantumGeneration==Generation&&before.QuantumGeneration==current.QuantumGeneration&&before.QuantumTick==current.QuantumTick&&before.QuantumSerial==current.QuantumSerial&&
+                before.Frontier.AllocationFloor==current.Frontier.AllocationFloor&&before.Frontier.OriginalBudget==current.Frontier.OriginalBudget&&before.QuantumBudget==current.QuantumBudget&&before.AdmissionPrefix==current.AdmissionPrefix&&before.ConsumedQuantum==current.ConsumedQuantum&&
+                before.QuantumRunnable&&!before.QuantumCompleted&&current.QuantumCompleted&&!current.QuantumRunnable&&before.FairArrivals==current.FairArrivals&&before.ReplayOnlyProjection==current.ReplayOnlyProjection&&before.AccruedCredits==current.AccruedCredits&&before.PhysicalTag.Equals(current.PhysicalTag);
+        }
+        // An owned Move does not consume the solver frontier. A worker may enter
+        // allocation after its semantic inputs were pinned. Admit only that start,
+        // with the same attached host, ledger, geometry and quantum envelope; the
+        // caller must still validate the complete movement readset and authority.
+        // No host/credit state is refreshed or published by this predicate.
+        private bool SameEnvelopeAllocationStarted(NavigationRetentionBudget budget,NavigationHostRoot before,CertifiedRouteKernel worker,long attachment,int allocationThread)
+        {
+            var current=committedHostRoot;
+            return allocationThread==0&&hostAllocationThread!=0&&before!=null&&current!=null&&!ReferenceEquals(before,current)&&
+                worker!=null&&ReferenceEquals(worker,certifiedHost)&&worker.OwnsAllocationThread(hostAllocationThread)&&attachment==certifiedHostAttachmentIdentity&&ReferenceEquals(budget,physicalHostBudget)&&
+                before.IsImmutableCaptureRoot&&current.IsImmutableCaptureRoot&&before.References>0&&current.References>0&&before.BelongsTo(budget)&&current.BelongsTo(budget)&&ReferenceEquals(before.AuthorityGeometry,current.AuthorityGeometry)&&
+                before.Frontier.Stage>=CertifiedRouteKernel.PumpStage.Idle&&before.Frontier.Stage<=CertifiedRouteKernel.PumpStage.Allocation&&
+                current.Frontier.Stage>=CertifiedRouteKernel.PumpStage.Scan&&current.Frontier.Stage<=CertifiedRouteKernel.PumpStage.EndAllocation&&
+                (before.Frontier.Stage==CertifiedRouteKernel.PumpStage.Idle||before.Frontier.OriginalBudget==current.Frontier.OriginalBudget)&&
+                before.TickQuantum==current.TickQuantum&&(!before.TickQuantum||before.QuantumGeneration==Generation&&before.QuantumRunnable&&!before.QuantumCompleted&&current.Frontier.OriginalBudget==before.QuantumBudget)&&
+                before.QuantumGeneration==current.QuantumGeneration&&before.QuantumTick==current.QuantumTick&&before.QuantumSerial==current.QuantumSerial&&before.QuantumBudget==current.QuantumBudget&&before.AdmissionPrefix==current.AdmissionPrefix&&before.ConsumedQuantum==current.ConsumedQuantum&&
+                before.QuantumCompleted==current.QuantumCompleted&&before.QuantumRunnable==current.QuantumRunnable&&before.FairArrivals==current.FairArrivals&&before.ReplayOnlyProjection==current.ReplayOnlyProjection&&before.AccruedCredits==current.AccruedCredits&&before.PhysicalTag.Equals(current.PhysicalTag);
+        }
+        private bool StartedSemanticMovementMatches(NavigationGroupCommand c)
+            =>c.MovementInputs!=null&&c.Arrival&&!c.IsStop&&!c.IsRemoval&&c.MetadataRecipients==null&&c.CommandContext!=null&&(c.CommandContext.Kind==PlayableCommandKind.Move||c.CommandContext.Kind==PlayableCommandKind.AttackMove)&&
+                SameEnvelopeAllocationStarted(c.Budget,c.ExpectedHost,c.Worker,c.StopAttachment,c.AllocationThread)&&c.MovementInputs.Current(this,c);
+        private bool CompletedSemanticMovementMatches(NavigationGroupCommand c)
+            =>c.MovementInputs!=null&&c.Arrival&&!c.IsStop&&!c.IsRemoval&&c.MetadataRecipients==null&&c.CommandContext!=null&&(c.CommandContext.Kind==PlayableCommandKind.Move||c.CommandContext.Kind==PlayableCommandKind.AttackMove)&&
+                SameQuantumAllocationCompleted(c.Budget,c.ExpectedHost,c.Worker,c.StopAttachment,c.AllocationThread)&&c.MovementInputs.Current(this,c);
+        // A semantic movement command does not consume the host quantum. Observe
+        // exactly one already-authorized accrued-credit rollover at Idle; never
+        // issue, consume, refresh or replace the worker's current root/bank here.
+        private bool NextIdleQuantumSemanticMovementMatches(NavigationGroupCommand c)
+        {
+            var before=c.ExpectedHost;var current=committedHostRoot;
+            return c.MovementInputs!=null&&c.Arrival&&!c.IsStop&&!c.IsRemoval&&c.MetadataRecipients==null&&c.CommandContext!=null&&
+                (c.CommandContext.Kind==PlayableCommandKind.Move||c.CommandContext.Kind==PlayableCommandKind.AttackMove)&&
+                c.AllocationThread==0&&hostAllocationThread==0&&before!=null&&current!=null&&!ReferenceEquals(before,current)&&
+                c.Worker!=null&&ReferenceEquals(c.Worker,certifiedHost)&&c.StopAttachment==certifiedHostAttachmentIdentity&&ReferenceEquals(c.Budget,physicalHostBudget)&&
+                before.IsImmutableCaptureRoot&&current.IsImmutableCaptureRoot&&before.References>0&&current.References>0&&before.BelongsTo(c.Budget)&&current.BelongsTo(c.Budget)&&
+                ReferenceEquals(before.AuthorityGeometry,current.AuthorityGeometry)&&before.TickQuantum&&current.TickQuantum&&before.AccruedCredits&&current.AccruedCredits&&
+                before.QuantumGeneration==Generation&&current.QuantumGeneration==Generation&&before.Frontier.Stage==CertifiedRouteKernel.PumpStage.Idle&&current.Frontier.Stage==CertifiedRouteKernel.PumpStage.Idle&&
+                before.QuantumCompleted&&!before.QuantumRunnable&&before.QuantumSerial>0&&before.QuantumSerial<long.MaxValue&&before.ConsumedQuantum==before.QuantumSerial-1&&
+                current.QuantumSerial==before.QuantumSerial+1&&current.ConsumedQuantum==before.QuantumSerial&&current.QuantumTick>before.QuantumTick&&
+                current.QuantumBudget==before.QuantumBudget&&current.AdmissionPrefix>=before.AdmissionPrefix&&current.AdmissionPrefix<=requestSequence&&
+                before.FairArrivals==current.FairArrivals&&before.ReplayOnlyProjection==current.ReplayOnlyProjection&&before.PhysicalTag.Equals(current.PhysicalTag)&&
+                c.MovementInputs.Current(this,c);
+        }
+        private bool PreparedMovementAllocationMatches(NavigationGroupCommand c)
+            =>hostAllocationThread==c.AllocationThread||CompletedSemanticMovementMatches(c)||StartedSemanticMovementMatches(c);
+
+        private bool ValidateMovementReadSetAndHostEnvelope(NavigationGroupCommand c)
+        {
+            if(c.MovementInputs==null||!c.MovementInputs.Current(this,c))return false;
+            return TacticalHostEnvelopeMatches(c);
+        }
+        private bool TacticalHostEnvelopeMatches(NavigationGroupCommand c)
+        {
+            var a=c.ExpectedHost;var b=committedHostRoot;
+            if(CompletedSemanticMovementMatches(c)||StartedSemanticMovementMatches(c)||NextIdleQuantumSemanticMovementMatches(c)||ArrivalPhaseSemanticMovementMatches(c))return true;
+            if(ReferenceEquals(a,b))return a==null||a.IsImmutableCaptureRoot&&a.References>0&&a.BelongsTo(c.Budget)&&(!a.TickQuantum||a.QuantumGeneration==Generation);
+            if(a==null||b==null||c.Worker==null||!ReferenceEquals(c.Worker,certifiedHost)||c.StopAttachment!=certifiedHostAttachmentIdentity||c.AllocationThread==0||c.AllocationThread!=hostAllocationThread||
+                !a.IsImmutableCaptureRoot||!b.IsImmutableCaptureRoot||a.References<=0||b.References<=0||!a.BelongsTo(c.Budget)||!b.BelongsTo(c.Budget)||!ReferenceEquals(a.AuthorityGeometry,b.AuthorityGeometry)||
+                a.Frontier.Stage<CertifiedRouteKernel.PumpStage.Scan||a.Frontier.Stage>CertifiedRouteKernel.PumpStage.EndAllocation||b.Frontier.Stage<CertifiedRouteKernel.PumpStage.Scan||b.Frontier.Stage>CertifiedRouteKernel.PumpStage.EndAllocation||
+                a.Frontier.AllocationFloor!=b.Frontier.AllocationFloor||a.Frontier.OriginalBudget!=b.Frontier.OriginalBudget||a.TickQuantum!=b.TickQuantum||a.QuantumGeneration!=b.QuantumGeneration||a.QuantumTick!=b.QuantumTick||a.QuantumSerial!=b.QuantumSerial||a.QuantumBudget!=b.QuantumBudget||a.AdmissionPrefix!=b.AdmissionPrefix||a.ConsumedQuantum!=b.ConsumedQuantum||a.QuantumCompleted!=b.QuantumCompleted||a.QuantumRunnable!=b.QuantumRunnable||a.FairArrivals!=b.FairArrivals||a.ReplayOnlyProjection!=b.ReplayOnlyProjection||a.AccruedCredits!=b.AccruedCredits||!a.PhysicalTag.Equals(b.PhysicalTag))return false;
+            return true;
+        }
+        private bool PreparedMovementHostMatches(NavigationGroupCommand candidate)
+        {
+            // Only owned semantic-readset paths opt in; legacy callers retain their exact-host contract.
+            if(candidate.MovementInputs!=null)return ValidateMovementReadSetAndHostEnvelope(candidate);
+            if(ReferenceEquals(candidate.ExpectedHost,committedHostRoot))return true;
+            var before=candidate.ExpectedHost;var current=committedHostRoot;
+            if(!candidate.Arrival||candidate.IsStop||candidate.IsRemoval||candidate.Issued==null||candidate.Issued.Length==0||candidate.CommandContext==null||
+                candidate.CommandContext.Kind!=PlayableCommandKind.Move&&candidate.CommandContext.Kind!=PlayableCommandKind.AttackMove||
+                before==null||current==null||ReferenceEquals(before,current)||candidate.Budget==null||
+                !before.IsImmutableCaptureRoot||before.References<=0||!before.BelongsTo(candidate.Budget)||
+                !current.IsImmutableCaptureRoot||current.References<=0||!current.BelongsTo(candidate.Budget)||
+                !ReferenceEquals(candidate.Budget,physicalHostBudget)||candidate.AllocationThread==0||hostAllocationThread!=candidate.AllocationThread||
+                candidate.Worker==null||!ReferenceEquals(candidate.Worker,certifiedHost))return false;
+            var source=before.Frontier;var observed=current.Frontier;
+            if(source.Stage!=CertifiedRouteKernel.PumpStage.Projection||observed.Stage!=CertifiedRouteKernel.PumpStage.EndAllocation||
+                source.OriginalBudget!=observed.OriginalBudget||source.ScansUsed!=observed.ScansUsed||source.TransfersUsed!=observed.TransfersUsed||
+                source.ReadyUsed!=observed.ReadyUsed||source.ProjectionUsed!=observed.ProjectionUsed||source.ProjectionAllowance!=observed.ProjectionAllowance||
+                source.SolveWorkLimit!=observed.SolveWorkLimit||source.SolveConsumed!=observed.SolveConsumed||source.AllocationFloor!=observed.AllocationFloor||
+                source.PhaseUsed!=observed.PhaseUsed||source.ScanAllowance!=observed.ScanAllowance||before.Epoch!=current.Epoch||before.Progress!=current.Progress||
+                before.Projection.Count!=0||current.Projection.Count!=0)return false;
+            if(!before.TickQuantum||!current.TickQuantum||before.QuantumGeneration!=current.QuantumGeneration||before.QuantumSerial!=current.QuantumSerial||
+                before.QuantumTick!=current.QuantumTick||before.QuantumBudget!=current.QuantumBudget||before.AdmissionPrefix!=current.AdmissionPrefix||
+                before.ConsumedQuantum!=current.ConsumedQuantum||before.QuantumCompleted!=current.QuantumCompleted||before.QuantumRunnable!=current.QuantumRunnable||
+                !ReferenceEquals(before.AuthorityGeometry,current.AuthorityGeometry)||before.FairArrivals!=current.FairArrivals||
+                before.ReplayOnlyProjection!=current.ReplayOnlyProjection||before.AccruedCredits!=current.AccruedCredits||
+                before.LastServedArrival!=current.LastServedArrival||before.ArrivalRoundEnd!=current.ArrivalRoundEnd||
+                before.NextProviderIdentity!=current.NextProviderIdentity||before.Scheduler==null||current.Scheduler==null||
+                before.Scheduler.RetainedBytes!=current.Scheduler.RetainedBytes)return false;
+            var sourceOperation=before.Operation;var currentOperation=current.Operation;
+            return sourceOperation.Stage==CertifiedRouteKernel.PumpStage.Projection&&currentOperation.Stage==CertifiedRouteKernel.PumpStage.EndAllocation&&
+                sourceOperation.Iteration==0&&currentOperation.Iteration==0&&!sourceOperation.Entered&&!currentOperation.Entered&&
+                !sourceOperation.ProgressIncrementConsumed&&!currentOperation.ProgressIncrementConsumed&&
+                sourceOperation.Selector.Owner==null&&sourceOperation.Selector.Role==NavNameRole.None&&sourceOperation.Selector.Index==0&&
+                currentOperation.Selector.Owner==null&&currentOperation.Selector.Role==NavNameRole.None&&currentOperation.Selector.Index==0;
+        }
         private GroupGuardObservation ObserveGroupGuard(NavigationGroupCommand candidate,NavigationRetentionBudget.Scope scope)
         {
             var value=new GroupGuardObservation{
                 BudgetMatches=!(!ReferenceEquals(candidate.Budget,physicalHostBudget)),
-                HostMatches=!(!ReferenceEquals(candidate.ExpectedHost,committedHostRoot)),
+                HostMatches=PreparedMovementHostMatches(candidate),
                 AuthorityMatches=!(!ReferenceEquals(candidate.ExpectedAuthority,authorityOwners)),
                 OperationMatches=!(candidate.Operation!=authorityOperationIdentity),
                 PublicationMatches=!(candidate.ExpectedPublication!=admissionPublicationIdentity),
@@ -347,7 +590,7 @@ namespace Spacewars.Runtime
                 GroupSequenceMatches=!(groupSequence!=candidate.ExpectedGroupSequence),
                 CommandContextMatches=!(!ReferenceEquals(commandGroup,candidate.CommandContext)),
                 AdmissionBatchMatches=!(admissionBatchDepth!=0),
-                AllocationThreadMatches=!(hostAllocationThread!=candidate.AllocationThread),
+                AllocationThreadMatches=PreparedMovementAllocationMatches(candidate),
                 WorkerMatches=!(!ReferenceEquals(certifiedHost,candidate.Worker)),
                 GroupsMatches=!(!ReferenceEquals(groups,candidate.OldGroups)),
                 MembersMatches=!(!ReferenceEquals(memberGroups,candidate.OldMembers)),
@@ -393,58 +636,133 @@ namespace Spacewars.Runtime
         private void ValidatePreparedGroup(NavigationGroupCommand candidate,NavigationRetentionBudget.Scope scope)
         {
             scope.AssertOwnerLive();
-            if(!ReferenceEquals(candidate.Budget,physicalHostBudget)||!ReferenceEquals(candidate.ExpectedHost,committedHostRoot)||!ReferenceEquals(candidate.ExpectedAuthority,authorityOwners)||candidate.Operation!=authorityOperationIdentity||candidate.ExpectedPublication!=admissionPublicationIdentity||requestSequence!=candidate.ExpectedRequestSequence||groupSequence!=candidate.ExpectedGroupSequence||!ReferenceEquals(commandGroup,candidate.CommandContext)||admissionBatchDepth!=0||hostAllocationThread!=candidate.AllocationThread||!ReferenceEquals(certifiedHost,candidate.Worker)||!ReferenceEquals(groups,candidate.OldGroups)||!ReferenceEquals(memberGroups,candidate.OldMembers)||!ReferenceEquals(pending,candidate.OldPending)||!ReferenceEquals(allocating,candidate.OldAllocating)||!ReferenceEquals(orders,candidate.OldOrders)||!ReferenceEquals(reservations,candidate.OldReservations)||!ReferenceEquals(retainedGoals,candidate.OldGoals)||!ReferenceEquals(movementIdentities,candidate.OldIdentities)||!ReferenceEquals(technicalFailures,candidate.OldFailures)||authorityOperationIdentity==long.MaxValue||scope.IsCancelled){LastGroupGuardObservationForQa=ObserveGroupGuard(candidate,scope);LastGroupGuardCandidateForQa=candidate;throw new InvalidOperationException("Group command lost its observed authority.");}
+            if(scope.Owner!=Generation||scope.Kind!=NavigationPreparationKind.Admission||scope.Publication!=candidate.ExpectedPublication)throw new NavigationCommandRefused("Prepared movement scope changed.");
+            if(Requests.Count+RegisteredRouteCount+candidate.Issued.Length>RouteRequestCapacity||physicalHostBudget.RetainedBytes>LayeredNavigationScheduler.MaxRetainedBytes)throw new NavigationCommandRefused("Prepared movement capacity changed.",NavigationCommandRefused.Cause.Capacity);
+            if(!ReferenceEquals(candidate.Budget,physicalHostBudget)||!PreparedMovementHostMatches(candidate)||!ReferenceEquals(candidate.ExpectedAuthority,authorityOwners)||candidate.Operation!=authorityOperationIdentity||candidate.ExpectedPublication!=admissionPublicationIdentity||requestSequence!=candidate.ExpectedRequestSequence||groupSequence!=candidate.ExpectedGroupSequence||!ReferenceEquals(commandGroup,candidate.CommandContext)||admissionBatchDepth!=0||!PreparedMovementAllocationMatches(candidate)||!ReferenceEquals(certifiedHost,candidate.Worker)||!ReferenceEquals(groups,candidate.OldGroups)||!ReferenceEquals(memberGroups,candidate.OldMembers)||!ReferenceEquals(pending,candidate.OldPending)||!ReferenceEquals(allocating,candidate.OldAllocating)||!ReferenceEquals(orders,candidate.OldOrders)||!ReferenceEquals(reservations,candidate.OldReservations)||!ReferenceEquals(retainedGoals,candidate.OldGoals)||!ReferenceEquals(movementIdentities,candidate.OldIdentities)||!ReferenceEquals(technicalFailures,candidate.OldFailures)||authorityOperationIdentity==long.MaxValue||scope.IsCancelled){LastGroupGuardObservationForQa=ObserveGroupGuard(candidate,scope);LastGroupGuardCandidateForQa=candidate;throw new NavigationCommandRefused("Group command lost its observed authority.");}
             for(int i=0;i<candidate.BirthCount;i++)candidate.Births[i].ValidateInstall(scope);
             for(int i=0;i<candidate.Issued.Length;i++){
                 var request=candidate.Issued[i];var expected=candidate.Actors[i];
-                if(!Crowd.TryGet(request.Entity,out var current)||!ReferenceEquals(expected,current)||current.Incarnation!=request.MemberIdentity.Incarnation||current.MobilityRevision!=request.MemberIdentity.MobilityRevision||!current.Position.Equals(request.Start)||!current.Location.Equals(request.StartLocation.Value)||current.Radius!=request.Profile.Radius||current.Speed!=request.Profile.TankSpeed||current.TurnSpeed!=request.Profile.TankTurnSpeed)throw new InvalidOperationException("Prepared actor changed during group preparation.");
-                installedExecutions.TryGetValue(request.Entity,out var installed);if(!ReferenceEquals(installed,candidate.Installed[i])||installedExecutions.IsDetached(request.Entity)!=candidate.InstalledDetached[i])throw new InvalidOperationException("Prepared installed execution changed.");
+                if(!Crowd.TryGet(request.Entity,out var current)||!ReferenceEquals(expected,current)||current.Incarnation!=request.MemberIdentity.Incarnation||current.MobilityRevision!=request.MemberIdentity.MobilityRevision||!MovementReadSet.SamePoint(current.Position,request.Start)||!MovementReadSet.SameLocationValue(current.Location,request.StartLocation.Value)||current.Radius!=request.Profile.Radius||current.Speed!=request.Profile.TankSpeed||current.TurnSpeed!=request.Profile.TankTurnSpeed)throw new NavigationCommandRefused("Prepared actor changed during group preparation.");
+                installedExecutions.TryGetValue(request.Entity,out var installed);if(!ReferenceEquals(installed,candidate.Installed[i])||installedExecutions.IsDetached(request.Entity)!=candidate.InstalledDetached[i])throw new NavigationCommandRefused("Prepared installed execution changed.");
             }
         }
         private void ValidateMetadataGroupSource(NavigationGroupCommand candidate,NavigationRetentionBudget.Scope scope)
         {
             scope.AssertOwnerLive();
+            if(candidate.MetadataRecipients!=null&&(!ReferenceEquals(candidate.StopBacking,groupCommandBacking)||!ReferenceEquals(candidate.StopAdmission,admissionOwner)||!ReferenceEquals(candidate.StopLedger,arrivalLedger)||candidate.StopAttachment!=certifiedHostAttachmentIdentity||candidate.MovementInputs==null||!candidate.MovementInputs.Current(this,candidate)||!TacticalHostEnvelopeMatches(candidate)))throw new NavigationCommandRefused("Tactical metadata semantic source changed.");
             if(candidate.Issued.Length!=0||candidate.Actors.Length!=0||candidate.IsStop||candidate.IsRemoval||candidate.Arrival)
                 throw new InvalidOperationException("Metadata publication cannot carry movement effects.");
-            if(!ReferenceEquals(candidate.Budget,physicalHostBudget)||!ReferenceEquals(candidate.ExpectedAuthority,authorityOwners)||candidate.Operation!=authorityOperationIdentity||candidate.ExpectedPublication!=admissionPublicationIdentity||requestSequence!=candidate.ExpectedRequestSequence||groupSequence!=candidate.ExpectedGroupSequence||!ReferenceEquals(commandGroup,candidate.CommandContext)||admissionBatchDepth!=0||!ReferenceEquals(certifiedHost,candidate.Worker)||!ReferenceEquals(groups,candidate.OldGroups)||!ReferenceEquals(memberGroups,candidate.OldMembers)||!ReferenceEquals(pending,candidate.OldPending)||!ReferenceEquals(allocating,candidate.OldAllocating)||!ReferenceEquals(orders,candidate.OldOrders)||!ReferenceEquals(reservations,candidate.OldReservations)||!ReferenceEquals(retainedGoals,candidate.OldGoals)||!ReferenceEquals(movementIdentities,candidate.OldIdentities)||!ReferenceEquals(technicalFailures,candidate.OldFailures)||authorityOperationIdentity==long.MaxValue||scope.IsCancelled){LastGroupGuardObservationForQa=ObserveGroupGuard(candidate,scope);LastGroupGuardCandidateForQa=candidate;throw new InvalidOperationException("Group command lost its observed authority.");}
+            if(!ReferenceEquals(candidate.Budget,physicalHostBudget)||!ReferenceEquals(candidate.ExpectedAuthority,authorityOwners)||candidate.Operation!=authorityOperationIdentity||candidate.ExpectedPublication!=admissionPublicationIdentity||requestSequence!=candidate.ExpectedRequestSequence||groupSequence!=candidate.ExpectedGroupSequence||!ReferenceEquals(commandGroup,candidate.CommandContext)||admissionBatchDepth!=0||!ReferenceEquals(certifiedHost,candidate.Worker)||!ReferenceEquals(groups,candidate.OldGroups)||!ReferenceEquals(memberGroups,candidate.OldMembers)||!ReferenceEquals(pending,candidate.OldPending)||!ReferenceEquals(allocating,candidate.OldAllocating)||!ReferenceEquals(orders,candidate.OldOrders)||!ReferenceEquals(reservations,candidate.OldReservations)||!ReferenceEquals(retainedGoals,candidate.OldGoals)||!ReferenceEquals(movementIdentities,candidate.OldIdentities)||!ReferenceEquals(technicalFailures,candidate.OldFailures)||authorityOperationIdentity==long.MaxValue||scope.IsCancelled){LastGroupGuardObservationForQa=ObserveGroupGuard(candidate,scope);LastGroupGuardCandidateForQa=candidate;throw new NavigationCommandRefused("Group command lost its observed authority.");}
             for(int i=0;i<candidate.BirthCount;i++)candidate.Births[i].ValidateInstall(scope);
+        }
+        internal enum CommandMailboxKind { Movement,Metadata,Stop,Arrival,MixedArrival }
+        // Runs outside both gates after the caller's revision/count observation.
+        internal Action<CommandMailboxKind> BeforeCommandMailboxSnapshotForQa;
+        private void PrepareCommandMailbox(NavigationGroupCommand candidate,long revision,int count,NavigationRetentionBudget.Scope scope,CommandMailboxKind kind)
+        {
+            BeforeCommandMailboxSnapshotForQa?.Invoke(kind);
+            using(NavStorageScratch.Reserve(scope.OwnedReservation(),checked(32L+8L*count)))
+            using(EnterTransport()){
+                // Worker transfer is legal during detached preparation. Reject the
+                // whole candidate on drift, including same-count replacement. Keep
+                // transport locked until the candidate has pinned every copied owner.
+                if(!Requests.TryCopyItemsAtRevision(revision,out var queued))throw new NavigationCommandRefused("Command mailbox changed before prepared snapshot.");
+                foreach(var request in queued)candidate.AppendMailbox(request);
+            }
+        }
+        private void ValidateCommandMailbox(NavigationGroupCommand candidate,NavMailbox<NavigationRequest>.PreparedWriteGate gate)
+        {
+            Requests.ObserveState(out long revision,out _);
+            if(revision!=candidate.MailboxRevision||revision==long.MaxValue)throw new NavigationCommandRefused("Prepared mailbox source changed.");
+            gate.Validate(candidate.MailboxRevision,candidate.Mailbox,candidate.MailboxCount);
         }
         private void PublishPreparedGroup(NavigationGroupCommand candidate,NavigationRetentionBudget.Scope scope,int[] metadataRecipients=null)
         {
             NavigationCommandAuthority retired=null;NavigationHostRoot retiredObservationHost=null;
             try{scope.Publish(candidate,_=>{
                 using(EnterTransport())using(var mailboxGate=Requests.EnterPreparedWrite()){
+                    candidate.DomainCommit?.StartValidationMeasureNoThrow();
                     RejectTransferCallbackReentry();
                     if(metadataRecipients!=null){
                         // Metadata consumes the command readset, not the host frontier.
                         // Validate that readset and mailbox before refreshing only its
                         // host pin/token, then run the unchanged complete guard below.
-                        ValidateMetadataGroupSource(candidate,scope);mailboxGate.Validate(candidate.MailboxRevision,candidate.Mailbox,candidate.MailboxCount);
+                        ValidateMetadataGroupSource(candidate,scope);ValidateCommandMailbox(candidate,mailboxGate);
                         if(AfterMetadataObservationForQa!=null)LastGroupGuardObservationForQa=ObserveGroupGuard(candidate,scope);
-                        var current=committedHostRoot;
-                        if(current!=null&&(!current.IsImmutableCaptureRoot||current.References<=0||!current.BelongsTo(physicalHostBudget)))throw new InvalidOperationException("Metadata host is not a live immutable owner of this ledger.");
-                        current?.Retain();retiredObservationHost=candidate.ExpectedHost;candidate.ExpectedHost=current;candidate.AllocationThread=hostAllocationThread;
+                        if(candidate.DomainCommit==null){
+                            var current=committedHostRoot;
+                            if(current!=null&&(!current.IsImmutableCaptureRoot||current.References<=0||!current.BelongsTo(physicalHostBudget)))throw new InvalidOperationException("Metadata host is not a live immutable owner of this ledger.");
+                            current?.Retain();retiredObservationHost=candidate.ExpectedHost;candidate.ExpectedHost=current;candidate.AllocationThread=hostAllocationThread;
+                        }else if(!TacticalHostEnvelopeMatches(candidate))throw new NavigationCommandRefused("Tactical metadata allocation changed.");
                     }
-                    ValidatePreparedGroup(candidate,scope);mailboxGate.Validate(candidate.MailboxRevision,candidate.Mailbox,candidate.MailboxCount);
+                    ValidatePreparedGroup(candidate,scope);ValidateCommandMailbox(candidate,mailboxGate);
+                    candidate.DomainCommit?.ValidateInGate();candidate.DomainCommit?.BeginNoThrow();
                     for(int i=0;i<candidate.BirthCount;i++)candidate.Births[i].ActivateNoThrow(this);
                     if(metadataRecipients!=null)foreach(int id in metadataRecipients)if(memberGroups.ContainsKey(id))DetachInstalledExecution(id);
                     retired=groupCommandBacking;groupCommandBacking=candidate.Committed;
                     groups=candidate.Groups;memberGroups=candidate.MemberGroups;orders=candidate.Orders;pending=candidate.Pending;allocating=candidate.Allocating;reservations=candidate.Reservations;retainedGoals=candidate.Goals;movementIdentities=candidate.Identities;technicalFailures=candidate.Failures;arrivalLedger=candidate.Ledger;
                     requestSequence=candidate.RequestSequence;groupSequence=candidate.GroupSequence;if(PublishAdmissionOwnerNoThrow(candidate.AdmissionOwner))candidate.AdmissionOwner=null;authorityOperationIdentity=candidate.Operation+1;
                     for(int i=0;i<candidate.Actors.Length;i++){var actor=candidate.Actors[i];actor.FailedRequest=actor.FailedOrder=actor.FailedGroupId=actor.FailedRevision=0;actor.FailedGoal=null;actor.LastFailure=NavigationOutcome.Idle;if(candidate.Installed[i]!=null)installedExecutions.SetDetachedNoThrow(actor.Id,true);}
-                    mailboxGate.InstallNoThrow(candidate.Mailbox,candidate.MailboxCount,candidate.Committed.MailboxOwners);commandGroup=null;commandActivationRevision=0;preparedCommandGroup=null;preparedCommandScope=null;candidate.Published=true;for(int i=0;i<candidate.BirthCount;i++)candidate.Births[i]=null;candidate.BirthCount=0;
+                    mailboxGate.InstallNoThrow(candidate.Mailbox,candidate.MailboxCount,candidate.Committed.MailboxOwners);commandGroup=null;commandActivationRevision=0;preparedCommandGroup=null;preparedCommandScope=null;candidate.DomainCommit?.InstallNoThrow();candidate.Published=true;candidate.DomainCommit?.MarkCommittedNoThrow();for(int i=0;i<candidate.BirthCount;i++)candidate.Births[i]=null;candidate.BirthCount=0;
                 }
             });}finally{retiredObservationHost?.Release();}
+            if(candidate.DomainCommit!=null){CompletePublishedTactical(candidate,scope,retired,false);return;}
             scope.ResolveCommitted();candidate.ReleaseObservationPins();retired?.ReleaseStorage();PruneArrivalAttempts();
             SignalHost();if(!candidate.Arrival)foreach(var request in candidate.Issued)RouteRequested?.Invoke(request);
         }
-        private NavigationRetentionBudget.Scope DetachPreparedCommandNoThrow(){var scope=preparedCommandScope;preparedCommandScope=null;preparedCommandGroup=null;commandMoveRefused=false;return scope;}
-        private void FinishPreparedCommandGroup(bool applied,IEnumerable<int> ids)
+        // All domain effects are installed already. Each postcommit operation and
+        // notification is attempted once, outside both gates; retain the first error.
+        private void CompletePublishedTactical(NavigationGroupCommand c,NavigationRetentionBudget.Scope scope,NavigationCommandAuthority retired,bool stop)
         {
+            Exception failure=null;
+            void Attempt(Action action){try{action();}catch(Exception error){if(failure==null)failure=error;else PlayableDomain.PreserveTacticalSecondary(failure,error);}}
+            Attempt(()=>AfterTacticalPublishForQa?.Invoke());Attempt(()=>BeforeTacticalResolveForQa?.Invoke());Attempt(scope.ResolveCommitted);
+            Attempt(c.ReleaseObservationPins);Attempt(()=>retired?.ReleaseStorage());Attempt(PruneArrivalAttempts);
+            // Acceptance is fully installed. Drop paid transient domain storage
+            // before external observers may capture the current world.
+            var payload=c.DomainCommit;c.DomainCommit=null;Attempt(payload.Dispose);Attempt(payload.Release);var inputs=c.MovementInputs;c.MovementInputs=null;if(inputs!=null)Attempt(inputs.Release);Attempt(SignalHost);
+            if(stop){for(int i=0;i<c.Actors.Length;i++){int entity=c.Actors[i].Id;Attempt(()=>payload.NotifyExternalCancellation(MovementCancelled,entity));}}
+            else if(!c.Arrival){for(int i=0;i<c.Issued.Length;i++){var request=c.Issued[i];Attempt(()=>payload.NotifyExternalRequest(RouteRequested,request));}}
+            if(failure!=null)System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+        internal bool StageTacticalMove(int[] ids,NavPoint[] goals,MovementReadSet inputs,bool single=false)=>TryPreparedOrdinaryMoveGroup(ids,goals,single,inputs)??false;
+        internal void StageTacticalMetadata(int[] ids,MovementReadSet inputs)=>FinishOwnedMetadataGroup(ids,out _,true,inputs);
+        internal NavigationGroupCommand PreparedTacticalCandidate=>preparedCommandGroup;
+        internal Action AfterTacticalPublishForQa,BeforeTacticalResolveForQa,AfterTacticalCleanupForQa;
+        internal void AbortTacticalPreparation()
+        {
+            NavigationGroupCommand candidate;NavigationRetentionBudget.Scope scope;
+            using(EnterTransport()){candidate=preparedCommandGroup;scope=preparedCommandScope;preparedCommandGroup=null;preparedCommandScope=null;commandGroup=null;commandActivationRevision=0;commandMoveRefused=false;}
+            try{scope?.Dispose();}finally{candidate?.ReleaseStorage();}
+        }
+        internal bool FinishTacticalPreparation(PlayableDomain.PreparedTacticalCommit payload,int[] ids)
+        {
+            var candidate=preparedCommandGroup;var scope=preparedCommandScope;if(candidate==null)throw new InvalidOperationException("Missing prepared tactical candidate.");
+            Exception failure=null;bool refused=false;
+            try{
+                if(candidate.MetadataRecipients==null&&ids.Length!=candidate.Actors.Length)throw new InvalidOperationException("Prepared tactical recipient count changed.");
+                for(int i=0;i<ids.Length;i++)if(ids[i]!=(candidate.MetadataRecipients==null?candidate.Actors[i].Id:candidate.MetadataRecipients[i]))throw new InvalidOperationException("Prepared tactical recipients changed.");
+                payload.ValidateBeforeGate();candidate.RequireEdge(payload);payload.Retain();candidate.DomainCommit=payload;
+                if(candidate.IsStop)PublishPreparedStop(candidate,scope);else PublishPreparedGroup(candidate,scope,candidate.MetadataRecipients);
+            }catch(Exception error){if(payload.Phase==PlayableDomain.TacticalCommitPhase.NotCommitted&&NavigationCommandRefused.IsExpected(error,scope)){payload.Refusal=NavigationCommandRefused.Expected(error,scope);refused=true;}else failure=error;}
+            finally{
+                using(EnterTransport()){if(ReferenceEquals(preparedCommandGroup,candidate)){preparedCommandGroup=null;preparedCommandScope=null;commandGroup=null;commandActivationRevision=0;}}
+                try{scope.Dispose();}catch(Exception error){if(failure==null)failure=error;else PlayableDomain.PreserveTacticalSecondary(failure,error);}
+                try{candidate.ReleaseStorage();}catch(Exception error){if(failure==null)failure=error;else PlayableDomain.PreserveTacticalSecondary(failure,error);}
+            }
+            try{AfterTacticalCleanupForQa?.Invoke();}catch(Exception error){if(failure==null)failure=error;else PlayableDomain.PreserveTacticalSecondary(failure,error);}
+            if(failure!=null)System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+            return !refused&&payload.Phase==PlayableDomain.TacticalCommitPhase.Committed;
+        }
+        private NavigationRetentionBudget.Scope DetachPreparedCommandNoThrow(){var scope=preparedCommandScope;preparedCommandScope=null;preparedCommandGroup=null;commandMoveRefused=false;return scope;}
+        private void FinishPreparedCommandGroup(bool applied,IEnumerable<int> ids,out bool published)
+        {
+            published=false;
             var candidate=preparedCommandGroup;var scope=preparedCommandScope;
             try{
                 if(applied){var accepted=ids.Distinct().OrderBy(id=>id).ToArray();if(!accepted.SequenceEqual(candidate.IsStop?candidate.Actors.Select(a=>a.Id):candidate.Issued.Select(r=>r.Entity)))throw new InvalidOperationException("Prepared group differs from accepted recipients.");if(candidate.IsStop)PublishPreparedStop(candidate,scope);else PublishPreparedGroup(candidate,scope);}
             }finally{
+                published=candidate.Published;
                 using(EnterTransport()){if(ReferenceEquals(preparedCommandGroup,candidate)){preparedCommandGroup=null;preparedCommandScope=null;commandGroup=null;commandActivationRevision=0;}}
                 scope.Dispose();candidate.ReleaseStorage();
             }

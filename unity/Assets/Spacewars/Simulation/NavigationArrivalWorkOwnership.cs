@@ -92,14 +92,15 @@ namespace Spacewars.Simulation
         }
         internal void SealPrepared()
         {
-            MutableRoot();preparedClearances.Seal();preparationValidCandidateIndices.Seal();preparationCandidateIndices?.Seal();preparationRegions?.Seal();pageRequests.Seal();pageResults.Seal();memberOutcomes.Seal();assignments.Seal();scheduler.SealPrepared();rootReservation=null;rootFrozen=true;
+            MutableRoot();historicalState?.Seal();preparedClearances.Seal();preparationValidCandidateIndices.Seal();preparationCandidateIndices?.Seal();preparationRegions?.Seal();pageRequests.Seal();pageResults.Seal();memberOutcomes.Seal();assignments.Seal();scheduler.SealPrepared();rootReservation=null;rootFrozen=true;
         }
         internal NavigationArrivalWork ForkOwned(INavStorageReservation reservation)
         {
             NavStorageAdmission.RequireOwned(reservation,this);if(!rootFrozen||rootFaulted)throw new InvalidOperationException("Seal arrival work before preparing a fork.");
             using(var allocation=new NavStorageAllocation(reservation.TryReserve)){
-                allocation.Reserve(LayoutBytes);var fork=allocation.Register(new NavigationArrivalWork(true));fork.Retain();fork.rootReservation=reservation.TryReserve;
+                allocation.Reserve(LayoutBytes);var fork=allocation.Register(new NavigationArrivalWork(true));fork.Retain();fork.rootReservation=reservation.TryReserve;fork.queryMode=queryMode;fork.groupQueryMode=groupQueryMode;fork.demandQueryMode=demandQueryMode;fork.boundedCorridorMode=boundedCorridorMode;
                 try{
+                    ForkHistoricalInto(fork,reservation);
                     fork.input=input;fork.ownedInput=NavPhysicalMacro.Acquire(fork,ownedInput);fork.membersStorage=NavPhysicalMacro.Acquire(fork,membersStorage);fork.members=members;fork.pageStartsStorage=NavPhysicalMacro.Acquire(fork,pageStartsStorage);fork.pageCountsStorage=NavPhysicalMacro.Acquire(fork,pageCountsStorage);fork.pageStarts=pageStarts;fork.pageCounts=pageCounts;
                     fork.workingKeys=NavPhysicalMacro.Acquire(fork,workingKeys);fork.preparingKeyStorage=NavPhysicalMacro.Acquire(fork,preparingKeyStorage);fork.preparingClearanceKey=preparingClearanceKey;
                     fork.preparedClearances=preparedClearances.ForkOwned(reservation);fork.preparationValidCandidateIndices=preparationValidCandidateIndices.ForkOwned(reservation);fork.preparationCandidateIndices=preparationCandidateIndices?.ForkOwned(reservation);fork.preparationRegions=preparationRegions?.ForkOwned(reservation);
@@ -117,6 +118,7 @@ namespace Spacewars.Simulation
         {
             // Legacy proposals have no declaration owner; keep their original route edge.
             if(!IsRegistered&&assignments!=null)foreach(var proposal in assignments)proposal.Route?.Release();
+            historicalState?.Release();
             ownedInput?.Release();membersStorage?.Release();pageStartsStorage?.Release();pageCountsStorage?.Release();workingKeys?.Release();preparingKeyStorage?.Release();
             preparedClearances?.Release();preparationValidCandidateIndices?.Release();preparationCandidateIndices?.Release();preparationRegions?.Release();pageRequests?.Release();pageResults?.Release();memberOutcomes?.Release();assignments?.Release();scheduler?.Release();rootReservation=null;
         }

@@ -69,7 +69,7 @@ namespace Spacewars.Runtime
         {
             id=0;if(!Binding(o)||!Enum.IsDefined(typeof(AiArmyRole),role)||string.IsNullOrWhiteSpace(tacticalOwner)||members==null)return false;
             var units=members.OrderBy(x=>x).ToArray();bool major=role!=AiArmyRole.Scout&&role!=AiArmyRole.Transport;
-            int required=role==AiArmyRole.MobileDefense&&tacticalOwner==AiDefensePlanner.Policy&&AiDefensePlanner.LastHeadquartersAttackers(o).Length>0?1:minimum;
+            int required=role==AiArmyRole.MobileDefense&&(tacticalOwner==AiDefensePlanner.Policy||tacticalOwner==AiArmyPlanner.Policy)?1:minimum;
             if((major&&Active.Count(a=>a.Major)>=majorCap)||(role==AiArmyRole.Scout&&Active.Count(a=>a.Role==role)>=scoutCap)||!Units(o,units,role,catalog??AiRosterCatalog.Initial,required)||units.Any(membership.ContainsKey))return false;
             id=nextId;nextId=checked(nextId+1);var a=new AiArmyState{Id=id,OwnerId=OwnerId,Role=role,TacticalOwner=tacticalOwner,Members=units,LeaderId=units[0],MinimumViableForce=major?required:1,CreatedTick=o.Tick,ProgressTick=o.Tick,Phase=AiArmyPhase.Forming};
             armies.Add(id,a);foreach(var unit in units)membership.Add(unit,id);AssertInvariants();return true;
@@ -133,10 +133,42 @@ namespace Spacewars.Runtime
             return null;
         }
         private static bool Finite(NavPoint? point)=>!point.HasValue||!double.IsNaN(point.Value.X)&&!double.IsInfinity(point.Value.X)&&!double.IsNaN(point.Value.Z)&&!double.IsInfinity(point.Value.Z);
+        // Immutable enum metadata; the defined-value contract still covers every row.
+        private static readonly HashSet<AiArmyRole> definedRoles=new HashSet<AiArmyRole>((AiArmyRole[])Enum.GetValues(typeof(AiArmyRole)));
+        private static readonly HashSet<AiArmyPhase> definedPhases=new HashSet<AiArmyPhase>((AiArmyPhase[])Enum.GetValues(typeof(AiArmyPhase)));
         public void AssertInvariants()
         {
-            var active=Active.ToArray();var all=armies.Values.ToArray();
-            if(nextId<1||all.Any(a=>a.Id<=0||a.Id>=nextId||a.OwnerId!=OwnerId||string.IsNullOrWhiteSpace(a.TacticalOwner)||!Enum.IsDefined(typeof(AiArmyRole),a.Role)||!Enum.IsDefined(typeof(AiArmyPhase),a.Phase)||a.CreatedTick<0||a.ProgressTick<a.CreatedTick||a.MinimumViableForce<1||!Finite(a.Anchor)||!Finite(a.Rally)||a.Reinforcements.Except(a.Members).Any()||a.Reinforcements.Any(x=>x<=0)||a.Reinforcements.Distinct().Count()!=a.Reinforcements.Length||!a.Reinforcements.SequenceEqual(a.Reinforcements.OrderBy(x=>x)))||active.Count(a=>a.Major)>majorCap||active.Count(a=>a.Role==AiArmyRole.Scout)>scoutCap||active.Any(a=>a.Members.Length==0||a.Members.Any(x=>x<=0)||!a.Members.Contains(a.LeaderId))||all.Where(a=>a.Phase==AiArmyPhase.Disbanded).Any(a=>a.Members.Length!=0||a.Reinforcements.Length!=0||a.LeaderId!=0)||active.SelectMany(a=>a.Members).Distinct().Count()!=active.Sum(a=>a.Members.Length)||membership.Count!=active.Sum(a=>a.Members.Length)||active.Any(a=>a.Members.Any(id=>ArmyFor(id)!=a.Id)))throw new InvalidOperationException("Army registry invariant");
+            if(!RegistryInvariantsHold())throw new InvalidOperationException("Army registry invariant");
+        }
+        private bool RegistryInvariantsHold()
+        {
+            if(nextId<1)return false;
+            int majors=0,scouts=0;var claimed=new HashSet<int>();
+            // Check all historical and live rows, all reinforcement rules, both caps
+            // and exact ownership in one traversal. No validation is skipped.
+            foreach(var a in armies.Values){
+                if(a.Id<=0||a.Id>=nextId||a.OwnerId!=OwnerId||string.IsNullOrWhiteSpace(a.TacticalOwner)||
+                    !definedRoles.Contains(a.Role)||!definedPhases.Contains(a.Phase)||a.CreatedTick<0||a.ProgressTick<a.CreatedTick||
+                    a.MinimumViableForce<1||!Finite(a.Anchor)||!Finite(a.Rally))return false;
+                int previous=0;
+                foreach(int id in a.Reinforcements){
+                    if(id<=previous||System.Array.IndexOf(a.Members,id)<0)return false;
+                    previous=id;
+                }
+                if(a.Phase==AiArmyPhase.Disbanded){
+                    if(a.Members.Length!=0||a.Reinforcements.Length!=0||a.LeaderId!=0)return false;
+                    continue;
+                }
+                if(a.Major)majors++;if(a.Role==AiArmyRole.Scout)scouts++;
+                if(a.Members.Length==0)return false;
+                bool leader=false;
+                foreach(int id in a.Members){
+                    if(id<=0||!claimed.Add(id)||ArmyFor(id)!=a.Id)return false;
+                    if(id==a.LeaderId)leader=true;
+                }
+                if(!leader)return false;
+            }
+            return majors<=majorCap&&scouts<=scoutCap&&membership.Count==claimed.Count;
         }
         public static AiArmyRegistry Restore(AiArmyRegistryState state,AiProfile profile,AiDifficulty difficulty,long tick)
         {

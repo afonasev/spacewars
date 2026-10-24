@@ -215,6 +215,12 @@ namespace Spacewars.Simulation
             if (double.IsInfinity(cost)) return Result(NavConnectorStatus.Blocked);
             return Result(NavConnectorStatus.Ready, cost);
         }
+        // Numerical source contract, not an OS/test/session performance switch.
+        // Supported current managed double/System.Math path is backed by the
+        // installed Mono FSQRT evidence in exact-astar-decision.md. Alternate
+        // approximate/float/Burst metric implementations must declare Unknown.
+        // This declaration is not Player codegen/device qualification.
+        internal const NavDistanceMetricContract DistanceMetricContract=NavDistanceMetricContract.ManagedBinary64SqrtV1;
         internal static double Distance(NavPoint a, NavPoint b) { double x = a.X - b.X, z = a.Z - b.Z; return Math.Sqrt(x * x + z * z); }
     }
 }

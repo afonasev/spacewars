@@ -117,14 +117,7 @@ namespace Spacewars.Runtime
             if(!attempt.Work.IsImmutableCaptureRoot)attempt.Work.UseSessionProviderOwnership(!attempt.LegacyProviderAccounting);
         }
         private long ProspectiveArrivalProviderBytes(NavGeometry value)
-        {
-            if(terrain==null)return checked(4096L+1024+2048+512+value.Obstacles.Sum(o=>512L+128L*(o.Polygon?.Vertices.Count??4))+4096);
-            long edges=terrain.Supports.Sum(v=>(long)(v.Bounds.Polygon?.Vertices.Count??4));
-            // Each authored edge has at most two intersections per other edge.
-            // This reserves construction before any arrangement/provider is retained.
-            return checked(8192L+1024L*terrain.Supports.Count+512L*edges+512L*edges*(2*edges+1)+
-                256L*terrain.SurfaceTransitions.Count+value.Obstacles.Sum(o=>512L+128L*(o.Polygon?.Vertices.Count??0)));
-        }
+            =>NavigationProviderConstructionBound.Estimate(terrain,value);
         private static string ProjectionLeaseBinding(ArrivalProviderLease lease)=>NavContract.Digest(w=>{
             w.Write(lease.Token);w.Write(lease.Acquisition);w.Write(lease.World);w.Write(lease.Attempt);w.Write(lease.Request);w.Write(lease.Entity);w.Write(lease.Incarnation);w.Write(lease.Order);w.Write(lease.ProviderId);
         });
@@ -225,6 +218,44 @@ namespace Spacewars.Runtime
         internal Action<NavArrivalStatus> BeforeArrivalAdvanceCommit;
         internal event Action<NavigationRequest> EndpointAssigned;
         internal string[] ArrivalPhases {get {using(EnterTransport())return arrivalAttempts.Values.Select(a=>a.SnapshotPhase+":"+a.SnapshotCandidate+":"+a.SnapshotOccupancy+":"+a.SnapshotMember).ToArray();}}
+        // Diagnostic-only snapshot of fields published by the authority. Never
+        // follows mutable ArrivalWork or worker state from the observing thread.
+        internal string ArrivalAuthoritySnapshot
+        {
+            get{
+                string header;long[] attemptIds;NavigationHostRoot root;
+                using(EnterTransport()){
+                    root=committedHostRoot;
+                    var attempts=arrivalAttempts.Values.OrderBy(a=>a.Id).ToArray();attemptIds=attempts.Select(a=>a.Id).ToArray();
+                    string hostState=root==null?"host=none":"hostFrontier="+root.Frontier.Stage+" hostOperation="+root.Operation.Stage+
+                        " hostQuantum="+root.QuantumRunnable+" quantumEnabled="+root.TickQuantum+" quantumTick="+root.QuantumTick+
+                        " quantumSerial="+root.QuantumSerial+" consumedQuantum="+root.ConsumedQuantum;
+                    header="allocating="+allocating.Count+" attempts="+attempts.Length+" "+hostState+" "+string.Join(";",attempts.Select(a=>
+                        a.Id+":"+a.Group+" epoch="+a.Epoch+" status="+a.SnapshotStatus+" phase="+a.SnapshotPhase+
+                        " candidate="+a.SnapshotCandidate+" occupancy="+a.SnapshotOccupancy+" member="+a.SnapshotMember+
+                        " working="+a.Working+" reconstructing="+a.Reconstructing+" retiring="+a.Retiring+" published="+a.Published));
+                    // The transport gate keeps the root stable until all header
+                    // allocations have completed; pin only before leaving it.
+                    root?.Retain();
+                }
+                try{
+                    if(attemptIds.Length==0)return header;
+                    if(root==null)return header+" routeWork="+string.Join(";",attemptIds.Select(id=>id+":work=unpublished"));
+                    var workDiagnostics=new string[attemptIds.Length];
+                    for(int i=0;i<attemptIds.Length;i++){
+                        long id=attemptIds[i];
+                        if(!root.ArrivalWork.TryGetValue(id,out var storage)||!(storage is NavigationArrivalWork work)||!work.IsImmutableCaptureRoot){workDiagnostics[i]=id+":work=unpublished";continue;}
+                        var counters=work.RouteCounters;
+                        workDiagnostics[i]=id+":pendingRoutes="+work.PendingRouteCount+" readyRoutes="+work.ReadyRouteCount+
+                            " LogicalGraphWork="+counters.LogicalGraphWork+" PhysicalGraphWork="+counters.PhysicalGraphWork+
+                            " LogicalFieldWork="+counters.LogicalFieldWork+" PhysicalFieldWork="+counters.PhysicalFieldWork+
+                            " ConnectorWork="+counters.ConnectorWork+" MaintenanceWork="+counters.MaintenanceWork+
+                            " route="+work.RetentionBreakdown;
+                    }
+                    return header+" routeWork="+string.Join(";",workDiagnostics);
+                }finally{root?.Release();}
+            }
+        }
         private bool AdmitArrivalGroup(int[] ids,NavPoint[] goals)
         {
             if(commandGroup==null || (commandGroup.Kind!=PlayableCommandKind.Move && commandGroup.Kind!=PlayableCommandKind.AttackMove))return false;
@@ -543,8 +574,17 @@ namespace Spacewars.Runtime
                     !p.Typed.SequenceEqual(route.Legs.Take(p.Leg).Where(l=>l.Kind==NavTypedLegKind.Portal).Select(l=>l.PortalId)))throw new ArgumentException("Corrupt projected route prefix.");
             }
         }
+        // An owned immutable Work is guarded by exact source/root/history
+        // references. Its live anchor is descriptive; capture stores a separate
+        // full digest and always verifies it before restoring a live header.
+        internal static string LiveArrivalFrontier(NavigationArrivalWork work)
+            =>!work.UsesOwnedFrontierAnchor?ArrivalFrontier(work):NavContract.Digest(w=>{
+                w.Write("owned-arrival-live-anchor-v1");w.Write(work.InputBinding);w.Write(work.LogicalEpoch);w.Write((int)work.Status);w.Write(work.WorkPhase);
+                w.Write(work.AllocationWorkConsumed);w.Write(work.CandidateWorkConsumed);w.Write(work.OccupancyWorkConsumed);w.Write(work.DirectWorkConsumed);
+                w.Write(work.AllocationQuotaRemaining);w.Write(work.MemberCursor);w.Write(work.CandidateCursor);w.Write(work.OccupancyCursor);
+            });
         internal static string ArrivalFrontier(NavigationArrivalWork work)
-            =>NavContract.Digest(w=>{w.Write(work.InputBinding);w.Write((int)work.Status);w.Write(work.LogicalEpoch);
+            =>NavContract.StreamingDigest(w=>{w.Write(work.InputBinding);w.Write((int)work.Status);w.Write(work.LogicalEpoch);
                 w.Write(work.AllocationWorkConsumed);w.Write(work.CandidateWorkConsumed);w.Write(work.OccupancyWorkConsumed);
                 w.Write(work.AllocationQuotaRemaining);w.Write(work.MemberCursor);w.Write(work.CandidateCursor);w.Write(work.OccupancyCursor);w.Write(work.WorkPhase);
                 var c=work.RouteCounters;w.Write(c.LogicalGraphWork);w.Write(c.LogicalFieldWork);w.Write(c.ConnectorWork);w.Write(c.MaintenanceWork);

@@ -30,7 +30,7 @@ namespace Spacewars.Simulation
         public double HalfExtent=>64;
         public double DirectFireHeight=>1;
         public int SurfaceSemanticsVersion=>1;
-        public const string DisplayName="Мшистое нагорье · 4";
+        public const string DisplayName="Забытое нагорье (4)";
         public string SourceRevision=>MossHighlandLayout.SourceRevision;
         public string SourceSha256=>MossHighlandLayout.SourceSha256;
         public IReadOnlyList<MapSupport> Supports{get;}

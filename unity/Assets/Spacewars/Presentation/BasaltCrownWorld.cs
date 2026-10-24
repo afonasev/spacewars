@@ -6,11 +6,12 @@ namespace Spacewars.Presentation
 {
     public sealed partial class PlayableWorld
     {
-        private void CreateBasaltCrown(BasaltCrownMap map)
+        private System.Collections.IEnumerator CreateBasaltCrown(BasaltCrownMap map)
         {
+            var budget=new LoadingFrameBudget();
             var art=BasaltCrownArtProfile.Load();
             basaltTerrainMaterial=art.Material(Fog.Texture,new Vector4((float)map.HalfExtent,(float)map.HalfExtent,0,0),new Color((float)profile.FogTintR,(float)profile.FogTintG,(float)profile.FogTintB));
-            var masks=BuildBasaltPaintMasks(map,art);basaltPaintMask=masks[0];basaltAccentMask=masks[1];
+            Texture2D[] masks=null;yield return PrepareBasaltPaintMasks(map,art,value=>masks=value);basaltPaintMask=masks[0];basaltAccentMask=masks[1];
             basaltTerrainMaterial.SetTexture("_PaintA",basaltPaintMask);basaltTerrainMaterial.SetTexture("_PaintB",basaltAccentMask);
             var mines=BasaltCrownDetails.Mines(map,profile);
             if(mines.Length!=4)throw new System.InvalidOperationException("Basalt Crown requires four mines");
@@ -22,6 +23,7 @@ namespace Spacewars.Presentation
             // Ramp precedence and flat supports come from the navigation provider.
             // Clip the underlying decks around ramps so no flat cap covers the slope.
             foreach(var support in map.Supports){
+                if(budget.Expired){yield return null;budget.Restart();}
                 var pieces=new List<NavObstacle>{support.Bounds};
                 if(support.Id!="citadel-ramp")foreach(var ramp in map.Supports)if(ramp.Id=="citadel-ramp")pieces=Subtract(pieces,ramp.Bounds);
                 foreach(var b in pieces)Prism(support.Id,b,-1,support.Height,support.HeightAt);
@@ -45,6 +47,11 @@ namespace Spacewars.Presentation
         private Material basaltTerrainMaterial;
         public static Texture2D[] BuildBasaltPaintMasks(BasaltCrownMap map,BasaltCrownArtProfile art)
         {
+            Texture2D[] result=null;LoadingPreparation.Drain(PrepareBasaltPaintMasks(map,art,value=>result=value));return result;
+        }
+        private static System.Collections.IEnumerator PrepareBasaltPaintMasks(BasaltCrownMap map,BasaltCrownArtProfile art,System.Action<Texture2D[]> ready)
+        {
+            var budget=new LoadingFrameBudget();
             art.Validate();
             // Fixed bounded raster precision: finer than the authored 2m source cells.
             const int size=512;int length=size*size;float step=(float)(map.HalfExtent*2/size);
@@ -56,7 +63,10 @@ namespace Spacewars.Presentation
                 int z0=Mathf.Clamp(Mathf.CeilToInt((float)(b.MinZ+map.HalfExtent)/step-.5f),0,size),z1=Mathf.Clamp(Mathf.CeilToInt((float)(b.MaxZ+map.HalfExtent)/step-.5f),0,size);
                 for(int z=z0;z<z1;z++)for(int x=x0;x<x1;x++){int i=z*size+x;fields[0][i]=0;fields[role][i]=1;}
             }
-            for(int role=0;role<fields.Length;role++)fields[role]=Feather(fields[role],size,Mathf.CeilToInt((role==2?art.roadFeather:art.naturalFeather)/step));
+            for(int role=0;role<fields.Length;role++){
+                if(budget.Expired){yield return null;budget.Restart();}
+                fields[role]=Feather(fields[role],size,Mathf.CeilToInt((role==2?art.roadFeather:art.naturalFeather)/step));
+            }
             var a=new Color[length];var c=new Color[length];
             for(int i=0;i<length;i++){
                 float total=0;foreach(var f in fields)total+=f[i];total=Mathf.Max(total,.00001f);
@@ -64,7 +74,7 @@ namespace Spacewars.Presentation
                 c[i]=new Color(fields[4][i]/total,fields[5][i]/total,fields[6][i]/total,0);
             }
             Texture2D Mask(string name,Color[] pixels){var t=new Texture2D(size,size,TextureFormat.RGBA32,false,true){name=name,wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};t.SetPixels(pixels);t.Apply(false,false);return t;}
-            return new[]{Mask("Basalt Crown ground role weights",a),Mask("Basalt Crown accent role weights",c)};
+            ready(new[]{Mask("Basalt Crown ground role weights",a),Mask("Basalt Crown accent role weights",c)});
         }
         private static float[] Feather(float[] field,int size,int radius)
         {

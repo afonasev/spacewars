@@ -30,7 +30,7 @@ namespace Spacewars.Simulation
                 NavContract.StringWireBytes(sourceProfile.ExactProfileBinding)+NavContract.StringWireBytes(sourceProfile.CostId)+12L);
             long subscriptionWire=checked(4L+88L+NavContract.LocationWireBytes(sourceSubscription.Origin)+NavContract.LocationWireBytes(sourceSubscription.AssignedEndpoint)+1L+
                 (sourceSubscription.HoldBinding==null?0:NavContract.StringWireBytes(sourceSubscription.HoldBinding)));
-            long digestScratch=checked(NavContract.DigestScratchBytes(graphWire)+NavContract.DigestScratchBytes(subscriptionWire)+NavContract.DigestScratchBytes(77)+NavContract.DigestScratchBytes(135));
+            long digestScratch=checked(NavContract.DigestScratchBytes(graphWire)+NavContract.DigestScratchBytes(subscriptionWire)+NavContract.DigestScratchBytes(77)+NavContract.DigestScratchBytes(135+(source.Query?192:0)));
             using(var scratch=NavStorageScratch.Reserve(reservation,8192L+128L*count+digestScratch))
             using(var allocation=new NavStorageAllocation(reservation.TryReserve)){
                 allocation.Reserve(bytes);var storage=allocation.Register(new NavDeclarationStorage(bytes));
@@ -44,7 +44,7 @@ namespace Spacewars.Simulation
                     region.StorageRoot.Retain();storage.Second=region.StorageRoot;if(copied)region.StorageRoot.ReleaseOwner();
                 }
                 var l=source.Limits;var limits=new NavGraphCompileLimits(l.MaxSamples,l.MaxNodes,l.MaxArcs);
-                var value=new NavScheduledRequest(provider,clearance,profile,limits,region,subscription,source.MaxLabels,source.Singleton){ownedRecipe=storage};
+                var value=new NavScheduledRequest(provider,clearance,profile,limits,region,subscription,source.MaxLabels,source.Singleton,source.Query,source.GroupQuery,source.DemandQuery,source.DemandQueryV2,source.DemandQueryV3,source.DemandQueryV4,source.DemandQueryV5,source.DemandQueryV6,source.LazyPartition,source.CertifiedLazyPartition,source.RectangularOrigins,source.TerminalRectangleProof,source.TerminalCornerProof,source.OriginShadowProof,source.TerminalCostProof,source.CertifiedGroupCorridor){ownedRecipe=storage};
                 if(value.GraphKey!=source.GraphKey||value.CompileKey!=source.CompileKey||value.ArtifactKey!=source.ArtifactKey||value.Subscription.StableKey!=s.StableKey)
                     throw new ArgumentException("Owned recipe identity changed.");
                 storage.Facade=value;clearance.MetadataOwner=storage;profile.MetadataOwner=storage;subscription.MetadataOwner=storage;limits.MetadataOwner=storage;storage.Retain();return value;

@@ -32,7 +32,7 @@ namespace Spacewars.Tests.EditMode
         {
             var session=ReadyPair(.5);
             var original=session.GroupFor(1);
-            Assert.AreEqual(1,original.MarchVersion);Assert.AreNotEqual(original.Members[0].Slot,original.Members[1].Slot);
+            Assert.AreEqual(2,original.MarchVersion);Assert.AreNotEqual(original.Members[0].Slot,original.Members[1].Slot);
             for(int i=0;i<30;i++)session.Step(1d/30);
             var slow=session.Crowd.Units.Single(u=>u.Id==1);var fast=session.Crowd.Units.Single(u=>u.Id==2);
             Assert.AreEqual(2,slow.Speed);Assert.AreEqual(4,fast.Speed);Assert.AreEqual(4.5,fast.TurnSpeed);
@@ -217,5 +217,28 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(0,restoredNav.GroupFor(id).MarchVersion);
             Assert.AreEqual(1,restoredNav.PendingCount);
         }
+        [Test] public void V2OwnOriginsOffsetAndLegacyProjectionStayDistinct()
+        {
+            NavLocation At(double x,double z)=>new NavLocation(new NavPoint(x,z),NavLocation.FlatSurface);
+            NavCorridorDescriptor Route(int id,NavLocation[] points)=>new NavCorridorDescriptor(1,new string('0',64),new string('0',64),new string('0',64),NavLocation.FlatSurface,null,1,.72,.8,NavRouteProvenance.CommandMember,1,1,1,1,0,1,id,id,0,id,1,points[0],points[points.Length-1],Enumerable.Range(0,points.Length-1).Select(i=>new NavCorridorLeg(points[i],points[i+1],NavTypedLegKind.Surface,null,1,NavCorridorSection.IndividualConnector,0,0)).ToArray());
+            var rows=new[]{Route(1,new[]{At(-20,0),At(20,0)}),Route(2,new[]{At(-10,2),At(20,2)}),Route(3,new[]{At(-5,4),At(-5,14),At(20,14),At(20,4)})};
+            foreach(var row in rows){Assert.Zero(GroupMarch.ProjectFromOrigin(row,row.Origin,0,0));Assert.AreEqual(2,GroupMarch.MaxSpeed(4,2,0,0,4,1d/30));Assert.AreEqual(7,GroupMarch.ProjectFromOrigin(row,row.Origin,7,7),"A replacement request starts at the persisted offset.");}
+            Assert.AreEqual(12,GroupMarch.ProjectFromOrigin(rows[0],At(-15,0),7,7));Assert.AreEqual(12,GroupMarch.ProjectFromOrigin(rows[0],At(-18,0),12,7),"Projection never loses progress.");
+            Assert.AreEqual(-40,GroupMarch.Project(rows[0],rows[0].Origin,double.NegativeInfinity));
+        }
+
+        [Test] public void V2ReplacementAndReinforcementKeepExistingProgressAndBindOffset()
+        {
+            var session=ReadyPair(4);try{
+                for(int i=0;i<30;i++)session.Step(1d/30);var before=session.GroupFor(1);var original=before.Members.Single(m=>m.Entity==1);Assert.Greater(original.Progress,0);
+                Assert.True(session.Move(1,new NavPoint(12,-2)));Assert.AreEqual(before.GroupId,session.GroupFor(1).GroupId);Assert.AreEqual(original.Progress,session.GroupFor(1).Members.Single(m=>m.Entity==1).Progress);
+                using(var host=new UnityHostRouteService()){var binding=new PlayableRouteBinding(session.AuthorityGeometry,PlayableProfile.Default,session.Admission,session.RoutePort);for(int i=0;i<80&&session.PendingCount>0;i++){host.Service(binding,8);session.ApplyResults();}}
+                Assert.Zero(session.PendingCount);session.Step(1d/30);var replaced=session.GroupFor(1).Members.Single(m=>m.Entity==1);Assert.AreEqual(original.Progress,replaced.ProgressOffset);Assert.GreaterOrEqual(replaced.Progress,original.Progress);
+                var existing=session.GroupFor(1);session.Crowd.Add(3,new NavPoint(-12,0),.72,2,4.5);var command=new PlayableCommand(1,existing.CommandSequence,"player-1",PlayableCommandKind.Move,new[]{3},existing.OriginalGoal);
+                session.PrepareCommandGroup(command,existing.OrderRevision+1,existing.IssuedTick,0,existing.GroupId,existing.OrderRevision,existing.IssuedTick);Assert.True(session.MoveGroup(new[]{3},new[]{new NavPoint(12,0)}));session.FinishCommandGroup(true,new[]{3});
+                var joined=session.GroupFor(3);Assert.AreEqual(existing.GroupId,joined.GroupId);Assert.AreEqual(3,joined.Members.Length);foreach(var m in existing.Members){var n=joined.Members.Single(x=>x.Entity==m.Entity);Assert.AreEqual(m.Progress,n.Progress);Assert.AreEqual(m.ProgressOffset,n.ProgressOffset);Assert.AreEqual(m.ProgressRequest,n.ProgressRequest);}Assert.AreEqual(Math.Max(0,existing.MarchAnchor),joined.Members.Single(m=>m.Entity==3).ProgressOffset);
+            }finally{session.DestroyNavigationAuthority();Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);}
+        }
+
     }
 }

@@ -108,6 +108,35 @@ public sealed class PersistentConstructionApronTests
             world.RenderSites(State(null,true));yield return null;Count(1);
         }
     }
+    [UnityTest] public IEnumerator CaptureSweepsWholeInsetPadAndRetainsTransparentFogMaterial()
+    {
+        var site=new TerritorySite(600,PlayableBuildingKind.Outpost,new NavPoint(0,0),Array.Empty<TerritorySlot>());
+        var art=EnvironmentArtProfile.Load();
+        camera.transform.position=new Vector3(0,20,0);camera.transform.LookAt(Vector3.zero,Vector3.forward);camera.orthographicSize=5;
+        var target=new RenderTexture(800,640,24);target.Create();camera.targetTexture=target;
+        try
+        {
+            float previousFront=float.NegativeInfinity;
+            foreach(float progress in new[]{0f,.25f,.5f,.5005f,.75f,1f,0f})
+            {
+                var view=new PlayableSnapshot(profile.ProfileId,profile.Revision,1,7,++tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,0,null,Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),null,null,
+                    sites:new[]{new TerritorySiteSnapshot(site,null,PlayableOwner.Player,progress,false,0,false)});
+                world.RenderSites(view,camera);yield return null;
+                var fill=Pad("600:0").Find("Capture");var mesh=fill.GetComponent<MeshFilter>().sharedMesh;
+                if(progress==0){Assert.Zero(mesh.vertexCount);continue;}
+                var surface=Pad("600:0").Find("Technical apron").GetComponent<MeshFilter>().sharedMesh;
+                Assert.Greater(mesh.bounds.size.x,surface.bounds.size.x*.8f,"Capture must span the apron width, not a service-edge strip");
+                Assert.Greater(mesh.bounds.max.z,previousFront,"Even sub-band progress must advance continuously");previousFront=mesh.bounds.max.z;
+                Assert.Greater(mesh.bounds.size.z,surface.bounds.size.z*progress*.8f);
+                var renderer=fill.GetComponent<MeshRenderer>();var material=renderer.sharedMaterial;
+                Assert.IsTrue(material.shader.isSupported);Assert.AreSame(world.Fog.Texture,material.GetTexture("_FogMask"));
+                Assert.AreEqual(3000,material.renderQueue);Assert.Zero(material.GetInt("_ZWrite"));
+                var block=new MaterialPropertyBlock();renderer.GetPropertyBlock(block);Assert.AreEqual(art.captureFillOpacity,block.GetColor("_BaseColor").a,.0001f);
+                if(progress==.25f||progress==.5f||progress==.75f||progress==1)Capture(target,"capture-"+Mathf.RoundToInt(progress*100)+".png");
+            }
+        }
+        finally{camera.targetTexture=null;target.Release();UnityEngine.Object.DestroyImmediate(target);}
+    }
     [UnityTest] public IEnumerator CaptureReadabilityAndCenterConstructionLifecycle()
     {
         var target=new RenderTexture(1600,1000,24);target.Create();camera.targetTexture=target;

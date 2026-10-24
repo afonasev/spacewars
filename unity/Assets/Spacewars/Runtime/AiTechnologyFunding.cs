@@ -173,7 +173,7 @@ namespace Spacewars.Runtime
 #if UNITY_INCLUDE_TESTS
             diagnosticFreshCash=freshCash.ToString();diagnosticWorldProgress=worldProgress.ToString();
 #endif
-            if(m!=null&&(o.Tick>m.Expires&&!HasHold(b)||m.Expired)&&!freshCash&&!worldProgress)
+            if(m!=null&&(o.Tick>m.Expires&&!HasHold(b)||m.Expired)&&!freshCash&&!worldProgress&&!(plan.PriorityResearch&&m.Branch!=plan.FundingGoal.Research))
             {
 #if UNITY_INCLUDE_TESTS
                 diagnosticOutcome="suppressed-expired-without-progress";
@@ -200,7 +200,7 @@ namespace Spacewars.Runtime
  #if UNITY_INCLUDE_TESTS
             diagnosticPending=pendingScience?"accepted-science-invoice":"none";diagnosticLostTarget=lostTarget.ToString();diagnosticReplace=replace.ToString();
  #endif
-            if(replace&&!freshCash&&!worldProgress){
+            if(replace&&!plan.PriorityResearch&&!freshCash&&!worldProgress){
 #if UNITY_INCLUDE_TESTS
                 diagnosticOutcome="suppressed-replacement-without-progress";
 #endif

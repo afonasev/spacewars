@@ -36,6 +36,7 @@ namespace Spacewars.Tests.EditMode
 
         [Test] public void ReceiptRequiresActivatedArrivalAndSurvivesAutomaticIdle()
         {
+            actualHost=new UnityHostRouteService();
             int id=Spawn(-12,-12);var goal=new NavPoint(-10,-12);Assert.AreEqual(PlayableCommandStatus.Applied,Send(id,goal,origin:PlayableOrderOrigin.Ai));
             Assert.Null(Receipt(id));Step(3);Assert.Null(Receipt(id));Deliver();Assert.Null(Receipt(id));Arrive(id);
             var r=Receipt(id);Assert.AreEqual(goal,r.OriginalTarget);Assert.AreEqual(PlayableSpatialCompletion.FlatSurface,r.SurfaceId);Assert.AreEqual(11,r.Order.JobId);Assert.AreEqual(12,r.Order.ActionId);
@@ -73,6 +74,7 @@ namespace Spacewars.Tests.EditMode
         }
         [TestCase(0)][TestCase(8)][TestCase(200)] public void PendingActiveAndCompletedSaveRestorePreserveContinuation(int ticks)
         {
+            actualHost=new UnityHostRouteService();
             int id=Spawn(-12,-12);Send(id,new NavPoint(-10,-12));if(ticks>0){Deliver();Step(ticks);}var bytes=Save();
             Arrive(id);var expected=Identity(Receipt(id));Restore(bytes);Arrive(id);Assert.AreEqual(expected,Identity(Receipt(id)));
             CollectionAssert.AreEqual(Save(),Save());
@@ -139,11 +141,15 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void AuthoredTerrainReceiptBindsProviderSurfaceAfterRealArrival()
         {
+            actualHost=new UnityHostRouteService();
             var profile=PlayableProfile.ThreeCrossingsDefault;
             domain=Activator.CreateInstance(D,F,null,new object[]{profile,1L,false},null);nav=(NavigationSession)D.GetProperty("Navigation",F).GetValue(domain);
             var id=nav.Crowd.Units.First(u=>u.Team==0).Id; // Use the authored existing player actor.
             var from=nav.Crowd.Units.Single(u=>u.Id==id).Position;
-            Assert.AreEqual(PlayableCommandStatus.Applied,Send(id,from));Deliver();Step(200);Assert.NotNull(Receipt(id));Assert.AreNotEqual(PlayableSpatialCompletion.FlatSurface,Receipt(id).SurfaceId);Assert.True(profile.AuthoredMap.IsValidLocation(Receipt(id).OriginalLocation,0));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(id,from));
+            var actor=nav.Crowd.Units.Single(u=>u.Id==id);var group=nav.GroupFor(id);var member=group.Members.Single(m=>m.Entity==id);var request=nav.PendingRequestFor(id);
+            TestContext.WriteLine("AUTHORED_SAME_POINT_INPUT actor="+id+" generation="+nav.Generation+" origin="+actor.Location.Position.X.ToString("R")+","+actor.Location.Position.Z.ToString("R")+" surface="+actor.Location.SurfaceId+" radius="+actor.Radius.ToString("R")+" target="+from.X.ToString("R")+","+from.Z.ToString("R")+" group="+group.GroupId+" root="+group.OrderRevision+" command="+group.CommandSequence+" incarnation="+member.Incarnation+" revision="+member.OrderRevision+" request="+request?.Request+" order="+request?.Order+" assigned="+member.GoalLocation?.SurfaceId+" exactPoint="+actor.Location.Position.Equals(from));
+            Deliver();Step(200);Assert.NotNull(Receipt(id));Assert.AreNotEqual(PlayableSpatialCompletion.FlatSurface,Receipt(id).SurfaceId);Assert.True(profile.AuthoredMap.IsValidLocation(Receipt(id).OriginalLocation,0));
         }
         [Test] public void OwnerProjectionPublishesOnlyOwnReceipt()
         {

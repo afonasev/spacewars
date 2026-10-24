@@ -86,7 +86,7 @@ namespace Spacewars.Runtime
             var rootRefs=issuanceRows.Where(i=>i.GroupId>0).Select(i=>new{Id=i.Id,Root=i.GroupId}).Concat(tacticalQueues.Values.Where(q=>q.Completion!=null).Select(q=>new{Id=q.Completion.IssuanceId,Root=q.Completion.GroupId}));
             if(rootRefs.GroupBy(x=>x.Root).Any(g=>g.Select(x=>x.Id).Distinct().Count()!=1))throw new ArgumentException("Distinct issuances alias a root.");
             foreach(var row in tacticalQueues){
-                var u=units[row.Key];var q=row.Value;navigation.Crowd.TryGet(u.Id,out var actor);
+                var u=units[row.Key];var q=row.Value;TryActor(u.Id,out var actor);
                 if(q.Deferred.Count>profile.UnitOrderQueueLimit||q.Deferred.Select(i=>i.Id).Distinct().Count()!=q.Deferred.Count||!q.Deferred.Select(i=>i.Id).SequenceEqual(q.Deferred.Select(i=>i.Id).OrderBy(id=>id))||q.Deferred.Any(i=>!i.Command.EntityIds.Contains(u.Id)||OwnerFor(i.Command.PlayerId)!=u.Owner))throw new ArgumentException("Invalid deferred FIFO.");
                 void StampBinding(PlayableOrderStamp o){if(o==null||o.UnitId!=u.Id||o.Owner!=u.Owner||o.Generation!=navigation.Generation||o.Revision<1||o.Revision>=nextOrderRevision||o.Sequence<1||o.Tick<0||o.Tick>Tick||!QueueKind(o.Kind)||
                     (o.Origin==PlayableOrderOrigin.Ai?(string.IsNullOrWhiteSpace(o.Source)||o.JobId<1||o.ActionId<1):(o.Source!=null||o.JobId!=0||o.ActionId!=0)))throw new ArgumentException("Invalid queue order stamp.");}

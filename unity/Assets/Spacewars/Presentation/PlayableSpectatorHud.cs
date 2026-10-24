@@ -12,6 +12,7 @@ namespace Spacewars.Presentation
         private bool spectatorMode,spectatorCollapsed;
         private PlayableOwner? spectatorPerspective;
         private PlayableSpectatorFrame spectatorFrame;
+        private OfflinePresentationFrame ownerFrame;
         private int inspectionEntityId;
         private VisualElement spectatorPanel,spectatorRows,spectatorHead;
         private Label spectatorTooltip;
@@ -26,7 +27,7 @@ namespace Spacewars.Presentation
         }
         private void ReadPresentationFrame()
         {
-            if(spectatorMode){spectatorFrame=runtime.SpectatorFrame(PlayableRuntime.LocalSpectatorId);view=spectatorFrame?.Perspective(spectatorPerspective);ValidateInspection();}else view=matchSetup?.Participants!=null?runtime.ParticipantView(LocalOwnerId):runtime.Latest;
+            if(spectatorMode){ownerFrame=null;spectatorFrame=runtime.SpectatorFrame(PlayableRuntime.LocalSpectatorId);view=spectatorFrame?.Perspective(spectatorPerspective);ValidateInspection();}else {ownerFrame=matchSetup?.Participants!=null?runtime.OfflineFrame:null;view=ownerFrame!=null?ownerFrame.Views[LocalOwnerId]:runtime.Latest;}
         }
         private void CreateSpectatorHud()
         {
@@ -35,7 +36,7 @@ namespace Spacewars.Presentation
             foreach(double rate in new[]{.5,1,2,4}){var speed=Button(rate.ToString("0.#",System.Globalization.CultureInfo.InvariantCulture)+"×",()=>{runtime?.SetSpectatorSpeed(PlayableRuntime.LocalSpectatorId,rate);spectatorRate=rate;UpdateSpectatorSpeed();});speed.name="spectator-speed-"+rate;speed.userData=rate;speed.style.width=42;speed.style.minWidth=42;speed.style.paddingLeft=2;speed.style.paddingRight=2;speed.style.paddingTop=0;speed.style.paddingBottom=0;speed.style.whiteSpace=WhiteSpace.NoWrap;speed.style.marginTop=0;speed.style.marginBottom=0;speed.style.height=26;speed.style.minHeight=26;speed.style.fontSize=12;speed.style.marginLeft=4;controls.Add(speed);}
             var spacer=new VisualElement();spacer.style.flexGrow=1;controls.Add(spacer);var fold=Button("‹",()=>{spectatorCollapsed=!spectatorCollapsed;UpdateSpectatorCollapse();});fold.name="spectator-collapse";fold.style.width=28;fold.style.minWidth=28;fold.style.paddingLeft=2;fold.style.paddingRight=2;fold.style.paddingTop=0;fold.style.paddingBottom=0;fold.style.marginTop=0;fold.style.marginBottom=0;fold.style.height=26;fold.style.minHeight=26;controls.Add(fold);
             spectatorHead=SpectatorRow();var widths=new[]{96,86,54,108,108,108};var names=new[]{"ИГРОК","КРЕДИТЫ","АРМИЯ","ЮНИТЫ","ПРОИЗВОДСТВО","АПГРЕЙДЫ"};for(int i=0;i<names.Length;i++){var label=SpectatorCell(names[i],widths[i]);label.style.fontSize=10;label.style.color=Muted;spectatorHead.Add(label);}spectatorHead.style.height=26;spectatorPanel.Add(spectatorHead);
-            spectatorRows=new VisualElement();spectatorPanel.Add(spectatorRows);UpdateSpectatorSpeed();
+            spectatorRows=new VisualElement();spectatorRows.RegisterCallback<GeometryChangedEvent>(_=>FitSpectatorNameColumn());spectatorPanel.Add(spectatorRows);UpdateSpectatorSpeed();
             spectatorTooltip=new Label{name="spectator-tooltip",pickingMode=PickingMode.Ignore};spectatorTooltip.style.position=Position.Absolute;spectatorTooltip.style.backgroundColor=PanelColor;spectatorTooltip.style.paddingLeft=10;spectatorTooltip.style.paddingRight=10;spectatorTooltip.style.paddingTop=8;spectatorTooltip.style.paddingBottom=8;spectatorTooltip.style.maxWidth=300;spectatorTooltip.style.whiteSpace=WhiteSpace.Normal;spectatorTooltip.style.fontSize=12;spectatorTooltip.style.display=DisplayStyle.None;root.Add(spectatorTooltip);
             spectatorPanel.RegisterCallback<KeyDownEvent>(evt=>{if(evt.keyCode==KeyCode.Tab&&!ModalVisible()){ToggleMap();evt.StopImmediatePropagation();}},TrickleDown.TrickleDown);
         }
@@ -58,7 +59,7 @@ namespace Spacewars.Presentation
             for(int i=0;i<count;i++)parent[i].style.display=i<4?DisplayStyle.Flex:DisplayStyle.None;
             if(count>4){var overflow=parent[3];overflow.tooltip=string.Join("\n",parent.Children().Skip(3).Select(e=>e.tooltip));overflow.Clear();var label=new Label("+"+(count-3)){pickingMode=PickingMode.Ignore};label.style.fontSize=11;label.style.unityTextAlign=TextAnchor.MiddleCenter;label.style.flexGrow=1;overflow.Add(label);}
         }
-        private static string SpectatorUnitGlyph(PlayableEntityKind kind)=>kind==PlayableEntityKind.Explorer?"explorer":kind==PlayableEntityKind.Shkval?"shkval":"tank";
+        private static string SpectatorUnitGlyph(PlayableEntityKind kind)=>kind==PlayableEntityKind.Hawk?"hawk":kind==PlayableEntityKind.Explorer?"explorer":kind==PlayableEntityKind.Shkval?"shkval":"tank";
         private string SpectatorName(PlayableSnapshot player)=>matchSetup==null?player.OwnerId:matchSetup.ParticipantName((int)player.Owner);
         private Color SpectatorPaint(PlayableOwner owner)=>matchSetup!=null?LobbyPaint(owner):Color.HSVToRGB((int)owner/8f,.5f,.9f);
         private int SpectatorTeam(PlayableSnapshot player)=>player.Team;
@@ -70,6 +71,21 @@ namespace Spacewars.Presentation
         private void ValidateInspection(){if(view!=null&&!view.Entities.Any(e=>e.Id==inspectionEntityId)&&!view.Buildings.Any(b=>b.Id==inspectionEntityId&&b.Phase!=ConstructionPhase.Pending))inspectionEntityId=0;}
         private void UpdateSpectatorCollapse(){spectatorHead.style.display=spectatorRows.style.display=spectatorCollapsed?DisplayStyle.None:DisplayStyle.Flex;spectatorPanel.Q<Button>("spectator-collapse").text=spectatorCollapsed?"›":"‹";}
         private void UpdateSpectatorSpeed(){foreach(var b in spectatorPanel.Query<Button>().ToList())if(b.userData is double rate)b.style.color=rate==spectatorRate?Cyan:Ink;}
+        private void FitSpectatorNameColumn()
+        {
+            if(spectatorRows==null||spectatorRows.childCount==0)return;
+            // Content-driven table geometry; keep the original non-name columns unchanged.
+            float width=96;
+            foreach(var row in spectatorRows.Children())
+            {
+                var name=(Button)row[0];
+                float text=name.MeasureTextSize(name.text,0,VisualElement.MeasureMode.Undefined,0,VisualElement.MeasureMode.Undefined).x;
+                width=Mathf.Max(width,Mathf.Ceil(text+name.resolvedStyle.paddingLeft+name.resolvedStyle.paddingRight+name.resolvedStyle.borderLeftWidth+name.resolvedStyle.borderRightWidth));
+            }
+            spectatorHead[0].style.width=spectatorHead[0].style.minWidth=width;
+            foreach(var row in spectatorRows.Children())row[0].style.width=row[0].style.minWidth=width;
+            spectatorPanel.style.width=560+width-96;
+        }
         private void UpdateSpectatorHud()
         {
             if(spectatorPanel==null)return;spectatorPanel.style.display=spectatorMode&&!inLobby&&!preparing&&!ModalVisible()?DisplayStyle.Flex:DisplayStyle.None;if(!spectatorMode||spectatorFrame==null)return;
@@ -80,17 +96,18 @@ namespace Spacewars.Presentation
             foreach(var player in players)
             {
                 bool created=!spectatorRowCache.TryGetValue(player.OwnerId,out var row);if(created){row=SpectatorRow();spectatorRowCache.Add(player.OwnerId,row);spectatorRows.Add(row);}row.name="spectator-row-"+player.OwnerId;bool eliminated=player.OwnerEliminated||!player.Buildings.Any(b=>b.Owner==player.Owner&&TerritoryRules.Center(b.Kind)&&b.Phase!=ConstructionPhase.Pending);row.style.backgroundColor=eliminated?new Color(.13f,.15f,.16f,.95f):shades[Array.IndexOf(teams,SpectatorTeam(player))];row.style.opacity=eliminated ? .5f : 1;
-                Button name;if(created){name=Button(SpectatorName(player),()=>SetSpectatorPerspective(player.Owner));name.name="spectator-player-"+player.OwnerId;name.style.width=96;name.style.minWidth=96;name.style.height=30;name.style.minHeight=30;name.style.fontSize=11;name.style.paddingLeft=8;name.style.paddingRight=2;name.style.marginRight=0;name.style.marginBottom=0;name.style.backgroundColor=Color.clear;name.style.unityTextAlign=TextAnchor.MiddleLeft;name.style.borderTopWidth=name.style.borderRightWidth=name.style.borderBottomWidth=0;name.style.borderLeftWidth=3;name.style.borderLeftColor=SpectatorPaint(player.Owner);name.style.color=SpectatorPaint(player.Owner);name.tooltip=SpectatorName(player);row.Add(name);
+                Button name;if(created){name=Button(SpectatorName(player),()=>SetSpectatorPerspective(player.Owner));name.name="spectator-player-"+player.OwnerId;name.style.width=96;name.style.minWidth=96;name.style.height=30;name.style.minHeight=30;name.style.fontSize=11;name.style.whiteSpace=WhiteSpace.NoWrap;name.style.paddingTop=name.style.paddingBottom=0;name.style.paddingLeft=8;name.style.paddingRight=2;name.style.marginRight=0;name.style.marginBottom=0;name.style.backgroundColor=Color.clear;name.style.unityTextAlign=TextAnchor.MiddleLeft;name.style.borderTopWidth=name.style.borderRightWidth=name.style.borderBottomWidth=0;name.style.borderLeftWidth=3;name.style.borderLeftColor=SpectatorPaint(player.Owner);name.style.color=SpectatorPaint(player.Owner);name.tooltip=SpectatorName(player);row.Add(name);
                 row.RegisterCallback<ClickEvent>(e=>{var target=e.target as VisualElement;for(var at=target;at!=null&&at!=row;at=at.parent)if(at.focusable)return;SetSpectatorPerspective(player.Owner);});
                 row.Add(SpectatorCell("",86));row.Add(SpectatorCell("",54));row.Add(SpectatorIcons(108));row.Add(SpectatorIcons(108));row.Add(SpectatorIcons(108));}
                 name=(Button)row[0];name.text=SpectatorName(player);name.style.backgroundColor=spectatorPerspective==player.Owner?new Color(1,1,1,.08f):Color.clear;name.style.color=SpectatorPaint(player.Owner);((Label)row[1]).text=player.Credits+" +"+player.IncomePerSecond.ToString("0.#")+"/с";((Label)row[2]).text=player.Population.Living+"/"+player.Population.Capacity;
-                var units=row[3];units.Clear();foreach(var kind in new[]{PlayableEntityKind.Explorer,PlayableEntityKind.Tank,PlayableEntityKind.Shkval}){int count=player.Entities.Count(e=>e.Owner==player.Owner&&e.Kind==kind);if(count==0)continue;var cell=new VisualElement();cell.style.flexDirection=FlexDirection.Row;var icon=new OrbitalGlyph(SpectatorUnitGlyph(kind));icon.style.width=20;icon.style.height=20;cell.Add(icon);var n=SpectatorCell(count.ToString(),18);n.style.paddingLeft=0;cell.Add(n);units.Add(cell);}
+                var units=row[3];units.Clear();foreach(var kind in new[]{PlayableEntityKind.Explorer,PlayableEntityKind.Tank,PlayableEntityKind.Shkval,PlayableEntityKind.Hawk}){int count=player.Entities.Count(e=>e.Owner==player.Owner&&e.Kind==kind);if(count==0)continue;var cell=new VisualElement();cell.style.flexDirection=FlexDirection.Row;var icon=new OrbitalGlyph(SpectatorUnitGlyph(kind));icon.style.width=20;icon.style.height=20;cell.Add(icon);var n=SpectatorCell(count.ToString(),18);n.style.paddingLeft=0;cell.Add(n);units.Add(cell);}
                 var production=row[4];production.userData=0;foreach(var b in player.Buildings.Where(b=>b.Owner==player.Owner&&b.Phase!=ConstructionPhase.Ready).OrderBy(b=>b.Id))SpectatorIcon(production,OrbitalPrecision.BuildingGlyph(b.Kind),BuildingName(b.Kind),b.Progress);
-                foreach(var b in player.Buildings.Where(b=>b.Owner==player.Owner&&b.Kind==PlayableBuildingKind.Factory).OrderBy(b=>b.Id)){var state=b.PrivateState;foreach(var order in state.Orders)SpectatorIcon(production,SpectatorUnitGlyph(order.Kind),UnitName(order.Kind),order.Active?order.Progress:0,state.Repeat&&state.RepeatKind==order.Kind?"∞":null);if(state.Repeat&&!state.Orders.Any(o=>o.Kind==state.RepeatKind))SpectatorIcon(production,SpectatorUnitGlyph(state.RepeatKind),UnitName(state.RepeatKind)+" · ожидает",0,"∞");}
+                foreach(var b in player.Buildings.Where(b=>b.Owner==player.Owner&&(b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar)).OrderBy(b=>b.Id)){var state=b.PrivateState;foreach(var order in state.Orders)SpectatorIcon(production,SpectatorUnitGlyph(order.Kind),UnitName(order.Kind),order.Active?order.Progress:0,state.Repeat&&state.RepeatKind==order.Kind?"∞":null);if(state.Repeat&&!state.Orders.Any(o=>o.Kind==state.RepeatKind))SpectatorIcon(production,SpectatorUnitGlyph(state.RepeatKind),UnitName(state.RepeatKind)+" · ожидает",0,"∞");}
                 FinishIcons(production);var upgrades=row[5];upgrades.userData=0;foreach(var research in player.OwnerResearch.Where(r=>r.Complete||r.Active).OrderBy(r=>r.Kind))SpectatorIcon(upgrades,OrbitalPrecision.ResearchGlyph(research.Kind),ResearchName(research.Kind)+"\n"+ResearchDescription(research.Kind),research.Active?research.Progress:-1,research.Complete?"✓":null);FinishIcons(upgrades);
             }
             UpdateSpectatorCollapse();
+            FitSpectatorNameColumn();
         }
-        private static string ResearchDescription(PlayableResearchKind kind)=>kind==PlayableResearchKind.TankChassis?"Улучшает ходовые характеристики танка.":kind==PlayableResearchKind.ExplorerAssaultGuns?"Усиливает вооружение исследователя.":"Улучшает наведение ракет Шквала.";
+        private string ResearchDescription(PlayableResearchKind kind)=>PlayableResearchRules.Description(profile,kind);
     }
 }

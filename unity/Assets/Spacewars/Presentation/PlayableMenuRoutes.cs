@@ -52,6 +52,7 @@ namespace Spacewars.Presentation
         }
         private void ReturnToMainMenu()
         {
+            if(provingGround!=null){ExitProvingGround();return;}
             if(localCoordinator!=null){localCoordinator.ReturnToMainMenu();return;}
             returningToMain=true;ReturnToLobby();
         }
@@ -63,7 +64,10 @@ namespace Spacewars.Presentation
         private NativeBalanceStore balanceStore;
         private void EnsureBalanceStore(){if(balanceStore!=null)return;string path=null;
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if(evidence!=null&&System.Array.IndexOf(System.Environment.GetCommandLineArgs(),"-hawkFlightEvidence")>=0)path=System.IO.Path.Combine(evidence,"native-balance.json");
+            if(evidence!=null&&System.Array.IndexOf(System.Environment.GetCommandLineArgs(),"-provingGroundEvidence")>=0)path=System.IO.Path.Combine(evidence,"native-balance.json");
             if(orbitalEvidence!=null)path=System.IO.Path.Combine(orbitalEvidence,"native-balance.json");
+            if(routePerformanceEvidence&&evidence!=null&&System.Array.IndexOf(System.Environment.GetCommandLineArgs(),"-sixPlayerPerformanceEvidence")>=0)path=System.IO.Path.Combine(evidence,"native-balance.json");
 #endif
             balanceStore=NativeBalanceStore.ForApplication(profile,path);
         }
@@ -72,9 +76,9 @@ namespace Spacewars.Presentation
             if(!inLobby||preparing)return;
             try{
                 EnsureBalanceStore();nativeMainMenu.ScreenRoot.style.display=DisplayStyle.None;
-                var page=new NativeBalanceView(root,menuNavigation,balanceStore,()=>{
+                laboratoryPage=new NativeBalanceView(root,menuNavigation,balanceStore,()=>{
                     childMenu=null;nativeMainMenu.RestoreFocus(nativeMainMenu.ScreenRoot.Q<Button>("main-laboratory"));
-                });childMenu=page.Page;
+                },openProvingGround:OpenProvingGround);childMenu=laboratoryPage.Page;
             }catch(System.Exception e){Debug.LogException(e);notice="Не удалось открыть лабораторию: "+e.Message;}
         }
         private void RebindPresentation()

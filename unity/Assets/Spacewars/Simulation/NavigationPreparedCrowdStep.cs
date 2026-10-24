@@ -8,15 +8,17 @@ namespace Spacewars.Simulation
     {
         private static readonly long HeaderBytes=NavStorageLayout.ObjectBytesBound(typeof(NavPreparedCrowdStep)),UnitBytes=NavStorageLayout.ObjectBytesBound(typeof(NavUnit)),CrowdBytes=NavStorageLayout.ObjectBytesBound(typeof(NavCrowd));
         private static long Align(long n)=>checked((n+7)/8*8);
-        private static long Layout(int count)=>checked(HeaderBytes+15*32L+104L*count+Align(4L*count)+Align(count)+2L*count*UnitBytes+CrowdBytes+NavMotionWorkspace.ArrayBytes(count));
+        private static long Layout(int count)=>checked(HeaderBytes+16*32L+104L*count+Align(4L*count)+2*Align(count)+2L*count*UnitBytes+CrowdBytes+NavMotionWorkspace.ArrayBytes(count));
         internal readonly NavUnit[] Source,Before,After;
         internal readonly NavLiveUnitStorage[] ActorPins;
         internal readonly NavRetainedArray<NavPoint>[] Globals,Locals,NewLocals,RetiredGlobals,RetiredLocals;
         internal readonly NavOwnedStorage[] LocationPins,GoalPins,FailurePins;
-        internal readonly int[] InitialRows;
+        internal readonly int[] InitialRows;internal readonly bool[] TerminalSeeds;
         internal readonly double[] Preferred;
+        // Final destination disposition, not an event history. At commit a
+        // cleared route also makes any preserved installed owner historical.
         internal readonly bool[] Cleared;
-        internal readonly NavMotionBody[] Motion;internal readonly NavMotionProposal[] Proposals;internal readonly int[] Neighbors,NeighborCounts;
+        internal readonly NavMotionBody[] Motion;internal readonly NavMotionProposal[] Proposals;internal readonly int[] Neighbors,NeighborCounts,ComponentLabels,YieldLabels,YieldQueue;internal readonly double[] OriginalSpeeds;
         internal readonly NavCrowd SourceCrowd,Working;
         internal INavStorageReservation Reservation;
         internal NavCrowdSpatialStorage SourceSpatial,NextSpatial,RetiredSpatial;
@@ -29,8 +31,8 @@ namespace Spacewars.Simulation
         {
             SourceCrowd=crowd;Reservation=reservation;Source=new NavUnit[count];Before=new NavUnit[count];After=new NavUnit[count];ActorPins=new NavLiveUnitStorage[count];
             Globals=new NavRetainedArray<NavPoint>[count];Locals=new NavRetainedArray<NavPoint>[count];NewLocals=new NavRetainedArray<NavPoint>[count];RetiredGlobals=new NavRetainedArray<NavPoint>[count];RetiredLocals=new NavRetainedArray<NavPoint>[count];
-            LocationPins=new NavOwnedStorage[count];GoalPins=new NavOwnedStorage[count];FailurePins=new NavOwnedStorage[count];InitialRows=new int[count];Preferred=new double[count];Cleared=new bool[count];for(int i=0;i<count;i++)Preferred[i]=double.NaN;
-            Motion=new NavMotionBody[count];Proposals=new NavMotionProposal[count];Neighbors=new int[checked(count*NavCrowdMotion.NeighborCapacity)];NeighborCounts=new int[count];
+            LocationPins=new NavOwnedStorage[count];GoalPins=new NavOwnedStorage[count];FailurePins=new NavOwnedStorage[count];InitialRows=new int[count];Preferred=new double[count];Cleared=new bool[count];TerminalSeeds=new bool[count];for(int i=0;i<count;i++)Preferred[i]=double.NaN;
+            Motion=new NavMotionBody[count];Proposals=new NavMotionProposal[count];Neighbors=new int[checked(count*NavCrowdMotion.NeighborCapacity)];NeighborCounts=new int[count];ComponentLabels=new int[count];OriginalSpeeds=new double[count];YieldLabels=new int[count];YieldQueue=new int[count];
             Working=new NavCrowd(this,crowd);Retain();
         }
         internal static NavPreparedCrowdStep Create(NavCrowd crowd,int count,INavStorageReservation r)
@@ -43,6 +45,9 @@ namespace Spacewars.Simulation
         internal void ReplaceLocal(NavUnit unit,NavLocalRepairWorkspace route)
         {int row=Find(unit.Id);var next=NavRetainedArray<NavPoint>.Copy(route,Reservation.TryReserve);NewLocals[row]?.Release();NewLocals[row]=next;unit.localRoute=next.ReadOnlyBacking;}
         internal void ClearRoutes(NavUnit unit){int row=Find(unit.Id);Cleared[row]=true;NewLocals[row]?.Release();NewLocals[row]=null;}
+        // A Ready projected after an earlier stop replaces that disposition.
+        // A later movement rejection may clear this new route again.
+        internal void ReplacedRoute(NavUnit unit){int row=Find(unit.Id);Cleared[row]=false;NewLocals[row]?.Release();NewLocals[row]=null;}
         internal void Observe()=>SourceCrowd.ObservePreparedStep(this);
         internal bool SourceCurrent()=>SourceCrowd.PreparedStepSourceCurrent(this);
         internal void Compute(double dt)=>Working.Step(dt);

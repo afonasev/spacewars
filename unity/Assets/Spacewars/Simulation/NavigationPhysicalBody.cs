@@ -16,7 +16,7 @@ namespace Spacewars.Simulation
             try{
                 using(var scratch=NavStorageScratch.Reserve(reservation,128L*512)){
                     output.Write(Magic);long countPosition=output.BaseStream.Position;output.Write(0);
-                    new NavPhysicalBodyWriter(output,index).Edge(root);int count=index.Finish();
+                    new NavPhysicalBodyWriter(output,index,reservation).Edge(root);int count=index.Finish();
                     long end=output.BaseStream.Position;output.BaseStream.Position=countPosition;output.Write(count);output.BaseStream.Position=end;
                 }
             }finally{index.ReleaseStorage();}
@@ -53,10 +53,11 @@ namespace Spacewars.Simulation
     {
         internal readonly BinaryWriter Output;
         private readonly NavPhysicalCaptureIndex index;
+        internal readonly INavStorageReservation Reservation;
         internal System.Collections.Generic.IReadOnlyList<string> EmbeddedTexts;internal int EmbeddedCursor;
         private int depth;
-        internal NavPhysicalBodyWriter(BinaryWriter output,NavPhysicalCaptureIndex index)
-        {Output=output??throw new ArgumentNullException(nameof(output));this.index=index??throw new ArgumentNullException(nameof(index));}
+        internal NavPhysicalBodyWriter(BinaryWriter output,NavPhysicalCaptureIndex index,INavStorageReservation reservation)
+        {Output=output??throw new ArgumentNullException(nameof(output));this.index=index??throw new ArgumentNullException(nameof(index));Reservation=reservation??throw new ArgumentNullException(nameof(reservation));}
         internal void Edge(NavOwnedStorage storage)
         {
             if(storage==null){Output.Write((byte)0);return;}
@@ -107,6 +108,7 @@ namespace Spacewars.Simulation
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalSource)))return NavArrivalCandidateSource.ReadPhysicalBody(reader);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalOccupant)))return NavArrivalOccupant.ReadPhysicalBody(reader);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalProfile)))return NavigationProfile.ReadPhysicalBody(reader);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalProfileCrowdV1,value:NavPhysicalValueKind.ArrivalProfileCorridor115V1)))return NavigationProfile.ReadPhysicalBody(reader,true,true);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalProfileCrowdV1)))return NavigationProfile.ReadPhysicalBody(reader,true);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalWorkingBinding)))return NavArrivalWorkingBinding.ReadPhysicalBody(reader);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalMember)))return NavArrivalMember.ReadPhysicalBody(reader);
@@ -125,7 +127,128 @@ namespace Spacewars.Simulation
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.PrivatePartitionSeam)))return TerrainLocations.ReadSeamPhysicalBody(reader);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.TerrainLocations)))return TerrainLocations.ReadPhysicalBody(reader);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.PartitionProvider)))return PartitionNavigationProvider.ReadPhysicalBody(reader);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.LazyPartitionStoreV2)))return NavLazyPartitionStore.ReadPhysicalBody(reader,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryRecipeV3,value:NavPhysicalValueKind.RectangleOriginsPolicyV9)))return NavScheduledRequest.ReadPhysicalBody(reader,true,false,true,true,true,false,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandQueryRecipeV3,value:NavPhysicalValueKind.RectangleOriginsPolicyV9)))return NavScheduledRequest.ReadPhysicalBody(reader,true,true,true,true,true,false,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryWorkV3,value:NavPhysicalValueKind.RectangleOriginsPolicyV9)))return NavDemandQueryWork.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandSchedulerV3,value:NavPhysicalValueKind.RectangleOriginsPolicyV9)))return LayeredNavigationScheduler.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV4,value:NavPhysicalValueKind.RectangleOriginsArrivalPolicyV11)))return NavHistoricalArrivalState.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV4,value:NavPhysicalValueKind.RectangleOriginsArrivalPolicyV11)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true,true,false,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV4,value:NavPhysicalValueKind.RectangleOriginsArrivalPolicyV11)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true,true,false,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryRecipeV3,value:NavPhysicalValueKind.CertifiedGroupCorridor115V1)))return NavScheduledRequest.ReadPhysicalBody(reader,true,false,true,true,true,false,true,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandQueryRecipeV3,value:NavPhysicalValueKind.CertifiedGroupCorridor115V1)))return NavScheduledRequest.ReadPhysicalBody(reader,true,true,true,true,true,false,true,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryWorkV3,value:NavPhysicalValueKind.CertifiedGroupCorridor115V1)))return NavDemandQueryWork.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandSchedulerV3,value:NavPhysicalValueKind.CertifiedGroupCorridor115V1)))return LayeredNavigationScheduler.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV4,value:NavPhysicalValueKind.CertifiedGroupArrival115V1)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true,true,false,true,true,true,true,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV4,value:NavPhysicalValueKind.CertifiedGroupArrival115V1)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true,true,false,true,true,true,true,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryRecipeV3,value:NavPhysicalValueKind.TerminalCostPolicyV13)))return NavScheduledRequest.ReadPhysicalBody(reader,true,false,true,true,true,false,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryRecipeV3,value:NavPhysicalValueKind.OriginShadowPolicyV12)))return NavScheduledRequest.ReadPhysicalBody(reader,true,false,true,true,true,false,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryRecipeV3,value:NavPhysicalValueKind.TerminalCornerPolicyV11)))return NavScheduledRequest.ReadPhysicalBody(reader,true,false,true,true,true,false,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryRecipeV3,value:NavPhysicalValueKind.TerminalRectanglePolicyV10)))return NavScheduledRequest.ReadPhysicalBody(reader,true,false,true,true,true,false,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandQueryRecipeV3,value:NavPhysicalValueKind.TerminalCostPolicyV13)))return NavScheduledRequest.ReadPhysicalBody(reader,true,true,true,true,true,false,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandQueryRecipeV3,value:NavPhysicalValueKind.OriginShadowPolicyV12)))return NavScheduledRequest.ReadPhysicalBody(reader,true,true,true,true,true,false,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandQueryRecipeV3,value:NavPhysicalValueKind.TerminalCornerPolicyV11)))return NavScheduledRequest.ReadPhysicalBody(reader,true,true,true,true,true,false,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandQueryRecipeV3,value:NavPhysicalValueKind.TerminalRectanglePolicyV10)))return NavScheduledRequest.ReadPhysicalBody(reader,true,true,true,true,true,false,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryWorkV3,value:NavPhysicalValueKind.TerminalCostPolicyV13)))return NavDemandQueryWork.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryWorkV3,value:NavPhysicalValueKind.OriginShadowPolicyV12)))return NavDemandQueryWork.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryWorkV3,value:NavPhysicalValueKind.TerminalCornerPolicyV11)))return NavDemandQueryWork.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryWorkV3,value:NavPhysicalValueKind.TerminalRectanglePolicyV10)))return NavDemandQueryWork.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandSchedulerV3,value:NavPhysicalValueKind.TerminalCostPolicyV13)))return LayeredNavigationScheduler.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandSchedulerV3,value:NavPhysicalValueKind.OriginShadowPolicyV12)))return LayeredNavigationScheduler.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandSchedulerV3,value:NavPhysicalValueKind.TerminalCornerPolicyV11)))return LayeredNavigationScheduler.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandSchedulerV3,value:NavPhysicalValueKind.TerminalRectanglePolicyV10)))return LayeredNavigationScheduler.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV4,value:NavPhysicalValueKind.Page0OccupancyArrivalPolicyV17)))return NavHistoricalArrivalState.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV4,value:NavPhysicalValueKind.Page0OccupancyArrivalPolicyV17)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true,true,false,true,true,true,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV4,value:NavPhysicalValueKind.Page0OccupancyArrivalPolicyV17)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true,true,false,true,true,true,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV4,value:NavPhysicalValueKind.TerminalCostArrivalPolicyV16)))return NavHistoricalArrivalState.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV4,value:NavPhysicalValueKind.OwnedArrivalAnchorPolicyV15)))return NavHistoricalArrivalState.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV4,value:NavPhysicalValueKind.OriginShadowArrivalPolicyV14)))return NavHistoricalArrivalState.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV4,value:NavPhysicalValueKind.TerminalCornerArrivalPolicyV13)))return NavHistoricalArrivalState.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV4,value:NavPhysicalValueKind.TerminalRectangleArrivalPolicyV12)))return NavHistoricalArrivalState.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV4,value:NavPhysicalValueKind.TerminalCostArrivalPolicyV16)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true,true,false,true,true,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV4,value:NavPhysicalValueKind.OwnedArrivalAnchorPolicyV15)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true,true,false,true,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV4,value:NavPhysicalValueKind.OriginShadowArrivalPolicyV14)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true,true,false,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV4,value:NavPhysicalValueKind.TerminalCornerArrivalPolicyV13)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true,true,false,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV4,value:NavPhysicalValueKind.TerminalRectangleArrivalPolicyV12)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true,true,false,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV4,value:NavPhysicalValueKind.TerminalCostArrivalPolicyV16)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true,true,false,true,true,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV4,value:NavPhysicalValueKind.OwnedArrivalAnchorPolicyV15)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true,true,false,true,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV4,value:NavPhysicalValueKind.OriginShadowArrivalPolicyV14)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true,true,false,true,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV4,value:NavPhysicalValueKind.TerminalCornerArrivalPolicyV13)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true,true,false,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV4,value:NavPhysicalValueKind.TerminalRectangleArrivalPolicyV12)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true,true,false,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ExclusionStateV1,value:NavPhysicalValueKind.OriginRectangleWorkV1)))return NavOriginRectangleWork.ReadPhysicalBody(reader);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ExclusionStateV1)))return NavOwnedExclusionState.ReadPhysicalBody(reader);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryRecipeV3,value:NavPhysicalValueKind.CertifiedLazyPartitionPolicyV8)))return NavScheduledRequest.ReadPhysicalBody(reader,true,false,true,true,true,false,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandQueryRecipeV3,value:NavPhysicalValueKind.CertifiedLazyPartitionPolicyV8)))return NavScheduledRequest.ReadPhysicalBody(reader,true,true,true,true,true,false,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryWorkV3,value:NavPhysicalValueKind.CertifiedLazyPartitionPolicyV8)))return NavDemandQueryWork.ReadPhysicalBody(reader,true,true,false,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandSchedulerV3,value:NavPhysicalValueKind.CertifiedLazyPartitionPolicyV8)))return LayeredNavigationScheduler.ReadPhysicalBody(reader,true,true,false,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV4,value:NavPhysicalValueKind.CertifiedLazyArrivalPolicyV10)))return NavHistoricalArrivalState.ReadPhysicalBody(reader,true,true,false,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV4,value:NavPhysicalValueKind.CertifiedLazyArrivalPolicyV10)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true,true,false,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV4,value:NavPhysicalValueKind.CertifiedLazyArrivalPolicyV10)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true,true,false,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.LazyPartitionStoreV1)))return NavLazyPartitionStore.ReadPhysicalBody(reader);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryRecipeV3,value:NavPhysicalValueKind.LazyPartitionPolicyV7)))return NavScheduledRequest.ReadPhysicalBody(reader,true,false,true,true,true,false,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandQueryRecipeV3,value:NavPhysicalValueKind.LazyPartitionPolicyV7)))return NavScheduledRequest.ReadPhysicalBody(reader,true,true,true,true,true,false,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryWorkV3,value:NavPhysicalValueKind.LazyPartitionPolicyV7)))return NavDemandQueryWork.ReadPhysicalBody(reader,true,true,false,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandSchedulerV3,value:NavPhysicalValueKind.LazyPartitionPolicyV7)))return LayeredNavigationScheduler.ReadPhysicalBody(reader,true,true,false,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV4,value:NavPhysicalValueKind.LazyArrivalPolicyV9)))return NavHistoricalArrivalState.ReadPhysicalBody(reader,true,true,false,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV4,value:NavPhysicalValueKind.LazyArrivalPolicyV9)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true,true,false,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV4,value:NavPhysicalValueKind.LazyArrivalPolicyV9)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true,true,false,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryRecipeV3,value:NavPhysicalValueKind.ExactAstarPolicyV6)))return NavScheduledRequest.ReadPhysicalBody(reader,true,false,true,true,true,false,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandQueryRecipeV3,value:NavPhysicalValueKind.ExactAstarPolicyV6)))return NavScheduledRequest.ReadPhysicalBody(reader,true,true,true,true,true,false,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandCatalogV3,value:NavPhysicalValueKind.ExactAstarPolicyV6)))return NavDemandQueryCatalog.ReadPhysicalBody(reader,true,false,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryWorkV3,value:NavPhysicalValueKind.ExactAstarPolicyV6)))return NavDemandQueryWork.ReadPhysicalBody(reader,true,true,false,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandSchedulerV3,value:NavPhysicalValueKind.ExactAstarPolicyV6)))return LayeredNavigationScheduler.ReadPhysicalBody(reader,true,true,false,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV4,value:NavPhysicalValueKind.ExactAstarArrivalPolicyV8)))return NavHistoricalArrivalState.ReadPhysicalBody(reader,true,true,false,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV4,value:NavPhysicalValueKind.ExactAstarArrivalPolicyV8)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true,true,false,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV4,value:NavPhysicalValueKind.ExactAstarArrivalPolicyV8)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true,true,false,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryRecipeV3,value:NavPhysicalValueKind.ExactCostPolicyV5)))return NavScheduledRequest.ReadPhysicalBody(reader,true,false,true,true,true,false,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandQueryRecipeV3,value:NavPhysicalValueKind.ExactCostPolicyV5)))return NavScheduledRequest.ReadPhysicalBody(reader,true,true,true,true,true,false,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandCatalogV3,value:NavPhysicalValueKind.ExactCostPolicyV5)))return NavDemandQueryCatalog.ReadPhysicalBody(reader,true,false,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryWorkV3,value:NavPhysicalValueKind.ExactCostPolicyV5)))return NavDemandQueryWork.ReadPhysicalBody(reader,true,true,false,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandSchedulerV3,value:NavPhysicalValueKind.ExactCostPolicyV5)))return LayeredNavigationScheduler.ReadPhysicalBody(reader,true,true,false,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV4,value:NavPhysicalValueKind.ExactArrivalPolicyV7)))return NavHistoricalArrivalState.ReadPhysicalBody(reader,true,true,false,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV4,value:NavPhysicalValueKind.ExactArrivalPolicyV7)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true,true,false,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV4,value:NavPhysicalValueKind.ExactArrivalPolicyV7)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true,true,false,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV4,value:NavPhysicalValueKind.RemovalPolicyV6)))return NavHistoricalArrivalState.ReadPhysicalBody(reader,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV4,value:NavPhysicalValueKind.RemovalPolicyV6)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV4,value:NavPhysicalValueKind.RemovalPolicyV6)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV4)))return NavHistoricalArrivalState.ReadPhysicalBody(reader,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV4)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV4)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV3)))return NavHistoricalArrivalState.ReadPhysicalBody(reader,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV3)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV3)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryRecipeV3,value:NavPhysicalValueKind.SeamBoundPolicyV4)))return NavScheduledRequest.ReadPhysicalBody(reader,true,false,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandQueryRecipeV3,value:NavPhysicalValueKind.SeamBoundPolicyV4)))return NavScheduledRequest.ReadPhysicalBody(reader,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandCatalogV3,value:NavPhysicalValueKind.SeamBoundPolicyV4)))return NavDemandQueryCatalog.ReadPhysicalBody(reader,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryWorkV3,value:NavPhysicalValueKind.SeamBoundPolicyV4)))return NavDemandQueryWork.ReadPhysicalBody(reader,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandSchedulerV3,value:NavPhysicalValueKind.SeamBoundPolicyV4)))return LayeredNavigationScheduler.ReadPhysicalBody(reader,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV4,value:NavPhysicalValueKind.SeamBoundPolicyV4)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV4,value:NavPhysicalValueKind.SeamBoundPolicyV4)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV4,value:NavPhysicalValueKind.SeamBoundPolicyV4)))return NavHistoricalArrivalState.ReadPhysicalBody(reader,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandCatalogV3)))return NavDemandQueryCatalog.ReadPhysicalBody(reader,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryRecipeV3)))return NavScheduledRequest.ReadPhysicalBody(reader,true,false,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandQueryRecipeV3)))return NavScheduledRequest.ReadPhysicalBody(reader,true,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryWorkV3)))return NavDemandQueryWork.ReadPhysicalBody(reader,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandSchedulerV3)))return LayeredNavigationScheduler.ReadPhysicalBody(reader,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HistoricalArrivalStateV2)))return NavHistoricalArrivalState.ReadPhysicalBody(reader);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandArrivalWorkV2)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandArrivalWorkV2)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandCatalogV2)))return NavDemandQueryCatalog.ReadPhysicalBody(reader);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryRecipeV2)))return NavScheduledRequest.ReadPhysicalBody(reader,true,false,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandQueryRecipeV2)))return NavScheduledRequest.ReadPhysicalBody(reader,true,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryWorkV2)))return NavDemandQueryWork.ReadPhysicalBody(reader,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandSchedulerV2)))return LayeredNavigationScheduler.ReadPhysicalBody(reader,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryWorkV1)))return NavDemandQueryWork.ReadPhysicalBody(reader);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryRecipeV1)))return NavScheduledRequest.ReadPhysicalBody(reader,true,false,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandQueryRecipeV1)))return NavScheduledRequest.ReadPhysicalBody(reader,true,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.DemandQueryArrivalWorkV1)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,false,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupDemandQueryArrivalWorkV1)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true,true);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.Recipe)))return NavScheduledRequest.ReadPhysicalBody(reader);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.QueryRecipeV1)))return NavScheduledRequest.ReadPhysicalBody(reader,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.QuerySingletonV1)))return NavIncrementalSingletonRoute.ReadPhysicalBody(reader,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.QueryArrivalWorkV1)))return NavigationArrivalWork.ReadPhysicalBody(reader,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupQueryRecipeV1)))return NavScheduledRequest.ReadPhysicalBody(reader,true,true);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.GroupQueryArrivalWorkV1)))return NavigationArrivalWork.ReadPhysicalBody(reader,true,true);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.TerminalRegion)))return NavTerminalRegion.ReadPhysicalBody(reader);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.MapSupport)))return MapSupport.ReadPhysicalBody(reader);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.SurfaceTransition)))return NavSurfaceTransition.ReadPhysicalBody(reader);
@@ -146,6 +269,7 @@ namespace Spacewars.Simulation
             if(tag.Storage==NavPhysicalStorageKind.FieldFrontier&&tag.Key==NavPhysicalValueKind.None&&tag.Value==NavPhysicalValueKind.None)return NavFieldFrontier.ReadPhysicalBody(reader);
             if(tag.Storage==NavPhysicalStorageKind.Queue&&tag.Key==NavPhysicalValueKind.None){
                 if(tag.Value==NavPhysicalValueKind.GraphArc)return NavCowOrderedSet<NavGraphArc>.ReadPhysicalBody(reader);
+                if(tag.Value==NavPhysicalValueKind.ExactQueueEntry)return NavCowOrderedSet<NavExactQueueEntry>.ReadPhysicalBody(reader);
                 if(tag.Value==NavPhysicalValueKind.QueueEntry)return NavCowOrderedSet<NavQueueEntry>.ReadPhysicalBody(reader);
                 if(tag.Value==NavPhysicalValueKind.Integer)return NavCowOrderedSet<int>.ReadPhysicalBody(reader);
             }
@@ -166,6 +290,8 @@ namespace Spacewars.Simulation
                 case NavPhysicalValueKind.Long:return ReadValue<long>(tag,reader);
                     case NavPhysicalValueKind.Double:return ReadValue<double>(tag,reader);
                     case NavPhysicalValueKind.Boolean:return ReadValue<bool>(tag,reader);
+                    case NavPhysicalValueKind.ExactCost:return ReadValue<NavExactCost>(tag,reader);
+                    case NavPhysicalValueKind.ExactQueueEntry:return ReadValue<NavExactQueueEntry>(tag,reader);
                     case NavPhysicalValueKind.QueueEntry:return ReadValue<NavQueueEntry>(tag,reader);
                     case NavPhysicalValueKind.GraphArc:return ReadValue<NavGraphArc>(tag,reader);
                     case NavPhysicalValueKind.FieldCell:return ReadValue<NavPackedFieldCell>(tag,reader);
@@ -205,6 +331,7 @@ namespace Spacewars.Simulation
                 if(tag.Value==NavPhysicalValueKind.PagedArcList)return ReadMap<int,NavPagedList<NavGraphArc>>(tag,reader);
                 if(tag.Value==NavPhysicalValueKind.Integer)return ReadMap<int,int>(tag,reader);
                 if(tag.Value==NavPhysicalValueKind.Boolean)return ReadMap<int,bool>(tag,reader);
+                if(tag.Value==NavPhysicalValueKind.ExactCost)return ReadMap<int,NavExactCost>(tag,reader);
                 if(tag.Value==NavPhysicalValueKind.Double)return ReadMap<int,double>(tag,reader);
                 if(tag.Value==NavPhysicalValueKind.GraphArc)return ReadMap<int,NavGraphArc>(tag,reader);
             }
@@ -212,9 +339,18 @@ namespace Spacewars.Simulation
             if(tag.Key==NavPhysicalValueKind.Long&&tag.Value==NavPhysicalValueKind.Double)return ReadMap<long,double>(tag,reader);
             if(tag.Key==NavPhysicalValueKind.Long&&tag.Value==NavPhysicalValueKind.Storage)return ReadMap<long,NavOwnedStorage>(tag,reader);
             if(tag.Key==NavPhysicalValueKind.Long&&tag.Value==NavPhysicalValueKind.GraphArc)return ReadMap<long,NavGraphArc>(tag,reader);
+            if(tag.Key==NavPhysicalValueKind.ExactQueueEntry&&tag.Value==NavPhysicalValueKind.Boolean)return ReadMap<NavExactQueueEntry,bool>(tag,reader);
             if(tag.Key==NavPhysicalValueKind.QueueEntry&&tag.Value==NavPhysicalValueKind.Boolean)return ReadMap<NavQueueEntry,bool>(tag,reader);
-            if((tag.Storage==NavPhysicalStorageKind.AuthorityCatalogLedgerLayout||tag.Storage==NavPhysicalStorageKind.HostRootQuantum||tag.Storage==NavPhysicalStorageKind.HostRoot||tag.Storage==NavPhysicalStorageKind.HostRequest||tag.Storage==NavPhysicalStorageKind.HostProvider||tag.Storage==NavPhysicalStorageKind.HostRow||tag.Storage==NavPhysicalStorageKind.HostAnswer||tag.Storage==NavPhysicalStorageKind.HostCorridor||tag.Storage==NavPhysicalStorageKind.HostProjection||tag.Storage==NavPhysicalStorageKind.HostArrivalIntents||tag.Storage==NavPhysicalStorageKind.HostArrivalHistory||tag.Storage==NavPhysicalStorageKind.HostAuthority||tag.Storage==NavPhysicalStorageKind.HostEnvelope||tag.Storage==NavPhysicalStorageKind.HostEnvelopePublication||tag.Storage==NavPhysicalStorageKind.AuthorityMember||tag.Storage==NavPhysicalStorageKind.AuthorityGroup||tag.Storage==NavPhysicalStorageKind.AuthorityCatalog||tag.Storage==NavPhysicalStorageKind.AuthorityCatalogTerrain||tag.Storage==NavPhysicalStorageKind.InstalledExecution||tag.Storage==NavPhysicalStorageKind.AuthorityCatalogRoutes||tag.Storage==NavPhysicalStorageKind.ArrivalAttemptSnapshot||tag.Storage==NavPhysicalStorageKind.ArrivalProviderSnapshot||tag.Storage==NavPhysicalStorageKind.ArrivalCatalog||tag.Storage==NavPhysicalStorageKind.ArrivalLeaseCatalog||tag.Storage==NavPhysicalStorageKind.LegacyProbeAnswer||tag.Storage==NavPhysicalStorageKind.AuthorityCatalogProbes||tag.Storage==NavPhysicalStorageKind.AuthorityCatalogAnswers||tag.Storage==NavPhysicalStorageKind.AuthorityCatalogLeases||tag.Storage==NavPhysicalStorageKind.ArrivalLeaseSnapshot||tag.Storage==NavPhysicalStorageKind.AuthorityCatalogArrival)&&tag.Key==NavPhysicalValueKind.None&&tag.Value==NavPhysicalValueKind.None&&reader.Extension!=null)
+            if(tag.Value==NavPhysicalValueKind.AccruedAuthorityCreditsV1&&tag.Key==NavPhysicalValueKind.None&&
+                (tag.Storage==NavPhysicalStorageKind.HostRootFairArrivalV1||tag.Storage==NavPhysicalStorageKind.HostEnvelopePublication)&&reader.Extension!=null)
+                return reader.Extension.Read(tag,reader)??throw new ArgumentException("Host BODY extension rejected accrued credit tag.");
+            if(tag.Value==NavPhysicalValueKind.ReplayOnlyProjectionV1&&tag.Key==NavPhysicalValueKind.None&&
+                (tag.Storage==NavPhysicalStorageKind.HostRootFairArrivalV1||tag.Storage==NavPhysicalStorageKind.HostRow||tag.Storage==NavPhysicalStorageKind.HostProjection)&&reader.Extension!=null)
+                return reader.Extension.Read(tag,reader)??throw new ArgumentException("Host BODY extension rejected Replay-only tag.");
+            if(tag.Key==NavPhysicalValueKind.None&&reader.Extension!=null&&((tag.Storage==NavPhysicalStorageKind.AuthorityMember&&tag.Value==NavPhysicalValueKind.GroupMarchProgressV2)||(tag.Storage==NavPhysicalStorageKind.InstalledExecution&&(tag.Value==NavPhysicalValueKind.InstalledGeometryMemberV2||tag.Value==NavPhysicalValueKind.InstalledGeometryCertificateV2||tag.Value==NavPhysicalValueKind.InstalledExecutionV2))))return reader.Extension.Read(tag,reader)??throw new ArgumentException("V2 BODY extension rejected its tag.");
+            if((tag.Storage==NavPhysicalStorageKind.HostEnvelopeTraffic||tag.Storage==NavPhysicalStorageKind.TrafficAuthority||tag.Storage==NavPhysicalStorageKind.AuthorityCatalogLedgerLayout||tag.Storage==NavPhysicalStorageKind.HostRootFairArrivalV1||tag.Storage==NavPhysicalStorageKind.HostRootQuantum||tag.Storage==NavPhysicalStorageKind.HostRoot||tag.Storage==NavPhysicalStorageKind.HostRequest||tag.Storage==NavPhysicalStorageKind.HostProvider||tag.Storage==NavPhysicalStorageKind.HostRow||tag.Storage==NavPhysicalStorageKind.HostAnswer||tag.Storage==NavPhysicalStorageKind.HostCorridor||tag.Storage==NavPhysicalStorageKind.HostProjection||tag.Storage==NavPhysicalStorageKind.HostArrivalIntents||tag.Storage==NavPhysicalStorageKind.HostArrivalHistory||tag.Storage==NavPhysicalStorageKind.HostAuthority||tag.Storage==NavPhysicalStorageKind.HostEnvelope||tag.Storage==NavPhysicalStorageKind.HostEnvelopePublication||tag.Storage==NavPhysicalStorageKind.AuthorityMember||tag.Storage==NavPhysicalStorageKind.AuthorityGroup||tag.Storage==NavPhysicalStorageKind.AuthorityCatalog||tag.Storage==NavPhysicalStorageKind.AuthorityCatalogTerrain||tag.Storage==NavPhysicalStorageKind.InstalledExecution||tag.Storage==NavPhysicalStorageKind.AuthorityCatalogRoutes||tag.Storage==NavPhysicalStorageKind.ArrivalAttemptSnapshot||tag.Storage==NavPhysicalStorageKind.ArrivalProviderSnapshot||tag.Storage==NavPhysicalStorageKind.ArrivalCatalog||tag.Storage==NavPhysicalStorageKind.ArrivalLeaseCatalog||tag.Storage==NavPhysicalStorageKind.LegacyProbeAnswer||tag.Storage==NavPhysicalStorageKind.AuthorityCatalogProbes||tag.Storage==NavPhysicalStorageKind.AuthorityCatalogAnswers||tag.Storage==NavPhysicalStorageKind.AuthorityCatalogLeases||tag.Storage==NavPhysicalStorageKind.ArrivalLeaseSnapshot||tag.Storage==NavPhysicalStorageKind.AuthorityCatalogArrival)&&tag.Key==NavPhysicalValueKind.None&&tag.Value==NavPhysicalValueKind.None&&reader.Extension!=null)
                 return reader.Extension.Read(tag,reader)??throw new ArgumentException("Host BODY extension rejected its tag.");
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalAttemptSnapshot,value:NavPhysicalValueKind.OwnedArrivalAnchorV1))&&reader.Extension!=null)return reader.Extension.Read(tag,reader)??throw new ArgumentException("Owned arrival anchor extension rejected its tag.");
             throw new ArgumentException("Unsupported physical BODY factory.");
         }
         private static NavOwnedStorage ReadValue<T>(NavPhysicalTag tag,NavPhysicalBodyReader reader)
@@ -284,6 +420,8 @@ namespace Spacewars.Simulation
                 if(typeof(T)==typeof(long))return NavPhysicalValueKind.Long;
                 if(typeof(T)==typeof(double))return NavPhysicalValueKind.Double;
                 if(typeof(T)==typeof(bool))return NavPhysicalValueKind.Boolean;
+                if(typeof(T)==typeof(NavExactCost))return NavPhysicalValueKind.ExactCost;
+                if(typeof(T)==typeof(NavExactQueueEntry))return NavPhysicalValueKind.ExactQueueEntry;
                 if(typeof(T)==typeof(NavQueueEntry))return NavPhysicalValueKind.QueueEntry;
                 if(typeof(T)==typeof(NavGraphArc))return NavPhysicalValueKind.GraphArc;
                 if(typeof(T)==typeof(NavPackedFieldCell))return NavPhysicalValueKind.FieldCell;
@@ -321,6 +459,7 @@ namespace Spacewars.Simulation
                 case NavPhysicalValueKind.Long:writer.Output.Write((long)(object)value);break;
                 case NavPhysicalValueKind.Double:writer.Output.Write((double)(object)value);break;
                 case NavPhysicalValueKind.Boolean:writer.Output.Write((bool)(object)value);break;
+                case NavPhysicalValueKind.ExactCost:case NavPhysicalValueKind.ExactQueueEntry:NavPhysicalExactWire<T>.Write(writer,value);break;
                 case NavPhysicalValueKind.QueueEntry:var entry=(NavQueueEntry)(object)value;writer.Output.Write(entry.Cost);writer.Output.Write(entry.Node);writer.Output.Write(entry.Candidate);break;
                 case NavPhysicalValueKind.Text:
                     var text=(string)(object)value;if(writer.EmbeddedTexts==null||writer.EmbeddedCursor>=writer.EmbeddedTexts.Count||!ReferenceEquals(writer.EmbeddedTexts[writer.EmbeddedCursor++],text))throw new ArgumentException("Unowned physical string payload.");NavPhysicalTextPlan.WriteData(writer,text);break;
@@ -363,6 +502,7 @@ namespace Spacewars.Simulation
                 case NavPhysicalValueKind.Long:return (T)(object)reader.Input.ReadInt64();
                 case NavPhysicalValueKind.Double:return (T)(object)reader.Input.ReadDouble();
                 case NavPhysicalValueKind.Boolean:byte b=reader.Input.ReadByte();if(b>1)throw new ArgumentException("Invalid physical boolean.");return (T)(object)(b==1);
+                case NavPhysicalValueKind.ExactCost:case NavPhysicalValueKind.ExactQueueEntry:return NavPhysicalExactWire<T>.Read(reader);
                 case NavPhysicalValueKind.QueueEntry:return (T)(object)new NavQueueEntry{Cost=reader.Input.ReadDouble(),Node=reader.Input.ReadInt32(),Candidate=reader.Input.ReadInt32()};
                 case NavPhysicalValueKind.Text:
                     if(reader.EmbeddedLengthPosition<0||reader.EmbeddedCursor>=reader.EmbeddedCount)throw new ArgumentException("Unowned physical string payload.");

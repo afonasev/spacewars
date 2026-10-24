@@ -16,17 +16,17 @@ namespace Spacewars.Presentation
         private int tacticalTopIndex,tacticalArmyIndex;
         private void CreateMaps(VisualElement row)
         {
-            mapTerrain=new PlayableMapTerrain(profile);
+            mapTerrain=mapTerrain??new PlayableMapTerrain(profile);
             var column=new VisualElement();column.style.width=(float)profile.MinimapCompactSize+30;column.style.flexShrink=0;column.style.marginRight=4;StyleRegion(column);column.name="tactical-minimap-frame";row.Add(column);
-            compactMap=new PlayableMapSurface(profile,mapTerrain.Texture){OwnerPaint=owner=>matchSetup!=null?LobbyPaint(owner):owner==LocalOwner?new Color(.19f,.72f,.77f):owner==PlayableOwner.Enemy?new Color(.93f,.34f,.23f):Color.white};compactMap.style.width=(float)profile.MinimapCompactSize;compactMap.style.height=(float)profile.MinimapCompactSize;column.Add(compactMap);
+            compactMap=new PlayableMapSurface(profile,mapTerrain.Texture){OwnerPaint=owner=>matchSetup!=null||campaignConfiguration!=null?LobbyPaint(owner):owner==LocalOwner?new Color(.19f,.72f,.77f):owner==PlayableOwner.Enemy?new Color(.93f,.34f,.23f):Color.white};compactMap.style.width=(float)profile.MinimapCompactSize;compactMap.style.height=(float)profile.MinimapCompactSize;column.Add(compactMap);
             mapClock=new Label();mapClock.style.unityTextAlign=TextAnchor.MiddleCenter;column.Add(mapClock);
             tacticalOverlay=Panel();tacticalOverlay.name="tactical-screen";StyleRegion(tacticalOverlay);tacticalOverlay.style.left=tacticalOverlay.style.right=tacticalOverlay.style.top=tacticalOverlay.style.bottom=0;tacticalOverlay.style.paddingLeft=24;tacticalOverlay.style.paddingRight=140;tacticalOverlay.style.paddingTop=74;tacticalOverlay.style.paddingBottom=24;tacticalOverlay.style.alignItems=Align.Center;tacticalOverlay.style.justifyContent=Justify.Center;tacticalOverlay.style.display=DisplayStyle.None;root.Add(tacticalOverlay);
             var mapFrame=new VisualElement{name="tactical-map-background"};mapFrame.style.flexShrink=0;
             mapFrame.style.backgroundColor=new Color(.025f,.05f,.065f,1);mapFrame.style.paddingLeft=mapFrame.style.paddingRight=mapFrame.style.paddingTop=mapFrame.style.paddingBottom=8;
             mapFrame.style.borderLeftWidth=mapFrame.style.borderRightWidth=mapFrame.style.borderTopWidth=mapFrame.style.borderBottomWidth=2;
             var mapEdge=new Color(Cyan.r,Cyan.g,Cyan.b,1);mapFrame.style.borderLeftColor=mapFrame.style.borderRightColor=mapFrame.style.borderTopColor=mapFrame.style.borderBottomColor=mapEdge;tacticalOverlay.Add(mapFrame);
-            tacticalMap=new PlayableMapSurface(profile,mapTerrain.Texture){OwnerPaint=owner=>matchSetup!=null?LobbyPaint(owner):owner==LocalOwner?new Color(.19f,.72f,.77f):owner==PlayableOwner.Enemy?new Color(.93f,.34f,.23f):Color.white};mapFrame.Add(tacticalMap);
-            tacticalOverlay.RegisterCallback<GeometryChangedEvent>(_=>{float size=Mathf.Min((float)profile.MinimapTacticalSize,Mathf.Max(0,tacticalOverlay.contentRect.width-20),Mathf.Max(0,tacticalOverlay.contentRect.height-20));tacticalMap.style.width=size;tacticalMap.style.height=size;});
+            tacticalMap=new PlayableMapSurface(profile,mapTerrain.Texture){OwnerPaint=owner=>matchSetup!=null||campaignConfiguration!=null?LobbyPaint(owner):owner==LocalOwner?new Color(.19f,.72f,.77f):owner==PlayableOwner.Enemy?new Color(.93f,.34f,.23f):Color.white};mapFrame.Add(tacticalMap);
+            tacticalOverlay.RegisterCallback<GeometryChangedEvent>(_=>{float size=Mathf.Min((float)profile.MinimapTacticalSize,Mathf.Max(0,tacticalOverlay.contentRect.width-(campaignConfiguration!=null?320:20)),Mathf.Max(0,tacticalOverlay.contentRect.height-20));tacticalMap.style.width=size;tacticalMap.style.height=size;});
         }
         private Vector2 GlobalPanelPoint(Vector2 screen)=>RuntimePanelUtils.ScreenToPanel(root.panel,new Vector2(screen.x,Screen.height-screen.y));
         private Vector2 PanelPoint(Vector2 screen)=>GlobalPanelPoint(screen)-root.worldBound.position;

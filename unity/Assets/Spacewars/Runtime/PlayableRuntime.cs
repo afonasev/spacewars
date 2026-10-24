@@ -27,6 +27,7 @@ namespace Spacewars.Runtime
         private readonly AiAuthorityScheduler aiScheduler;
         private readonly PlayableAuthorityTick authorityTick;
         private readonly int seed;
+        public int MatchSeed=>seed;
         private PlayableSnapshot latest;
         private PlayableProfile requestedBalance;
         private AiProfile requestedAiProfile;
@@ -64,8 +65,14 @@ namespace Spacewars.Runtime
         private PlayableRouteBinding navigationBinding;
         public PlayableRouteBinding NavigationBinding=>Volatile.Read(ref navigationBinding);
         private void PublishNavigationBinding(){Volatile.Write(ref navigationBinding,authorityTick.NavigationBinding);Volatile.Write(ref navigationGeometry,domain.Geometry);}
-        private int stopping,stopped,paused,outstanding,errors;
-        private int finishRequested;
+        private int stopping,stopped,paused,menuPaused,campaignTutorialPauseHeld,outstanding,errors;
+        private int finishRequested,provingGroundStart;
+        public bool StartProvingGroundBattle()
+        {
+            lock(gate){if(offlineConfiguration?.ProvingGround==null||stopping!=0||stopped!=0||paused==0||provingGroundStart!=0)return false;
+                provingGroundStart=1;acceptedByOwner["player-1"]=1;lastAcceptedSequence=1;}
+            Signal();return true;
+        }
         private readonly Dictionary<string,int> humanActions=new Dictionary<string,int>();
         private MatchResult matchResult;
         public MatchResult Result=>Volatile.Read(ref matchResult);
@@ -73,6 +80,9 @@ namespace Spacewars.Runtime
         public void RequestFinish(){lock(gate){if(stopping==0&&stopped==0)finishRequested=1;}Signal();}
         private void ApplyMatchActions(bool isPaused)
         {
+            DrainCampaignTutorialControls();
+            bool startGround=false;lock(gate){if(provingGroundStart==1){provingGroundStart=2;startGround=true;}}
+            if(startGround){domain.StartProvingGroundBattle();RequestPause(false);PresentationChanged();}
             KeyValuePair<string,int>[] actions;bool finish;
             lock(gate){actions=humanActions.OrderBy(x=>x.Key,StringComparer.Ordinal).ToArray();humanActions.Clear();finish=finishRequested!=0;finishRequested=0;}
             if(actions.Length!=0||finish)PresentationChanged();
@@ -103,9 +113,10 @@ namespace Spacewars.Runtime
         public static PlayableRuntime CreateLobbyMatch(PlayableProfile profile,long generation,NativeLobbyConfiguration setup,bool startPaused=false)
         {
             if(setup==null)throw new ArgumentNullException(nameof(setup));setup=setup.Copy();
-            if(profile.AuthoredMap is BasaltCrownMap||profile.AuthoredMap is MossHighlandMap)setup.InitializeParticipants();
+            if(profile.AuthoredMap is CrimsonGroveMap||profile.AuthoredMap is WhiteMeridianMap||profile.AuthoredMap is BasaltCrownMap||profile.AuthoredMap is MossHighlandMap)setup.InitializeParticipants();
             var error=setup.Validate(profile,true,true);
             if(error!=null)throw new ArgumentException(error,nameof(setup));
+            setup.PrepareMatchNames();
             PlayableRuntime runtime;
             if(setup.Participants!=null)
             {
@@ -127,7 +138,7 @@ namespace Spacewars.Runtime
             localSpectator=spectator;
             NativeAiProfile=aiProfile??AiProfile.Initial;NativeAiCatalog=AiRosterCatalog.Initial;
             EnemyAiConfig=new AiOwnerConfig("enemy-1",aiDifficulty,seed,NativeAiProfile);
-            this.seed=seed;Generation=generation;paused=startPaused?1:0;
+            this.seed=seed;Generation=generation;paused=menuPaused=startPaused?1:0;
             bool runEnemyAi=autonomousOwnerAi&&autonomousEnemyAi;
             domain=TwoOwnerDiagnosticAdapter.Create(profile,generation,patrol:!runEnemyAi);
             openingCompositionAuthority=new PlayableAiOpeningCompositionAuthority();OpeningComposition=openingCompositionAuthority.Initialize(seed,PlayableDomain.PlayerId,aiProfile:NativeAiProfile);
@@ -149,10 +160,10 @@ namespace Spacewars.Runtime
         public PlayableRuntime(OfflineMatchConfiguration configuration,long generation,bool startPaused=false,AiDifficulty aiDifficulty=AiDifficulty.Fighter,AiDifficulty[] participantDifficulties=null,bool spectator=false)
         {
             localSpectator=spectator;offlineConfiguration=configuration??throw new ArgumentNullException(nameof(configuration));if(generation<1)throw new ArgumentOutOfRangeException(nameof(generation));
-            seed=configuration.Seed;Generation=generation;paused=startPaused?1:0;domain=new PlayableDomain(configuration.Profile,generation,configuration);
+            seed=configuration.Seed;Generation=generation;paused=menuPaused=startPaused?1:0;domain=new PlayableDomain(configuration.Profile,generation,configuration);
             NativeAiProfile=AiProfile.Initial;NativeAiCatalog=AiRosterCatalog.Initial;EnemyAiConfig=new AiOwnerConfig(configuration.Roster.FirstOrDefault(p=>p.Control==OfflineControl.Ai)?.Id??"enemy-1",aiDifficulty,seed,NativeAiProfile);
             aiScheduler=new AiAuthorityScheduler(configuration.Roster.Where(p=>p.Control==OfflineControl.Ai).Select((p,i)=>new PlayableAiOwnerLoop(configuration.Profile,PlayableAiOpeningComposition.Initialize(seed,p.Id,aiProfile:NativeAiProfile),generation,null,NativeAiProfile,participantDifficulties==null?aiDifficulty:participantDifficulties[i])));
-            authorityTick=new PlayableAuthorityTick(domain,aiScheduler,seed,configuration,asynchronousRoutes:true);
+            authorityTick=new PlayableAuthorityTick(domain,aiScheduler,seed,configuration,asynchronousRoutes:true);authorityTick.EnableAccruedCredits();
             PublishNavigationBinding();latest=domain.PlayerSnapshot(0,RuntimeStatus.Starting,false,Metrics(0,0),null,seed);PublishParticipantViews(RuntimeStatus.Starting,null);
             worker=new Thread(Loop){IsBackground=true,Name="Spacewars.Offline.SharedAuthority"};worker.Start();
         }
@@ -171,7 +182,7 @@ namespace Spacewars.Runtime
         {
             bool framePaused=publicationPaused??(Volatile.Read(ref paused)!=0);
             PublishSpectatorFrame(status,failure,framePaused);
-            if(offlineConfiguration==null)return;var frameMetrics=Metrics(lastCpu,0);var views=new Dictionary<string,PlayableSnapshot>();foreach(var p in offlineConfiguration.Roster)views.Add(p.Id,spectatorFrame!=null?spectatorFrame.Perspective(domain.OwnerFor(p.Id)):domain.PlayerSnapshot(snapshotSequence,status,framePaused,frameMetrics,failure,seed,domain.OwnerFor(p.Id)));OfflineReceipt[] history;long ordinal;lock(gate){history=offlineReceipts.ToArray();ordinal=receiptOrdinal;}Volatile.Write(ref offlineFrame,new OfflinePresentationFrame(views,history,ordinal));
+            if(offlineConfiguration==null)return;var frameMetrics=Metrics(lastCpu,0);var views=new Dictionary<string,PlayableSnapshot>();foreach(var p in offlineConfiguration.Roster)views.Add(p.Id,spectatorFrame!=null?spectatorFrame.Perspective(domain.OwnerFor(p.Id)):domain.PlayerSnapshot(snapshotSequence,status,framePaused,frameMetrics,failure,seed,domain.OwnerFor(p.Id)));OfflineReceipt[] history;long ordinal;lock(gate){history=offlineReceipts.ToArray();ordinal=receiptOrdinal;}Volatile.Write(ref offlineFrame,new OfflinePresentationFrame(views,history,ordinal,offlineFrame));
         }
         // Trusted local route service only; never a map/HUD or network view.
         public NavGeometry NavigationGeometry=>Volatile.Read(ref navigationGeometry);
@@ -227,12 +238,12 @@ namespace Spacewars.Runtime
         public IReadOnlyList<PlayableCommandReceipt> DrainReceipts(){lock(gate){var result=receipts.ToArray();receipts.Clear();outstanding-=result.Count(r=>r.Status!=PlayableCommandStatus.Accepted);return result;}}
         // Non-destructive diagnostic read: adapter consumers must not steal presentation receipts.
         public IReadOnlyList<PlayableCommandReceipt> ReceiptsAfter(long sequence){lock(gate)return receiptHistory.Where(r=>r.Sequence>sequence).ToArray();}
-        public void RequestPause(bool pause){lock(gate){if(stopping==0&&stopped==0&&paused!=(pause?1:0)){Volatile.Write(ref paused,pause?1:0);PresentationChanged();}}Signal();}
+        public void RequestPause(bool pause){bool changed;lock(gate){if(stopping!=0||stopped!=0)return;menuPaused=pause?1:0;int effective=menuPaused!=0||campaignTutorialPauseHeld!=0?1:0;changed=paused!=effective;Volatile.Write(ref paused,effective);}if(changed)PresentationChanged();Signal();}
         public void RequestStop(){lock(gate)Volatile.Write(ref stopping,1);Signal();NavigationBinding?.RoutePort?.SignalHost();}
         public void Dispose()=>RequestStop();
         private void Loop()
         {
-            string failure=null;
+            string failure=null;Exception primaryFailure=null;
             try
             {
                 // Crossings' first public route raster is pure derived work. Prepare it
@@ -247,12 +258,13 @@ namespace Spacewars.Runtime
                 {
                     if(Volatile.Read(ref routeFailure) is Exception routeError)throw new InvalidOperationException("Certified route worker failed.",routeError);
                     double now=clock.Elapsed.TotalSeconds;
+                    ApplyMatchActions(Volatile.Read(ref paused)!=0);
                     bool isPaused=Volatile.Read(ref paused)!=0;
                     double wait=pacing.WaitSeconds(now,Volatile.Read(ref spectatorSpeed),isPaused);
                     if(wait>0){wake.WaitOne((int)Math.Min(20,Math.Ceiling(wait*1000)));continue;}
                     var timer=Stopwatch.StartNew();
                     if(!authorityTick.AwaitingRoutes){ApplyRequestedBalance(isPaused);domain.SetRallyPaused(isPaused);ApplyCommands(isPaused);}
-                    ApplyMatchActions(isPaused);
+                    ApplyMatchActions(isPaused);isPaused=Volatile.Read(ref paused)!=0;
                     // Publish command-generated geometry before main-thread service admission.
                     PublishNavigationBinding();
                     long revision=Volatile.Read(ref presentationRevision);
@@ -268,7 +280,7 @@ namespace Spacewars.Runtime
                             snapshotSequence++;PublishParticipantViews(RuntimeStatus.Running,null,isPaused);Volatile.Write(ref latest,snapshot);
                             lastPublishedRevision=revision;lastPublishedPause=isPaused;Interlocked.Increment(ref barrierPublications);
                         }else Interlocked.Increment(ref barrierReuses);
-                        CompleteCapture();
+                        MaintainCampaignCheckpoint();CompleteCapture();
                         wake.WaitOne(1);continue;
                     }
                     snapshotSequence++;
@@ -276,24 +288,29 @@ namespace Spacewars.Runtime
                     foreach(var receipt in domain.DrainRallyReceipts())RecordReceipt(receipt);
                     if(ownerAi!=null)Volatile.Write(ref aiCheckpoint,ownerAi.Checkpoint);
                     if(enemyAi!=null)Volatile.Write(ref enemyAiCheckpoint,enemyAi.Checkpoint);
-                    PublishParticipantViews(snapshot.Status,null,isPaused);lastPublishedRevision=revision;lastPublishedPause=isPaused;PublishNavigationBinding();Volatile.Write(ref latest,snapshot);if(completedBalanceStatus!=null){lock(gate){balanceApplyStatus=completedBalanceStatus;requestedBalance=null;requestedAiProfile=null;completedBalanceStatus=null;}}lastCpu=timer.Elapsed.TotalMilliseconds;maxCpu=Math.Max(maxCpu,lastCpu);if(lastCpu>TickSeconds*1000)missedDeadlines++;lastAt=now;CompleteCapture();
+                    PublishParticipantViews(snapshot.Status,null,isPaused);lastPublishedRevision=revision;lastPublishedPause=isPaused;PublishNavigationBinding();Volatile.Write(ref latest,snapshot);if(completedBalanceStatus!=null){lock(gate){balanceApplyStatus=completedBalanceStatus;requestedBalance=null;requestedAiProfile=null;completedBalanceStatus=null;}}lastCpu=timer.Elapsed.TotalMilliseconds;maxCpu=Math.Max(maxCpu,lastCpu);if(lastCpu>TickSeconds*1000)missedDeadlines++;lastAt=now;MaintainCampaignCheckpoint();CompleteCapture();
                     pacing.Complete(clock.Elapsed.TotalSeconds);
                 }
             }
-            catch(Exception ex){failure=ex.ToString();Interlocked.Increment(ref errors);}
+            catch(Exception ex){primaryFailure=ex;failure=PlayableDomain.TacticalFailureText(ex);Interlocked.Increment(ref errors);}
             finally
             {
-                domain.CancelAllRally();foreach(var receipt in domain.DrainRallyReceipts())RecordReceipt(receipt);
-                aiScheduler.Stop(domain.Tick);if(ownerAi!=null)Volatile.Write(ref aiCheckpoint,ownerAi.Checkpoint);
-                enemyAi?.Stop(domain.Tick);if(enemyAi!=null)Volatile.Write(ref enemyAiCheckpoint,enemyAi.Checkpoint);
-                lock(gate)
-                {
-                    stopping=1;captureRequest?.TrySetException(new InvalidOperationException("Runtime stopped before capture."));captureRequest=null;
-                    while(inbox.Count>0){var p=inbox.Dequeue();RecordReceipt(new PlayableCommandReceipt(p.Command.Sequence,domain.Tick,PlayableCommandStatus.Cancelled,"Runtime stopped.",0,p.Command.PlayerId));}
-                }
-                NavigationBinding?.RoutePort?.SignalHost();
-                Volatile.Write(ref latest,domain.PlayerSnapshot(++snapshotSequence,failure==null?RuntimeStatus.Stopped:RuntimeStatus.Failed,paused!=0,Metrics(lastCpu,0),failure,seed));
-                PublishParticipantViews(failure==null?RuntimeStatus.Stopped:RuntimeStatus.Failed,failure);Volatile.Write(ref stopped,1);wake.Dispose();
+                void TerminalAttempt(Action action){try{action();}catch(Exception error){
+                    if(primaryFailure==null){primaryFailure=error;Interlocked.Increment(ref errors);}else PlayableDomain.PreserveTacticalSecondary(primaryFailure,error);
+                    failure=PlayableDomain.TacticalFailureText(primaryFailure);
+                }}
+                try{
+                    TerminalAttempt(domain.CancelAllRally);TerminalAttempt(()=>{foreach(var receipt in domain.DrainRallyReceipts())RecordReceipt(receipt);});
+                    TerminalAttempt(()=>{aiScheduler.Stop(domain.Tick);if(ownerAi!=null)Volatile.Write(ref aiCheckpoint,ownerAi.Checkpoint);});
+                    TerminalAttempt(()=>{enemyAi?.Stop(domain.Tick);if(enemyAi!=null)Volatile.Write(ref enemyAiCheckpoint,enemyAi.Checkpoint);});
+                    TerminalAttempt(()=>{lock(gate){
+                        stopping=1;captureRequest?.TrySetException(new InvalidOperationException("Runtime stopped before capture."));captureRequest=null;
+                        while(inbox.Count>0){var p=inbox.Dequeue();RecordReceipt(new PlayableCommandReceipt(p.Command.Sequence,domain.Tick,PlayableCommandStatus.Cancelled,"Runtime stopped.",0,p.Command.PlayerId));}
+                    }});
+                    TerminalAttempt(()=>NavigationBinding?.RoutePort?.SignalHost());
+                    TerminalAttempt(()=>Volatile.Write(ref latest,domain.PlayerSnapshot(++snapshotSequence,failure==null?RuntimeStatus.Stopped:RuntimeStatus.Failed,paused!=0,Metrics(lastCpu,0),failure,seed)));
+                    TerminalAttempt(()=>PublishParticipantViews(failure==null?RuntimeStatus.Stopped:RuntimeStatus.Failed,failure));
+                }finally{domain.FlushMovementDelayEvidence();Volatile.Write(ref stopped,1);TerminalAttempt(wake.Dispose);}
             }
         }
         private void ApplyCommands(bool isPaused)
@@ -305,7 +322,9 @@ namespace Spacewars.Runtime
                 double latency=(Timestamp()-p.Submitted)*1000;lastCommandLatency=latency;
                 PlayableCommandStatus status;string message;
                 try {if(isPaused){status=PlayableCommandStatus.Rejected;message="Paused.";}else status=domain.ApplyWithoutHumanStatistics(p.Command,out message);}
+                catch(PlayableDomain.TacticalCommitFailure error){if(error.Phase==PlayableDomain.TacticalCommitPhase.Committed)RecordReceipt(new PlayableCommandReceipt(p.Command.Sequence,domain.Tick,PlayableCommandStatus.Applied,"Order committed; postcommit failure.",latency,p.Command.PlayerId));System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error.Original).Throw();throw;}
                 catch {RecordReceipt(new PlayableCommandReceipt(p.Command.Sequence,domain.Tick,PlayableCommandStatus.Rejected,"Command failed.",latency,p.Command.PlayerId));throw;}
+                try{OnCampaignCommandApplied(p.Command,status);}catch{RecordReceipt(new PlayableCommandReceipt(p.Command.Sequence,domain.Tick,status,message,latency,p.Command.PlayerId));throw;}
                 RecordReceipt(new PlayableCommandReceipt(p.Command.Sequence,domain.Tick,status,message,latency,p.Command.PlayerId));
             }
         }

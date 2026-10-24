@@ -13,6 +13,12 @@ namespace Spacewars.Tests.EditMode
     public sealed class CertifiedHostContinuationTests
     {
         private const BindingFlags F=BindingFlags.Instance|BindingFlags.NonPublic;
+        private sealed class ResolvingBirth : NavOwnedStorage
+        {
+            private readonly ManualResetEventSlim entered,release;
+            internal ResolvingBirth(ManualResetEventSlim entered,ManualResetEventSlim release):base(128){this.entered=entered;this.release=release;}
+            protected override void ReleaseEdges(){entered.Set();if(!release.Wait(5000))throw new TimeoutException("Resolver release was not signaled.");}
+        }
         private static readonly Type Domain=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.PlayableDomain",true);
         private object domain;
         private NavigationSession session;
@@ -32,6 +38,12 @@ namespace Spacewars.Tests.EditMode
 
         private object Call(string name,params object[] args)=>Domain.GetMethod(name,F).Invoke(domain,args);
         private int Spawn(double x,double z)=>(int)Call("SpawnUnit",new NavPoint(x,z),PlayableOwner.Player,PlayableEntityKind.Tank);
+        private static object MovementReadback(NavUnit actor)=>new{actor.Id,actor.Incarnation,actor.Moving,Outcome=actor.Outcome.ToString(),Position=new{actor.Position.X,actor.Position.Z},actor.Heading,Goal=new{actor.Goal.X,actor.Goal.Z},actor.routeIndex,GlobalRoute=actor.route.Select(p=>new{x=p.X,z=p.Z}).ToArray(),actor.localIndex,LocalRoute=actor.localRoute.Select(p=>new{x=p.X,z=p.Z}).ToArray(),actor.blockedSeconds,actor.noProgressTicks};
+        private void AssertClearFromPath(NavUnit actor,params NavPoint[] points)
+        {
+            var clearFrom=typeof(NavCrowd).GetMethod("ClearFrom",F);Assert.NotNull(clearFrom);var from=actor.Location;
+            foreach(var point in points){var args=new object[]{actor,from,point,null};Assert.True((bool)clearFrom.Invoke(session.Crowd,args),$"actual ClearFrom rejected QA repair segment from {from.Position} to {point}");from=(NavLocation)args[3];}
+        }
         private void Arrival(int id,NavPoint goal)
         {
             Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",new PlayableCommand(1,++command,"player-1",
@@ -57,6 +69,20 @@ namespace Spacewars.Tests.EditMode
                 root.Rows.Count,root.Scan.Count,root.Projection.Count,root.Completion.Count);}
             finally{root?.Release();}
         }
+        private object ColdRetentionReadback(string stage)
+        {
+            var budget=session.PhysicalHostBudget;
+            var before=new{budget.RetainedBytes,budget.PhysicalBytes,budget.HeldBytes,budget.CommittedBytes,budget.ActiveScopes};
+            var backing=(NavigationCommandAuthority)typeof(NavigationSession).GetField("groupCommandBacking",F).GetValue(session);
+            var names=backing?.CrowdNames;var keys=names?.Keys.ToArray()??Array.Empty<int>();
+            var entries=names==null?Array.Empty<object>():Enumerable.Range(0,names.Names.Length).Select(i=>{
+                var name=names.Names[i];return (object)new{Entity=keys[i/3],Slot=i%3,Role=name.Role.ToString(),OwnerType=name.Owner?.GetType().FullName,OwnerBytes=name.Owner?.StorageBytes,OwnerReferences=name.Owner?.References};
+            }).ToArray();
+            long unique=NavigationStorageOwnershipTests.UniqueWithSession(session);
+            string ownerShape=NavigationStorageOwnershipTests.OwnerShapeWithSession(session);
+            var after=new{budget.RetainedBytes,budget.PhysicalBytes,budget.HeldBytes,budget.CommittedBytes,budget.ActiveScopes};
+            return new{Stage=stage,BudgetBefore=before,BackingBytes=backing?.StorageBytes,BackingReferences=backing?.References,CrowdNamesBytes=names?.StorageBytes,CrowdNamesReferences=names?.References,KeysLength=names?.Keys.Length,NameReferencesLength=names?.Names.Length,Keys=keys,Entries=entries,CrowdIds=session.Crowd.Units.Select(u=>u.Id).ToArray(),UniqueWithSession=unique,OwnerShapeWithSession=ownerShape,BudgetAfter=after};
+        }
         private byte[] Bytes(){using(var state=(PlayableWorldState)Call("CaptureWorldState",7,"a5a-host-continuation")){CertifiedPhysicalPumpTests.AssertCaptureDtoLayout(state.CaptureNavigation);return state.Encode();}}
         private void Restore(byte[] bytes)
         {
@@ -69,11 +95,90 @@ namespace Spacewars.Tests.EditMode
 
         private byte[] ProbeBytes(){using(var state=session.CaptureOwnedState()){CertifiedPhysicalPumpTests.AssertCaptureDtoLayout(state);return WorldWire.Pack(w=>WorldWire.Write(w,state));}}
         private void PumpProbe(int budget)=>kernel.Pump(new PlayableRouteBinding(session.Admission.Geometry,activeProfile,session.Admission,session.RoutePort),budget);
-        private void RestoreProbeBytes(byte[] bytes){
+        private void RestoreProbeBytes(byte[] bytes,IPlayableTerrain terrainOverride=null){
             var g=session.Admission.Geometry;var polygons=new System.Collections.Generic.Dictionary<NavPolygon,NavPolygon>();NavObstacle Fresh(NavObstacle o){if(o.Polygon==null)return o;if(!polygons.TryGetValue(o.Polygon,out var polygon)){polygon=new NavPolygon(o.Polygon.Vertices.ToArray());polygons.Add(o.Polygon,polygon);}return new NavObstacle(polygon,o.Bottom,o.Top);}var freshGeometry=new NavGeometry(g.HalfExtent,g.Obstacles.Select(Fresh).ToArray(),g.Revision);
-            kernel.Clear();session.ReleaseCommittedHostRoot();Call("DestroyOwnedNavigation");session=new NavigationSession(1,freshGeometry,activeProfile.Navigation);Domain.GetField("navigation",F).SetValue(domain,session);session.ConfigureMarch(activeProfile.GroupMarchMaximumStretch,activeProfile.Revision);
+            kernel.Clear();session.ReleaseCommittedHostRoot();Call("DestroyOwnedNavigation");session=new NavigationSession(1,freshGeometry,activeProfile.Navigation,null,terrainOverride);Domain.GetField("navigation",F).SetValue(domain,session);session.ConfigureMarch(activeProfile.GroupMarchMaximumStretch,activeProfile.Revision);
             using(var state=WorldWire.Unpack(bytes,WorldWire.ReadNavigationSessionState))session.RestoreState(state);kernel=new CertifiedRouteKernel();
         }
+        [TestCase(false,false)][TestCase(true,false)][TestCase(false,true)][TestCase(true,true)] public void InstalledMovementSurvivesWorkerQuantumChangeButRefusesActorChange(bool stopActor,bool ready)
+        {
+            int moving=Spawn(-18,-14);Arrival(moving,new NavPoint(-10,-14));
+            for(int i=0;i<20000&&(session.PendingCount>0||session.AllocationCount>0);i++){Pump(4);session.ApplyResults();}
+            Assert.Zero(session.PendingCount);Assert.Zero(session.AllocationCount);Assert.Zero(session.Answers.Count);
+            Assert.True(session.Crowd.TryGet(moving,out var actor));Assert.True(actor.Moving);Assert.NotNull(session.InstalledExecutionFor(moving));
+            for(int i=0;i<20000;i++){var root=session.PinCommittedHostRoot();bool idle;try{idle=root.Frontier.Stage==CertifiedRouteKernel.PumpStage.Idle;}finally{root.Release();}if(idle)break;Pump(4);}
+            void PublishQuantum()
+            {
+                var source=session.PinCommittedHostRoot();NavigationHostRoot candidate=null;NavigationRetentionBudget.Scope scope=null;
+                try{
+                    Assert.AreEqual(CertifiedRouteKernel.PumpStage.Idle,source.Frontier.Stage);
+                    Assert.True(session.TryOpenPhysicalHostScope(NavigationPreparationKind.Admission,session.Generation,session.Admission.PublicationIdentity,out scope));
+                    candidate=source.ForkOwned(scope.OwnedReservation());candidate.IssueQuantum(session.Generation,source.QuantumTick+1,4,session.Admission.PublishedThroughRequestSequence);
+                    candidate.CompleteQuantum();candidate.ConsumeQuantum();candidate.SealPrepared();scope.Attach(candidate);session.PublishPhysicalHostRoot(scope,source,candidate,()=>{});
+                }finally{scope?.Dispose();candidate?.ReleaseStorage();source?.Release();}
+            }
+            if(ready){int second=Spawn(-18,-6);Arrival(second,new NavPoint(-10,-6));for(int i=0;i<20000&&session.Answers.Count==0;i++){Pump(4);if(session.Answers.Count==0)session.PrepareDeliveryBarrier();}Assert.AreEqual(1,session.Answers.Count);Assert.AreEqual(NavSolveStatus.Ready,session.Answers.CopyItems()[0].Status);
+                for(int i=0;i<20000;i++){var root=session.PinCommittedHostRoot();bool idle;try{idle=root.Frontier.Stage==CertifiedRouteKernel.PumpStage.Idle;}finally{root.Release();}if(idle)break;Pump(4);}}
+            PublishQuantum();
+            int applied=session.AppliedResults;
+            var before=actor.Position;int publications=session.OwnedMovementPublications;bool changed=false;var budget=session.PhysicalHostBudget;
+            var gate=typeof(NavigationSession).GetField("transportGate",F).GetValue(session);
+            try{
+                budget.AllocationAdmission=_=>{
+                    if(changed||!new System.Diagnostics.StackTrace().GetFrames().Any(f=>f.GetMethod().DeclaringType==typeof(GroupMarch)&&f.GetMethod().Name=="PrepareOwned"))return true;
+                    Assert.False(Monitor.IsEntered(gate));changed=true;PublishQuantum();
+                    if(stopActor)Assert.True(session.TryStopGroup(new[]{moving},true));
+                    return true;
+                };
+                session.Step(1d/30);
+            }finally{budget.AllocationAdmission=null;}
+            Assert.True(changed,"Inject a legitimate worker quantum publication after movement source capture.");
+            var afterHost=session.PinCommittedHostRoot();try{Assert.AreEqual(2,afterHost.QuantumSerial);Assert.AreEqual(2,afterHost.ConsumedQuantum);}finally{afterHost.Release();}
+            if(stopActor){Assert.AreEqual(publications,session.OwnedMovementPublications);Assert.AreEqual(before,actor.Position);Assert.True(actor.Held);Assert.AreEqual(applied,session.AppliedResults);}
+            else{
+                Assert.AreEqual(publications+1,session.OwnedMovementPublications,"Worker-only quantum progress must not discard installed movement.");Assert.Greater(actor.Position.X,before.X);
+                Assert.Zero(session.LastOwnedMovementPublicationAllocatedBytes);Assert.AreEqual(applied+(ready?1:0),session.AppliedResults);Assert.Zero(session.Answers.Count);
+                byte[] captured=Bytes();session.Step(1d/30);byte[] next=Bytes();Restore(captured);CollectionAssert.AreEqual(captured,Bytes());session.Step(1d/30);CollectionAssert.AreEqual(next,Bytes(),"Current-format continuation after commuted worker progress.");
+            }
+            Assert.Zero(session.PhysicalHostBudget.HeldBytes);Assert.Zero(session.PhysicalHostBudget.ActiveScopes);
+            Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+        }
+
+        [TestCase(false,false,false)][TestCase(true,false,false)][TestCase(false,true,false)][TestCase(false,false,true)][TestCase(true,false,true)][TestCase(false,true,true)] public void InstalledMovementSurvivesUnrelatedArrivalWorkButRefusesRetirement(bool stopForeign,bool completeForeign,bool ready)
+        {
+            int moving=Spawn(-18,-14);Arrival(moving,new NavPoint(-10,-14));
+            for(int i=0;i<20000&&(session.PendingCount>0||session.AllocationCount>0);i++){Pump(4);session.ApplyResults();}
+            Assert.Zero(session.PendingCount);Assert.Zero(session.AllocationCount);Assert.Zero(session.Answers.Count);
+            Assert.True(session.Crowd.TryGet(moving,out var actor));Assert.True(actor.Moving);
+            if(ready){int second=Spawn(-18,-10);Arrival(second,new NavPoint(-10,-10));for(int i=0;i<20000&&session.Answers.Count==0;i++){Pump(4);if(session.Answers.Count==0)session.PrepareDeliveryBarrier();}Assert.AreEqual(1,session.Answers.Count);Assert.AreEqual(NavSolveStatus.Ready,session.Answers.CopyItems()[0].Status);}
+            int applied=session.AppliedResults;
+            int foreign=Spawn(-18,-6);Arrival(foreign,new NavPoint(-10,-6));Assert.True(session.PreparePhysicalArrivalAttempt());Assert.False(session.HasReadyArrival);
+            var before=actor.Position;int publications=session.OwnedMovementPublications;bool changed=false;var budget=session.PhysicalHostBudget;
+            var gate=typeof(NavigationSession).GetField("transportGate",F).GetValue(session);
+            try{
+                budget.AllocationAdmission=_=>{
+                    if(changed||!new System.Diagnostics.StackTrace().GetFrames().Any(f=>f.GetMethod().DeclaringType==typeof(GroupMarch)&&f.GetMethod().Name=="PrepareOwned"))return true;
+                    Assert.False(Monitor.IsEntered(gate));changed=true;
+                    Assert.True(session.AdvancePhysicalArrivalAuthority(1),"Execute the real worker work/history publication and Working transitions.");
+                    Assert.False(session.HasReadyArrival,"The injected service step is still derived work, not a new Ready result.");
+                    if(completeForeign){for(int i=0;i<20000&&!session.HasReadyArrival;i++)Assert.True(session.AdvancePhysicalArrivalAuthority(4));Assert.True(session.HasReadyArrival);}
+                    if(stopForeign)Assert.True(session.TryStopGroup(new[]{foreign},true));
+                    return true;
+                };
+                session.Step(1d/30);
+            }finally{budget.AllocationAdmission=null;}
+            Assert.True(changed);
+            if(stopForeign||completeForeign){Assert.AreEqual(publications,session.OwnedMovementPublications);Assert.AreEqual(before,actor.Position);
+                if(stopForeign)Assert.True(session.Crowd.Units.Single(u=>u.Id==foreign).Held);
+                else if(!ready){session.Step(1d/30);Assert.AreEqual(21,session.LastOwnedMovementNullReason,"The next step selects the ready authority prefix instead of endlessly refusing its captured source.");}
+            }
+            else{
+                Assert.AreEqual(publications+1,session.OwnedMovementPublications,"Unrelated worker-only arrival progress must not discard installed movement.");Assert.Greater(actor.Position.X,before.X);Assert.Zero(session.LastOwnedMovementPublicationAllocatedBytes);Assert.AreEqual(applied+(ready?1:0),session.AppliedResults);Assert.Zero(session.Answers.Count);
+                byte[] captured=Bytes();session.Step(1d/30);byte[] next=Bytes();Restore(captured);CollectionAssert.AreEqual(captured,Bytes());session.Step(1d/30);CollectionAssert.AreEqual(next,Bytes());
+            }
+            Assert.Zero(session.PhysicalHostBudget.HeldBytes);Assert.Zero(session.PhysicalHostBudget.ActiveScopes);Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+        }
+
         [Test] public void CompatibilityMotionAdmissionRefusalPrecedesActualReadyAnswerAndMarchMutation()
         {
             int id=Spawn(-18,-14);Arrival(id,new NavPoint(-10,-14));for(int i=0;i<20000&&session.Answers.Count==0;i++){Pump(4);if(session.Answers.Count==0)session.PrepareDeliveryBarrier();}Assert.AreEqual(1,session.Answers.Count);Assert.AreEqual(NavSolveStatus.Ready,session.Answers.CopyItems()[0].Status);
@@ -130,15 +235,26 @@ namespace Spacewars.Tests.EditMode
             for(int i=0;i<20000&&(session.PendingCount>0||session.AllocationCount>0);i++){Pump(4);session.ApplyResults();}
             Assert.Zero(session.PendingCount);Assert.Zero(session.AllocationCount);Assert.Zero(session.Answers.Count);Assert.True(session.Crowd.TryGet(moving,out var actor));Assert.True(actor.Moving);Assert.NotNull(session.InstalledExecutionFor(moving));
             var global=actor.StorageOwner.Global;var budget=session.PhysicalHostBudget;int start=session.OwnedMovementPublications;
+            Assert.AreEqual(.72,activeProfile.TankCollisionRadius,1e-12,"Tank radius changed; review this QA-only blockage construction.");Assert.AreEqual(.2,activeProfile.Navigation.LocalGridCell,1e-12,"Local grid changed; review this QA-only blockage construction.");Assert.AreEqual(3.6,activeProfile.Navigation.LocalDetourDistance,1e-12,"Detour reach changed; review this QA-only path.");
+            double radius=activeProfile.TankCollisionRadius,d=2*radius+activeProfile.Navigation.LocalGridCell;var blockers=new[]{new NavPoint(actor.Position.X+d,actor.Position.Z),new NavPoint(actor.Position.X+d/2,actor.Position.Z+Math.Sqrt(3)*d/2),new NavPoint(actor.Position.X+d/2,actor.Position.Z-Math.Sqrt(3)*d/2)};
+            foreach(var blockerPoint in blockers){Assert.True(session.Crowd.CanPlace(blockerPoint,radius),$"QA U blocker placement must pass geometry, terrain, and non-overlap checks: {blockerPoint}");Spawn(blockerPoint.X,blockerPoint.Z);}
+            var rearExit=new[]{new NavPoint(actor.Position.X-1.2,actor.Position.Z),new NavPoint(actor.Position.X-1.2,actor.Position.Z+2.8),new NavPoint(actor.Position.X+1.6,actor.Position.Z+3.0)};
+            foreach(var exitPoint in rearExit){double dx=exitPoint.X-actor.Position.X,dz=exitPoint.Z-actor.Position.Z;Assert.LessOrEqual(Math.Sqrt(dx*dx+dz*dz),activeProfile.Navigation.LocalDetourDistance+1e-12,"QA rear-exit intermediate must remain inside the existing detour reach.");}
+            AssertClearFromPath(actor,rearExit[0],rearExit[1],rearExit[2],actor.Goal);
             const double dt=1d/30;
             for(int tick=0;tick<300&&actor.blockedSeconds+dt<activeProfile.Navigation.RepairRetrySeconds;tick++)Call("Step",dt);
+            bool hasCurrentActor=session.Crowd.TryGet(moving,out var currentActor),hasCurrentNeighbor=session.Crowd.TryGet(neighbor,out var currentNeighbor);
+            TestContext.WriteLine("OWNED_RETRY_PRECONDITION "+Newtonsoft.Json.JsonConvert.SerializeObject(new{ActorReferenceIsCurrent=hasCurrentActor&&ReferenceEquals(actor,currentActor),CapturedActor=MovementReadback(actor),CurrentActor=hasCurrentActor?MovementReadback(currentActor):null,CapturedNeighbor=MovementReadback(session.Crowd.Units.Single(u=>u.Id==neighbor)),CurrentNeighbor=hasCurrentNeighbor?MovementReadback(currentNeighbor):null,RepairCount=session.Crowd.RepairCount,RepairFailed=session.Crowd.RepairFailed,session.Crowd.MaxNoProgressTicks,MovementPublicationDelta=session.OwnedMovementPublications-start,session.OwnedMovementPublications,session.LastOwnedMovementPublicationAllocatedBytes,RepairRetrySeconds=activeProfile.Navigation.RepairRetrySeconds,BlockedTimeoutSeconds=activeProfile.Navigation.BlockedTimeoutSeconds}));
             Assert.Greater(session.OwnedMovementPublications,start);Assert.Zero(session.LastOwnedMovementPublicationAllocatedBytes);Assert.GreaterOrEqual(actor.blockedSeconds+dt,activeProfile.Navigation.RepairRetrySeconds);Assert.Zero(session.Crowd.RepairCount);
             var point=actor.Position;double heading=actor.Heading,blocked=actor.blockedSeconds;int cursor=actor.routeIndex,noProgress=actor.noProgressTicks,publications=session.OwnedMovementPublications;var spatial=session.Crowd.SpatialStorage;var group=session.GroupFor(moving);byte[] prefix=Bytes();long physical=budget.PhysicalBytes;int denied=0,underGate=0;var gate=typeof(NavigationSession).GetField("transportGate",F).GetValue(session);
             try{budget.AllocationAdmission=_=>{if(Monitor.IsEntered(gate))underGate++;if(new System.Diagnostics.StackTrace().GetFrames().Any(f=>f.GetMethod().Name=="ReplaceLocal"&&f.GetMethod().DeclaringType==typeof(NavPreparedCrowdStep))){denied++;return false;}return true;};session.Step(dt);}finally{budget.AllocationAdmission=null;}
             Assert.AreEqual(1,denied);Assert.Zero(underGate);Assert.AreEqual(publications,session.OwnedMovementPublications);Assert.AreEqual(point,actor.Position);Assert.AreEqual(heading,actor.Heading);Assert.AreEqual(blocked,actor.blockedSeconds);Assert.AreEqual(cursor,actor.routeIndex);Assert.AreEqual(noProgress,actor.noProgressTicks);Assert.AreSame(spatial,session.Crowd.SpatialStorage);Assert.AreSame(global,actor.StorageOwner.Global);Assert.AreEqual(physical,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);CollectionAssert.AreEqual(prefix,Bytes());
             session.Step(dt);Assert.AreEqual(publications+1,session.OwnedMovementPublications);Assert.Zero(session.LastOwnedMovementPublicationAllocatedBytes);Assert.Greater(session.Crowd.RepairCount,0);Assert.Greater(actor.StorageOwner.Local.Count,0);Assert.AreSame(global,actor.StorageOwner.Global);Assert.True(actor.Moving);Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);
             byte[] atRepair=Bytes();var suffix=new byte[20][];for(int i=0;i<suffix.Length;i++){Call("Step",dt);suffix[i]=Bytes();}Pump(4);byte[] afterPump=Bytes();string facts=HostFacts();
-            Restore(atRepair);CollectionAssert.AreEqual(atRepair,Bytes());for(int i=0;i<suffix.Length;i++){Call("Step",dt);CollectionAssert.AreEqual(suffix[i],Bytes(),"actual repaired movement cold suffix "+i);}Pump(4);CollectionAssert.AreEqual(afterPump,Bytes());Assert.AreEqual(facts,HostFacts());Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+            TestContext.WriteLine("COLD_RETENTION_READBACK "+Newtonsoft.Json.JsonConvert.SerializeObject(ColdRetentionReadback("warm")));
+            Restore(atRepair);CollectionAssert.AreEqual(atRepair,Bytes());for(int i=0;i<suffix.Length;i++){Call("Step",dt);CollectionAssert.AreEqual(suffix[i],Bytes(),"actual repaired movement cold suffix "+i);}Pump(4);CollectionAssert.AreEqual(afterPump,Bytes());
+            TestContext.WriteLine("COLD_RETENTION_READBACK "+Newtonsoft.Json.JsonConvert.SerializeObject(ColdRetentionReadback("cold")));
+            Assert.AreEqual(facts,HostFacts());Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
         }
         [TestCase(false)][TestCase(true)]
         public void PhysicalCompletionTracksBeforePublicationAndRestoresPubliclyDequeuedOwnership(bool publicTake)
@@ -309,6 +425,7 @@ namespace Spacewars.Tests.EditMode
             var budget=session.PhysicalHostBudget;var prefix=Bytes();long charge=budget.PhysicalBytes;var fifo=typeof(NavigationLiveProbeAnswers);int denied=0,underGate=0;var gate=typeof(NavigationSession).GetField("transportGate",F).GetValue(session);
             try{budget.AllocationAdmission=_=>{if(Monitor.IsEntered(gate))underGate++;if(new System.Diagnostics.StackTrace().GetFrames().Any(frame=>frame.GetMethod().DeclaringType==fifo)){denied++;return false;}return true;};session.Step(1d/30);}finally{budget.AllocationAdmission=null;}
             Assert.AreEqual(1,denied);Assert.Zero(underGate);Assert.Zero(session.OwnedResultBatchPublications);Assert.AreEqual(charge,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);CollectionAssert.AreEqual(prefix,Bytes());Assert.AreSame(replacement,session.PendingRequestFor(obsolete));Assert.False(first.Moving);Assert.False(second.Moving);
+            session.MovementDiagnosticObserver=_=>TestContext.WriteLine(session.LastOwnedMovementComputation);
             var order=new System.Collections.Generic.List<long>();long operation=(long)typeof(NavigationSession).GetField("authorityOperationIdentity",F).GetValue(session);long publication=session.Admission.PublicationIdentity;
             session.RouteActivated+=request=>{Assert.False(Monitor.IsEntered(gate));Assert.AreEqual(operation+4,(long)typeof(NavigationSession).GetField("authorityOperationIdentity",F).GetValue(session));Assert.AreEqual(publication+1,session.Admission.PublicationIdentity);order.Add(request.Request);};
             session.Step(1d/30);Assert.AreEqual(1,session.OwnedResultBatchPublications);Assert.Zero(session.LastOwnedResultBatchPublicationAllocatedBytes);CollectionAssert.AreEqual(expected,order);Assert.AreEqual(2,session.AppliedResults);Assert.AreEqual(1,session.RejectedResults);Assert.AreSame(replacement,session.PendingRequestFor(obsolete));Assert.AreNotEqual(firstPosition,first.Position);Assert.AreNotEqual(secondPosition,second.Position);Assert.True(first.Moving);Assert.True(second.Moving);
@@ -417,13 +534,16 @@ namespace Spacewars.Tests.EditMode
             var suffix=Complete();Pump(4);var next=Bytes();var facts=HostFacts();Restore(prefix);CollectionAssert.AreEqual(prefix,Bytes());CollectionAssert.AreEqual(suffix,Complete());Pump(4);CollectionAssert.AreEqual(next,Bytes());Assert.AreEqual(facts,HostFacts());Restore(suffix);CollectionAssert.AreEqual(suffix,Bytes());Pump(4);CollectionAssert.AreEqual(next,Bytes());
         }
 
-        [TestCase("request")][TestCase("admission")][TestCase("two")] public void ActualAuthorityHeldBarrierRefusesThenReissuesAndRestoresPendingPhaseCold(string site)
+        [TestCase("request",true)][TestCase("admission",true)][TestCase("two",true)]
+        [TestCase("request",false)][TestCase("admission",false)][TestCase("two",false)]
+        public void ActualAuthorityHeldBarrierRefusesThenReissuesAndRestoresPendingPhaseCold(string site,bool legacyV1)
         {
             int moving=Spawn(-18,-14),holder=Spawn(-8,10);int second=site=="two"?Spawn(-14,-6):0;int count=second==0?1:2;if(second==0)Arrival(moving,new NavPoint(-10,-14));else Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",new PlayableCommand(1,++command,"player-1",PlayableCommandKind.Move,new[]{moving,second},new NavPoint(-10,-10),origin:PlayableOrderOrigin.Human),null));
             for(int i=0;i<20000&&(session.PendingCount>0||session.AllocationCount>0);i++){Pump(4);session.ApplyResults();}
             Assert.Zero(session.PendingCount);Assert.Zero(session.AllocationCount);Assert.True(session.Crowd.TryGet(moving,out var actor));Assert.True(actor.Moving);
             var initialPosition=actor.Position;for(int t=0;t<120&&actor.Position.Equals(initialPosition);t++)Call("Step",1d/30);Assert.AreNotEqual(initialPosition,actor.Position,"preflight requires actual motion, including normal steering/formation startup");var authority=new PlayableAuthorityTick((PlayableDomain)domain,new AiAuthorityScheduler(Array.Empty<PlayableAiOwnerLoop>()),7);
-            var idle=authority.CaptureBytes();Assert.AreEqual(13,BitConverter.ToInt32(PlayableWorldState.Decode(idle).AiAuthority,4),"existing idle encoding remains v13");
+            if(legacyV1){typeof(PlayableAuthorityTick).GetField("tickQuanta",F).SetValue(authority,false);typeof(PlayableAuthorityTick).GetMethod("SetRouteDeliveryPolicy",F).Invoke(authority,new object[]{false});}
+            var idle=authority.CaptureBytes();Assert.AreEqual(15,BitConverter.ToInt32(PlayableWorldState.Decode(idle).AiAuthority,4),"ordinary authority uses current inner and outer schema v15");
             Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(1,++command,"player-1",PlayableCommandKind.Hold,new[]{holder},origin:PlayableOrderOrigin.Human)).Status);
             var global=actor.StorageOwner.Global;var installed=(NavigationInstalledExecutions)typeof(NavigationSession).GetField("installedExecutions",F).GetValue(session);var old=installed.OwnerFor(moving);var position=actor.Position;long mobility=actor.MobilityRevision,tick=authority.Tick;var admission=session.Admission;var budget=session.PhysicalHostBudget;long physical=budget.PhysicalBytes;var gate=typeof(NavigationSession).GetField("transportGate",F).GetValue(session);int denied=0,underGate=0;
             try{budget.AllocationAdmission=_=>{if(Monitor.IsEntered(gate))underGate++;var frames=new System.Diagnostics.StackTrace().GetFrames();bool reject=frames.Any(f=>f.GetMethod().DeclaringType==(site=="request"?typeof(NavigationHostRequest):typeof(NavigationAdmissionStorage)));if(reject){denied++;return false;}return true;};Assert.False(authority.TryAdvance());}finally{budget.AllocationAdmission=null;}
@@ -434,12 +554,16 @@ namespace Spacewars.Tests.EditMode
                 Assert.True(session.Crowd.TryGet(moving,out var a));var start=a.Position;long m=a.MobilityRevision,op=(long)typeof(NavigationSession).GetField("authorityOperationIdentity",F).GetValue(session),publication=session.Admission.PublicationIdentity;var snapshot=session.Admission.Groups.Single(g=>g.Members.Any(member=>member.Entity==moving));long revision=snapshot.Members.Single(member=>member.Entity==moving).ActivationRevision;int requested=0,cancelled=0;byte[] callback=null;
                 void Requested(NavigationRequest r){if(r.Entity!=moving&&r.Entity!=second)return;requested++;if(r.Entity!=moving)return;Assert.False(Monitor.IsEntered(typeof(NavigationSession).GetField("transportGate",F).GetValue(session)));Assert.False(authority.MaintenancePendingFor(session));Assert.Zero(session.PhysicalHostBudget.ActiveScopes);Assert.AreEqual(start,r.Start);Assert.AreEqual(m+1,r.MemberIdentity.MobilityRevision);Assert.AreEqual(revision,r.MemberIdentity.OrderRevision);Assert.AreEqual(op+count+1,typeof(NavigationSession).GetField("authorityOperationIdentity",F).GetValue(session));Assert.AreEqual(publication+count,session.Admission.PublicationIdentity);Assert.Greater(r.Geometry.Obstacles.Count,session.Admission.Geometry.Obstacles.Count);callback=authority.CaptureBytes();}
                 void Cancelled(int _){cancelled++;}session.RouteRequested+=Requested;session.MovementCancelled+=Cancelled;try{Assert.False(authority.TryAdvance());}finally{session.RouteRequested-=Requested;session.MovementCancelled-=Cancelled;}
-                Assert.AreEqual(count,requested);Assert.Zero(cancelled);Assert.NotNull(callback);Assert.AreEqual(tick,authority.Tick);Assert.True(authority.AwaitingRoutes);Assert.False(authority.MaintenancePendingFor(session));Assert.AreEqual(start,a.Position);Assert.False(a.Moving);Assert.AreEqual(m+1,a.MobilityRevision);Assert.Null(a.StorageOwner.Global);Assert.Zero(session.LastOwnedHeldMaintenancePublicationAllocatedBytes);Assert.AreEqual(count,session.PendingCount);Assert.AreEqual(count,session.Requests.Count);Assert.AreEqual(13,BitConverter.ToInt32(PlayableWorldState.Decode(callback).AiAuthority,4),"completed waiting uses old true encoding");
+                Assert.AreEqual(count,requested);Assert.Zero(cancelled);Assert.NotNull(callback);Assert.AreEqual(tick,authority.Tick);Assert.True(authority.AwaitingRoutes);Assert.False(authority.MaintenancePendingFor(session));Assert.AreEqual(start,a.Position);Assert.False(a.Moving);Assert.AreEqual(m+1,a.MobilityRevision);Assert.Null(a.StorageOwner.Global);Assert.Zero(session.LastOwnedHeldMaintenancePublicationAllocatedBytes);Assert.AreEqual(count,session.PendingCount);Assert.AreEqual(count,session.Requests.Count);Assert.AreEqual(15,BitConverter.ToInt32(PlayableWorldState.Decode(callback).AiAuthority,4),"completed waiting uses current ordinary true encoding");
                 long completedOp=(long)typeof(NavigationSession).GetField("authorityOperationIdentity",F).GetValue(session);Assert.False(authority.TryAdvance());Assert.AreEqual(completedOp,typeof(NavigationSession).GetField("authorityOperationIdentity",F).GetValue(session));return authority.CaptureBytes();
             }
             byte[] waiting=Complete();RestoreAuthority(pending);Assert.True(authority.MaintenancePendingFor(session));CollectionAssert.AreEqual(pending,authority.CaptureBytes(),"pending prefix");byte[] coldWaiting=Complete();CollectionAssert.AreEqual(waiting,coldWaiting,"waiting prefix");
-            byte[] Finish(){for(int i=0;i<20000&&!session.DeliveryBarrierReady;i++)Pump(4);Assert.True(session.DeliveryBarrierReady);Assert.True(authority.TryAdvance());Assert.AreEqual(tick+1,authority.Tick);Assert.False(authority.AwaitingRoutes);Assert.True(session.Crowd.TryGet(moving,out var a));Assert.True(a.Moving);Assert.AreNotEqual(position,a.Position);var suffix=authority.CaptureBytes();Pump(4);var next=authority.CaptureBytes();return WorldWire.Pack(w=>{w.Write(suffix.Length);w.Write(suffix);w.Write(next.Length);w.Write(next);});}
-            var hot=Finish();RestoreAuthority(waiting);Assert.False(authority.MaintenancePendingFor(session));Assert.True(authority.AwaitingRoutes);Assert.False(authority.TryAdvance());var cold=Finish();if(!hot.SequenceEqual(cold)){var folder=System.IO.Path.GetFullPath(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(typeof(CertifiedHostContinuationTests).Assembly.Location),"../../../.local/qa/held-diag-01a13b4c"));System.IO.Directory.CreateDirectory(folder);System.IO.File.WriteAllBytes(System.IO.Path.Combine(folder,"hot-"+site+".bin"),hot);System.IO.File.WriteAllBytes(System.IO.Path.Combine(folder,"cold-"+site+".bin"),cold);}CollectionAssert.AreEqual(hot,cold,"published suffix and next Pump");Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);RestoreAuthority(idle);Assert.False(authority.AwaitingRoutes);CollectionAssert.AreEqual(idle,authority.CaptureBytes(),"old false phase decode");
+            byte[] Finish(){
+                if(legacyV1){for(int i=0;i<20000&&!session.DeliveryBarrierReady;i++)Pump(4);Assert.True(session.DeliveryBarrierReady);Assert.True(authority.TryAdvance());Assert.AreEqual(tick+1,authority.Tick);Assert.False(authority.AwaitingRoutes);Assert.True(session.Crowd.TryGet(moving,out var a));Assert.True(a.Moving);Assert.AreNotEqual(position,a.Position);}
+                else{int advanced=0;long progressedTick=tick;bool moved=false;for(int i=0;i<20000&&(!session.DeliveryBarrierReady||advanced==0||authority.AwaitingRoutes);i++){if(authority.TryAdvance()){advanced++;Assert.AreEqual(progressedTick+1,authority.Tick,"each current V2 grant advances one fixed world tick");progressedTick=authority.Tick;Assert.True(session.Crowd.TryGet(moving,out var stepped));moved|=!position.Equals(stepped.Position);}Pump(4);}Assert.True(session.DeliveryBarrierReady,"current V2 held continuation reaches its delivery barrier");Assert.Greater(advanced,0,"current V2 must progress through ordinary authority grants");Assert.True(moved,"current V2 continuation includes actual bounded movement");}
+                Assert.False(authority.AwaitingRoutes,"finish must leave the route-waiting phase before capturing the suffix");var suffix=authority.CaptureBytes();Pump(4);var next=authority.CaptureBytes();return WorldWire.Pack(w=>{w.Write(suffix.Length);w.Write(suffix);w.Write(next.Length);w.Write(next);});
+            }
+            var hot=Finish();RestoreAuthority(waiting);Assert.False(authority.MaintenancePendingFor(session));Assert.True(authority.AwaitingRoutes);Assert.False(authority.TryAdvance());var cold=Finish();if(!hot.SequenceEqual(cold)){var folder=System.IO.Path.GetFullPath(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(typeof(CertifiedHostContinuationTests).Assembly.Location),"../../../.local/qa/held-diag-01a13b4c"));System.IO.Directory.CreateDirectory(folder);System.IO.File.WriteAllBytes(System.IO.Path.Combine(folder,"hot-"+site+"-"+legacyV1+".bin"),hot);System.IO.File.WriteAllBytes(System.IO.Path.Combine(folder,"cold-"+site+"-"+legacyV1+".bin"),cold);}CollectionAssert.AreEqual(hot,cold,legacyV1?"legacy V1 suffix and next Pump":"current V2 final suffix and next Pump");Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);RestoreAuthority(idle);Assert.False(authority.AwaitingRoutes);CollectionAssert.AreEqual(idle,authority.CaptureBytes(),"old false phase decode");
         }
         [TestCase(false,false)][TestCase(false,true)][TestCase(true,false)][TestCase(true,true)] public void ProducerBarrierHandoffKeepsTypedPayloadThroughReadBoundary(bool legacy,bool throwRead)
         {
@@ -698,6 +822,198 @@ namespace Spacewars.Tests.EditMode
                 var prefix=Bytes();Pump(1);var suffix=Bytes();var facts=HostFacts();Restore(prefix);Assert.Zero(budget.PhysicalBytes);CollectionAssert.AreEqual(prefix,Bytes());Pump(1);CollectionAssert.AreEqual(suffix,Bytes());Assert.AreEqual(facts,HostFacts());
             }finally{budget.AllocationAdmission=null;pressure?.Release();root?.Release();}
         }
+        [Test,Timeout(180000)] public void InstalledTrioWithForeignArrivalRecordsFirstStepAndFoundationReissue()
+        {
+            var folder=Environment.GetEnvironmentVariable("SPACEWARS_ARMY_MOTION_EVIDENCE");if(String.IsNullOrWhiteSpace(folder))folder=null;else System.IO.Directory.CreateDirectory(folder);
+            kernel.Clear();session.ReleaseCommittedHostRoot();Call("DestroyOwnedNavigation");activeProfile=PlayableProfile.ThreeCrossingsDefault;
+            domain=Activator.CreateInstance(Domain,F,null,new object[]{activeProfile,1L,false},null);session=(NavigationSession)Domain.GetProperty("Navigation",F).GetValue(domain);kernel=new CertifiedRouteKernel();
+            int EnemyTank(double x,double z)=>(int)Call("SpawnUnit",new NavPoint(x,z),PlayableOwner.Enemy,PlayableEntityKind.Tank);
+            int[] trio={EnemyTank(42.39,46),EnemyTank(41.5,48.89),EnemyTank(39.5,48.89)};int foreign=Spawn(-42,-40);var goal=new NavPoint(-36,-46);
+            var authority=new PlayableAuthorityTick((PlayableDomain)domain,new AiAuthorityScheduler(Array.Empty<PlayableAiOwnerLoop>()),-515260688,asynchronousRoutes:true);authority.EnableAccruedCredits();Assert.True(session.AccruedCreditsEnabled);
+            var stages=new System.Collections.Generic.List<object>();var callbacks=new System.Collections.Generic.List<object>();CertifiedRouteWorker worker=null;string result="PREPARATION_NOT_RUN",stage="prepare-certified-trio";
+            object Hidden(object value,string name)=>value?.GetType().GetField(name,F|BindingFlags.Public)?.GetValue(value);
+            int Allocating()=>((System.Collections.Generic.IDictionary<int,NavigationRequest>)typeof(NavigationSession).GetField("allocating",F).GetValue(session)).Count;
+            var originalGoals=new System.Collections.Generic.Dictionary<int,NavPoint>();
+            object Quantum()
+            {
+                var root=session.PinCommittedHostRoot();var bank=session.PinCreditBank();try{return new{pinnedRoot=root==null?0:System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(root),serial=root?.QuantumSerial,tick=root?.QuantumTick,budget=root?.QuantumBudget,prefix=root?.AdmissionPrefix,consumed=root?.ConsumedQuantum,complete=root?.QuantumCompleted,queued=bank==null?(long?)null:bank[NavigationAccruedCredits.Count],promoted=bank==null?(long?)null:bank[NavigationAccruedCredits.Promoted],earned=bank==null?(long?)null:bank[NavigationAccruedCredits.Accepted]};}finally{root?.Release();bank?.Release();}
+            }
+            object Snapshot(string label)
+            {
+                using((IDisposable)typeof(NavigationSession).GetMethod("EnterTransport",F).Invoke(session,null)){
+                    var goals=(System.Collections.Generic.IDictionary<int,NavPoint>)typeof(NavigationSession).GetField("retainedGoals",F).GetValue(session);
+                    var reservations=(System.Collections.Generic.IDictionary<int,NavPoint>)typeof(NavigationSession).GetField("reservations",F).GetValue(session);
+                    var pending=(System.Collections.Generic.IDictionary<int,NavigationRequest>)typeof(NavigationSession).GetField("pending",F).GetValue(session);
+                    var allocations=(System.Collections.Generic.IDictionary<int,NavigationRequest>)typeof(NavigationSession).GetField("allocating",F).GetValue(session);
+                    var queues=(IDictionary)Domain.GetField("tacticalQueues",F).GetValue(domain);
+                    var installed=(NavigationInstalledExecutions)typeof(NavigationSession).GetField("installedExecutions",F).GetValue(session);
+                    var row=new{stage=label,hostQuantum=Quantum(),tick=Domain.GetProperty("Tick",F|BindingFlags.Public).GetValue(domain),geometry=session.AuthorityGeometry.Revision,globalAllocating=allocations.Keys.OrderBy(x=>x).ToArray(),globalPending=pending.Keys.OrderBy(x=>x).ToArray(),session.SuspendPendingMovement,session.LastNavigationStepPath,session.LastOwnedMovementNullReason,session.LastOwnedMovementNullDetail,session.LastOwnedMovementRefusal,session.LastOwnedMovementRefusalMessage,session.LastOwnedMovementComputation,session.LastTrafficDispatchStage,session.LastAnswerNamesFailure,session.LastResultBatchFailure,session.OwnedMovementPublications,session.OwnedRebindPublications,workerFailure=worker?.Publication.Failure,
+                        actors=trio.Select(id=>{var a=session.Crowd.Units.Single(u=>u.Id==id);var execution=session.InstalledExecutionFor(id);var q=queues.Contains(id)?queues[id]:null;var active=Hidden(q,"Active");var waiting=Hidden(q,"Pending");return new{id,a.Position,a.Location,a.Goal,a.GoalLocation,a.Heading,a.Radius,a.Speed,a.TurnSpeed,a.Moving,a.Held,a.Outcome,a.MobilityRevision,a.routeIndex,a.localIndex,routePoints=a.Route.Count,globalRoute=a.Route.ToArray(),localRoute=a.localRoute.ToArray(),installedRoute=execution?.InstalledRoute,corridor=execution?.Corridor,installed=execution!=null,installedOwner=installed.OwnerFor(id)==null?0:System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(installed.OwnerFor(id)),a.InstalledGroupId,a.InstalledRevision,a.InstalledRequest,a.InstalledOrder,retained=goals.ContainsKey(id),retainedGoal=goals.TryGetValue(id,out var g)?(NavPoint?)g:null,reserved=reservations.ContainsKey(id),reservation=reservations.TryGetValue(id,out var r)?(NavPoint?)r:null,pending=pending.ContainsKey(id),allocating=allocations.ContainsKey(id),active=active!=null,activeSequence=active==null?(long?)null:((PlayableCommand)Hidden(Hidden(active,"Issuance"),"Command")).Sequence,activeAssigned=Hidden(active,"Assigned"),activeSuspended=Hidden(active,"Suspended"),activeFailed=Hidden(active,"Failed"),activeInterrupted=Hidden(active,"Interrupted"),activeAttemptRequest=Hidden(active,"AttemptRequest"),activeAttemptOrder=Hidden(active,"AttemptOrder"),pendingTactical=waiting!=null};}).ToArray()};stages.Add(row);return row;
+                }
+            }
+            Action<NavigationRequest> requested=r=>callbacks.Add(new{kind="requested",stage,entity=r.Entity,r.Request,r.Order,r.Goal,r.MemberIdentity.GroupId});
+            Action<int> cancelled=id=>callbacks.Add(new{kind="cancelled",stage,entity=id});
+            try{
+                Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",new PlayableCommand(1,++command,"enemy-1",PlayableCommandKind.AttackMove,trio,goal,origin:PlayableOrderOrigin.Human),null));
+                long trioSequence=command;worker=new CertifiedRouteWorker(Binding(),4,kernel);
+                Assert.True(SpinWait.SpinUntil(()=>{Assert.True(authority.TryAdvance());return trio.All(id=>session.InstalledExecutionFor(id)!=null);},60000),worker.Publication.Failure??"Preparation: actual certified trio did not install within the fixture bound.");
+                Assert.Null(worker.Publication.Failure);foreach(int id in trio){var a=session.Crowd.Units.Single(u=>u.Id==id);Assert.True(a.Moving,"Preparation: installed actor must be moving.");Assert.Greater(a.Route.Count,0);Assert.NotNull(session.InstalledExecutionFor(id));}
+                var retained=(System.Collections.Generic.IDictionary<int,NavPoint>)typeof(NavigationSession).GetField("retainedGoals",F).GetValue(session);foreach(int id in trio){Assert.True(retained.ContainsKey(id));originalGoals[id]=retained[id];}
+                int observedSteps=0;session.MovementDiagnosticObserver=_=>observedSteps++;session.RouteRequested+=requested;session.MovementCancelled+=cancelled;
+                stage="foreign-arrival-before-first-step";Arrival(foreign,new NavPoint(36,40));Assert.Greater(Allocating(),0,"Preparation: a real foreign arrival must remain unfinished.");Snapshot(stage);
+                var before=trio.Select(id=>session.Crowd.Units.Single(u=>u.Id==id)).Select(a=>(a.Position,a.Heading,a.routeIndex,a.localIndex)).ToArray();int publications=session.OwnedMovementPublications;
+                stage="first-session-step";Assert.True(authority.TryAdvance());Snapshot(stage);Assert.AreEqual(1,observedSteps,"One real authority boundary must execute its normal Navigation.Step.");callbacks.Add(new{kind="first-step-result",path=session.LastNavigationStepPath,ownedPublications=session.OwnedMovementPublications-publications,poseChanged=trio.Select(id=>session.Crowd.Units.Single(u=>u.Id==id)).Select((u,i)=>!u.Position.Equals(before[i].Position)||u.Heading!=before[i].Heading).ToArray()});Assert.Null(worker.Publication.Failure);Assert.Greater(Allocating(),0,"The diagnostic must cover unfinished foreign allocation after Step too.");
+                foreach(int id in trio){Assert.NotNull(session.InstalledExecutionFor(id),"Unrelated foreign work must not discard installed trio execution.");Assert.True(((System.Collections.Generic.IDictionary<int,NavPoint>)typeof(NavigationSession).GetField("retainedGoals",F).GetValue(session)).ContainsKey(id));}
+                Assert.Greater(session.LastNavigationStepPath,0,"A real Step path must be observed.");
+                if(session.LastNavigationStepPath==3){
+                    Assert.AreEqual(publications,session.OwnedMovementPublications,"A refused prepared frame must not publish a partial movement.");
+                    for(int i=0;i<trio.Length;i++){var actor=session.Crowd.Units.Single(u=>u.Id==trio[i]);Assert.AreEqual(before[i].Position,actor.Position,"Refusal keeps each actual position.");Assert.AreEqual(before[i].Heading,actor.Heading,"Refusal keeps each actual heading.");Assert.AreEqual(before[i].routeIndex,actor.routeIndex,"Refusal keeps each installed route cursor.");Assert.AreEqual(before[i].localIndex,actor.localIndex,"Refusal keeps each local cursor.");}
+                    callbacks.Add(new{kind="atomic-first-step-refusal",stage,exactGuard=session.LastOwnedMovementNullDetail,refusal=session.LastOwnedMovementRefusal,allTrioPoseAndCursorUnchanged=true});
+                }
+
+                stage="foundation-pending";Call("AddCredits",PlayableOwner.Enemy,10000d);var buildings=(IDictionary)Domain.GetField("buildings",F).GetValue(domain);var parent=buildings.Values.Cast<object>().Single(v=>(PlayableBuildingKind)v.GetType().GetField("Kind").GetValue(v)==PlayableBuildingKind.Headquarters&&(PlayableOwner)v.GetType().GetField("Owner").GetValue(v)==PlayableOwner.Enemy);int parentId=(int)parent.GetType().GetField("Id").GetValue(parent);Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",2,2,PlayableBuildingKind.Factory,parentId,PlayableOwner.Enemy,null));
+                var building=buildings.Values.Cast<object>().Single(v=>(PlayableBuildingKind)v.GetType().GetField("Kind").GetValue(v)==PlayableBuildingKind.Factory);var type=building.GetType();Assert.AreEqual(ConstructionPhase.Pending,type.GetField("Phase").GetValue(building));Snapshot(stage);int revision=session.AuthorityGeometry.Revision;
+                stage="foundation-geometry-publication";int foundationCalls=0;Assert.True(SpinWait.SpinUntil(()=>{Call("AdvanceFoundations");foundationCalls++;return (ConstructionPhase)type.GetField("Phase").GetValue(building)==ConstructionPhase.Constructing;},5000),"Normal foundation source refusals may retry while the worker advances; the actual publication must complete.");callbacks.Add(new{kind="foundation-publication",calls=foundationCalls});Snapshot(stage);Assert.Greater(Allocating(),0,"Foreign arrival must remain unfinished through foundation publication.");Assert.AreEqual(ConstructionPhase.Constructing,type.GetField("Phase").GetValue(building));Assert.AreEqual(revision+1,session.AuthorityGeometry.Revision);Assert.AreSame(session.AuthorityGeometry,Domain.GetProperty("Geometry",F).GetValue(domain));Assert.AreEqual(1,session.OwnedRebindPublications);
+                var reissued=(System.Collections.Generic.IDictionary<int,NavPoint>)typeof(NavigationSession).GetField("retainedGoals",F).GetValue(session);
+                foreach(int id in trio){Assert.IsNull(session.InstalledExecutionFor(id),"Geometry publication deliberately retires the old installed execution.");Assert.True(reissued.TryGetValue(id,out var saved)&&saved.Equals(originalGoals[id]),"Foundation rebind must retain each original assigned goal.");Assert.True(session.IsPending(id),"Each retired installed trio actor must have an actual retry intent.");Assert.AreEqual(1,callbacks.Count(x=>(string)x.GetType().GetProperty("kind").GetValue(x)=="requested"&&(int)x.GetType().GetProperty("entity").GetValue(x)==id),"Exactly one production retry callback per installed trio actor.");}
+                var queuesAfter=(IDictionary)Domain.GetField("tacticalQueues",F).GetValue(domain);var reservationsAfter=(System.Collections.Generic.IDictionary<int,NavPoint>)typeof(NavigationSession).GetField("reservations",F).GetValue(session);
+                foreach(int id in trio){Assert.True(reservationsAfter.TryGetValue(id,out var reservation)&&reservation.Equals(originalGoals[id]),"Foundation retains each assigned reservation.");var active=Hidden(queuesAfter[id],"Active");Assert.NotNull(active,"Foundation retry retains the active tactical execution.");Assert.AreEqual(trioSequence,((PlayableCommand)Hidden(Hidden(active,"Issuance"),"Command")).Sequence,"Foundation does not replace the original AttackMove intent.");}
+                Assert.Zero(callbacks.Count(x=>x.GetType().GetProperty("kind").GetValue(x).Equals("cancelled")),"This unblocked foundation must not cancel trio or foreign intent.");
+                result="DIAGNOSTIC_COMPONENT_PASS_ORDINARY_ARMY_FAIL_REMAINS";
+            }
+            catch(Exception e){result=stage.StartsWith("prepare")||stage.StartsWith("foreign-arrival")?"PREPARATION_FAILURE":"DIAGNOSTIC_FAILURE";callbacks.Add(new{kind="exception",stage,detail=e.ToString()});throw;}
+            finally{
+                session.MovementDiagnosticObserver=null;session.RouteRequested-=requested;session.MovementCancelled-=cancelled;worker?.Dispose();if(worker!=null)Assert.True(SpinWait.SpinUntil(()=>worker.IsStopped,5000),"Worker stop ACK");
+                var json=Newtonsoft.Json.JsonConvert.SerializeObject(new{result,stage,profile=activeProfile.ProfileId,activeProfile.Revision,map=activeProfile.AuthoredMap.Id,mode="actual Domain constructor, scriptedEnemyPatrol=false; fresh async accrued-v3 authority, empty strategic owner scheduler, original seed; threaded certified host; Human Enemy AttackMove; Factory foundation site2/slot2; not an Army mission witness",trio,foreign,stages,callbacks,ledger=new{session.PhysicalHostBudget.PhysicalBytes,session.PhysicalHostBudget.HeldBytes,session.PhysicalHostBudget.ActiveScopes}},Newtonsoft.Json.Formatting.Indented);if(folder==null)TestContext.Out.WriteLine(json);else System.IO.File.WriteAllText(System.IO.Path.Combine(folder,"diagnostic.json"),json);
+            }
+        }
+
+        [Test,Timeout(180000)] public void InstalledTrioMovesWhileGroupedForeignMemberIsAllocating()
+        {
+            kernel.Clear();session.ReleaseCommittedHostRoot();Call("DestroyOwnedNavigation");activeProfile=PlayableProfile.ThreeCrossingsDefault;
+            domain=Activator.CreateInstance(Domain,F,null,new object[]{activeProfile,1L,false},null);session=(NavigationSession)Domain.GetProperty("Navigation",F).GetValue(domain);kernel=new CertifiedRouteKernel();
+            int EnemyTank(double x,double z)=>(int)Call("SpawnUnit",new NavPoint(x,z),PlayableOwner.Enemy,PlayableEntityKind.Tank);
+            int[] trio={EnemyTank(42.39,46),EnemyTank(41.5,48.89),EnemyTank(39.5,48.89)};int foreign=Spawn(-42,-40);
+            var authority=new PlayableAuthorityTick((PlayableDomain)domain,new AiAuthorityScheduler(Array.Empty<PlayableAiOwnerLoop>()),-515260688,asynchronousRoutes:true);authority.EnableAccruedCredits();
+            CertifiedRouteWorker worker=null;
+            var allocating=(System.Collections.Generic.IDictionary<int,NavigationRequest>)typeof(NavigationSession).GetField("allocating",F).GetValue(session);
+            try{
+                Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",new PlayableCommand(1,++command,"enemy-1",PlayableCommandKind.AttackMove,trio,new NavPoint(-36,-46),origin:PlayableOrderOrigin.Human),null));
+                worker=new CertifiedRouteWorker(Binding(),4,kernel);
+                Assert.True(SpinWait.SpinUntil(()=>{Assert.True(authority.TryAdvance());return trio.All(id=>session.InstalledExecutionFor(id)!=null);},60000),worker.Publication.Failure??"Preparation: actual certified trio did not install within the fixture bound.");
+                Assert.Null(worker.Publication.Failure);
+                foreach(int id in trio){var actor=session.Crowd.Units.Single(u=>u.Id==id);Assert.True(actor.Moving);Assert.Greater(actor.Route.Count,0);Assert.NotNull(session.InstalledExecutionFor(id));}
+                worker.Dispose();Assert.True(SpinWait.SpinUntil(()=>worker.IsStopped,5000),"Worker stop ACK before the stable mixed-allocation step.");worker=null;
+
+                Arrival(foreign,new NavPoint(36,40));
+                allocating=(System.Collections.Generic.IDictionary<int,NavigationRequest>)typeof(NavigationSession).GetField("allocating",F).GetValue(session);
+                var foreignGroup=session.GroupFor(foreign);Assert.NotNull(foreignGroup,"The actual Move must bind the allocating actor into its authoritative command group.");
+                Assert.AreEqual(GroupMemberPhase.Allocating,foreignGroup.Members.Single(m=>m.Entity==foreign).Phase);
+                Assert.True(allocating.ContainsKey(foreign),"The same grouped actor must still have an actual unfinished route allocation.");
+                var before=trio.Select(id=>session.Crowd.Units.Single(u=>u.Id==id)).Select(a=>(a.Position,a.Heading,a.routeIndex,a.localIndex)).ToArray();
+                int publications=session.OwnedMovementPublications;
+                session.MovementDiagnosticObserver=_=>{};
+                long serial,tick,consumed,prefix;int budget;bool completed;
+                var hostBefore=session.PinCommittedHostRoot();try{serial=hostBefore?.QuantumSerial??0;tick=hostBefore?.QuantumTick??0;consumed=hostBefore?.ConsumedQuantum??0;prefix=hostBefore?.AdmissionPrefix??0;budget=hostBefore?.QuantumBudget??0;completed=hostBefore?.QuantumCompleted??false;}finally{hostBefore?.Release();}
+                Action AssertHostQuantumStable=()=>{var root=session.PinCommittedHostRoot();try{Assert.AreEqual(serial,root?.QuantumSerial??0,"Direct Navigation.Step must not advance the host quantum.");Assert.AreEqual(tick,root?.QuantumTick??0);Assert.AreEqual(consumed,root?.ConsumedQuantum??0);Assert.AreEqual(prefix,root?.AdmissionPrefix??0);Assert.AreEqual(budget,root?.QuantumBudget??0);Assert.AreEqual(completed,root?.QuantumCompleted??false);}finally{root?.Release();}};
+
+                session.Step(1d/30);
+
+                Assert.Greater(session.LastNavigationStepPath,0,"A real stable-host Navigation.Step must be observed.");
+                Assert.AreEqual(publications+1,session.OwnedMovementPublications,$"The certified movers must publish through the owned path. Phase diagnostic: path={session.LastNavigationStepPath}, reason={session.LastOwnedMovementNullReason}, detail={session.LastOwnedMovementNullDetail}, actor={session.LastOwnedMovementNullActor}, group={session.LastOwnedMovementNullGroup}; computation={session.LastOwnedMovementComputation}; before={string.Join(";",before.Select(x=>$"{x.Position}:{x.Heading}:{x.routeIndex}:{x.localIndex}"))}; after={string.Join(";",trio.Select(id=>{var a=session.Crowd.Units.Single(u=>u.Id==id);return $"{a.Position}:{a.Heading}:{a.routeIndex}:{a.localIndex}";}))}");
+                Assert.AreEqual(0,session.LastOwnedMovementNullReason,"A successful owned movement publication must not retain a no-op diagnostic.");
+                AssertHostQuantumStable();
+                // At the 4.5 rad/s turn cap, pi radians takes at most 21 exact
+                // 1/30-second steps; 30 normal steps allow a complete turn and
+                // prove subsequent physical progress without changing dt.
+                for(int step=0;step<30;step++){
+                    allocating=(System.Collections.Generic.IDictionary<int,NavigationRequest>)typeof(NavigationSession).GetField("allocating",F).GetValue(session);
+                    Assert.True(allocating.ContainsKey(foreign),"Foreign allocation must remain live during the fixed continuation.");
+                    int stepPublications=session.OwnedMovementPublications;session.Step(1d/30);
+                    Assert.AreEqual(stepPublications+1,session.OwnedMovementPublications,"Every continuation must use the owned movement path.");
+                    Assert.AreEqual(0,session.LastOwnedMovementNullReason);AssertHostQuantumStable();
+                }
+                allocating=(System.Collections.Generic.IDictionary<int,NavigationRequest>)typeof(NavigationSession).GetField("allocating",F).GetValue(session);
+                int moved=0;for(int i=0;i<trio.Length;i++){var actor=session.Crowd.Units.Single(u=>u.Id==trio[i]);if(!before[i].Position.Equals(actor.Position)||before[i].routeIndex!=actor.routeIndex||before[i].localIndex!=actor.localIndex)moved++;Assert.NotNull(session.InstalledExecutionFor(trio[i]));}
+                Assert.Greater(moved,0,"The same-dt continuation must advance at least one installed actor position or route cursor.");
+                Assert.True(allocating.ContainsKey(foreign),"The diagnostic must leave the actual foreign allocation intact.");
+            }
+            finally{
+                session.MovementDiagnosticObserver=null;
+                worker?.Dispose();if(worker!=null)Assert.True(SpinWait.SpinUntil(()=>worker.IsStopped,5000),"Worker stop ACK");
+            }
+        }
+
+        private void ReadyForeignAllocationBoundary(bool keepHostToken)
+        {
+            kernel.Clear();session.ReleaseCommittedHostRoot();Call("DestroyOwnedNavigation");activeProfile=PlayableProfile.ThreeCrossingsDefault;
+            domain=Activator.CreateInstance(Domain,F,null,new object[]{activeProfile,1L,false},null);session=(NavigationSession)Domain.GetProperty("Navigation",F).GetValue(domain);kernel=new CertifiedRouteKernel();
+            int EnemyTank(double x,double z)=>(int)Call("SpawnUnit",new NavPoint(x,z),PlayableOwner.Enemy,PlayableEntityKind.Tank);
+            int[] trio={EnemyTank(42.39,46),EnemyTank(41.5,48.89),EnemyTank(39.5,48.89)};int foreign=Spawn(-42,-40);
+            var authority=new PlayableAuthorityTick((PlayableDomain)domain,new AiAuthorityScheduler(Array.Empty<PlayableAiOwnerLoop>()),-515260688,asynchronousRoutes:true);authority.EnableAccruedCredits();
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",new PlayableCommand(1,++command,"enemy-1",PlayableCommandKind.AttackMove,trio,new NavPoint(-36,-46),origin:PlayableOrderOrigin.Human),null));
+            // Saved credits belong to the original admission prefix. The normal later
+            // foreign request cannot consume this FIFO while the original routes finish.
+            for(int credit=0;credit<600;credit++)Assert.True(authority.TryAdvance());
+            long originalPrefix=session.Admission.PublishedThroughRequestSequence;
+            Arrival(foreign,new NavPoint(36,40));
+            var gate=typeof(NavigationSession).GetField("transportGate",F).GetValue(session);var allocatingField=typeof(NavigationSession).GetField("allocating",F);var barrierAnswersField=typeof(NavigationSession).GetField("barrierAnswers",F);
+            NavigationRequest foreignRequest;lock(gate){foreignRequest=session.PendingRequestFor(foreign);}
+            NavigationAnswer[] AnswerSnapshot(){lock(gate){var barrier=(System.Collections.IEnumerable)barrierAnswersField.GetValue(session);return session.Answers.CopyItems().Concat(barrier.Cast<NavigationAnswer>()).ToArray();}}
+            bool ForeignStillAllocating(){lock(gate){var current=(System.Collections.Generic.IDictionary<int,NavigationRequest>)allocatingField.GetValue(session);return current.TryGetValue(foreign,out var request)&&ReferenceEquals(request,foreignRequest);}}
+            bool HasUnfinishedReadyArrivalFor(System.Collections.Generic.IEnumerable<int> entityIds){var ids=new System.Collections.Generic.HashSet<int>(entityIds);lock(gate){var attempts=(System.Collections.IEnumerable)typeof(NavigationSession).GetField("arrivalAttempts",F).GetValue(session);if(attempts==null)return false;foreach(var pair in attempts){var attempt=(NavigationSession.ArrivalAttempt)pair.GetType().GetProperty("Value").GetValue(pair);if(attempt.Intents!=null&&attempt.Intents.Any(intent=>ids.Contains(intent.Entity))&&!attempt.Retiring&&!attempt.Working&&!attempt.Reconstructing&&!attempt.Published&&attempt.SnapshotStatus!=NavArrivalStatus.Pending&&attempt.SnapshotStatus!=NavArrivalStatus.BudgetExhausted)return true;}return false;}}
+            lock(gate){var foreignGroup=session.GroupFor(foreign);Assert.NotNull(foreignRequest);Assert.NotNull(foreignGroup);Assert.AreEqual(GroupMemberPhase.Allocating,foreignGroup.Members.Single(m=>m.Entity==foreign).Phase);Assert.True(ForeignStillAllocating());}
+            var diagnosticRows=new System.Collections.Generic.List<string>();string diagnosticResult="PREPARATION_FAILURE";
+            int deniedInstallAdmission=0;var budget=session.PhysicalHostBudget;
+            // Barrier-only preparation cannot consume answers or install execution.
+            // No admission callback or per-allocation stack walking is needed.
+            CertifiedRouteWorker worker=null;var heldBoundary=new ManualResetEventSlim(false);var releaseBoundary=new ManualResetEventSlim(false);var freeBoundary=new ManualResetEventSlim(false);var allocation=typeof(NavigationSession).GetField("hostAllocationThread",F);
+            try{
+                worker=new CertifiedRouteWorker(Binding(),4,kernel);
+                kernel.PauseAtPhysicalBoundary=()=>{
+                    var stage=kernel.CapturePumpFrontier().Stage;
+                    bool readyAndAllocating;lock(gate){var ready=AnswerSnapshot().Where(answer=>answer.Status==NavSolveStatus.Ready&&trio.Contains(answer.Request.Entity)).Select(answer=>answer.Request.Entity).Distinct().Count();readyAndAllocating=ready==trio.Length&&ForeignStillAllocating()&&trio.All(id=>session.InstalledExecutionFor(id)==null)&&ArrivalLeaseCount==0;}
+                    if(!releaseBoundary.IsSet&&readyAndAllocating&&(int)allocation.GetValue(session)!=0&&(stage==CertifiedRouteKernel.PumpStage.Projection||stage==CertifiedRouteKernel.PumpStage.EndAllocation)){heldBoundary.Set();releaseBoundary.Wait();return false;}
+                    if(!keepHostToken&&releaseBoundary.IsSet&&(int)allocation.GetValue(session)==0){freeBoundary.Set();return true;}
+                    return false;
+                };
+                var bound=System.Diagnostics.Stopwatch.StartNew();while(!heldBoundary.IsSet&&bound.ElapsedMilliseconds<60000){session.PrepareDeliveryBarrier();heldBoundary.Wait(1);}
+                object BatchValue(string name)=>typeof(NavigationSession).GetProperty(name,F)?.GetValue(session)??typeof(NavigationSession).GetField(name,F)?.GetValue(session);
+                string BatchFacts()=>"stage="+BatchValue("LastResultBatchStage")+",failure="+BatchValue("LastResultBatchFailure")+",sourceReason="+BatchValue("LastResultBatchSourceReason")+",detail="+BatchValue("LastResultBatchDetail");
+                string Snapshot(string phase){var root=session.PinCommittedHostRoot();string host;try{host=$"root={root?.GetHashCode()},hostStage={root?.Frontier.Stage},quantum={root?.QuantumSerial}/{root?.QuantumTick}/{root?.ConsumedQuantum}/{root?.AdmissionPrefix}/{root?.QuantumBudget}/{root?.QuantumCompleted},allocation={(int)allocation.GetValue(session)},held={budget.HeldBytes},scopes={budget.ActiveScopes}";}finally{root?.Release();}
+                    var publication=worker?.Publication;lock(gate){var answers=AnswerSnapshot();var current=(System.Collections.Generic.IDictionary<int,NavigationRequest>)allocatingField.GetValue(session);return $"{phase}:authorityTick={authority.Tick},workerPumps={publication?.Pumps},workerEpoch={publication?.Epoch},workerFailure={publication?.Failure},projectionFailure={publication?.ProjectionFailure},answers=[{string.Join(";",answers.Select(answer=>$"{answer.Request.Entity}/{answer.Status}/req{answer.Request.Request}/ord{answer.Request.Order}/member{answer.Request.MemberIdentity?.GroupId}:{answer.Request.MemberIdentity?.Incarnation}:{answer.Request.MemberIdentity?.OrderRevision}/corridor{answer.Corridor?.GetHashCode()}"))}],requests={session.Requests.Count},pending={string.Join(",",trio.Select(id=>$"{id}:{session.PendingRequestFor(id)?.Request}"))},allocating={string.Join(",",current.Keys)},foreignPhase={session.GroupFor(foreign)?.Members.Single(m=>m.Entity==foreign).Phase},installed={string.Join(",",trio.Select(id=>$"{id}:{session.InstalledExecutionFor(id)?.GetHashCode()}"))},admissionRefusals={deniedInstallAdmission},batch={BatchFacts()},{host}";}
+                }
+                if(!heldBoundary.IsSet){diagnosticRows.Add(Snapshot("preparation-failure"));Assert.Fail("Preparation failure: expected all 3 actual original-trio Ready answers at a Projection or EndAllocation boundary with the foreign allocation token held within 60000ms.");}
+                var heldAnswers=AnswerSnapshot();var readyAnswers=heldAnswers.Where(answer=>answer.Status==NavSolveStatus.Ready&&trio.Contains(answer.Request.Entity)).ToArray();var readyIds=readyAnswers.Select(answer=>answer.Request.Entity).Distinct().ToArray();Assert.AreEqual(trio.Length,readyIds.Length);
+                Assert.Zero(ArrivalLeaseCount,"No active arrival projection lease at the park.");Assert.False(HasUnfinishedReadyArrivalFor(readyIds),"The actually Ready original members must not have an unfinished READY-arrival prefix awaiting projection; unrelated pending arrival work remains admissible.");
+                foreach(var answer in readyAnswers){lock(gate)Assert.AreSame(session.PendingRequestFor(answer.Request.Entity),answer.Request);Assert.NotNull(answer.Request.MemberIdentity);Assert.NotNull(answer.Corridor);Assert.LessOrEqual(answer.Request.Request,originalPrefix,"Real original request binding stays eligible for saved-prefix credits.");}
+                diagnosticRows.Add(Snapshot("parked-held"));
+                if(!keepHostToken){
+                    releaseBoundary.Set();Assert.True(freeBoundary.Wait(10000),"Preparation failure: worker did not release the allocation token at a stable pump boundary.");
+                    Assert.Zero((int)allocation.GetValue(session));
+                }
+                diagnosticResult="MEASUREMENT_FAILURE";budget.AllocationAdmission=null;var answersBefore=AnswerSnapshot();Assert.AreEqual(trio.Length,answersBefore.Length);int applied=session.AppliedResults,batches=session.OwnedResultBatchPublications,movements=session.OwnedMovementPublications;var actorBefore=trio.ToDictionary(id=>id,id=>session.Crowd.Units.Single(actor=>actor.Id==id).Position);
+                session.Step(1d/30);diagnosticRows.Add(Snapshot("after-one-step"));
+                Assert.AreEqual(answersBefore.Length,session.AppliedResults-applied,"The real Ready batch should drain atomically; "+Snapshot("drain-check"));
+                if(keepHostToken){Assert.AreEqual(batches+1,session.OwnedResultBatchPublications,"Held-token Ready batch must publish atomically through the owned result carrier.");Assert.AreEqual(movements+1,session.OwnedMovementPublications);}
+                Assert.Zero(AnswerSnapshot().Length);foreach(int id in readyIds)Assert.Null(session.PendingRequestFor(id));Assert.AreSame(foreignRequest,session.PendingRequestFor(foreign));Assert.AreEqual(GroupMemberPhase.Allocating,session.GroupFor(foreign).Members.Single(m=>m.Entity==foreign).Phase);Assert.True(ForeignStillAllocating());
+                foreach(int id in readyIds){Assert.NotNull(session.InstalledExecutionFor(id));Assert.NotNull(session.Crowd.Units.Single(actor=>actor.Id==id).StorageOwner.Global);}
+                for(int step=0;step<30;step++){session.Step(1d/30);Assert.True(ForeignStillAllocating());Assert.AreEqual(GroupMemberPhase.Allocating,session.GroupFor(foreign).Members.Single(m=>m.Entity==foreign).Phase);}
+                Assert.True(trio.Any(id=>!actorBefore[id].Equals(session.Crowd.Units.Single(actor=>actor.Id==id).Position)),"Fixed 1/30-second continuation must move an installed member while the foreign intent stays live.");
+                diagnosticResult="PASS";
+            }
+            finally{
+                budget.AllocationAdmission=null;releaseBoundary.Set();kernel.PauseAtPhysicalBoundary=null;
+                worker?.Dispose();if(worker!=null)Assert.True(SpinWait.SpinUntil(()=>worker.IsStopped,5000),"Worker stop ACK after releasing its physical-boundary park.");
+                freeBoundary.Dispose();releaseBoundary.Dispose();heldBoundary.Dispose();
+                var evidence=Environment.GetEnvironmentVariable("SPACEWARS_READY_ALLOCATION_EVIDENCE");if(!String.IsNullOrWhiteSpace(evidence)){System.IO.Directory.CreateDirectory(evidence);System.IO.File.WriteAllText(System.IO.Path.Combine(evidence,keepHostToken?"held-boundary.json":"free-boundary.json"),Newtonsoft.Json.JsonConvert.SerializeObject(new{diagnosticResult,diagnosticRows,ledger=new{budget.PhysicalBytes,budget.HeldBytes,budget.ActiveScopes}},Newtonsoft.Json.Formatting.Indented));}
+            }
+            Assert.Zero(budget.HeldBytes,"All physical token reservations must be released after worker stop and teardown.");Assert.Zero(budget.ActiveScopes,"No allocation scopes remain after worker stop and teardown.");var creditBank=session.PinCreditBank();try{Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session,creditBank),budget.PhysicalBytes,"Session plus its accrued credit bank must reconcile after worker stop and teardown.");}finally{creditBank?.Release();}
+        }
+
+        [Test,Timeout(180000)] public void ReadyOriginalTrioWithForeignAllocationInstallsAtStableFreeToken(){ReadyForeignAllocationBoundary(false);}
+        [Test,Timeout(180000)] public void ReadyOriginalTrioWithForeignAllocationInstallsAtHeldToken(){ReadyForeignAllocationBoundary(true);}
+
         [Test] public void GeometryReissuePublishesSuccessfulThenRejectedRetainedGoalsAndRefusesLateWithoutLeaking()
         {
             int a=Spawn(-18,-14),b=Spawn(-18,-10);Assert.True(session.Move(a,new NavPoint(-10,-14)));Assert.True(session.Move(b,new NavPoint(-10,-10)));
@@ -711,6 +1027,220 @@ namespace Spacewars.Tests.EditMode
                 Assert.True(session.TryChangeGeometry(next));Domain.GetProperty("Geometry",F).SetValue(domain,session.AuthorityGeometry);Assert.AreEqual(1,canceled);Assert.AreEqual(1,requested);Assert.AreEqual(1,session.OwnedRebindPublications);Assert.Zero(session.LastOwnedRebindPublicationAllocatedBytes);Assert.AreEqual(am,first.MobilityRevision);Assert.AreEqual(bm,second.MobilityRevision);Assert.False(first.Moving);Assert.False(second.Moving);Assert.IsNull(first.StorageOwner.Global);Assert.IsNull(second.StorageOwner.Global);Assert.IsNull(session.InstalledExecutionFor(a));Assert.IsNull(session.InstalledExecutionFor(b));Assert.AreEqual(1,session.Requests.Count);Assert.AreEqual(a,session.Requests.CopyItems().Single().Entity);CollectionAssert.AreEqual(before,frozen.Encode());PhysicalShape(frozen);frozen.Dispose();frozen=null;Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);
                 var prefix=ProbeBytes();PumpProbe(1);var suffix=ProbeBytes();string facts=HostFacts();RestoreProbeBytes(prefix);Assert.Zero(budget.PhysicalBytes);CollectionAssert.AreEqual(prefix,ProbeBytes(),"Session-only custom obstacle cold prefix");PumpProbe(1);CollectionAssert.AreEqual(suffix,ProbeBytes(),"Session-only custom obstacle next Pump");Assert.AreEqual(facts,HostFacts());
             }finally{budget.AllocationAdmission=null;if(session!=null){session.MovementCancelled-=cancel;session.RouteRequested-=request;}frozen?.Dispose();}
+        }
+
+        [Test,Timeout(180000)] public void TransientPhysicalArrivalRefusalPreservesPaidHistoricalContinuation()
+        {
+            kernel.Clear();session.ReleaseCommittedHostRoot();Call("DestroyOwnedNavigation");activeProfile=PlayableProfile.ThreeCrossingsDefault;
+            domain=Activator.CreateInstance(Domain,F,null,new object[]{activeProfile,1L,false},null);session=(NavigationSession)Domain.GetProperty("Navigation",F).GetValue(domain);kernel=new CertifiedRouteKernel();
+            int entity=Spawn(-42,-40);using(var idle=session.CaptureState()){}Arrival(entity,new NavPoint(-36,-46));Assert.True(session.PreparePhysicalArrivalAttempt(),"the normal physical-arrival preparation publishes owned Work");
+            var attemptsField=typeof(NavigationSession).GetField("arrivalAttempts",F);
+            NavigationSession.ArrivalAttempt AttemptFor(int id)
+            {
+                var attempts=(IEnumerable)attemptsField.GetValue(session);
+                foreach(var pair in attempts){var a=(NavigationSession.ArrivalAttempt)pair.GetType().GetProperty("Value").GetValue(pair);if(a.Intents.Any(i=>i.Entity==id))return a;}
+                return null;
+            }
+            NavigationHostRoot Root()=>session.PinCommittedHostRoot();
+            NavigationArrivalWork PaidWork()
+            {
+                var root=Root();try{if(root!=null)foreach(var pair in root.ArrivalWork){var work=(NavigationArrivalWork)pair.Value;if(work.IsHistoricalCandidate&&work.AllocationWorkConsumed>0)return work;}return null;}finally{root?.Release();}
+            }
+            for(int i=0;i<20000&&PaidWork()==null;i++)Pump(1);
+            var original=PaidWork();Assert.NotNull(original,"the normal terrain-backed arrival must create paid historical-capable Work");
+            Assert.IsInstanceOf<PartitionNavigationProvider>(original.PhysicalInput.Provider);
+            var prior=AttemptFor(entity);Assert.NotNull(prior);Assert.AreSame(original,prior.Work);
+            var geometry=(NavGeometry)Domain.GetProperty("Geometry",F).GetValue(domain);
+            var next=new NavGeometry(geometry.HalfExtent,geometry.Obstacles.ToArray(),geometry.Revision+1);
+            Domain.GetProperty("Geometry",F).SetValue(domain,next);session.ChangeGeometry(next);
+            Assert.True(prior.Retiring||AttemptFor(entity)==null,"geometry replacement must retire or remove the old attempt");
+            var retained=PaidWork();Assert.AreSame(original,retained,"the paid historical source must remain in the committed host root");
+            Assert.True(session.PendingRequestFor(entity)!=null||session.AllocationCount>0,"same-command replacement must be allocating");
+            Assert.True((bool)typeof(NavigationSession).GetMethod("HistoricalBirthPending",F).Invoke(session,new object[]{original}),"the current replacement must still protect the paid historical source");
+            Assert.IsNull(session.NextRetiringArrivalProjection(),"no projection lease may precede the wrapper retirement");
+            var replacementRoot=Root();try{Assert.True(replacementRoot.ArrivalWork.Any(pair=>ReferenceEquals(pair.Value,original)));}finally{replacementRoot?.Release();}
+            var replacementRequest=session.PendingRequestFor(entity);Assert.NotNull(replacementRequest);long replacementIdentity=replacementRequest.Request,quantumIdentity,commandIdentity=session.GroupFor(entity).CommandSequence;
+            var beforeQuantum=Root();try{quantumIdentity=beforeQuantum.QuantumSerial;}finally{beforeQuantum?.Release();}
+
+            var budget=session.PhysicalHostBudget;var ledgerGate=typeof(NavigationRetentionBudget).GetField("gate",F).GetValue(budget);
+            using var entered=new ManualResetEventSlim();using var release=new ManualResetEventSlim();
+            Thread resolver=null;Exception resolverError=null;bool resolutionObserved=false;int scopeAdmissions=0;bool firstRefusedWhileResolving=false,secondWasForcedRetirement=false;
+            Action resolved=()=>{lock(ledgerGate){resolutionObserved=true;Monitor.PulseAll(ledgerGate);}};session.HostChanged+=resolved;
+            try{
+                resolver=new Thread(()=>{
+                    NavigationRetentionBudget.Scope scope=null;
+                    try{if(!budget.TryOpenScope(NavigationPreparationKind.Capture,session.Generation,0,out scope))throw new InvalidOperationException("Resolver fixture scope admission refused.");var reservation=scope.OwnedReservation();using(var allocation=new NavStorageAllocation(reservation.TryReserve)){allocation.Reserve(128);allocation.Register(new ResolvingBirth(entered,release));}scope.Discard();}
+                    catch(Exception error){resolverError=error;entered.Set();}finally{scope?.Discard();}
+                }){IsBackground=true};resolver.Start();Assert.True(entered.Wait(5000),"the resolver must be paused while releasing its real scope");Assert.IsNull(resolverError);
+                budget.AllocationAdmission=bytes=>{
+                    if(bytes!=NavigationRetentionBudget.ScopeBytes)return true;
+                    var frames=new System.Diagnostics.StackTrace().GetFrames();if(!frames.Any(frame=>frame.GetMethod().DeclaringType==typeof(NavigationRetentionBudget)&&frame.GetMethod().Name=="TryOpenScope"))return true;
+                    scopeAdmissions++;
+                    if(scopeAdmissions==1){firstRefusedWhileResolving=(int)typeof(NavigationRetentionBudget).GetField("resolvingScopes",F).GetValue(budget)>0;return true;}
+                    if(scopeAdmissions==2){secondWasForcedRetirement=frames.Any(frame=>frame.GetMethod().Name=="RetirePhysicalArrivalOwner");release.Set();while(!resolutionObserved)Assert.True(Monitor.Wait(ledgerGate,5000),"HostChanged must observe completed resolution");return true;}
+                    return true;
+                };
+                Assert.False(session.PreparePhysicalArrivalAttempt(),"the first transient admission refusal leaves the normal replacement attempt pending");
+            }finally{
+                budget.AllocationAdmission=null;release.Set();if(resolver!=null)Assert.True(resolver.Join(5000),"resolver must finish before fixture cleanup");session.HostChanged-=resolved;
+            }
+            Assert.IsNull(resolverError);Assert.True(firstRefusedWhileResolving,"the wrapper's first admitted callback must observe resolvingScopes");Assert.AreEqual(1,scopeAdmissions,"transient resolution refusal must return before a retirement admission");Assert.False(secondWasForcedRetirement,"transient resolution refusal must not force historical retirement");
+            Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+            Assert.AreEqual(replacementIdentity,session.PendingRequestFor(entity)?.Request,"the live replacement request must remain the same");var afterQuantum=Root();try{Assert.AreEqual(quantumIdentity,afterQuantum.QuantumSerial,"transient refusal cannot mint or consume a quantum");}finally{afterQuantum?.Release();}
+            var after=Root();bool oldStillRetained;try{oldStillRetained=after.ArrivalWork.Any(pair=>ReferenceEquals(pair.Value,original));}finally{after?.Release();}
+            Assert.True(oldStillRetained,"a transient resolution refusal must preserve paid historical Work until its replacement is born");
+            Assert.True(session.PreparePhysicalArrivalAttempt(),"the ordinary replacement preparation must resume after resolution");
+            var current=AttemptFor(entity);Assert.NotNull(current);Assert.AreSame(original,current.Work.HistoricalSource,"replacement Work must continue from the exact paid historical source");
+            Assert.AreEqual(prior.Group,session.GroupFor(entity).GroupId);Assert.AreEqual(commandIdentity,session.GroupFor(entity).CommandSequence);
+            TestContext.WriteLine("TRANSIENT_HISTORICAL_PRECONDITION status="+original.Status+" paid="+original.AllocationWorkConsumed+" resolvingRefusal="+firstRefusedWhileResolving+" retirementAdmission="+scopeAdmissions+" retained="+oldStillRetained+" replacementHistoricalSource="+ReferenceEquals(original,current.Work.HistoricalSource));
+
+            int fallbackAdmissions=0;bool capacityFallbackRetirement=false;
+            budget.AllocationAdmission=bytes=>{
+                if(bytes!=NavigationRetentionBudget.ScopeBytes)return true;
+                var frames=new System.Diagnostics.StackTrace().GetFrames();if(!frames.Any(frame=>frame.GetMethod().DeclaringType==typeof(NavigationRetentionBudget)&&frame.GetMethod().Name=="TryOpenScope"))return true;
+                fallbackAdmissions++;if(fallbackAdmissions==1)return false;
+                if(fallbackAdmissions==2)capacityFallbackRetirement=frames.Any(frame=>frame.GetMethod().Name=="RetirePhysicalArrivalOwner");
+                return true;
+            };
+            bool capacityPrepared;try{capacityPrepared=session.PreparePhysicalArrivalAttempt();}finally{budget.AllocationAdmission=null;}
+            Assert.False(capacityPrepared,"the injected admission refusal must remain a refusal");Assert.AreEqual(2,fallbackAdmissions,"one injected admission refusal followed by the existing retirement fallback");Assert.True(capacityFallbackRetirement,"the second admitted scope is the wrapper's ordinary retirement fallback");
+            var fallbackRoot=Root();bool oldRetired;try{oldRetired=!fallbackRoot.ArrivalWork.Any(pair=>ReferenceEquals(pair.Value,original));Assert.True(fallbackRoot.ArrivalWork.Any(pair=>ReferenceEquals(pair.Value,current.Work)));}finally{fallbackRoot?.Release();}
+            Assert.True(oldRetired,"ordinary injected admission refusal keeps the existing historical retirement fallback");Assert.AreSame(original,current.Work.HistoricalSource,"the born replacement retains its paid source across owner retirement");
+            Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);
+            TestContext.WriteLine("INJECTED_ADMISSION_FALLBACK admissions="+fallbackAdmissions+" retiredHistoricalOwner="+oldRetired+" replacementKeepsPaidSource="+ReferenceEquals(original,current.Work.HistoricalSource));
+        }
+        [Test,Timeout(180000)] public void PhysicalArrivalCapacityRefusalRetiresPaidWorkBeforeReplacementBirth()
+        {
+            kernel.Clear();session.ReleaseCommittedHostRoot();Call("DestroyOwnedNavigation");activeProfile=PlayableProfile.ThreeCrossingsDefault;
+            domain=Activator.CreateInstance(Domain,F,null,new object[]{activeProfile,1L,false},null);session=(NavigationSession)Domain.GetProperty("Navigation",F).GetValue(domain);kernel=new CertifiedRouteKernel();
+            int entity=Spawn(-42,-40);using(var idle=session.CaptureState()){}Arrival(entity,new NavPoint(-36,-46));Assert.True(session.PreparePhysicalArrivalAttempt(),"the normal physical-arrival preparation publishes owned Work");
+            var attemptsField=typeof(NavigationSession).GetField("arrivalAttempts",F);
+            NavigationSession.ArrivalAttempt AttemptFor(int id)
+            {
+                var attempts=(IEnumerable)attemptsField.GetValue(session);
+                foreach(var pair in attempts){var attempt=(NavigationSession.ArrivalAttempt)pair.GetType().GetProperty("Value").GetValue(pair);if(attempt.Intents.Any(i=>i.Entity==id))return attempt;}
+                return null;
+            }
+            NavigationHostRoot Root()=>session.PinCommittedHostRoot();
+            NavigationArrivalWork PaidWork()
+            {
+                var root=Root();try{if(root!=null)foreach(var pair in root.ArrivalWork){var work=(NavigationArrivalWork)pair.Value;if(work.IsHistoricalCandidate&&work.AllocationWorkConsumed>0)return work;}return null;}finally{root?.Release();}
+            }
+            for(int i=0;i<20000&&PaidWork()==null;i++)Pump(1);
+            var original=PaidWork();Assert.NotNull(original,"the normal terrain-backed arrival must create paid historical-capable Work");
+            Assert.IsInstanceOf<PartitionNavigationProvider>(original.PhysicalInput.Provider);
+            var prior=AttemptFor(entity);Assert.NotNull(prior);Assert.AreSame(original,prior.Work);
+            var geometry=(NavGeometry)Domain.GetProperty("Geometry",F).GetValue(domain);
+            var next=new NavGeometry(geometry.HalfExtent,geometry.Obstacles.ToArray(),geometry.Revision+1);
+            Domain.GetProperty("Geometry",F).SetValue(domain,next);session.ChangeGeometry(next);
+            Assert.True(prior.Retiring||AttemptFor(entity)==null,"geometry replacement must retire or remove the old attempt");
+            Assert.AreSame(original,PaidWork(),"paid historical Work remains before the injected refusal");
+            Assert.True((bool)typeof(NavigationSession).GetMethod("HistoricalBirthPending",F).Invoke(session,new object[]{original}),"the allocating replacement protects the historical source before refusal");
+            Assert.IsNull(session.NextRetiringArrivalProjection(),"no projection lease may precede the wrapper retirement");
+            var request=session.PendingRequestFor(entity);Assert.NotNull(request);long requestIdentity=request.Request;
+            long commandIdentity=session.GroupFor(entity).CommandSequence,quantumIdentity,allocationCount=session.AllocationCount,groupIdentity=session.GroupFor(entity).GroupId;
+            var before=Root();try{quantumIdentity=before.QuantumSerial;}finally{before?.Release();}
+            var budget=session.PhysicalHostBudget;int admissions=0;bool forcedRetirement=false;
+            budget.AllocationAdmission=bytes=>{
+                if(bytes!=NavigationRetentionBudget.ScopeBytes)return true;
+                var frames=new System.Diagnostics.StackTrace().GetFrames();if(!frames.Any(frame=>frame.GetMethod().DeclaringType==typeof(NavigationRetentionBudget)&&frame.GetMethod().Name=="TryOpenScope"))return true;
+                admissions++;if(admissions==1)return false;
+                if(admissions==2)forcedRetirement=frames.Any(frame=>frame.GetMethod().Name=="RetirePhysicalArrivalOwner");
+                return true;
+            };
+            bool prepared;try{prepared=session.PreparePhysicalArrivalAttempt();}finally{budget.AllocationAdmission=null;}
+            Assert.False(prepared,"the first capacity refusal still refuses the physical arrival");Assert.AreEqual(2,admissions,"the wrapper retries only for its historical-owner retirement fallback");Assert.True(forcedRetirement,"the fallback admission must be RetirePhysicalArrivalOwner");
+            var afterRetirement=Root();try{Assert.False(afterRetirement.ArrivalWork.Any(pair=>ReferenceEquals(pair.Value,original)),"capacity fallback must remove the historical source before replacement birth");}finally{afterRetirement?.Release();}
+            Assert.AreEqual(requestIdentity,session.PendingRequestFor(entity)?.Request,"fallback preserves the same replacement request");Assert.AreEqual(allocationCount,session.AllocationCount,"fallback does not change allocation ownership");
+            Assert.AreEqual(groupIdentity,session.GroupFor(entity).GroupId);Assert.AreEqual(commandIdentity,session.GroupFor(entity).CommandSequence);
+            var afterQuantum=Root();try{Assert.AreEqual(quantumIdentity,afterQuantum.QuantumSerial,"fallback does not mint or consume a quantum");}finally{afterQuantum?.Release();}
+            Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+            Assert.True(session.PreparePhysicalArrivalAttempt(),"after the ordinary capacity fallback, replacement birth proceeds cold");
+            var replacement=AttemptFor(entity);Assert.NotNull(replacement);Assert.AreNotSame(original,replacement.Work.HistoricalSource,"the replacement must not attach the retired paid historical source");
+            var born=Root();try{Assert.True(born.ArrivalWork.Any(pair=>ReferenceEquals(pair.Value,replacement.Work)));Assert.False(born.ArrivalWork.Any(pair=>ReferenceEquals(pair.Value,original)));}finally{born?.Release();}
+            Assert.AreEqual(requestIdentity,session.PendingRequestFor(entity)?.Request);Assert.AreEqual(groupIdentity,session.GroupFor(entity).GroupId);Assert.AreEqual(commandIdentity,session.GroupFor(entity).CommandSequence);
+            Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+            TestContext.WriteLine("CAPACITY_FALLBACK_BEFORE_BIRTH paid="+original.AllocationWorkConsumed+" admissions="+admissions+" oldRemoved="+(!ReferenceEquals(original,replacement.Work.HistoricalSource))+" requestSame="+(requestIdentity==session.PendingRequestFor(entity)?.Request)+" allocationCount="+allocationCount+" quantum="+quantumIdentity+" replacementHistoricalSource="+(replacement.Work.HistoricalSource==null));
+        }
+        [Test,Timeout(180000)] public void DoubleGeometryRebindRetainsOriginalPaidThreeMemberArrivalOracle()
+        {
+            kernel.Clear();session.ReleaseCommittedHostRoot();Call("DestroyOwnedNavigation");activeProfile=PlayableProfile.ThreeCrossingsDefault;
+            domain=Activator.CreateInstance(Domain,F,null,new object[]{activeProfile,1L,false},null);session=(NavigationSession)Domain.GetProperty("Navigation",F).GetValue(domain);kernel=new CertifiedRouteKernel();using(var idle=session.CaptureState()){}
+            int a=Spawn(42.39,46),b=Spawn(41.54353859762912,48.04353859762912),c=Spawn(39.5,48.89);int[] ids={a,b,c};
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",new PlayableCommand(1,++command,"player-1",PlayableCommandKind.Move,ids,new NavPoint(-36,-46),origin:PlayableOrderOrigin.Human),null));
+            object Field(Type type,string name,object value)=>type.GetField(name,F).GetValue(value);
+            NavigationArrivalWork WorkForGroup(long group)
+            {var root=session.PinCommittedHostRoot();try{return root?.ArrivalWork.OrderBy(pair=>pair.Key).Select(pair=>(NavigationArrivalWork)pair.Value).LastOrDefault(work=>work.PhysicalInput.Members.Count==3&&work.PhysicalInput.Members[0].GroupId==group);}finally{root?.Release();}}
+            int AssignmentCount(NavigationArrivalWork work)=> (int)typeof(NavigationArrivalWork).GetField("assignments",F).GetValue(work).GetType().GetProperty("Count").GetValue(typeof(NavigationArrivalWork).GetField("assignments",F).GetValue(work));
+            object HistoricalSnapshot(NavigationArrivalWork work)=>Field(typeof(NavigationArrivalWork.Checkpoint),"Historical",work.Save());
+            string HistoricalFacts(NavigationArrivalWork work)
+            {
+                var saved=HistoricalSnapshot(work);if(saved==null)return "none";var type=saved.GetType();var removal=Field(type,"Removal",saved) as int[];var occupancy=Field(type,"Page0Occupancy",saved) as int[];
+                return "gate="+Field(type,"Gate",saved)+" cursor="+Field(type,"Cursor",saved)+" member="+Field(type,"Member",saved)+" leg="+Field(type,"Leg",saved)+" removal="+(removal==null?"null":string.Join(",",removal))+" occupancy="+(occupancy==null?"null":string.Join(",",occupancy));
+            }
+            string FrontierFacts(NavigationArrivalWork oracle)
+            {
+                var cp=oracle.Save();var scheduler=Field(typeof(NavigationArrivalWork.Checkpoint),"Scheduler",cp);var jobs=(Array)Field(scheduler.GetType(),"Jobs",scheduler);int demandJobs=0,exact=0,frontier=0;string scalarSha="none";
+                foreach(var job in jobs){if(job==null)continue;var demand=Field(job.GetType(),"Demand",job);if(demand==null)continue;demandJobs++;var dt=demand.GetType();exact+=(Field(dt,"ExactFrontier",demand) as Array)?.Length??0;frontier+=(Field(dt,"Frontier",demand) as Array)?.Length??0;var scalar=Field(dt,"Scalars",demand) as byte[];if(scalar!=null)using(var sha=System.Security.Cryptography.SHA256.Create())scalarSha=BitConverter.ToString(sha.ComputeHash(scalar)).Replace("-","");}
+                return "oracleObject="+System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(oracle)+" binding="+oracle.LogicalContinuationBinding+" status="+oracle.Status+" paid="+oracle.AllocationWorkConsumed+" member="+oracle.MemberCursor+" demandJobs="+demandJobs+" exactFrontier="+exact+" frontier="+frontier+" scalarSha256="+scalarSha;
+            }
+            string Inputs(NavigationArrivalWork current,NavigationArrivalWork oracle)
+            {
+                var x=current.PhysicalInput;var y=oracle.PhysicalInput;
+                bool[] memberSame=Enumerable.Range(0,Math.Min(x.Members.Count,y.Members.Count)).Select(index=>(bool)typeof(NavigationArrivalWork).GetMethod("HistoricalMemberSame",F).Invoke(current,new object[]{index})).ToArray();
+                bool header=(bool)typeof(NavigationArrivalWork).GetMethod("HistoricalHeader",F).Invoke(current,null);
+                bool provider=((PartitionNavigationProvider)y.Provider).MonotoneHeaderTo((PartitionNavigationProvider)x.Provider);
+                bool candidates=x.Source.Candidates.SequenceEqual(y.Source.Candidates);
+                bool occupancyPrefix=x.Occupancy.Occupants.Count>=y.Occupancy.Occupants.Count&&y.Occupancy.Occupants.Select((row,index)=>row.StableKey==x.Occupancy.Occupants[index].StableKey).All(equal=>equal);
+                return "header="+header+" memberSame="+string.Join(",",memberSame)+" providerMonotone="+provider+" sourceEqual="+candidates+" source="+x.Source.Id+":"+x.Source.Revision+":"+x.Source.Candidates.Count+":"+x.Source.StableKey+"/"+y.Source.Id+":"+y.Source.Revision+":"+y.Source.Candidates.Count+":"+y.Source.StableKey+" occupancyPrefix="+occupancyPrefix+" occupancy="+x.Occupancy.Generation+":"+x.Occupancy.Occupants.Count+":"+x.Occupancy.StableKey+"/"+y.Occupancy.Generation+":"+y.Occupancy.Occupants.Count+":"+y.Occupancy.StableKey+" members="+string.Join(";",x.Members.Select(member=>member.StableKey))+"/"+string.Join(";",y.Members.Select(member=>member.StableKey));
+            }
+            NavGeometry Addition(NavGeometry prior,int revision,NavPoint[] away)
+            {
+                for(double z=-prior.HalfExtent+2;z<=prior.HalfExtent-2;z+=2)for(double x=-prior.HalfExtent+2;x<=prior.HalfExtent-2;x+=2){var center=new NavPoint(x,z);if(away.Any(point=>Math.Sqrt(Math.Pow(point.X-x,2)+Math.Pow(point.Z-z,2))<24)||!prior.IsFree(center,0))continue;var obstacle=new NavObstacle(x-.25,z-.25,x+.25,z+.25);var next=new NavGeometry(prior.HalfExtent,prior.Obstacles.Concat(new[]{obstacle}).ToArray(),revision);if(!next.IsFree(center,0))return next;}return null;
+            }
+            Assert.True(session.PreparePhysicalArrivalAttempt(),"normal group Move must publish physical arrival Work");long group=session.GroupFor(a).GroupId;var original=WorkForGroup(group);
+            if(original==null)Assert.Inconclusive("NotQualified: actual three-member arrival Work was not published by normal Move/PreparePhysicalArrivalAttempt.");
+            for(int tick=0;tick<30000&&(AssignmentCount(original)<2||original.Status==NavArrivalStatus.Ready);tick++){Pump(1);session.ApplyResults();original=WorkForGroup(group)??original;if(original.Status==NavArrivalStatus.Ready&&AssignmentCount(original)==3)break;}
+            int ready=AssignmentCount(original);TestContext.WriteLine("INITIAL_WORK status="+original.Status+" members="+original.PhysicalInput.Members.Count+" assignments="+ready+" memberCursor="+original.MemberCursor+" paid="+original.AllocationWorkConsumed+" source="+original.PhysicalInput.Source.StableKey+" provider="+original.PhysicalInput.Provider.Binding);
+            if(ready!=2||original.Status==NavArrivalStatus.Ready||original.MemberCursor!=2)Assert.Inconclusive("NotQualified: the real paid three-member oracle did not reach exactly two Ready assignments with its third pending; no geometry reissue was attempted.");
+            Assert.True(original.IsHistoricalCandidate);Assert.Greater(original.AllocationWorkConsumed,0);var geometry=(NavGeometry)Domain.GetProperty("Geometry",F).GetValue(domain);
+            var points=original.PhysicalInput.Members.Select(member=>member.Origin.Position).Concat(new[]{new NavPoint(-36,-46)}).ToArray();var firstGeometry=Addition(geometry,geometry.Revision+1,points);if(firstGeometry==null)Assert.Inconclusive("NotQualified: no unoccupied position was available for an additive geometry change.");
+            Domain.GetProperty("Geometry",F).SetValue(domain,firstGeometry);session.ChangeGeometry(firstGeometry);Assert.True(session.PreparePhysicalArrivalAttempt());var first=WorkForGroup(group);if(first==null)Assert.Inconclusive("NotQualified: first geometry reissue produced no replacement work.");
+            Assert.AreSame(original,first.HistoricalSource,"first replacement must unwrap to the original paid Work");Assert.AreSame(original,typeof(NavigationArrivalWork).GetProperty("historicalOracle",F).GetValue(first),"first replacement must own the original direct oracle");
+            string beforeFirstGrant=FrontierFacts(original);long paidBefore=first.AllocationWorkConsumed;
+            for(int tick=0;tick<30000;tick++){var saved=HistoricalSnapshot(first);if(saved!=null&&(int)Field(saved.GetType(),"Gate",saved)>0)break;Pump(1);session.ApplyResults();first=WorkForGroup(group)??first;if(!ReferenceEquals(original,first.HistoricalSource))break;}
+            if(HistoricalSnapshot(first)==null||!ReferenceEquals(original,first.HistoricalSource)){TestContext.WriteLine("FIRST_REISSUE oracleRetained="+ReferenceEquals(original,first.HistoricalSource)+" historical="+HistoricalFacts(first)+" input="+Inputs(first,original)+" oracleBefore="+beforeFirstGrant+" paidBefore="+paidBefore+" paidAfter="+first.AllocationWorkConsumed);Assert.Inconclusive("NotQualified: first reissue failed to reach a paid incomplete certificate retaining the original oracle.");}
+            TestContext.WriteLine("FIRST_REISSUE historical="+HistoricalFacts(first)+" input="+Inputs(first,original)+" oracle="+FrontierFacts(original)+" paidBefore="+paidBefore+" paidAfter="+first.AllocationWorkConsumed);
+            var secondGeometry=Addition(firstGeometry,firstGeometry.Revision+1,points);if(secondGeometry==null)Assert.Inconclusive("NotQualified: no free position for the second additive geometry change.");var firstSource=first.PhysicalInput;string oracleBeforeSecond=FrontierFacts(original);
+            Domain.GetProperty("Geometry",F).SetValue(domain,secondGeometry);session.ChangeGeometry(secondGeometry);Assert.True(session.PreparePhysicalArrivalAttempt());var second=WorkForGroup(group);if(second==null)Assert.Inconclusive("NotQualified: second geometry reissue produced no replacement work.");
+            Assert.AreSame(original,second.HistoricalSource,"second replacement must still unwrap to the same original oracle");Assert.AreSame(original,typeof(NavigationArrivalWork).GetProperty("historicalOracle",F).GetValue(second),"second replacement's direct oracle identity is unchanged");
+            TestContext.WriteLine("SECOND_REISSUE historical="+HistoricalFacts(second)+" input="+Inputs(second,original)+" oracleBefore="+oracleBeforeSecond+" oracleAfter="+FrontierFacts(original)+" priorInput="+firstSource.Source.StableKey);
+            Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);Assert.Zero(session.PhysicalHostBudget.HeldBytes);Assert.Zero(session.PhysicalHostBudget.ActiveScopes);
+            int grants=0;for(;grants<30000;grants++){var saved=HistoricalSnapshot(second);if(saved!=null&&(int)Field(saved.GetType(),"Gate",saved)>0)break;Pump(1);session.ApplyResults();second=WorkForGroup(group)??second;if(!ReferenceEquals(original,second.HistoricalSource))break;}
+            if(!ReferenceEquals(original,second.HistoricalSource)){TestContext.WriteLine("SECOND_REISSUE_ORACLE_DETACHED grants="+grants+" cert="+HistoricalFacts(second)+" physicalMembers="+string.Join(";",second.PhysicalInput.Members.Select(member=>member.StableKey))+" originalMembers="+string.Join(";",original.PhysicalInput.Members.Select(member=>member.StableKey))+" source="+second.PhysicalInput.Source.StableKey+"/"+original.PhysicalInput.Source.StableKey+" occupancy="+second.PhysicalInput.Occupancy.StableKey+"/"+original.PhysicalInput.Occupancy.StableKey+" originalFrontier="+FrontierFacts(original));}
+            var partial=HistoricalSnapshot(second);if(partial==null||(int)Field(partial.GetType(),"Gate",partial)==0)Assert.Inconclusive("NotQualified: second certificate did not consume a measurable allocation grant.");
+            var prefix=ProbeBytes();var terrain=(IPlayableTerrain)typeof(NavigationSession).GetField("terrain",F).GetValue(session);var budget=session.PhysicalHostBudget;Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+            PumpProbe(1);session.ApplyResults();second=WorkForGroup(group)??second;var suffix=ProbeBytes();string hotFacts=HistoricalFacts(second)+" "+FrontierFacts(original);
+            RestoreProbeBytes(prefix,terrain);Assert.Zero(budget.PhysicalBytes);CollectionAssert.AreEqual(prefix,ProbeBytes());kernel.Attach(session.RoutePort);typeof(CertifiedRouteKernel).GetMethod("RefreshPhysicalFrontier",F).Invoke(kernel,new object[]{session.RoutePort});PumpProbe(1);session.ApplyResults();var cold=ProbeBytes();var coldWork=WorkForGroup(group);TestContext.WriteLine("COLD_NEXT_GRANT hot="+hotFacts+" cold="+(coldWork==null?"missing":HistoricalFacts(coldWork)+" "+FrontierFacts(coldWork.HistoricalSource)));
+            CollectionAssert.AreEqual(suffix,cold,"partial second certificate plus next grant must cold-continue byte-exactly");Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);Assert.Zero(session.PhysicalHostBudget.HeldBytes);Assert.Zero(session.PhysicalHostBudget.ActiveScopes);
+            string OracleCheckpointFacts(NavigationArrivalWork oracle)
+            {var cp=oracle.Save();var starts=Field(typeof(NavigationArrivalWork.Checkpoint),"PageStarts",cp) as int[];var counts=Field(typeof(NavigationArrivalWork.Checkpoint),"PageCounts",cp) as int[];var prepared=Field(typeof(NavigationArrivalWork.Checkpoint),"PreparedClearances",cp) as Array;var valid=prepared==null?"none":string.Join(";",prepared.Cast<object>().Select(row=>{var indices=(int[][])Field(row.GetType(),"CandidateIndices",row);return string.Join(",",indices.Select(values=>values.Length));}));return "status="+oracle.Status+" phase="+Field(typeof(NavigationArrivalWork.Checkpoint),"Phase",cp)+" page="+Field(typeof(NavigationArrivalWork.Checkpoint),"PageIndex",cp)+" member="+Field(typeof(NavigationArrivalWork.Checkpoint),"MemberIndex",cp)+" candidateCursor="+Field(typeof(NavigationArrivalWork.Checkpoint),"CandidateCursor",cp)+" prepPage="+Field(typeof(NavigationArrivalWork.Checkpoint),"PreparationPageIndex",cp)+" prepCursor="+Field(typeof(NavigationArrivalWork.Checkpoint),"PreparationCursor",cp)+" pageStarts="+string.Join(",",starts??Array.Empty<int>())+" pageCounts="+string.Join(",",counts??Array.Empty<int>())+" validCounts="+valid+" requests="+((Array)Field(typeof(NavigationArrivalWork.Checkpoint),"Requests",cp)).Length+" routes="+((Array)Field(typeof(NavigationArrivalWork.Checkpoint),"Routes",cp)).Length+" outcomes="+((Array)Field(typeof(NavigationArrivalWork.Checkpoint),"MemberOutcomes",cp)).Length+" assignments="+((Array)Field(typeof(NavigationArrivalWork.Checkpoint),"Assignments",cp)).Length+" paid="+oracle.AllocationWorkConsumed;}
+            string DropPredicates(NavigationArrivalWork work,NavigationArrivalWork oracle,NavigationArrivalWork.Checkpoint before)
+            {
+                var hist=HistoricalSnapshot(work);var ht=hist.GetType();int gate=(int)Field(ht,"Gate",hist),cursor=(int)Field(ht,"Cursor",hist);var removal=Field(ht,"Removal",hist) as int[];var occupancy=Field(ht,"Page0Occupancy",hist) as int[];var bits=typeof(NavigationArrivalWork).GetProperties(F).Where(property=>property.Name.EndsWith("Mode")||property.Name=="HistoricalPartCount").OrderBy(property=>property.Name).Select(property=>property.Name+"="+property.GetValue(work));var failures=new System.Collections.Generic.List<string>();
+                bool header=(bool)typeof(NavigationArrivalWork).GetMethod("HistoricalHeader",F).Invoke(work,null);if(!header)failures.Add("HistoricalHeader=false");
+                for(int i=0;i<work.PhysicalInput.Members.Count;i++){bool same=(bool)typeof(NavigationArrivalWork).GetMethod("HistoricalMemberSame",F).Invoke(work,new object[]{i});if(!same){failures.Add("HistoricalMemberSame["+i+"]=false");break;}}
+                var oldProvider=(PartitionNavigationProvider)oracle.PhysicalInput.Provider;var newProvider=(PartitionNavigationProvider)work.PhysicalInput.Provider;for(int i=0;i<oldProvider.MonotonePartCount;i++)if(!oldProvider.MonotonePartTo(newProvider,i)){failures.Add("MonotonePartTo["+i+"]=false old="+oldProvider.MonotonePartCount+" current="+newProvider.MonotonePartCount);break;}
+                if(gate==2&&removal!=null&&removal.Length>0&&removal[0]==oracle.PhysicalInput.Source.Candidates.Count&&cursor!=work.PhysicalInput.Source.Candidates.Count)failures.Add("RemovalSubsequenceFinalCursor=false oldSource="+oracle.PhysicalInput.Source.Candidates.Count+" currentSource="+work.PhysicalInput.Source.Candidates.Count+" cursor="+cursor);
+                bool page0=(bool)typeof(NavigationArrivalWork).GetMethod("RemovalOraclePageZero",F).Invoke(work,null);if(gate==4&&!page0)failures.Add("RemovalOraclePageZero=false oldPage="+Field(typeof(NavigationArrivalWork.Checkpoint),"PageIndex",oracle.Save())+" oldOutcomes="+oracle.Save().MemberOutcomes.Length);
+                if(gate==4){var regionMethod=typeof(NavigationArrivalWork).GetMethod("RemovalRegion",F);var recipeMethod=typeof(NavigationArrivalWork).GetMethod("RemovalOldRecipe",F);for(int m=0;m<work.PhysicalInput.Members.Count;m++){var old=(NavTerminalRegion)regionMethod.Invoke(work,new object[]{oracle,m});var current=(NavTerminalRegion)regionMethod.Invoke(work,new object[]{work,m});if(old==null||current==null){failures.Add("RemovalRegion["+m+"] old="+(old!=null)+" current="+(current!=null));break;}bool shape=old.Candidates.Count==current.Candidates.Count&&old.Requested.Equals(current.Requested);bool recipe=(bool)recipeMethod.Invoke(work,new object[]{m,old});if(!shape||!recipe){failures.Add("RemovalRegionRecipe["+m+"] oldCount="+old.Candidates.Count+" currentCount="+current.Candidates.Count+" requestedEqual="+old.Requested.Equals(current.Requested)+" oldRecipe="+recipe+" oldKey="+old.StableKey+" currentKey="+current.StableKey);break;}int changed=-1;for(int n=0;n<old.Candidates.Count;n++)if(!old.Candidates[n].Equals(current.Candidates[n])){changed=n;break;}if(changed>=0){failures.Add("RemovalRegionCandidate["+m+","+changed+"]=false old="+old.Candidates[changed]+" current="+current.Candidates[changed]);break;}
+                    var blocker=typeof(NavigationArrivalWork).GetMethod("HistoricalOccupantBlocks",F);var oldRows=oracle.PhysicalInput.Occupancy.Occupants;var currentRows=work.PhysicalInput.Occupancy.Occupants;for(int n=0;n<current.Candidates.Count;n++){bool oldBlocked=oldRows.Any(row=>(bool)blocker.Invoke(work,new object[]{work.PhysicalInput.Members[m],current.Candidates[n],row}));bool currentBlocked=currentRows.Any(row=>(bool)blocker.Invoke(work,new object[]{work.PhysicalInput.Members[m],current.Candidates[n],row}));if(oldBlocked!=currentBlocked){failures.Add("Page0Placement["+m+","+n+"]=false oldBlocked="+oldBlocked+" currentBlocked="+currentBlocked+" oldRows="+oldRows.Count+" currentRows="+currentRows.Count);break;}}
+                    if(failures.Count>0)break;}}
+                bool page0Mode=(bool)typeof(NavigationArrivalWork).GetProperty("page0OccupancyMode",F).GetValue(work);return "firstFalse="+(failures.Count>0?failures[0]:page0Mode&&!page0?"RemovalOraclePageZero=false(oldPage="+Field(typeof(NavigationArrivalWork.Checkpoint),"PageIndex",oracle.Save())+",oldOutcomes="+oracle.Save().MemberOutcomes.Length+")":"none-of-tested-predicates")+" gate="+gate+" cursor="+cursor+" removal="+string.Join(",",removal??Array.Empty<int>())+" occupancy="+string.Join(",",occupancy??Array.Empty<int>())+" policy="+string.Join(",",bits)+" header="+header+" page0="+page0+" old="+OracleCheckpointFacts(oracle);
+            }
+            second=coldWork;int completion=0;bool detachmentLogged=false;for(;completion<30000&&second.Status!=NavArrivalStatus.Ready;completion++){var pinned=session.PinCommittedHostRoot();try{var preWork=WorkForGroup(group)??second;var preOracle=typeof(NavigationArrivalWork).GetProperty("historicalOracle",F).GetValue(preWork) as NavigationArrivalWork;var beforeWork=preWork.Save();var prePaid=preWork.AllocationWorkConsumed;string certificateBefore=preOracle==null?"none":DropPredicates(preWork,preOracle,beforeWork);PumpProbe(1);session.ApplyResults();var postWork=WorkForGroup(group)??preWork;var postOracle=typeof(NavigationArrivalWork).GetProperty("historicalOracle",F).GetValue(postWork);if(preOracle!=null&&postOracle==null&&!detachmentLogged){detachmentLogged=true;TestContext.WriteLine("CERTIFICATE_ORACLE_DETACHED iteration="+(completion+1)+" prePaid="+prePaid+" postPaid="+postWork.AllocationWorkConsumed+" actualGrantDelta="+(postWork.AllocationWorkConsumed-prePaid)+" postLastAdvance="+postWork.LastAdvanceConsumed+" preCert="+certificateBefore+" postStatus="+postWork.Status+" postAssignments="+AssignmentCount(postWork)+" postCursor="+postWork.MemberCursor+" postHistorical="+HistoricalFacts(postWork)+" postFrontier="+FrontierFacts(postWork)+" source="+postWork.PhysicalInput.Source.StableKey+" members="+string.Join(";",postWork.PhysicalInput.Members.Select(member=>member.StableKey)));}second=postWork;}finally{pinned?.Release();}}
+            object finalOracle=typeof(NavigationArrivalWork).GetProperty("historicalOracle",F).GetValue(second);TestContext.WriteLine("SECOND_CERTIFICATE_END iterations="+completion+" detachmentLogged="+detachmentLogged+" oracleAttached="+(finalOracle!=null)+" status="+second.Status+" assignments="+AssignmentCount(second)+" cursor="+second.MemberCursor+" paid="+second.AllocationWorkConsumed+" facts="+HistoricalFacts(second)+" frontier="+FrontierFacts(finalOracle as NavigationArrivalWork??second));
+            Assert.AreEqual(NavArrivalStatus.Ready,second.Status,"the pending third assignment must reach Ready after certificate/solver continuation");Assert.AreEqual(3,AssignmentCount(second));Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);Assert.Zero(session.PhysicalHostBudget.HeldBytes);Assert.Zero(session.PhysicalHostBudget.ActiveScopes);
         }
         [Test] public void FoundationGeometryRefusalKeepsPendingPhaseHealthAndWorldThenPublishesTogetherCold()
         {
@@ -788,6 +1318,57 @@ namespace Spacewars.Tests.EditMode
             byte[] Finish(){for(int i=0;i<20000&&!session.DeliveryBarrierReady;i++)Pump(4);Assert.True(session.DeliveryBarrierReady);Assert.Zero((int)allocation.GetValue(session));Assert.AreEqual(capacity+1,session.RejectedResults);session.ApplyResults();Assert.AreEqual(1,session.AppliedResults);Assert.True(session.Crowd.TryGet(entity,out var current));Assert.True(current.Moving);Assert.AreEqual(position,current.Position);return Bytes();}
             Drain();var drained=Bytes();var suffix=Finish();Pump(4);var next=Bytes();var facts=HostFacts();
             Restore(prefix);CollectionAssert.AreEqual(prefix,Bytes());kernel.PauseAtPhysicalBoundary=()=>kernel.CapturePumpFrontier().Stage==CertifiedRouteKernel.PumpStage.Transfer;try{Pump(0);}finally{kernel.PauseAtPhysicalBoundary=null;}CollectionAssert.AreEqual(prefix,Bytes());Drain();CollectionAssert.AreEqual(drained,Bytes());CollectionAssert.AreEqual(suffix,Finish());Pump(4);CollectionAssert.AreEqual(next,Bytes());Assert.AreEqual(facts,HostFacts());Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+        }
+
+        [Test] public void TwoOrdinaryReadyAnswersDrainAndMoveAtomicallyDuringSavedPhysicalAllocationCold()
+        {
+            int first=Spawn(-18,-14),second=Spawn(-18,-10);Assert.True(session.Move(second,new NavPoint(-10,-10)));Assert.True(session.Move(first,new NavPoint(-10,-14)));
+            var allocation=typeof(NavigationSession).GetField("hostAllocationThread",F);bool paused=false;
+            kernel.PauseAtPhysicalBoundary=()=>{
+                var stage=kernel.CapturePumpFrontier().Stage;
+                if(session.Answers.Count==2&&(int)allocation.GetValue(session)!=0&&(stage==CertifiedRouteKernel.PumpStage.Projection||stage==CertifiedRouteKernel.PumpStage.EndAllocation)){paused=true;return true;}
+                return false;
+            };
+            try{for(int tick=0;tick<20000&&!paused;tick++)Pump(1);}finally{kernel.PauseAtPhysicalBoundary=null;}
+            Assert.True(paused,"Pause only after two genuine answers exist while the physical host allocation token is held");Assert.AreEqual(2,session.Answers.Count);Assert.AreNotEqual(0,allocation.GetValue(session));
+            Assert.True(session.Crowd.TryGet(first,out var a));Assert.True(session.Crowd.TryGet(second,out var b));var a0=a.Position;var b0=b.Position;var prefix=Bytes();var budget=session.PhysicalHostBudget;long physical=budget.PhysicalBytes;int applied=session.AppliedResults,batches=session.OwnedResultBatchPublications,movements=session.OwnedMovementPublications,denied=0;
+            try{budget.AllocationAdmission=_=>{if(new System.Diagnostics.StackTrace().GetFrames().Any(frame=>frame.GetMethod().DeclaringType==typeof(NavPreparedCrowdStep)&&frame.GetMethod().Name=="Create")){denied++;return false;}return true;};session.Step(1d/30);}finally{budget.AllocationAdmission=null;}
+            Assert.AreEqual(1,denied,"The refusal must reach real composed movement preparation");Assert.AreEqual(2,session.Answers.Count);Assert.AreEqual(applied,session.AppliedResults);Assert.AreEqual(batches,session.OwnedResultBatchPublications);Assert.AreEqual(movements,session.OwnedMovementPublications);Assert.AreEqual(a0,a.Position);Assert.AreEqual(b0,b.Position);Assert.AreEqual(physical,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);CollectionAssert.AreEqual(prefix,Bytes());Assert.Zero(ArrivalLeaseCount);
+            session.Step(1d/30);Assert.AreEqual(applied+2,session.AppliedResults);Assert.AreEqual(batches+1,session.OwnedResultBatchPublications);Assert.AreEqual(movements+1,session.OwnedMovementPublications);Assert.Zero(session.Answers.Count);Assert.Zero(session.PendingCount);Assert.Zero(ArrivalLeaseCount);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);Assert.NotNull(session.InstalledExecutionFor(first));Assert.NotNull(session.InstalledExecutionFor(second));Assert.Greater(a.Position.X,a0.X);Assert.Greater(b.Position.X,b0.X);
+            Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);var published=Bytes();Pump(4);var next=Bytes();var facts=HostFacts();
+            Restore(prefix);CollectionAssert.AreEqual(prefix,Bytes());kernel.Attach(session.RoutePort);typeof(CertifiedRouteKernel).GetMethod("RefreshPhysicalFrontier",F).Invoke(kernel,new object[]{session.RoutePort});session.Step(1d/30);CollectionAssert.AreEqual(published,Bytes());Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);Pump(4);CollectionAssert.AreEqual(next,Bytes());Assert.AreEqual(facts,HostFacts());Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+        }
+
+        [Test] public void TwoStaleReadyDiscardsStillMoveUnrelatedInstalledActorDuringSavedAllocationCold()
+        {
+            int moving=Spawn(-18,-6);Assert.True(session.Move(moving,new NavPoint(-10,-6)));for(int i=0;i<20000&&session.PendingCount>0;i++){Pump(4);session.ApplyResults();}var initialAllocation=typeof(NavigationSession).GetField("hostAllocationThread",F);for(int i=0;i<20000&&(int)initialAllocation.GetValue(session)!=0;i++)Pump(4);Assert.Zero((int)initialAllocation.GetValue(session));session.Step(1d/30);Assert.NotNull(session.InstalledExecutionFor(moving));Assert.True(session.Crowd.TryGet(moving,out var mover));Assert.True(mover.Moving);session.Step(1d/30);var movingStart=mover.Position;
+            int first=Spawn(-18,-14),second=Spawn(-18,-10);Assert.True(session.Move(second,new NavPoint(-10,-10)));Assert.True(session.Move(first,new NavPoint(-10,-14)));var allocation=typeof(NavigationSession).GetField("hostAllocationThread",F);bool paused=false;
+            kernel.PauseAtPhysicalBoundary=()=>{var stage=kernel.CapturePumpFrontier().Stage;if(session.Answers.Count==2&&(int)allocation.GetValue(session)!=0&&(stage==CertifiedRouteKernel.PumpStage.Projection||stage==CertifiedRouteKernel.PumpStage.EndAllocation)){paused=true;return true;}return false;};
+            try{for(int i=0;i<20000&&!paused;i++)Pump(1);}finally{kernel.PauseAtPhysicalBoundary=null;}Assert.True(paused);Assert.AreEqual(2,session.Answers.Count);Assert.AreNotEqual(0,allocation.GetValue(session));
+            session.Stop(first,false);session.Stop(second,false);Assert.AreEqual(2,session.Answers.Count,"Both late Ready answers remain transport-owned after Stop");var prefix=Bytes();var budget=session.PhysicalHostBudget;long physical=budget.PhysicalBytes;int rejected=session.RejectedResults,batches=session.OwnedResultBatchPublications,movements=session.OwnedMovementPublications,denied=0;var installedSet=(NavigationInstalledExecutions)typeof(NavigationSession).GetField("installedExecutions",F).GetValue(session);var installed=installedSet.OwnerFor(moving);
+            try{budget.AllocationAdmission=_=>{if(new System.Diagnostics.StackTrace().GetFrames().Any(frame=>frame.GetMethod().DeclaringType==typeof(NavPreparedCrowdStep)&&frame.GetMethod().Name=="Create")){denied++;return false;}return true;};session.Step(1d/30);}finally{budget.AllocationAdmission=null;}
+            Assert.AreEqual(1,denied);Assert.AreEqual(2,session.Answers.Count);Assert.AreEqual(rejected,session.RejectedResults);Assert.AreEqual(batches,session.OwnedResultBatchPublications);Assert.AreEqual(movements,session.OwnedMovementPublications);Assert.AreSame(installed,installedSet.OwnerFor(moving));Assert.AreEqual(movingStart,mover.Position);Assert.AreEqual(physical,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);CollectionAssert.AreEqual(prefix,Bytes());Assert.Zero(ArrivalLeaseCount);
+            session.Step(1d/30);Assert.AreEqual(rejected+2,session.RejectedResults);Assert.AreEqual(batches+1,session.OwnedResultBatchPublications);Assert.AreEqual(movements+1,session.OwnedMovementPublications);Assert.AreEqual(2,session.OwnedDiscardPublications);Assert.Zero(session.Answers.Count);Assert.Zero(ArrivalLeaseCount);Assert.Greater(mover.Position.X,movingStart.X);Assert.AreSame(installed,installedSet.OwnerFor(moving));Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+            var drained=Bytes();Pump(4);var next=Bytes();var facts=HostFacts();Restore(prefix);CollectionAssert.AreEqual(prefix,Bytes());kernel.Attach(session.RoutePort);typeof(CertifiedRouteKernel).GetMethod("RefreshPhysicalFrontier",F).Invoke(kernel,new object[]{session.RoutePort});session.Step(1d/30);CollectionAssert.AreEqual(drained,Bytes());Pump(4);CollectionAssert.AreEqual(next,Bytes());Assert.AreEqual(facts,HostFacts());Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+        }
+
+        [TestCase(false)][TestCase(true)] public void SavedAllocationCommutationAcceptsSameSchedulerHostForkAndRefusesMailboxChange(bool mutateMailbox)
+        {
+            int first=Spawn(-18,-14),second=Spawn(-18,-10),extra=mutateMailbox?Spawn(-18,-6):0;Assert.True(session.Move(second,new NavPoint(-10,-10)));Assert.True(session.Move(first,new NavPoint(-10,-14)));var allocation=typeof(NavigationSession).GetField("hostAllocationThread",F);bool paused=false;
+            kernel.PauseAtPhysicalBoundary=()=>{var stage=kernel.CapturePumpFrontier().Stage;if(session.Answers.Count==2&&(int)allocation.GetValue(session)!=0&&(stage==CertifiedRouteKernel.PumpStage.Projection||stage==CertifiedRouteKernel.PumpStage.EndAllocation)){paused=true;return true;}return false;};
+            try{for(int i=0;i<20000&&!paused;i++)Pump(1);}finally{kernel.PauseAtPhysicalBoundary=null;}Assert.True(paused);var prefix=Bytes();var budget=session.PhysicalHostBudget;int applied=session.AppliedResults,batches=session.OwnedResultBatchPublications,movements=session.OwnedMovementPublications;bool changed=false;byte[] mutationPrefix=null;NavigationHostRoot originalRoot=null;
+            if(!mutateMailbox)originalRoot=session.PinCommittedHostRoot();
+            try{budget.AllocationAdmission=_=>{
+                if(changed||!new System.Diagnostics.StackTrace().GetFrames().Any(frame=>frame.GetMethod().DeclaringType==typeof(NavPreparedCrowdStep)&&frame.GetMethod().Name=="Create"))return true;
+                changed=true;
+                if(mutateMailbox){Assert.True(session.Move(extra,new NavPoint(-10,-6)));mutationPrefix=Bytes();}
+                else{var source=session.PinCommittedHostRoot();NavigationHostRoot candidate=null;NavigationRetentionBudget.Scope scope=null;try{Assert.True(session.TryOpenPhysicalHostScope(NavigationPreparationKind.Admission,session.Generation,session.Admission.PublicationIdentity,out scope));candidate=source.ForkOwned(scope.OwnedReservation());candidate.SealPrepared();scope.Attach(candidate);session.PublishPhysicalHostRoot(scope,source,candidate,()=>{});}finally{scope?.Dispose();candidate?.ReleaseStorage();source?.Release();}}
+                return true;
+            };session.Step(1d/30);}finally{budget.AllocationAdmission=null;originalRoot?.Release();}
+            Assert.True(changed);
+            if(mutateMailbox){Assert.AreNotEqual(0,extra);Assert.AreEqual(2,session.Answers.Count);Assert.AreEqual(applied,session.AppliedResults);Assert.AreEqual(batches,session.OwnedResultBatchPublications);Assert.AreEqual(movements,session.OwnedMovementPublications);CollectionAssert.AreEqual(mutationPrefix,Bytes());}
+            else{Assert.AreEqual(applied+2,session.AppliedResults);Assert.AreEqual(batches+1,session.OwnedResultBatchPublications);Assert.AreEqual(movements+1,session.OwnedMovementPublications);Assert.Zero(session.Answers.Count);Assert.Zero(session.LastOwnedResultBatchPublicationAllocatedBytes);Assert.Zero(session.LastOwnedMovementPublicationAllocatedBytes);var current=session.PinCommittedHostRoot();try{Assert.AreNotSame(originalRoot,current);}finally{current?.Release();}}
+            Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);
         }
 
         [Test] public void FirstGroupPublicationInvalidatesPreparedProbeBootstrapWithoutLosingPendingOrder()
@@ -956,9 +1537,10 @@ namespace Spacewars.Tests.EditMode
             CollectionAssert.AreEqual(expected,actual);Assert.AreEqual(3,session.OwnedReadyPublications);Assert.Zero(barrier.Count);Assert.Zero(session.Answers.Count);Assert.Zero(session.PendingCount);foreach(int entity in new[]{a,b,c}){Assert.True(session.Crowd.TryGet(entity,out var actor));Assert.True(actor.Moving);Assert.AreEqual(GroupMemberPhase.March,session.GroupFor(entity).Members.Single(m=>m.Entity==entity).Phase);}
             Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);var prefix=Bytes();Pump(1);var next=Bytes();string facts=HostFacts();Restore(prefix);CollectionAssert.AreEqual(prefix,Bytes());Pump(1);CollectionAssert.AreEqual(next,Bytes());Assert.AreEqual(facts,HostFacts());
         }
-        [Test] public void ActualAttemptCaptureLeafHasExactBodyRolesAndOutlivesMutableSession()
+        [TestCase(false)][TestCase(true)] public void ActualAttemptCaptureLeafHasExactBodyRolesAndOutlivesMutableSession(bool partition)
         {
-            int a=Spawn(-18,-14),b=Spawn(-18,-10);Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",new PlayableCommand(1,++command,"player-1",PlayableCommandKind.Move,new[]{a,b},new NavPoint(-10,-12),origin:PlayableOrderOrigin.Human),null));
+            if(partition){kernel.Clear();session.ReleaseCommittedHostRoot();Call("DestroyOwnedNavigation");activeProfile=PlayableProfile.ThreeCrossingsDefault;domain=Activator.CreateInstance(Domain,F,null,new object[]{activeProfile,1L,false},null);session=(NavigationSession)Domain.GetProperty("Navigation",F).GetValue(domain);kernel=new CertifiedRouteKernel();}
+            int a=Spawn(-18,partition?0:-14),b=Spawn(-18,partition?4:-10);Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",new PlayableCommand(1,++command,"player-1",PlayableCommandKind.Move,new[]{a,b},partition?new NavPoint(18,0):new NavPoint(-10,-12),origin:PlayableOrderOrigin.Human),null));
             kernel.PauseAtPhysicalBoundary=()=>session.ArrivalPhases.Length!=0;try{Pump(1);}finally{kernel.PauseAtPhysicalBoundary=null;}
             var attempts=(IEnumerable)typeof(NavigationSession).GetField("arrivalAttempts",F).GetValue(session);long id=0;foreach(var pair in attempts){id=(long)pair.GetType().GetProperty("Key").GetValue(pair);break;}Assert.Greater(id,0);
             var budget=session.PhysicalHostBudget;var before=Bytes();long charge=budget.PhysicalBytes;Assert.True(budget.TryOpenScope(NavigationPreparationKind.Capture,1,1,out var denied));
@@ -968,9 +1550,21 @@ namespace Spacewars.Tests.EditMode
             NavRetainedArray<NavOwnedStorage> bundle=null,coldBundle=null;var cold=new NavigationRetentionBudget();
             try{
                 Assert.True(budget.TryOpenScope(NavigationPreparationKind.Capture,1,1,out var scope));NavigationArrivalAttemptSnapshot snapshot=null;NavigationArrivalProviderSnapshot provider=null;int underGate=0;var gate=typeof(NavigationSession).GetField("transportGate",F).GetValue(session);
-                try{budget.AllocationAdmission=_=>{if(Monitor.IsEntered(gate))underGate++;return true;};snapshot=session.CaptureArrivalAttemptSnapshotOwned(id,scope.OwnedReservation());Assert.AreEqual(77,(int)snapshot.PhysicalTag.Storage);Assert.AreEqual(78,(int)NavPhysicalStorageKind.ArrivalProviderSnapshot);Assert.AreEqual(76,(int)NavPhysicalStorageKind.AuthorityCatalogRoutes);Assert.AreEqual(2,snapshot.WorkingCount);Assert.AreEqual(2,snapshot.ProviderCount);Assert.AreNotSame(snapshot.ProviderRoot(0),snapshot.ProviderRoot(1));Assert.AreEqual(((ILayeredNavigationProvider)snapshot.ProviderRoot(0).Facade).Binding,((ILayeredNavigationProvider)snapshot.ProviderRoot(1).Facade).Binding);Assert.AreEqual(snapshot.Data.InputProviderId,snapshot.WorkingId(0));Assert.AreNotEqual(snapshot.WorkingId(0),snapshot.WorkingId(1));provider=NavigationArrivalProviderSnapshot.AllocatePrepared(scope.OwnedReservation());provider.ObservePrepared(snapshot.Data.InputProviderId,1,snapshot.ProviderRoot(0));bundle=NavRetainedArray<NavOwnedStorage>.Copy(new NavOwnedStorage[]{snapshot,provider,provider},scope.TryReserve);scope.Attach(bundle);scope.Commit(bundle,_=>{});Assert.Zero(underGate);}
+                try{budget.AllocationAdmission=_=>{if(Monitor.IsEntered(gate))underGate++;return true;};snapshot=session.CaptureArrivalAttemptSnapshotOwned(id,scope.OwnedReservation());Assert.AreEqual(77,(int)snapshot.PhysicalTag.Storage);Assert.AreEqual(partition,snapshot.Work.OwnedArrivalAnchorPolicy);Assert.AreEqual(partition,snapshot.UsesAnchor);Assert.AreEqual(partition?NavPhysicalValueKind.OwnedArrivalAnchorV1:NavPhysicalValueKind.None,snapshot.PhysicalTag.Value);if(partition){Assert.NotNull(snapshot.FullFrontier);Assert.AreEqual(NavigationSession.ArrivalFrontier(snapshot.Work),snapshot.FullFrontier.Value);Assert.AreNotEqual(snapshot.Frontier.Value,snapshot.FullFrontier.Value);}else Assert.Null(snapshot.FullFrontier);Assert.AreEqual(NavigationSession.LiveArrivalFrontier(snapshot.Work),snapshot.Frontier.Value);Assert.AreEqual(232,NavStorageLayout.ObjectBytesBound(typeof(NavigationArrivalAttemptSnapshot)),"Historical leaf layout remains exact");Assert.LessOrEqual(NavStorageLayout.ObjectBytesBound(snapshot.GetType()),snapshot.StorageBytes);Assert.AreEqual(78,(int)NavPhysicalStorageKind.ArrivalProviderSnapshot);Assert.AreEqual(76,(int)NavPhysicalStorageKind.AuthorityCatalogRoutes);Assert.AreEqual(2,snapshot.WorkingCount);Assert.AreEqual(2,snapshot.ProviderCount);Assert.AreNotSame(snapshot.ProviderRoot(0),snapshot.ProviderRoot(1));Assert.AreEqual(((ILayeredNavigationProvider)snapshot.ProviderRoot(0).Facade).Binding,((ILayeredNavigationProvider)snapshot.ProviderRoot(1).Facade).Binding);Assert.AreEqual(snapshot.Data.InputProviderId,snapshot.WorkingId(0));Assert.AreNotEqual(snapshot.WorkingId(0),snapshot.WorkingId(1));provider=NavigationArrivalProviderSnapshot.AllocatePrepared(scope.OwnedReservation());provider.ObservePrepared(snapshot.Data.InputProviderId,1,snapshot.ProviderRoot(0));bundle=NavRetainedArray<NavOwnedStorage>.Copy(new NavOwnedStorage[]{snapshot,provider,provider},scope.TryReserve);scope.Attach(bundle);scope.Commit(bundle,_=>{});Assert.Zero(underGate);}
                 finally{budget.AllocationAdmission=null;snapshot?.ReleaseStorage();provider?.ReleaseStorage();scope.Discard();}
                 Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session,bundle),budget.PhysicalBytes);var bytes=Body(budget,bundle);var oldWork=((NavigationArrivalAttemptSnapshot)bundle[0]).Work;Assert.True(session.AdvancePhysicalArrivalAuthority(1));CollectionAssert.AreEqual(bytes,Body(budget,bundle));
+                var witness=(((NavigationArrivalAttemptSnapshot)bundle[0]).FullFrontier??((NavigationArrivalAttemptSnapshot)bundle[0]).Frontier).Value;var needle=System.Text.Encoding.Unicode.GetBytes(witness);int offset=-1;for(int at=0;at<=bytes.Length-needle.Length;at++){bool match=true;for(int n=0;n<needle.Length;n++)if(bytes[at+n]!=needle[n]){match=false;break;}if(match){offset=at;break;}}Assert.GreaterOrEqual(offset,0);var corrupt=(byte[])bytes.Clone();corrupt[offset]=(byte)(corrupt[offset]=='0'?'1':'0');Assert.True(cold.TryOpenScope(NavigationPreparationKind.Decode,1,0,out var bad));try{Assert.Throws<ArgumentException>(()=>{using(var stream=new System.IO.MemoryStream(corrupt,false))using(var reader=new System.IO.BinaryReader(stream))NavPhysicalBodyWire.ReadFrom(reader,bad.OwnedReservation(),NavigationHostBodyExtension.Instance);});}finally{bad.Discard();}Assert.Zero(cold.PhysicalBytes);Assert.Zero(cold.HeldBytes);Assert.Zero(cold.ActiveScopes);
+                if(partition){
+                    void Reject(byte[] malformed,string message=null){Assert.True(cold.TryOpenScope(NavigationPreparationKind.Decode,1,0,out var rejected));try{var error=Assert.Throws<ArgumentException>(()=>{using(var stream=new System.IO.MemoryStream(malformed,false))using(var reader=new System.IO.BinaryReader(stream))NavPhysicalBodyWire.ReadFrom(reader,rejected.OwnedReservation(),NavigationHostBodyExtension.Instance);});if(message!=null)Assert.AreEqual(message,error.Message);}finally{rejected.Discard();}Assert.Zero(cold.PhysicalBytes);Assert.Zero(cold.HeldBytes);Assert.Zero(cold.ActiveScopes);}
+                    Assert.AreEqual(2,bytes[offset-21]);Assert.AreEqual(new NavPhysicalTag(NavPhysicalStorageKind.Metadata,value:NavPhysicalValueKind.Text).Encoded,BitConverter.ToInt32(bytes,offset-16));Assert.AreEqual(64,BitConverter.ToInt32(bytes,offset-4));
+                    var missing=(byte[])bytes.Clone();missing[offset-21]=0;Reject(missing,"Missing physical macro edge.");
+                    int tag=((NavigationArrivalAttemptSnapshot)bundle[0]).PhysicalTag.Encoded,tagOffset=-1,definitions=0;for(int at=5;at<=bytes.Length-4;at++)if(bytes[at-5]==2&&BitConverter.ToInt32(bytes,at)==tag){tagOffset=at;definitions++;}Assert.AreEqual(1,definitions);var mixed=(byte[])bytes.Clone();Array.Copy(BitConverter.GetBytes(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalAttemptSnapshot).Encoded),0,mixed,tagOffset,4);Reject(mixed);
+                    using(var captured=session.CaptureOwnedState()){
+                        var isolatedDomain=Activator.CreateInstance(Domain,F,null,new object[]{activeProfile,1L,false},null);var isolated=(NavigationSession)Domain.GetProperty("Navigation",F).GetValue(isolatedDomain);
+                        try{typeof(NavigationSession).GetMethod("UseLegacyArrivalTablesForDecode",F).Invoke(isolated,null);var focused=new NavigationSessionState{ArrivalAuthority=captured.ArrivalAuthority,AllocationRequestIndices=Array.Empty<int>()};var error=Assert.Throws<TargetInvocationException>(()=>typeof(NavigationSession).GetMethod("RestoreArrivalAuthority",F).Invoke(isolated,new object[]{focused,Array.Empty<NavigationRequest>(),captured.CaptureRoot,null,null}));Assert.IsInstanceOf<ArgumentException>(error.InnerException,error.InnerException.ToString());Assert.AreEqual("Owned arrival anchor requires its full-witness catalog leaf.",error.InnerException.Message);}
+                        finally{isolated.ReleaseCommittedHostRoot();Domain.GetMethod("DestroyOwnedNavigation",F).Invoke(isolatedDomain,null);Assert.Zero(isolated.PhysicalHostBudget.PhysicalBytes);Assert.Zero(isolated.PhysicalHostBudget.HeldBytes);Assert.Zero(isolated.PhysicalHostBudget.ActiveScopes);}
+                    }
+                }
                 Assert.True(cold.TryOpenScope(NavigationPreparationKind.Decode,1,1,out var decode));try{using(var stream=new System.IO.MemoryStream(bytes,false))using(var reader=new System.IO.BinaryReader(stream)){coldBundle=(NavRetainedArray<NavOwnedStorage>)NavPhysicalBodyWire.ReadFrom(reader,decode.OwnedReservation(),NavigationHostBodyExtension.Instance);Assert.AreEqual(stream.Length,stream.Position);}decode.Attach(coldBundle);decode.Commit(coldBundle,_=>{});}finally{decode.Discard();}
                 Assert.AreEqual(NavigationStorageOwnershipTests.Unique(coldBundle),cold.PhysicalBytes);CollectionAssert.AreEqual(bytes,Body(cold,coldBundle));var restored=(NavigationArrivalAttemptSnapshot)coldBundle[0];var record=(NavigationArrivalProviderSnapshot)coldBundle[1];Assert.AreSame(coldBundle[1],coldBundle[2]);Assert.AreSame(restored.ProviderRoot(0),record.ProviderRoot);Assert.AreSame((restored.Work.PhysicalInput.Provider as INavStorageFacade).StorageRoot,record.ProviderRoot);Assert.AreEqual(1,record.LogicalReferences);Assert.AreEqual(0,restored.Data.ReasonSelector);Assert.Null(restored.InitialReason);Assert.AreEqual("gameplay-owner-removed",restored.RemovedReason.Value);
                 kernel.Clear();session.ReleaseCommittedHostRoot();Call("DestroyOwnedNavigation");session=null;kernel=null;domain=null;Assert.AreEqual(NavigationStorageOwnershipTests.Unique(bundle),budget.PhysicalBytes);Assert.Greater(oldWork.References,0);CollectionAssert.AreEqual(bytes,Body(budget,bundle));
@@ -996,6 +1590,113 @@ namespace Spacewars.Tests.EditMode
                 var cold=session.PhysicalHostBudget;int allocations=0;bool ack;long managed;try{cold.AllocationAdmission=_=>{allocations++;return false;};long before=GC.GetAllocatedBytesForCurrentThread();ack=session.RetireRestoredArrivalProjection();managed=GC.GetAllocatedBytesForCurrentThread()-before;}finally{cold.AllocationAdmission=null;}
                 Assert.True(ack);Assert.Zero(allocations);Assert.Zero(managed);Assert.Zero(session.LastOwnedArrivalPruneAllocatedBytes);Assert.Zero(restored.Count);Assert.Zero(restored.References.Capacity);Assert.Zero(restored.Ids.Capacity);CollectionAssert.AreEqual(new[]{1,0},restored.Attempts.CaptureLayout());CollectionAssert.AreEqual(cleaned,Bytes());Assert.AreEqual(facts,HostFacts());Pump(1);CollectionAssert.AreEqual(next,Bytes());Assert.AreEqual(nextFacts,HostFacts());Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),cold.PhysicalBytes);Assert.Zero(cold.HeldBytes);Assert.Zero(cold.ActiveScopes);
             }finally{if(session!=null)session.BeforeArrivalAdvanceCommit=null;budget.AllocationAdmission=null;frozen?.Dispose();owner?.Release();provider?.Release();}
+        }
+        [TestCase(false,false)][TestCase(true,false)]
+        [TestCase(false,true)][TestCase(true,true)]
+        public void ActualIngressAuthorityChangeAtAdmissionReadGateRefusesAtomicallyAndRetries(bool secondGate,bool cancel)
+        {
+            ExerciseAdmissionReadChange(secondGate,cancel,false);
+        }
+        [TestCase(false)][TestCase(true)]
+        public void ActualIngressNeighborMoveAtAdmissionReadGateRefusesWithoutPublication(bool secondGate)
+        {
+            ExerciseAdmissionReadChange(secondGate,false,true);
+        }
+        [Test] public void AdmissionCountChangeWithoutOperationChangeRemainsInvariantFailure()
+        {
+            int entity=Spawn(-18,-14);Arrival(entity,new NavPoint(-10,-14));
+            var budget=session.PhysicalHostBudget;
+            var groups=typeof(NavigationSession).GetField("groups",F).GetValue(session);
+            var owner=(NavigationAdmissionStorage)typeof(NavigationSession).GetField("admissionOwner",F).GetValue(session);
+            long operation=(long)typeof(NavigationSession).GetField("authorityOperationIdentity",F).GetValue(session);
+            int mailboxCount=session.Requests.Count;
+            var requests=new System.Collections.Generic.Dictionary<int,NavigationRequest>();
+            var probes=new System.Collections.Generic.Dictionary<int,NavigationRequest>();
+            Assert.True(session.TryOpenPhysicalHostScope(NavigationPreparationKind.Admission,1,session.Admission.PublicationIdentity,out var scope));
+            bool changed=false;
+            try{
+                budget.AllocationAdmission=_=>{if(!changed){changed=true;requests.Add(999,null);}return true;};
+                var failure=Assert.Throws<TargetInvocationException>(()=>typeof(NavigationSession).GetMethod("PrepareAdmissionProjection",F).Invoke(session,new object[]{groups,requests,0L,session.Admission.PublicationIdentity+1,operation,scope,owner,null,null,probes,null,0}));
+                Assert.IsTrue(changed);Assert.AreEqual(typeof(InvalidOperationException),failure.InnerException.GetType());
+                Assert.AreEqual("Admission copy lost read-set.",failure.InnerException.Message);
+                Assert.AreEqual(operation,(long)typeof(NavigationSession).GetField("authorityOperationIdentity",F).GetValue(session));
+            }finally{budget.AllocationAdmission=null;scope.Discard();}
+            Assert.AreSame(owner.Value,session.Admission);Assert.AreEqual(mailboxCount,session.Requests.Count);
+            Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);
+            Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+        }
+        private void ExerciseAdmissionReadChange(bool secondGate,bool cancel,bool moveNeighbor)
+        {
+            int entity=Spawn(-18,-14),other=Spawn(-18,-6);Arrival(entity,new NavPoint(-10,-14));
+            bool AtIngressBoundary()=>session.Requests.Count>0&&kernel.CapturePumpFrontier().Stage==CertifiedRouteKernel.PumpStage.Transfer;
+            kernel.PauseAtPhysicalBoundary=AtIngressBoundary;
+            try{for(int n=0;n<20000&&!AtIngressBoundary();n++){Pump(4);session.ApplyResults();}}
+            finally{kernel.PauseAtPhysicalBoundary=null;}
+            Assert.AreEqual(1,session.Requests.Count);Assert.True(AtIngressBoundary());
+            Assert.AreSame(kernel,typeof(NavigationSession).GetField("certifiedHost",F).GetValue(session));
+            long attachment=(long)typeof(NavigationSession).GetField("certifiedHostAttachmentIdentity",F).GetValue(session);
+            Assert.True(session.TryObservePhysicalArrivalIngress(out var ingress,out var pin,out var input,out var proposal,out var token,out var attempt));
+            var budget=session.PhysicalHostBudget;bool changed=false;byte[] afterCommand=null;
+            NavigationRequest[] mailbox=null;NavigationAdmission afterAdmission=null;
+            var gate=typeof(NavigationSession).GetField("transportGate",F).GetValue(session);
+            var operationField=typeof(NavigationSession).GetField("authorityOperationIdentity",F);
+            using(pin){
+                var source=session.PinCommittedHostRoot();NavigationHostRoot candidate=null;
+                Assert.AreEqual(source.Frontier,kernel.CapturePumpFrontier());Assert.AreEqual(source.Epoch,kernel.SolverEpoch);
+                Assert.True(session.TryOpenPhysicalHostScope(NavigationPreparationKind.Admission,1,pin.Value.PublicationIdentity,out var scope));
+                try{
+                    candidate=source.ForkOwned(scope.OwnedReservation());
+                    var key=candidate.RegisterArrival(ingress,proposal.Proof.PhysicalRecipe,proposal.Route,token,pin.Value.SurfaceProviderId,scope.OwnedReservation());candidate.SealPrepared();
+                    budget.AllocationAdmission=_=>{
+                        if(changed)return true;
+                        var frames=new System.Diagnostics.StackTrace().GetFrames();
+                        bool target=secondGate?
+                            frames.Any(f=>f.GetMethod().Name=="PrepareAdmissionProjection"):
+                            frames.Any(f=>f.GetMethod().DeclaringType?.Name=="NavigationLiveArrivalLease"&&f.GetMethod().Name=="CreateOwned");
+                        if(!target)return true;
+                        Assert.False(Monitor.IsEntered(gate),"mutation runs outside transport gate");
+                        changed=true;budget.AllocationAdmission=null;
+                        long operation=(long)operationField.GetValue(session);
+                        if(cancel)Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",new PlayableCommand(1,++command,"player-1",PlayableCommandKind.Stop,new[]{entity},origin:PlayableOrderOrigin.Human),null));
+                        else if(moveNeighbor)Arrival(other,new NavPoint(-10,-6));
+                        // The normal owned capture publication itself advances authority
+                        // operation identity without changing the pending route or HOLD set.
+                        afterCommand=Bytes();afterAdmission=session.Admission;mailbox=session.Requests.CopyItems();
+                        Assert.AreNotEqual(operation,(long)operationField.GetValue(session));
+                        if(!cancel&&!moveNeighbor){
+                            Assert.AreSame(ingress,session.PendingRequestFor(entity));Assert.True(session.Admission.Contains(ingress));
+                            Assert.True((bool)typeof(NavigationSession).GetMethod("CurrentHeldBinding",F).Invoke(session,new object[]{ingress.HeldIdentity,entity}));
+                            Assert.True((bool)typeof(NavigationSession).GetMethod("IngressObservationCompatible",F).Invoke(session,new object[]{pin.Value,ingress}));
+                            Assert.AreSame(kernel,typeof(NavigationSession).GetField("certifiedHost",F).GetValue(session));
+                            Assert.AreEqual(attachment,(long)typeof(NavigationSession).GetField("certifiedHostAttachmentIdentity",F).GetValue(session));
+                            Assert.True(session.TryObservePhysicalArrivalIngress(out var sameRequest,out var freshPin,out var sameInput,out var sameProposal,out var sameToken,out var sameAttempt));
+                            using(freshPin){Assert.AreSame(input,sameInput);Assert.AreSame(ingress,sameRequest);Assert.AreSame(proposal.Route,sameProposal.Route);Assert.AreSame(proposal.Proof.PhysicalRecipe,sameProposal.Proof.PhysicalRecipe);Assert.AreEqual(token,sameToken);Assert.AreEqual(attempt,sameAttempt);}
+                        }
+                        return true;
+                    };
+                    Assert.Throws<NavigationSession.PhysicalIngressRefused>(()=>session.PublishRegisteredPhysicalArrival(scope,source,candidate,pin.Value,ingress,key,attempt));
+                    Assert.True(changed,"must reach the selected admission read gate");
+                    var current=session.PinCommittedHostRoot();try{Assert.AreSame(source,current);}finally{current.Release();}
+                    Assert.AreSame(afterAdmission,session.Admission);CollectionAssert.AreEqual(mailbox,session.Requests.CopyItems());
+                    Assert.Zero(session.OwnedIngressPublications);Assert.Zero(session.RegisteredRouteCount);Assert.Zero(ArrivalLeaseCount);
+                    CollectionAssert.AreEqual(afterCommand,Bytes());
+                }finally{budget.AllocationAdmission=null;candidate?.ReleaseStorage();scope.Discard();source.Release();}
+            }
+            Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+            Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes,"refused private ingress leaves no retained owners");
+            if(moveNeighbor)return;
+            if(cancel){
+                Assert.Null(session.PendingRequestFor(entity));
+                for(int n=0;n<3;n++){Pump(4);session.ApplyResults();}
+                Assert.False(HostRows.Any(row=>row.Request.Request==ingress.Request));Assert.Null(session.InstalledExecutionFor(entity));
+            }else{
+                Assert.True(AtIngressBoundary());
+                var current=session.PinCommittedHostRoot();try{Assert.AreEqual(current.Frontier,kernel.CapturePumpFrontier());Assert.AreEqual(current.Epoch,kernel.SolverEpoch);}finally{current.Release();}
+                Assert.True((bool)typeof(CertifiedRouteKernel).GetMethod("TryRegisterPhysicalArrival",F).Invoke(kernel,new object[]{Binding()}),"one fresh kernel observation retries the refused ingress");
+                Assert.True(HostRows.Any(row=>row.Request.Entity==entity));
+                Assert.AreEqual(1,session.OwnedIngressPublications);Assert.AreEqual(1,ArrivalLeaseCount);
+                Assert.AreEqual(1,session.RegisteredRouteCount);Assert.Zero(session.LastOwnedIngressPublicationAllocatedBytes);
+            }
         }
         [Test] public void ActualJointIngressCarrierRefusalPreservesExactMailboxAndAuthority()
         {
@@ -1703,5 +2404,58 @@ namespace Spacewars.Tests.EditMode
             }finally{worker.Dispose();Assert.True(SpinWait.SpinUntil(()=>worker.IsStopped,5000));}
             Assert.DoesNotThrow(()=>kernel.Pump(binding,1));
         }
+        [Test,Timeout(180000)] public void V2FarFoundationKeepsWholeInstalledGroupAndExactColdNextWithAtomicRefusal()
+        {
+            int a=Spawn(-18,-14),b=Spawn(-18,-10);Assert.True(session.MoveGroup(new[]{a,b},new[]{new NavPoint(-10,-14),new NavPoint(-10,-10)}));
+            for(int i=0;i<20000&&session.PendingCount>0;i++){Pump(4);session.ApplyResults();}Assert.Zero(session.PendingCount);
+            for(int i=0;i<30;i++)session.Step(1d/30);
+            Assert.AreEqual(2,session.GroupFor(a).MarchVersion);var group=session.GroupFor(a);var positions=new[]{a,b}.Select(id=>session.Crowd.Units.Single(u=>u.Id==id).Position).ToArray();
+            var requests=new[]{a,b}.Select(id=>session.InstalledExecutionFor(id).Corridor.Request).ToArray();var budget=session.PhysicalHostBudget;
+            Call("AddCredits",PlayableOwner.Enemy,10000d);Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",2,1,PlayableBuildingKind.Refinery,2,PlayableOwner.Enemy,null));
+            var before=Bytes();long charge=budget.PhysicalBytes;int denied=0,underGate=0;var gate=typeof(NavigationSession).GetField("transportGate",F).GetValue(session);
+            try{budget.AllocationAdmission=_=>{if(Monitor.IsEntered(gate))underGate++;if(new System.Diagnostics.StackTrace().GetFrames().Any(f=>f.GetMethod().DeclaringType==typeof(InstalledGeometryCertificateV2))){denied++;return false;}return true;};Call("AdvanceFoundations");}finally{budget.AllocationAdmission=null;}
+            Assert.Greater(denied,0,"The actual foundation path must reach certificate preparation.");Assert.Zero(underGate);Assert.AreEqual(charge,budget.PhysicalBytes);CollectionAssert.AreEqual(before,Bytes());
+            Call("AdvanceFoundations");Assert.Zero(session.LastOwnedRebindPublicationAllocatedBytes);Assert.Zero(session.PendingCount);
+            for(int i=0;i<2;i++){int id=i==0?a:b;Assert.NotNull(session.InstalledExecutionFor(id));Assert.AreEqual(requests[i],session.InstalledExecutionFor(id).Corridor.Request);Assert.True(session.Crowd.Units.Single(u=>u.Id==id).Moving);Assert.AreEqual(positions[i],session.Crowd.Units.Single(u=>u.Id==id).Position);}
+            foreach(var m in group.Members){var now=session.GroupFor(a).Members.Single(n=>n.Entity==m.Entity);Assert.AreEqual(m.Progress,now.Progress);Assert.AreEqual(m.ProgressOffset,now.ProgressOffset);Assert.AreEqual(m.ProgressRequest,now.ProgressRequest);}
+            var prefix=Bytes();session.Step(1d/30);var next=Bytes();Restore(prefix);CollectionAssert.AreEqual(prefix,Bytes());session.Step(1d/30);CollectionAssert.AreEqual(next,Bytes());
+            Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+        }
+
+        [Test,Timeout(180000)] public void V2CertificateRejectsIntersectingRemoveReplaceAndWrongGroupInputs()
+        {
+            int a=Spawn(-18,-14),b=Spawn(-18,-10);Assert.True(session.MoveGroup(new[]{a,b},new[]{new NavPoint(-10,-14),new NavPoint(-10,-10)}));
+            for(int i=0;i<20000&&session.PendingCount>0;i++){Pump(4);session.ApplyResults();}Assert.Zero(session.PendingCount);
+            Call("AddCredits",PlayableOwner.Enemy,10000d);Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",2,1,PlayableBuildingKind.Refinery,2,PlayableOwner.Enemy,null));Call("AdvanceFoundations");
+            var installed=(NavigationInstalledExecutionOwner)session.Crowd.Units.Single(u=>u.Id==a).StorageOwner.InstalledExecution;Assert.NotNull(installed.Certificate);var proof=installed.Certificate;var old=proof.Before;var far=proof.Current;
+            Assert.True(InstalledGeometryCertificateV2.Safe(proof.Group,old,far,proof.Members));
+            NavGeometry Next(params NavObstacle[] rows)=>new NavGeometry(far.HalfExtent,rows,far.Revision+1);
+            foreach(var p in new[]{new NavPoint(-14,-14),installed.Corridor.Corridor.Origin.Position,installed.Corridor.Corridor.Endpoint.Position})Assert.False(InstalledGeometryCertificateV2.Safe(proof.Group,far,Next(far.Obstacles.Concat(new[]{new NavObstacle(p.X-.1,p.Z-.1,p.X+.1,p.Z+.1)}).ToArray()),proof.Members),"Every group route, origin and endpoint is covered.");
+            Assert.False(InstalledGeometryCertificateV2.AddOnly(far,Next(far.Obstacles.Skip(1).ToArray())));
+            Assert.False(InstalledGeometryCertificateV2.AddOnly(far,Next(far.Obstacles.Skip(1).Concat(new[]{new NavObstacle(20,10,21,11),new NavObstacle(22,10,23,11)}).ToArray())));
+            Assert.False(InstalledGeometryCertificateV2.AddOnly(far,Next(far.Obstacles.Concat(new[]{new NavObstacle(new NavPoint(20,10),1)}).ToArray())));
+            Assert.True(session.PhysicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,session.Generation,0,out var scope));using(scope){
+                var r=scope.OwnedReservation();var changed=session.GroupFor(a);changed.MembershipRevision++;var wrong=NavigationAuthorityGroup.CopyWithValuesOwned(proof.Group,new NavigationAuthorityGroup.Values(changed),r);try{Assert.False(InstalledGeometryCertificateV2.Safe(wrong,old,far,proof.Members));}finally{wrong.ReleaseStorage();}
+                var original=(NavigationAuthorityMember)proof.Group.Members[0];var v=original.Data;var endpoint=new NavigationAuthorityMember.Values(v.Entity,v.Slot,v.Incarnation,v.OrderRevision,v.MobilityRevision,v.Phase,new NavPoint(v.Goal.X+1,v.Goal.Z),v.Location,v.HasLocation,v.HasGoal,v.FormationReleased,v.Branch,v.Reservation,v.ContactTick,v.ProgressRequest,v.Progress,v.ProgressVersion,v.ProgressOffset);var member=NavigationAuthorityMember.CopyWithValuesOwned(original,endpoint,r);try{wrong=NavigationAuthorityGroup.CopyWithMemberOwned(proof.Group,0,member,r);try{Assert.False(InstalledGeometryCertificateV2.Safe(wrong,old,far,proof.Members));}finally{wrong.ReleaseStorage();}}finally{member.ReleaseStorage();}
+            }
+            var before=Bytes();session.Stop(a,true);Assert.Null(session.InstalledExecutionFor(a));Assert.True(session.Crowd.Units.Single(u=>u.Id==a).Held);Assert.False(before.SequenceEqual(Bytes()));
+            // A later HOLD is an existing reissue boundary, not a new geometry
+            // certificate. Its pending transition must still save exactly.
+            var held=Bytes();session.Step(1d/30);var heldNext=Bytes();Restore(held);CollectionAssert.AreEqual(held,Bytes());session.Step(1d/30);CollectionAssert.AreEqual(heldNext,Bytes());
+            Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+        }
+
+        [Test,Timeout(180000)] public void V2ChangedProfileRevisionRejectsFoundationCarryAndSavesFallbackExactly()
+        {
+            int a=Spawn(-18,-14),b=Spawn(-18,-10);Assert.True(session.MoveGroup(new[]{a,b},new[]{new NavPoint(-10,-14),new NavPoint(-10,-10)}));
+            for(int i=0;i<20000&&session.PendingCount>0;i++){Pump(4);session.ApplyResults();}Assert.Zero(session.PendingCount);
+            var data=activeProfile.CopyData();data.revision++;activeProfile=PlayableProfile.Create(data,activeProfile.AuthoredMap);Call("ApplyBalance",activeProfile);
+            Assert.NotNull(session.InstalledExecutionFor(a),"Existing compatible profile apply keeps its established route policy.");
+            var old=(NavigationInstalledExecutionOwner)session.Crowd.Units.Single(u=>u.Id==a).StorageOwner.InstalledExecution;Assert.AreNotEqual(activeProfile.Navigation.Revision,old.Request.Request.ProfileRevision);
+            Call("AddCredits",PlayableOwner.Enemy,10000d);Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",2,1,PlayableBuildingKind.Refinery,2,PlayableOwner.Enemy,null));Call("AdvanceFoundations");
+            Assert.Null(session.InstalledExecutionFor(a),"A new geometry certificate cannot cross a profile revision identity change.");Assert.Null(session.InstalledExecutionFor(b));Assert.Greater(session.PendingCount,0);
+            var prefix=Bytes();Pump(1);var next=Bytes();Restore(prefix);CollectionAssert.AreEqual(prefix,Bytes());Pump(1);CollectionAssert.AreEqual(next,Bytes());
+        }
+
     }
 }

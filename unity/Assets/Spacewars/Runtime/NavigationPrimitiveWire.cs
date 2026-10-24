@@ -211,7 +211,7 @@ namespace Spacewars.Runtime
                 w.Write(s.PeakLabels);
                 w.Write(s.PeakFrontier);
                 w.Write(s.OwnerGraphWork);
-                w.Write(s.OwnerFieldWork);
+                w.Write(s.OwnerFieldIncremental?~s.OwnerFieldWork:s.OwnerFieldWork);
                 w.Write(s.CacheGraphWork);
                 w.Write(s.LastEpoch);
                 w.Write(s.LogicalGraph);
@@ -250,7 +250,7 @@ namespace Spacewars.Runtime
                 w.Write(s!=null);if(s==null)return;
                 Request(s.Recipe);
                 Field(s.Field);
-                w.Write(s.Work);
+                w.Write(s.Incremental?~s.Work:s.Work);
             }
             internal void Job(LayeredNavigationScheduler.JobState s)
             {
@@ -565,7 +565,7 @@ namespace Spacewars.Runtime
             internal LayeredNavigationScheduler.Checkpoint Scheduler()
             {
                 if(!WorldWire.Boolean(r))return null;Charge(256);
-                return new LayeredNavigationScheduler.Checkpoint {
+                var state=new LayeredNavigationScheduler.Checkpoint {
                     Version=r.ReadInt32(),
                     GraphQuota=r.ReadInt32(),
                     FieldQuota=r.ReadInt32(),
@@ -610,15 +610,19 @@ namespace Spacewars.Runtime
                     Jobs=Items(()=>Job(),128),
                     Ready=Items(()=>Completion(),32),
                 };
+                if(state.OwnerFieldWork<0){state.OwnerFieldIncremental=true;state.OwnerFieldWork=~state.OwnerFieldWork;}
+                return state;
             }
             internal LayeredNavigationScheduler.CacheFieldState CacheField()
             {
                 if(!WorldWire.Boolean(r))return null;Charge(256);
-                return new LayeredNavigationScheduler.CacheFieldState {
+                var state=new LayeredNavigationScheduler.CacheFieldState {
                     Recipe=Request(),
                     Field=Field(),
                     Work=r.ReadInt32(),
                 };
+                if(state.Work<0){state.Incremental=true;state.Work=~state.Work;}
+                return state;
             }
             internal LayeredNavigationScheduler.JobState Job()
             {

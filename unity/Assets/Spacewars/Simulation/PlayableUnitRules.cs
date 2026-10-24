@@ -31,6 +31,7 @@ namespace Spacewars.Simulation
         {
             switch(k)
             {
+                case PlayableEntityKind.Hawk:return 2*p.HawkDamage/(assault?p.HawkUpgradedReloadSeconds+p.HawkUpgradedSalvoDelay:p.HawkReloadSeconds+p.HawkSalvoDelay);
                 case PlayableEntityKind.Tank:return p.TankWeaponDamage/p.TankWeaponReloadSeconds;
                 case PlayableEntityKind.Explorer:
                     int burst=assault?p.ExplorerAssaultBurstSize:p.ExplorerBurstSize;
@@ -43,6 +44,7 @@ namespace Spacewars.Simulation
         // Strategy/admission/ledger paths decode this registry, never enumerate commands.
         private static readonly IReadOnlyDictionary<PlayableEntityKind,PlayableCommandKind> productionCommands=
             new Dictionary<PlayableEntityKind,PlayableCommandKind>{
+                {PlayableEntityKind.Hawk,PlayableCommandKind.QueueHawk},
                 {PlayableEntityKind.Tank,PlayableCommandKind.QueueTank},
                 {PlayableEntityKind.Explorer,PlayableCommandKind.QueueExplorer},
                 {PlayableEntityKind.Shkval,PlayableCommandKind.QueueShkval}};
@@ -50,14 +52,16 @@ namespace Spacewars.Simulation
         public static PlayableEntityKind? ProductionKind(PlayableCommandKind command)
         {foreach(var row in productionCommands)if(row.Value==command)return row.Key;return null;}
         public static bool Supported(PlayableEntityKind k)=>productionCommands.ContainsKey(k);
-        public static double Radius(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Shkval?p.ShkvalCollisionRadius:k==PlayableEntityKind.Explorer?p.ExplorerCollisionRadius:p.TankCollisionRadius;
-        public static double Speed(PlayableProfile p,PlayableEntityKind k,bool chassis=false)=>k==PlayableEntityKind.Shkval?p.ShkvalSpeed:k==PlayableEntityKind.Explorer?p.ExplorerSpeed:chassis?p.TankChassisSpeed:p.TankSpeed;
-        public static double Turn(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Shkval?p.ShkvalTurnSpeed:k==PlayableEntityKind.Explorer?p.ExplorerTurnSpeed:p.TankTurnSpeed;
-        public static double Range(PlayableProfile p,PlayableEntityKind k,bool guidance=false)=>k==PlayableEntityKind.Shkval?(guidance?p.ShkvalGuidanceRange:p.ShkvalBaseRange):k==PlayableEntityKind.Explorer?p.ExplorerRange:p.TankRange;
-        public static double Vision(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Shkval?p.ShkvalVision:k==PlayableEntityKind.Explorer?p.ExplorerVision:p.TankVisionRange;
-        public static int Health(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Shkval?p.ShkvalHealth:k==PlayableEntityKind.Explorer?p.ExplorerHealth:p.TankHealth;
-        public static int Cost(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Shkval?p.ShkvalCreditCost:k==PlayableEntityKind.Explorer?p.ExplorerCreditCost:p.TankCreditCost;
-        public static int Population(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Shkval?p.ShkvalPopulationCost:k==PlayableEntityKind.Explorer?p.ExplorerPopulationCost:p.TankPopulationCost;
-        public static double Duration(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Shkval?p.ShkvalProductionDurationSec:k==PlayableEntityKind.Explorer?p.ExplorerProductionDurationSec:p.TankProductionSeconds;
+        public static double Radius(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Hawk?p.HawkRadius:k==PlayableEntityKind.Shkval?p.ShkvalCollisionRadius:k==PlayableEntityKind.Explorer?p.ExplorerCollisionRadius:p.TankCollisionRadius;
+        public static double Speed(PlayableProfile p,PlayableEntityKind k,bool chassis=false)=>k==PlayableEntityKind.Hawk?p.HawkSpeed:k==PlayableEntityKind.Shkval?p.ShkvalSpeed:k==PlayableEntityKind.Explorer?p.ExplorerSpeed:chassis?p.TankChassisSpeed:p.TankSpeed;
+        public static double Turn(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Hawk?p.HawkYawSpeed:k==PlayableEntityKind.Shkval?p.ShkvalTurnSpeed:k==PlayableEntityKind.Explorer?p.ExplorerTurnSpeed:p.TankTurnSpeed;
+        public static double Range(PlayableProfile p,PlayableEntityKind k,bool guidance=false)=>k==PlayableEntityKind.Hawk?p.HawkRange:k==PlayableEntityKind.Shkval?(guidance?p.ShkvalGuidanceRange:p.ShkvalBaseRange):k==PlayableEntityKind.Explorer?p.ExplorerRange:p.TankRange;
+        public static double Vision(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Hawk?p.ExplorerVision:k==PlayableEntityKind.Shkval?p.ShkvalVision:k==PlayableEntityKind.Explorer?p.ExplorerVision:p.TankVisionRange;
+        public static double MaximumHealth(PlayableProfile p,PlayableEntitySnapshot u)=>u.MaxHealth>0?u.MaxHealth:Health(p,u.Kind);
+        public static double HealthRatio(PlayableProfile p,PlayableEntitySnapshot u)=>(u.ExactHealth??u.Health)/MaximumHealth(p,u);
+        public static int Health(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Hawk?(int)p.HawkHealth:k==PlayableEntityKind.Shkval?p.ShkvalHealth:k==PlayableEntityKind.Explorer?p.ExplorerHealth:p.TankHealth;
+        public static int Cost(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Hawk?(int)p.HawkCreditCost:k==PlayableEntityKind.Shkval?p.ShkvalCreditCost:k==PlayableEntityKind.Explorer?p.ExplorerCreditCost:p.TankCreditCost;
+        public static int Population(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Hawk?(int)p.HawkPopulationCost:k==PlayableEntityKind.Shkval?p.ShkvalPopulationCost:k==PlayableEntityKind.Explorer?p.ExplorerPopulationCost:p.TankPopulationCost;
+        public static double Duration(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Hawk?p.HawkProductionSeconds:k==PlayableEntityKind.Shkval?p.ShkvalProductionDurationSec:k==PlayableEntityKind.Explorer?p.ExplorerProductionDurationSec:p.TankProductionSeconds;
     }
 }

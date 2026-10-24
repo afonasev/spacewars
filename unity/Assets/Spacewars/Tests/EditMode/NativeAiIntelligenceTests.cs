@@ -100,11 +100,21 @@ namespace Spacewars.Tests.EditMode
         [Test] public void Memory_AuthorityPauseRestartProfileBarrierAndByteExactRestore()
         {
             var basis=OfflineParticipantAuthorityTests.Config(2,false);var c=new OfflineMatchConfiguration(basis.Profile,basis.SourceIdentity,basis.MapIdentity,basis.RouteProvenance,basis.Seed,basis.Roster.Select(p=>new OfflineParticipant(p.Id,p.LogicalPlayer,p.Team,OfflineControl.Ai)).ToArray(),basis.Starts.ToArray(),basis.Sites.ToArray(),basis.Obstacles.ToArray(),Costs(basis.Starts.Count));
-            var a=new PlayableAuthorityTick(c,71);for(int i=0;i<45;i++)Step(a);var checkpoints=a.CaptureDiagnosticCheckpoints();Assert.True(checkpoints.All(p=>p.Knowledge.ObservationTick==a.Tick&&p.Knowledge.Areas.Count>0));
-            var original=a.CaptureBytes();var b=PlayableAuthorityTick.RestoreBytes(original,c);CollectionAssert.AreEqual(original,b.CaptureBytes());for(int i=0;i<45;i++){Step(a);Step(b);}CollectionAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes());
+            var a=new PlayableAuthorityTick(c,71);PlayableAuthorityTick b=null;
+            var host=new CertifiedRouteKernel();var coldHost=new CertifiedRouteKernel();
+            void Advance(PlayableAuthorityTick authority,CertifiedRouteKernel worker)
+            {
+                // Current fixed-quantum authority needs its real host, not fabricated empty answers.
+                for(int pump=0;pump<4096;pump++){if(authority.TryAdvance())return;worker.Pump(authority.NavigationBinding,4);}
+                Assert.Fail("Current host did not complete the tick quantum.");
+            }
+            try{
+            for(int i=0;i<45;i++)Advance(a,host);var checkpoints=a.CaptureDiagnosticCheckpoints();Assert.True(checkpoints.All(p=>p.Knowledge.ObservationTick==a.Tick&&p.Knowledge.Areas.Count>0));
+            var original=a.CaptureBytes();b=PlayableAuthorityTick.RestoreBytes(original,c);CollectionAssert.AreEqual(original,b.CaptureBytes());for(int i=0;i<45;i++){Advance(a,host);Advance(b,coldHost);}CollectionAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes());
             var memory=a.CaptureDiagnosticCheckpoints().Select(p=>p.Knowledge).ToArray();for(int i=0;i<60;i++)Assert.True(a.TryAdvance(paused:true));Assert.AreEqual(90,a.Tick);for(int i=0;i<memory.Length;i++)Assert.AreSame(memory[i],a.CaptureDiagnosticCheckpoints()[i].Knowledge);
             var profile=AiProfile.Initial.CopyData();profile.revision++;profile.fields.Single(p=>p.path=="scouting.contactHalfLifeSeconds").value=120;profile.fields.Single(p=>p.path=="scouting.revisitSeconds").value=90;var next=new AiProfile(profile);Assert.IsNull(a.ApplyProfile(c.Profile,next));
-            CollectionAssert.AreEqual(a.CaptureBytes(),PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c,next).CaptureBytes());var fresh=new PlayableAuthorityTick(c,72);Assert.True(fresh.CaptureDiagnosticCheckpoints().All(p=>p.Knowledge.Generation==72&&p.Knowledge.ObservationTick==-1&&p.Knowledge.Contacts.Count==0));fresh.Stop();a.Stop();b.Stop();
+            CollectionAssert.AreEqual(a.CaptureBytes(),PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c,next).CaptureBytes());var fresh=new PlayableAuthorityTick(c,72);Assert.True(fresh.CaptureDiagnosticCheckpoints().All(p=>p.Knowledge.Generation==72&&p.Knowledge.ObservationTick==-1&&p.Knowledge.Contacts.Count==0));fresh.Stop();
+            }finally{host.Clear();coldHost.Clear();a.Stop();b?.Stop();}
         }
         [Test] public void Freshness_AppliedScoutCommandHasSeparateClockWithoutSurveySuccess()
         {

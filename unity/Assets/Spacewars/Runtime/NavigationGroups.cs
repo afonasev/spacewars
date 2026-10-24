@@ -11,7 +11,7 @@ namespace Spacewars.Runtime
     {
         public int Entity, Slot; public long Incarnation, OrderRevision, MobilityRevision;
         public GroupMemberPhase Phase; public NavPoint Goal; public NavLocation? GoalLocation; public bool HasGoal, FormationReleased;
-        public long Branch, Reservation, ContactTick, ProgressRequest; public string ContactPhase; public double Progress;
+        public long Branch, Reservation, ContactTick, ProgressRequest; public string ContactPhase; public double Progress; public int ProgressVersion; public double ProgressOffset;
         internal GroupMemberState Copy()=>(GroupMemberState)MemberwiseClone();
     }
     [Serializable] public sealed class GroupOrderState
@@ -41,12 +41,12 @@ namespace Spacewars.Runtime
         internal readonly struct Values
         {
             internal readonly int Entity,Slot;internal readonly long Incarnation,OrderRevision,MobilityRevision,Branch,Reservation,ContactTick,ProgressRequest;
-            internal readonly GroupMemberPhase Phase;internal readonly NavPoint Goal,Location;internal readonly bool HasLocation,HasGoal,FormationReleased;internal readonly double Progress;
-            internal Values(int entity,int slot,long incarnation,long order,long mobility,GroupMemberPhase phase,NavPoint goal,NavPoint location,bool hasLocation,bool hasGoal,bool released,long branch,long reservation,long contactTick,long progressRequest,double progress)
-            {Entity=entity;Slot=slot;Incarnation=incarnation;OrderRevision=order;MobilityRevision=mobility;Phase=phase;Goal=goal;Location=hasLocation?location:default;HasLocation=hasLocation;HasGoal=hasGoal;FormationReleased=released;Branch=branch;Reservation=reservation;ContactTick=contactTick;ProgressRequest=progressRequest;Progress=progress;}
-            internal Values(GroupMemberState source):this(source.Entity,source.Slot,source.Incarnation,source.OrderRevision,source.MobilityRevision,source.Phase,source.Goal,source.GoalLocation?.Position??default,source.GoalLocation.HasValue,source.HasGoal,source.FormationReleased,source.Branch,source.Reservation,source.ContactTick,source.ProgressRequest,source.Progress){}
-            internal void Validate(){if(Slot<0||ContactTick<0||ProgressRequest<0||Branch<0||Reservation<0||(uint)Phase>(uint)GroupMemberPhase.Allocating||!Finite(Goal.X)||!Finite(Goal.Z)||HasLocation&&(!Finite(Location.X)||!Finite(Location.Z))||!Finite(Progress))throw new ArgumentException("Invalid immutable group member scalars.");}
-            internal bool BitwiseSame(Values other)=>Entity==other.Entity&&Slot==other.Slot&&Incarnation==other.Incarnation&&OrderRevision==other.OrderRevision&&MobilityRevision==other.MobilityRevision&&Phase==other.Phase&&HasLocation==other.HasLocation&&HasGoal==other.HasGoal&&FormationReleased==other.FormationReleased&&Branch==other.Branch&&Reservation==other.Reservation&&ContactTick==other.ContactTick&&ProgressRequest==other.ProgressRequest&&Bits(Goal.X,other.Goal.X)&&Bits(Goal.Z,other.Goal.Z)&&Bits(Location.X,other.Location.X)&&Bits(Location.Z,other.Location.Z)&&Bits(Progress,other.Progress);
+            internal readonly GroupMemberPhase Phase;internal readonly NavPoint Goal,Location;internal readonly bool HasLocation,HasGoal,FormationReleased;internal readonly double Progress,ProgressOffset;internal readonly int ProgressVersion;
+            internal Values(int entity,int slot,long incarnation,long order,long mobility,GroupMemberPhase phase,NavPoint goal,NavPoint location,bool hasLocation,bool hasGoal,bool released,long branch,long reservation,long contactTick,long progressRequest,double progress,int progressVersion=0,double progressOffset=0)
+            {Entity=entity;Slot=slot;Incarnation=incarnation;OrderRevision=order;MobilityRevision=mobility;Phase=phase;Goal=goal;Location=hasLocation?location:default;HasLocation=hasLocation;HasGoal=hasGoal;FormationReleased=released;Branch=branch;Reservation=reservation;ContactTick=contactTick;ProgressRequest=progressRequest;Progress=progress;ProgressVersion=progressVersion;ProgressOffset=progressOffset;}
+            internal Values(GroupMemberState source):this(source.Entity,source.Slot,source.Incarnation,source.OrderRevision,source.MobilityRevision,source.Phase,source.Goal,source.GoalLocation?.Position??default,source.GoalLocation.HasValue,source.HasGoal,source.FormationReleased,source.Branch,source.Reservation,source.ContactTick,source.ProgressRequest,source.Progress,source.ProgressVersion,source.ProgressOffset){}
+            internal void Validate(){if(Slot<0||ContactTick<0||ProgressRequest<0||Branch<0||Reservation<0||(uint)Phase>(uint)GroupMemberPhase.Allocating||!Finite(Goal.X)||!Finite(Goal.Z)||HasLocation&&(!Finite(Location.X)||!Finite(Location.Z))||!Finite(Progress)||ProgressVersion!=0&&ProgressVersion!=2||!Finite(ProgressOffset)||ProgressVersion==0&&ProgressOffset!=0||ProgressVersion==2&&(Progress<0||ProgressOffset<0||ProgressOffset>Progress))throw new ArgumentException("Invalid immutable group member scalars.");}
+            internal bool BitwiseSame(Values other)=>Entity==other.Entity&&Slot==other.Slot&&Incarnation==other.Incarnation&&OrderRevision==other.OrderRevision&&MobilityRevision==other.MobilityRevision&&Phase==other.Phase&&HasLocation==other.HasLocation&&HasGoal==other.HasGoal&&FormationReleased==other.FormationReleased&&Branch==other.Branch&&Reservation==other.Reservation&&ContactTick==other.ContactTick&&ProgressRequest==other.ProgressRequest&&Bits(Goal.X,other.Goal.X)&&Bits(Goal.Z,other.Goal.Z)&&Bits(Location.X,other.Location.X)&&Bits(Location.Z,other.Location.Z)&&Bits(Progress,other.Progress)&&ProgressVersion==other.ProgressVersion&&Bits(ProgressOffset,other.ProgressOffset);
             private static bool Bits(double a,double b)=>BitConverter.DoubleToInt64Bits(a)==BitConverter.DoubleToInt64Bits(b);
             private static bool Finite(double value)=>!double.IsNaN(value)&&!double.IsInfinity(value);
         }
@@ -59,7 +59,7 @@ namespace Spacewars.Runtime
         internal NavNameReference GoalSelector=>goalName;
         internal NavLocation? GoalLocation=>Data.HasLocation?new NavLocation(Data.Location,goalName):(NavLocation?)null;
         internal override bool IsImmutableCaptureRoot=>sealedRoot;
-        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(NavPhysicalStorageKind.AuthorityMember);
+        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(NavPhysicalStorageKind.AuthorityMember,value:Data.ProgressVersion==2?NavPhysicalValueKind.GroupMarchProgressV2:NavPhysicalValueKind.None);
         private NavigationAuthorityMember(Values data,bool owner):base(LayoutBytes){Data=data;if(owner)Retain();}
         private static NavigationAuthorityMember Allocate(Values data,INavStorageReservation reservation,bool owner)
         {using(var allocation=new NavStorageAllocation(reservation.TryReserve)){allocation.Reserve(LayoutBytes);return allocation.Register(new NavigationAuthorityMember(data,owner));}}
@@ -94,15 +94,15 @@ namespace Spacewars.Runtime
             if(!sealedRoot||StorageBytes!=NavStorageLayout.Charge(LayoutBytes)||Data.HasLocation!=(goalName.Owner!=null))throw new ArgumentException("Invalid member ownership.");Data.Validate();
             var w=writer.Output;w.Write(Data.Entity);w.Write(Data.Slot);w.Write(Data.Incarnation);w.Write(Data.OrderRevision);w.Write(Data.MobilityRevision);w.Write((int)Data.Phase);
             WorldWire.Write(w,Data.Goal);w.Write(Data.HasLocation);if(Data.HasLocation)WorldWire.Write(w,Data.Location);w.Write(Data.HasGoal);w.Write(Data.FormationReleased);
-            w.Write(Data.Branch);w.Write(Data.Reservation);w.Write(Data.ContactTick);w.Write(Data.ProgressRequest);WorldWire.Number(w,Data.Progress);
+            w.Write(Data.Branch);w.Write(Data.Reservation);w.Write(Data.ContactTick);w.Write(Data.ProgressRequest);WorldWire.Number(w,Data.Progress);if(Data.ProgressVersion==2)WorldWire.Number(w,Data.ProgressOffset);
             NavPhysicalMacro.WriteEdge(writer,this,contact,true);if(goalName.Owner!=null)goalName.Validate(goalName.Resolve(),this);goalName.Write(writer);
         }
-        internal static NavigationAuthorityMember ReadPhysicalBody(NavPhysicalBodyReader reader)
+        internal static NavigationAuthorityMember ReadPhysicalBody(NavPhysicalBodyReader reader,bool v2=false)
         {
             var r=reader.Input;int entity=r.ReadInt32(),slot=r.ReadInt32();long incarnation=r.ReadInt64(),order=r.ReadInt64(),mobility=r.ReadInt64();var phase=(GroupMemberPhase)r.ReadInt32();
             var goal=WorldWire.ReadPoint(r);bool hasLocation=NavPhysicalMacro.ReadBoolean(reader);var location=hasLocation?WorldWire.ReadPoint(r):default;bool hasGoal=NavPhysicalMacro.ReadBoolean(reader),released=NavPhysicalMacro.ReadBoolean(reader);
-            long branch=r.ReadInt64(),reservation=r.ReadInt64(),contactTick=r.ReadInt64(),progressRequest=r.ReadInt64();double progress=WorldWire.Number(r);
-            var values=new Values(entity,slot,incarnation,order,mobility,phase,goal,location,hasLocation,hasGoal,released,branch,reservation,contactTick,progressRequest,progress);values.Validate();
+            long branch=r.ReadInt64(),reservation=r.ReadInt64(),contactTick=r.ReadInt64(),progressRequest=r.ReadInt64();double progress=WorldWire.Number(r),offset=v2?WorldWire.Number(r):0;
+            var values=new Values(entity,slot,incarnation,order,mobility,phase,goal,location,hasLocation,hasGoal,released,branch,reservation,contactTick,progressRequest,progress,v2?2:0,offset);values.Validate();
             var contact=NavPhysicalMacro.ReadEdge<NavOwnedText>(reader,true);var goalName=NavNameReference.Read(reader);
             return Create(values,contact,goalName,reader.Reservation,false);
         }
@@ -120,7 +120,7 @@ namespace Spacewars.Runtime
             internal readonly PlayableOrderOrigin Origin;internal readonly PlayableCommandKind Kind;internal readonly NavPoint OriginalGoal,Location;
             internal Values(GroupOrderState source){WorldGeneration=source.WorldGeneration;GroupId=source.GroupId;OrderRevision=source.OrderRevision;CommandSequence=source.CommandSequence;IssuedTick=source.IssuedTick;MembershipRevision=source.MembershipRevision;JobId=source.JobId;ActionId=source.ActionId;MarchVersion=source.MarchVersion;MarchProfileRevision=source.MarchProfileRevision;TeamId=source.TeamId;TargetId=source.TargetId;MarchStretch=source.MarchStretch;MarchAnchor=source.MarchAnchor;MarchInitialized=source.MarchInitialized;Origin=source.Origin;Kind=source.Kind;OriginalGoal=source.OriginalGoal;HasLocation=source.OriginalLocation.HasValue;Location=source.OriginalLocation?.Position??default;}
             internal Values(long world,long group,long order,long command,long tick,long membership,long job,long action,int march,int revision,int team,int target,double stretch,double anchor,bool initialized,PlayableOrderOrigin origin,PlayableCommandKind kind,NavPoint goal,bool hasLocation,NavPoint location){WorldGeneration=world;GroupId=group;OrderRevision=order;CommandSequence=command;IssuedTick=tick;MembershipRevision=membership;JobId=job;ActionId=action;MarchVersion=march;MarchProfileRevision=revision;TeamId=team;TargetId=target;MarchStretch=stretch;MarchAnchor=anchor;MarchInitialized=initialized;Origin=origin;Kind=kind;OriginalGoal=goal;HasLocation=hasLocation;Location=hasLocation?location:default;}
-            internal void ValidateScalars(){if(WorldGeneration<1||GroupId<1||OrderRevision<1||MembershipRevision<1||CommandSequence<0||IssuedTick<0||(uint)Origin>(uint)PlayableOrderOrigin.Ai||(uint)Kind>(uint)PlayableCommandKind.Follow||MarchVersion<0||MarchVersion>1||!Finite(MarchAnchor)||MarchAnchor>0||!Finite(MarchStretch)||!Finite(OriginalGoal.X)||!Finite(OriginalGoal.Z)||HasLocation&&(!Finite(Location.X)||!Finite(Location.Z))||
+            internal void ValidateScalars(){if(WorldGeneration<1||GroupId<1||OrderRevision<1||MembershipRevision<1||CommandSequence<0||IssuedTick<0||(uint)Origin>(uint)PlayableOrderOrigin.Ai||(uint)Kind>(uint)PlayableCommandKind.Follow||MarchVersion<0||MarchVersion>2||!Finite(MarchAnchor)||MarchVersion==1&&MarchAnchor>0||MarchVersion==2&&MarchAnchor<0||!Finite(MarchStretch)||!Finite(OriginalGoal.X)||!Finite(OriginalGoal.Z)||HasLocation&&(!Finite(Location.X)||!Finite(Location.Z))||
                 (MarchVersion==0?MarchInitialized||MarchAnchor!=0||MarchStretch!=0||MarchProfileRevision!=0:MarchProfileRevision<1||MarchStretch<=0||!MarchInitialized&&MarchAnchor!=0)||
                 (Origin==PlayableOrderOrigin.Ai?JobId<1||ActionId<1:JobId!=0||ActionId!=0))throw new ArgumentException("Invalid immutable group scalars.");}
             internal void Validate(string source){ValidateScalars();if(Origin==PlayableOrderOrigin.Ai?string.IsNullOrWhiteSpace(source):source!=null)throw new ArgumentException("Invalid group source role.");}
@@ -149,7 +149,7 @@ namespace Spacewars.Runtime
             System.Threading.Interlocked.Add(ref fullValidationVisits,members.Count);int previous=-1;
             for(int i=0;i<members.Count;i++){
                 if(!(members[i] is NavigationAuthorityMember member)||!member.IsImmutableCaptureRoot)throw new ArgumentException("Wrong immutable group member kind.");NavStorageAdmission.RequireOwned(reservation,member);var value=member.Data;
-                if(value.Entity<=previous||value.OrderRevision<data.OrderRevision||value.Phase==GroupMemberPhase.Dead||value.Phase==GroupMemberPhase.Detached||(data.MarchVersion==0?value.Progress<0||value.ProgressRequest!=0:value.Progress>0))throw new ArgumentException("Group member context contradiction.");previous=value.Entity;
+                if(value.Entity<=previous||value.OrderRevision<data.OrderRevision||value.Phase==GroupMemberPhase.Dead||value.Phase==GroupMemberPhase.Detached||(data.MarchVersion==0?value.Progress<0||value.ProgressRequest!=0:data.MarchVersion==1?value.Progress>0||value.ProgressVersion!=0:value.ProgressVersion!=2))throw new ArgumentException("Group member context contradiction.");previous=value.Entity;
             }
             // Reject all foreign/type/scalar input before even validation scratch.
             using(NavStorageScratch.Reserve(reservation,checked(64L+4L*members.Count))){var slots=new int[members.Count];for(int i=0;i<slots.Length;i++)slots[i]=((NavigationAuthorityMember)members[i]).Data.Slot;Array.Sort(slots);for(int i=1;i<slots.Length;i++)if(slots[i]==slots[i-1])throw new ArgumentException("Duplicate member slot.");}
@@ -191,7 +191,7 @@ namespace Spacewars.Runtime
             var original=current.Data;
             if(!data.SameIssuance(original))throw new ArgumentException("Member/march write changed immutable issuance.");
             var old=((NavigationAuthorityMember)current.Members[index]).Data;var next=member.Data;
-            if(next.Entity!=old.Entity||next.Slot!=old.Slot||next.OrderRevision<current.Data.OrderRevision||next.Phase==GroupMemberPhase.Dead||next.Phase==GroupMemberPhase.Detached||(current.Data.MarchVersion==0?next.Progress<0||next.ProgressRequest!=0:next.Progress>0))throw new ArgumentException("Scalar member update changed membership/context.");
+            if(next.Entity!=old.Entity||next.Slot!=old.Slot||next.OrderRevision<current.Data.OrderRevision||next.Phase==GroupMemberPhase.Dead||next.Phase==GroupMemberPhase.Detached||(current.Data.MarchVersion==0?next.Progress<0||next.ProgressRequest!=0:current.Data.MarchVersion==1?next.Progress>0||next.ProgressVersion!=0:next.ProgressVersion!=2))throw new ArgumentException("Scalar member update changed membership/context.");
             NavPagedList<NavOwnedStorage> pages=null;
             try{if(current.memberRoot is NavPagedList<NavOwnedStorage> existing)pages=existing.ForkOwned(reservation);else {pages=NavPagedList<NavOwnedStorage>.Create(reservation.TryReserve);for(int i=0;i<current.Members.Count;i++)pages.Add(current.Members[i]);}
                 pages[index]=member;pages.Seal();return Create(data,current.ownerId,current.source,current.originalName,pages,reservation,true,true,current.VersionIdentity,index);
@@ -309,13 +309,26 @@ namespace Spacewars.Runtime
         }
         internal void FinishCommandGroup(bool applied,IEnumerable<int> ids)
         {
-            if(preparedCommandGroup!=null){FinishPreparedCommandGroup(applied,ids);return;}
+            // Only this legacy API promises the exact base exception type.
+            // Internal publishers retain typed refusals for rollback/retry.
+            bool published=false;
+            try{FinishCommandGroupCore(applied,ids,out published);}
+            catch(NavigationCommandRefused error){
+                // Callee finally blocks have now supplied the publication phase.
+                if(published)throw;
+                throw new InvalidOperationException(error.Message,error);
+            }
+        }
+        private void FinishCommandGroupCore(bool applied,IEnumerable<int> ids,out bool published)
+        {
+            published=false;
+            if(preparedCommandGroup!=null){FinishPreparedCommandGroup(applied,ids,out published);return;}
             if(commandMoveRefused){using(EnterTransport()){commandGroup=null;commandActivationRevision=0;commandMoveRefused=false;}return;}
             if(applied){
                 var recipients=ids.Distinct().OrderBy(id=>id).ToArray();
                 if(recipients.Length>0){
                     var context=commandGroup;
-                    try{FinishOwnedMetadataGroup(recipients);}finally{using(EnterTransport())if(ReferenceEquals(commandGroup,context)){commandGroup=null;commandActivationRevision=0;}}
+                    try{FinishOwnedMetadataGroup(recipients,out published);}finally{using(EnterTransport())if(ReferenceEquals(commandGroup,context)){commandGroup=null;commandActivationRevision=0;}}
                     return;
                 }
             }
@@ -344,12 +357,12 @@ namespace Spacewars.Runtime
                 next.MarchVersion=existing.MarchVersion;next.MarchProfileRevision=existing.MarchProfileRevision;
                 next.MarchStretch=existing.MarchStretch;next.MarchAnchor=0;next.MarchInitialized=false;
                 int nextSlot=existing.Members.Max(m=>m.Slot)+1;
-                foreach(var member in SpatialSlotOrder(members,next.OriginalGoal))member.Slot=nextSlot++;
+                foreach(var member in SpatialSlotOrder(members,next.OriginalGoal)){member.Slot=nextSlot++;if(next.MarchVersion==2){member.ProgressVersion=2;member.Progress=member.ProgressOffset=Math.Max(0,existing.MarchAnchor);}}
                 next.Members=existing.Members.Concat(members).OrderBy(m=>m.Entity).ToArray();next.MembershipRevision=existing.MembershipRevision+1;groups[next.GroupId]=next;
             }else{
-                if(marchConfigured){next.MarchVersion=1;next.MarchProfileRevision=marchProfileRevision;next.MarchStretch=marchStretch;}
+                if(marchConfigured){next.MarchVersion=2;next.MarchProfileRevision=marchProfileRevision;next.MarchStretch=marchStretch;}
                 int slot=0;foreach(var member in SpatialSlotOrder(members,next.OriginalGoal))member.Slot=slot++;
-                next.Members=members.ToArray();groups.Add(next.GroupId,next);
+                foreach(var member in members)if(next.MarchVersion==2)member.ProgressVersion=2;next.Members=members.ToArray();groups.Add(next.GroupId,next);
             }
             groupSequence=Math.Max(groupSequence,next.GroupId);commandActivationRevision=0;
             foreach(var member in members)memberGroups.Add(member.Entity,next.GroupId);
@@ -393,8 +406,8 @@ namespace Spacewars.Runtime
         {return memberGroups.TryGetValue(id,out var groupId)?groups[groupId].Members.First(m=>m.Entity==id):null;}
         private void ResetMarchProgress(int id)
         {
-            var member=Member(id);if(member==null||groups[memberGroups[id]].MarchVersion!=1)return;
-            member.Progress=0;member.ProgressRequest=0;
+            var member=Member(id);if(member==null||groups[memberGroups[id]].MarchVersion==0)return;
+            if(member.ProgressVersion==2)member.ProgressOffset=member.Progress;else member.Progress=0;member.ProgressRequest=0;
             var group=groups[memberGroups[id]];group.MarchAnchor=0;group.MarchInitialized=false;
         }
         private NavigationMemberIdentity RequestIdentity(NavUnit unit)
@@ -478,7 +491,7 @@ namespace Spacewars.Runtime
             if(state.GroupSequence<0)throw new ArgumentException("Invalid group allocator.");
             foreach(var saved in state.Groups){
                 if(saved==null||saved.WorldGeneration!=Generation||saved.GroupId<1||saved.GroupId>state.GroupSequence||saved.OrderRevision<1||saved.MembershipRevision<1||saved.CommandSequence<0||saved.IssuedTick<0||
-                    saved.MarchVersion<0||saved.MarchVersion>1||saved.MarchAnchor>0||double.IsNaN(saved.MarchAnchor)||double.IsInfinity(saved.MarchAnchor)||
+                    saved.MarchVersion<0||saved.MarchVersion>2||saved.MarchVersion==1&&saved.MarchAnchor>0||saved.MarchVersion==2&&saved.MarchAnchor<0||double.IsNaN(saved.MarchAnchor)||double.IsInfinity(saved.MarchAnchor)||
                     (saved.MarchVersion==0?(saved.MarchInitialized||saved.MarchAnchor!=0||saved.MarchStretch!=0||saved.MarchProfileRevision!=0):
                         !marchConfigured||saved.MarchProfileRevision<1||saved.MarchStretch<=0||double.IsNaN(saved.MarchStretch)||double.IsInfinity(saved.MarchStretch)||
                         !saved.MarchInitialized&&saved.MarchAnchor!=0||
@@ -487,7 +500,7 @@ namespace Spacewars.Runtime
                     (saved.Origin==PlayableOrderOrigin.Ai?(string.IsNullOrWhiteSpace(saved.Source)||saved.JobId<1||saved.ActionId<1):(saved.Source!=null||saved.JobId!=0||saved.ActionId!=0)))throw new ArgumentException("Invalid group checkpoint.");
                 int previous=-1;var slots=new HashSet<int>();
                 foreach(var member in saved.Members){
-                    if(member==null||member.ContactTick<0||(saved.MarchVersion==0?member.Progress<0||member.ProgressRequest!=0:member.Progress>0)||double.IsNaN(member.Progress)||double.IsInfinity(member.Progress)||member.ProgressRequest<0||member.ProgressRequest>state.RequestSequence||member.Branch<0||member.Reservation<0||member.Entity<=previous||memberGroups.ContainsKey(member.Entity)||member.OrderRevision<saved.OrderRevision||member.Slot<0||!slots.Add(member.Slot)||
+                    if(member==null||member.ContactTick<0||(saved.MarchVersion==0?member.Progress<0||member.ProgressRequest!=0:saved.MarchVersion==1?member.Progress>0||member.ProgressVersion!=0:member.Progress<0||member.ProgressVersion!=2||member.ProgressOffset<0||member.ProgressOffset>member.Progress)||double.IsNaN(member.Progress)||double.IsInfinity(member.Progress)||member.ProgressRequest<0||member.ProgressRequest>state.RequestSequence||member.Branch<0||member.Reservation<0||member.Entity<=previous||memberGroups.ContainsKey(member.Entity)||member.OrderRevision<saved.OrderRevision||member.Slot<0||!slots.Add(member.Slot)||
                         !Enum.IsDefined(typeof(GroupMemberPhase),member.Phase)||member.Phase==GroupMemberPhase.Dead||member.Phase==GroupMemberPhase.Detached||
                         !Crowd.TryGet(member.Entity,out var actor)||member.Incarnation!=actor.Incarnation||member.MobilityRevision!=actor.MobilityRevision)throw new ArgumentException("Invalid group member checkpoint.");
                     previous=member.Entity;memberGroups.Add(member.Entity,saved.GroupId);

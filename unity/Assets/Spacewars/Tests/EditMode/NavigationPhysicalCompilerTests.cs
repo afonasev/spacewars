@@ -188,5 +188,138 @@ namespace Spacewars.Tests.EditMode
             }
             compiler.ReleaseStorage();Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);
         }
+
+        private static NavOwnedStorage[] AdjacencyOwnedRoots(NavigationRetentionBudget.Scope scope,params NavOwnedStorage[] roots)
+        {
+            var all=new List<NavOwnedStorage>(roots);
+            var head=(NavOwnedStorage)typeof(NavigationRetentionBudget.Scope).GetField("births",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(scope);
+            var seen=new HashSet<NavOwnedStorage>();
+            while(head!=null){Assert.True(seen.Add(head),"Birth journal must not alias or cycle.");all.Add(head);head=head.BirthNext;}
+            return all.ToArray();
+        }
+        private sealed class AdjacencyLocalProbe : INavStorageReservation,INavStorageLocalBirthAllocator,INavStorageScratchAllocator,INavStorageLedgerIdentity
+        {
+            private readonly NavigationRetentionBudget.Scope scope;
+            internal readonly List<long> Scratch=new List<long>();
+            internal readonly List<Func<long,bool>> Callbacks=new List<Func<long,bool>>();
+            internal bool Local=true;internal int LocalTransfers,Fallbacks;
+            internal AdjacencyLocalProbe(NavigationRetentionBudget.Scope scope){this.scope=scope;}
+            public bool TryReserve(long bytes)=>scope.TryReserve(bytes);
+            public void Register(NavOwnedStorage storage){Fallbacks++;((INavStorageAllocator)scope).Register(storage);}
+            public bool TryRegisterLocalBirth(NavOwnedStorage storage){
+                if(!Local)return false;
+                if(storage is NavPagedList<NavGraphArc>){
+                    var callback=(Func<long,bool>)typeof(NavPagedList<NavGraphArc>).GetField("reserveCopy",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(storage);
+                    if(callback?.Target?.GetType().Name=="AdjacencyBirthRegion")Callbacks.Add(callback);
+                }
+                LocalTransfers++;return scope.TryRegisterLocalBirth(storage);
+            }
+            public IDisposable ClaimScratch(long bytes){Scratch.Add(bytes);return scope.ClaimScratch(bytes);}
+            public object Identity=>scope.Identity;
+            public bool Owns(NavOwnedStorage storage)=>scope.Owns(storage);
+        }
+        private sealed class AdjacencyLegacyProbe : INavStorageReservation,INavStorageLedgerIdentity
+        {
+            private readonly NavigationRetentionBudget.Scope scope;internal int Calls;
+            internal AdjacencyLegacyProbe(NavigationRetentionBudget.Scope scope){this.scope=scope;}
+            public bool TryReserve(long bytes){Calls++;return scope.TryReserve(bytes);}
+            public void Register(NavOwnedStorage storage)=>((INavStorageAllocator)scope).Register(storage);
+            public object Identity=>scope.Identity;
+            public bool Owns(NavOwnedStorage storage)=>scope.Owns(storage);
+        }
+        [Test,Timeout(180000)]
+        public void OwnedAdjacencyLocalBirthsLowerLivePhysicalBeforeResolveWithExactBody()
+        {
+            var budget=new NavigationRetentionBudget();var source=AdjacencySource(budget,0);var bytes=CaptureGraph(budget,source);long baseline=budget.PhysicalBytes;
+            byte[] Run(bool local,out long retained){
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Solve,1,2,out var scope));
+                // The opaque baseline preserves local AVL births, but its normal
+                // list factories keep the original whole-Solve birth journal.
+                INavStorageReservation reservation=local?scope.OwnedReservation():new NavStorageReservation(scope.TryReserve,scope);
+                var work=source.ForkOwned(reservation);
+                for(int i=0;i<64;i++){
+                    Assert.AreEqual(1,work.Advance(1));
+                    Assert.AreEqual(NavigationStorageOwnershipTests.Unique(AdjacencyOwnedRoots(scope,source,work)),budget.PhysicalBytes,"Every live physical owner is independently reachable, including existing scope births.");
+                    Assert.AreEqual(NavigationRetentionBudget.ScopeBytes,budget.HeldBytes,"Region metadata scratch must return before whole Solve resolves.");
+                    Assert.AreEqual(1,budget.ActiveScopes);
+                }
+                retained=budget.PhysicalBytes;work.SealPrepared();var result=CaptureGraph(budget,work);
+                CollectionAssert.AreEqual(bytes,CaptureGraph(budget,source));scope.Attach(work);scope.Commit(work,_=>{});work.ReleaseStorage();Assert.AreEqual(baseline,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);return result;
+            }
+            var legacy=Run(false,out long oldLive);var actual=Run(true,out long newLive);
+            CollectionAssert.AreEqual(legacy,actual);Assert.Less(newLive,oldLive,"Only list birth lifetime changes; baseline already uses mutation-local AVL births.");
+            TestContext.WriteLine("owned adjacency preResolve legacy="+oldLive+" local="+newLive+" delta="+(oldLive-newLive));
+            source.ReleaseStorage();Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+        }
+        [Test,Timeout(180000)]
+        public void OwnedAdjacencyMetadataIsPrepaidAndOptionalLocalFallbackOwnsEachBirthOnce()
+        {
+            var budget=new NavigationRetentionBudget();var source=AdjacencySource(budget,0);long baseline=budget.PhysicalBytes;var original=CaptureGraph(budget,source);
+            foreach(bool local in new[]{true,false}){
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Solve,1,2,out var scope));var probe=new AdjacencyLocalProbe(scope){Local=local};var work=source.ForkOwned(probe);
+                work.Advance(12);Assert.AreEqual(12,probe.Scratch.Count);Assert.True(probe.Scratch.All(v=>v==256),"64 region +128 concrete Mono delegate +64 existing scratch lease.");
+                Assert.AreEqual(NavigationRetentionBudget.ScopeBytes,budget.HeldBytes);Assert.AreEqual(NavigationStorageOwnershipTests.Unique(AdjacencyOwnedRoots(scope,source,work)),budget.PhysicalBytes);
+                if(local){
+                    Assert.AreEqual(12,probe.Callbacks.Count);Assert.Greater(probe.LocalTransfers,0);
+                    foreach(var callback in probe.Callbacks){
+                        var fields=callback.Target.GetType().GetFields(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic);
+                        Assert.AreEqual(5,fields.Length);Assert.AreEqual(4,fields.Count(f=>!f.FieldType.IsValueType));Assert.AreEqual(1,fields.Count(f=>f.FieldType==typeof(bool)));
+                        int slots=0,flags=0;
+                        for(Type type=callback.GetType();type!=typeof(object);type=type.BaseType)foreach(var field in type.GetFields(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.DeclaredOnly)){
+                            if(field.FieldType==typeof(bool)){flags++;continue;}Assert.True(!field.FieldType.IsValueType||field.FieldType==typeof(IntPtr));slots++;
+                            if(field.Name=="data"||field.Name=="delegates")Assert.IsNull(field.GetValue(callback),"No hidden DelegateData/invocation-array metadata.");
+                        }
+                        Assert.AreEqual(13,slots);Assert.AreEqual(1,flags);Assert.LessOrEqual(16+slots*8+8,128);
+                    }
+                }else{Assert.Zero(probe.LocalTransfers);Assert.Greater(probe.Fallbacks,0,"false uses original Register, never also links region BirthNext.");}
+                work.ReleaseStorage();scope.Discard();Assert.AreEqual(baseline,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);CollectionAssert.AreEqual(original,CaptureGraph(budget,source));
+            }
+            // Opaque adapters may advertise scratch/local-birth without support.
+            // They must retain the existing callback path and never claim scratch.
+            byte[] Legacy(bool opaque,out int calls){
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Solve,1,3,out var legacyScope));var legacy=new AdjacencyLegacyProbe(legacyScope);
+                INavStorageReservation reservation=opaque?new NavStorageReservation(legacy.TryReserve,legacy):legacy;
+                var legacyWork=source.ForkOwned(reservation);legacyWork.Advance(12);legacyWork.SealPrepared();calls=legacy.Calls;
+                var bytes=CaptureGraph(budget,legacyWork);legacyWork.ReleaseStorage();legacyScope.Discard();Assert.AreEqual(baseline,budget.PhysicalBytes);return bytes;
+            }
+            var plain=Legacy(false,out int plainCalls);var wrapped=Legacy(true,out int wrappedCalls);CollectionAssert.AreEqual(plain,wrapped);Assert.AreEqual(plainCalls,wrappedCalls,"Opaque unsupported scratch/local markers add no reserve or journal.");
+            source.ReleaseStorage();Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+        }
+        [Test,Timeout(180000)]
+        public void OwnedAdjacencyEveryPaidReservationRefusalUnwindsConstructorAndIndexBirths()
+        {
+            var budget=new NavigationRetentionBudget();var source=AdjacencySource(budget,1);long baseline=budget.PhysicalBytes;var original=CaptureGraph(budget,source);
+            Assert.True(budget.TryOpenScope(NavigationPreparationKind.Solve,1,2,out var countScope));int total=0;budget.AllocationAdmission=_=>{total++;return true;};
+            LayeredNavigationCompileWork trial=null;
+            try{trial=source.ForkOwned(countScope.OwnedReservation());trial.Advance(12);trial.SealPrepared();}finally{budget.AllocationAdmission=null;trial?.ReleaseStorage();countScope.Discard();}
+            Assert.Greater(total,12);
+            for(int nth=1;nth<=total;nth++){
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Solve,1,3,out var scope));int calls=0;budget.AllocationAdmission=_=>++calls!=nth;LayeredNavigationCompileWork work=null;
+                try{Assert.Throws<InvalidOperationException>(()=>{work=source.ForkOwned(scope.OwnedReservation());work.Advance(12);work.SealPrepared();});Assert.AreEqual(nth,calls);}
+                finally{budget.AllocationAdmission=null;work?.ReleaseStorage();scope.Discard();}
+                Assert.AreEqual(baseline,budget.PhysicalBytes,"Failure "+nth+" includes unreturned constructor prefixes and index assignment.");Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);CollectionAssert.AreEqual(original,CaptureGraph(budget,source));
+            }
+            TestContext.WriteLine("owned adjacency every paid refusal="+total+"/"+total);source.ReleaseStorage();Assert.Zero(budget.PhysicalBytes);
+        }
+        [Test,Timeout(180000)]
+        public void OwnedAdjacencyCancellationReturnsLiveRegionScratchAndPinnedSource()
+        {
+            var budget=new NavigationRetentionBudget();var source=AdjacencySource(budget,0);var original=CaptureGraph(budget,source);long baseline=budget.PhysicalBytes;
+            Assert.True(budget.TryOpenScope(NavigationPreparationKind.Solve,1,2,out var scope));var work=source.ForkOwned(scope.OwnedReservation());bool entered=false,cancelled=false;
+            budget.AllocationAdmission=bytes=>{if(bytes==256&&!entered)entered=true;else if(entered&&!cancelled){cancelled=true;scope.RequestCancel();}return true;};
+            try{Assert.Throws<InvalidOperationException>(()=>work.Advance(12));Assert.True(entered);Assert.True(cancelled);Assert.True(scope.IsCancelled);Assert.AreEqual(NavigationRetentionBudget.ScopeBytes,budget.HeldBytes);}
+            finally{budget.AllocationAdmission=null;work.ReleaseStorage();scope.Discard();}
+            Assert.AreEqual(baseline,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);CollectionAssert.AreEqual(original,CaptureGraph(budget,source));source.ReleaseStorage();Assert.Zero(budget.PhysicalBytes);
+        }
+        [Test,Timeout(180000)]
+        public void OwnedAdjacencyDirectScopeColdNextBodyAndCreditsAreExact()
+        {
+            byte[] Next(NavigationRetentionBudget budget,LayeredNavigationCompileWork source,out long charge){
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Solve,1,2,out var scope));var work=source.ForkOwned(scope.OwnedReservation());work.Advance(12);work.SealPrepared();scope.Attach(work);scope.Commit(work,_=>{});charge=Unique(work);Assert.AreEqual(NavigationStorageOwnershipTests.Unique(source,work),budget.PhysicalBytes);var result=CaptureGraph(budget,work);work.ReleaseStorage();return result;
+            }
+            var hot=new NavigationRetentionBudget();var source=AdjacencySource(hot,7);var bytes=CaptureGraph(hot,source);var next=Next(hot,source,out long hotCharge);source.ReleaseStorage();Assert.Zero(hot.PhysicalBytes);Assert.Zero(hot.HeldBytes);
+            var cold=new NavigationRetentionBudget();Assert.True(cold.TryOpenScope(NavigationPreparationKind.Decode,1,1,out var decode));var restored=(LayeredNavigationCompileWork)Decode(bytes,decode.OwnedReservation());decode.Attach(restored);decode.Commit(restored,_=>{});
+            CollectionAssert.AreEqual(bytes,CaptureGraph(cold,restored));CollectionAssert.AreEqual(next,Next(cold,restored,out long coldCharge));Assert.AreEqual(hotCharge,coldCharge);restored.ReleaseStorage();Assert.Zero(cold.PhysicalBytes);Assert.Zero(cold.HeldBytes);Assert.Zero(cold.ActiveScopes);
+        }
     }
 }

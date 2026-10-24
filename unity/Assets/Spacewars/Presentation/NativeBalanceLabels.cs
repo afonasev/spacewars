@@ -26,10 +26,11 @@ namespace Spacewars.Presentation
         };
         internal static string Section(PlayableProfileField f)
         {
+            if(f.Path=="ai.research.armySystemsMinimumUnits"||f.Path.StartsWith("ai.research.armySystems."))return "Правила";
             var n=f.FieldName??"";
             if(f.Path.StartsWith("unitUpgrades.")||f.Path.StartsWith("research."))return "Юниты";
             if(f.Path.StartsWith("presentation.")||f.Group=="Selection ring"||f.Group.StartsWith("Бой ·")||n=="rallyFlagHeight"||n=="saleMarkerScale"||n=="refineryTurbineSpeed"||n=="shkvalMarkerStartRadius"||n=="shkvalMarkerOpacity")return "Графика";
-            if(Entity(f)!="Общие")return Entity(f)=="Танк"||Entity(f)=="Исследователь"||Entity(f)=="Шквал"?"Юниты":"Здания";
+            if(Entity(f)!="Общие")return Entity(f)=="Танк"||Entity(f)=="Исследователь"||Entity(f)=="Шквал"||Entity(f)=="Ястреб"?"Юниты":"Здания";
             if(f.Group=="Construction"||f.Group.StartsWith("Здания ·"))return "Здания";
             if(f.Group=="Economy"||f.Group=="Army")return "Экономика";
             return "Правила";
@@ -37,19 +38,24 @@ namespace Spacewars.Presentation
         internal static string Entity(PlayableProfileField f)
         {
             var n=(f.FieldName??"").ToLowerInvariant();
+            if(f.Path.StartsWith("research.weaponSystems."))return "Оружейные системы";
+            if(f.Path.StartsWith("research.defensiveSystems."))return "Защитные системы";
+            if(f.Path=="ai.research.armySystemsMinimumUnits"||f.Path.StartsWith("ai.research.armySystems."))return "ИИ";
+            if(n.StartsWith("hawk"))return "Ястреб";
             if(n.Contains("tank"))return "Танк";
             if(n.Contains("explorer"))return "Исследователь";
             if(n.Contains("shkval"))return "Шквал";
             if(n.Contains("headquarters"))return "Штаб";
             if(n.Contains("outpost"))return "Форпост";
             if(n.StartsWith("mine"))return "Шахта";
+            if(n.StartsWith("hangar"))return "Ангар";
             if(n.Contains("factory"))return "Фабрика";
             if(n.Contains("refinery"))return "Переработчик";
             if(n.StartsWith("science"))return "Научный центр";
             return "Общие";
         }
         internal static string Glyph(string name)=>name switch {
-            "Танк"=>"tank","Исследователь"=>"explorer","Шквал"=>"shkval","Штаб"=>"headquarters","Форпост"=>"outpost","Шахта"=>"mine","Фабрика"=>"factory","Переработчик"=>"refinery","Научный центр"=>"science",_=>"army"};
+            "Ястреб"=>"hawk","Танк"=>"tank","Исследователь"=>"explorer","Шквал"=>"shkval","Штаб"=>"headquarters","Форпост"=>"outpost","Шахта"=>"mine","Фабрика"=>"factory","Ангар"=>"hangar","Переработчик"=>"refinery","Научный центр"=>"science","Оружейные системы"=>"weapon-systems-1","Защитные системы"=>"defensive-systems-1",_=>"army"};
         internal static string Bucket(PlayableProfileField f)
         {
             if(f.Path.StartsWith("research.")||f.Path.StartsWith("unitUpgrades.")||(f.FieldName??"").StartsWith("refineryUpgrade"))return "Улучшения";

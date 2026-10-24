@@ -61,7 +61,7 @@ namespace Spacewars.Input.Tests
         {
             var keyboard=InputSystem.AddDevice<Keyboard>();var mouse=InputSystem.AddDevice<Mouse>();keyboard.MakeCurrent();mouse.MakeCurrent();pads=new[]{InputSystem.AddDevice<Gamepad>(),InputSystem.AddDevice<Gamepad>()};
             host=new GameObject("B Y queue ordinary adapter");app=host.AddComponent<PlayableBootstrap>();app.enabled=false;Put(app,"profile",PlayableProfile.ThreeCrossingsDefault);Call(app,"CreateWorld");Call(app,"CreateHud");Put(app,"input",host.AddComponent<PlayableInput>());Call(app,"BindLocalKeyboardInput");Call(app,"CreateLobby");Call(app,"ShowLobby");
-            Get<VisualElement>(app,"lobbyScreen").Q<DropdownField>("lobby-map-choice").value="Огненный разлом";
+            Get<VisualElement>(app,"lobbyScreen").Q<DropdownField>("lobby-map-choice").value="Огненный разлом (6)";
             var draft=Get<NativeLobbyConfiguration>(app,"lobbySetup");draft.HasExplicitSeed=true;draft.ExplicitSeed=19092026;
             for(int i=0;i<2;i++){draft.Participants[i].Human=true;draft.Participants[i].DeviceId=i==0?0:pads[i].deviceId;draft.Participants[i].Team=i+1;}
             Call(app,"RebuildRoster");Call(app,"LaunchLobbyMatch");float until=Time.realtimeSinceStartup+15;

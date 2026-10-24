@@ -6,7 +6,7 @@ namespace Spacewars.Runtime
     // hot and cold live slots use this same admitted concrete array factory.
     internal sealed class NavigationCrowdNameBacking : NavOwnedStorage
     {
-        private static long Layout(int count)=>checked(NavStorageLayout.ObjectBytesBound(typeof(NavigationCrowdNameBacking))+64L+count*(4L+3L*NavStorageLayout.ValueBytes(typeof(NavNameReference))));
+        internal static long Layout(int count)=>checked(NavStorageLayout.ObjectBytesBound(typeof(NavigationCrowdNameBacking))+64L+count*(4L+3L*NavStorageLayout.ValueBytes(typeof(NavNameReference))));
         internal readonly int[] Keys;internal readonly NavNameReference[] Names;
         internal override bool IsImmutableCaptureRoot=>false;
         private NavigationCrowdNameBacking(int count):base(Layout(count)){Keys=new int[count];Names=new NavNameReference[count*3];Retain();}
@@ -29,7 +29,7 @@ namespace Spacewars.Runtime
     // exact slot assignments happen in ApplyNoThrow; retirement follows the gate.
     internal sealed class NavigationPreparedCrowdNameWrite : NavOwnedStorage
     {
-        private static readonly long Layout=NavStorageLayout.ObjectBytesBound(typeof(NavigationPreparedCrowdNameWrite));
+        internal static readonly long Layout=NavStorageLayout.ObjectBytesBound(typeof(NavigationPreparedCrowdNameWrite));
         internal NavigationCrowdNameBacking Backing;internal NavigationHostRequest RequestOwner;
         private NavNameReference expectedGoal,expectedFailure,success,failure,retiredGoal,retiredFailure;
         private int slot;private bool applied;
@@ -60,7 +60,7 @@ namespace Spacewars.Runtime
     }
     internal sealed class NavigationPreparedAnswerNames : NavOwnedStorage,IDisposable
     {
-        private static long Layout(int count,int barrier)=>checked(NavStorageLayout.ObjectBytesBound(typeof(NavigationPreparedAnswerNames))+352L+8L*barrier+56L*count+2L*((count+7L)/8L*8L)+NavStorageLayout.ValueBytes(typeof(NavigationLiveGroupObservation))*count);
+        internal static long Layout(int count,int barrier)=>checked(NavStorageLayout.ObjectBytesBound(typeof(NavigationPreparedAnswerNames))+352L+8L*barrier+56L*count+2L*((count+7L)/8L*8L)+NavStorageLayout.ValueBytes(typeof(NavigationLiveGroupObservation))*count);
         internal bool LegacyProbeDestination,CapacityObserved,SingleCapacityExceeded;internal long CapacityHostBytes,CapacityInstalledBytes,CapacityGeometryBytes;
         internal readonly NavigationInstalledExecutionOwner[] Installed;
         internal readonly NavOwnedStorage[] RetiredInstalled;
@@ -114,6 +114,7 @@ namespace Spacewars.Runtime
         private bool TryPrepareAnswerNames(out NavigationPreparedAnswerNames prepared)=>TryPrepareAnswerNamesBatch(out prepared,false);
         private bool TryPrepareAnswerNamesBatch(out NavigationPreparedAnswerNames prepared,bool single,bool stepEmpty=false)
         {
+            LastAnswerNamesFailure=null;
             prepared=null;int count,barrierCount,mailboxCount;long operation,revision;NavigationCommandAuthority backing;NavigationAdmissionStorage observedAdmission;
             using(EnterTransport()){
                 barrierCount=barrierAnswers.Count;mailboxCount=Answers.Count;count=barrierCount+mailboxCount;if(count==0&&!stepEmpty)return true;if(single)count=1;
@@ -166,7 +167,7 @@ namespace Spacewars.Runtime
                         scope.Attach(candidate);scope.Publish(candidate,_=>{using(EnterTransport()){
                             if(!AnswerNamesSourceCurrent(candidate))throw new InvalidOperationException("Prepared answer names lost source.");
                         }});scope.ResolveCommitted();prepared=candidate;candidate=null;return true;
-                    }catch(InvalidOperationException){return false;}
+                    }catch(InvalidOperationException error){LastAnswerNamesFailure=error.Message;return false;}
                     finally{candidate?.Dispose();}
                 }
             }finally{backing?.Release();observedAdmission?.Release();}
@@ -208,13 +209,21 @@ namespace Spacewars.Runtime
             if(name.Owner==null){if(location.Value.SurfaceId!=NavLocation.FlatSurface)throw new InvalidOperationException("Crowd surface has no owned name role.");return default;}
             return name;
         }
-        private NavigationCrowdNameBacking CaptureCrowdNameReferences(INavStorageReservation reservation,int excludedEntity=0)
+        private NavigationCrowdNameBacking CaptureCrowdNameReferences(INavStorageReservation reservation,int excludedEntity=0,NavUnit prospective=null)
         {
-            int count;using(EnterTransport())count=Crowd.Units.Count-(excludedEntity!=0&&Crowd.TryGet(excludedEntity,out _)?1:0);
+            int count;using(EnterTransport())count=Crowd.Units.Count-(excludedEntity!=0&&Crowd.TryGet(excludedEntity,out _)?1:0)+(prospective==null?0:1);
             using(NavStorageScratch.Reserve(reservation,checked(64L+4L*count+3L*count*NavStorageLayout.ValueBytes(typeof(NavNameReference))))){
                 var names=new NavNameReference[count*3];var keys=new int[count];int pinned=0;
                 try{
-                    using(EnterTransport()){int i=0;foreach(var u in Crowd.Units){if(u.Id==excludedEntity)continue;keys[i]=u.Id;names[i*3]=OwnedOrFlatName(u.Location);names[i*3+1]=OwnedOrFlatName(u.GoalLocation);names[i*3+2]=OwnedOrFlatName(u.FailedGoal);for(int n=0;n<3;n++){names[i*3+n].Owner?.Retain();pinned++;}i++;}if(i!=count)throw new InvalidOperationException("Crowd name source changed during preparation.");}
+                    using(EnterTransport()){
+                        int i=0;bool inserted=false;
+                        void Row(NavUnit u){if(i>=count)throw new InvalidOperationException("Crowd name source changed during preparation.");keys[i]=u.Id;names[i*3]=OwnedOrFlatName(u.Location);names[i*3+1]=OwnedOrFlatName(u.GoalLocation);names[i*3+2]=OwnedOrFlatName(u.FailedGoal);for(int n=0;n<3;n++){names[i*3+n].Owner?.Retain();pinned++;}i++;}
+                        foreach(var u in Crowd.Units){if(excludedEntity!=0&&u.Id==excludedEntity)continue;if(prospective!=null&&u.Id==prospective.Id)throw new InvalidOperationException("Prospective actor already exists.");if(prospective!=null&&!inserted&&prospective.Id<u.Id){Row(prospective);inserted=true;}Row(u);}
+                        if(prospective!=null&&!inserted)Row(prospective);if(i!=count)throw new InvalidOperationException("Crowd name source changed during preparation.");
+                    }
+                    // Hydration may preserve a historical actor iteration order.
+                    // The name catalog itself always uses ordered entity keys.
+                    for(int i=1;i<count;i++){int key=keys[i];var a=names[i*3];var b=names[i*3+1];var c=names[i*3+2];int j=i;while(j>0&&keys[j-1]>key){keys[j]=keys[j-1];for(int n=0;n<3;n++)names[j*3+n]=names[(j-1)*3+n];j--;}keys[j]=key;names[j*3]=a;names[j*3+1]=b;names[j*3+2]=c;}
                     return NavigationCrowdNameBacking.CopyOwned(keys,names,reservation);
                 }finally{for(int i=0;i<pinned;i++)names[i].Owner?.Release();}
             }

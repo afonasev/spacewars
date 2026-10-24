@@ -13,6 +13,13 @@ namespace Spacewars.Tests.EditMode
         private static PlayableSnapshot Frame(PlayableEntitySnapshot e,long tick,long generation=1,bool paused=false,PlayableOwner owner=PlayableOwner.Player,int geometry=1)
             =>new PlayableSnapshot("motion",1,generation,7,tick+1,tick,RuntimeStatus.Running,paused,PlayableMatchOutcome.Playing,0,
                 new NavGeometry(1024,Array.Empty<NavObstacle>(),geometry),new[]{e},Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,owner:owner);
+        [Test] public void HeldAircraftHeightAndAttitudeInterpolateWithoutChangingAuthority()
+        {
+            var motion=new PlayableUnitMotion();var a=new PlayableEntitySnapshot(3,PlayableOwner.Player,PlayableEntityKind.Hawk,new NavPoint(0,0),60,false,0,0,0,held:true,altitude:3,pitch:0,roll:0);
+            var b=new PlayableEntitySnapshot(3,PlayableOwner.Player,PlayableEntityKind.Hawk,new NavPoint(0,0),60,false,0,.2,.2,held:true,altitude:4,pitch:10,roll:20);
+            motion.BeginFrame(Frame(a,0));motion.Sample(a,0);motion.BeginFrame(Frame(b,1));motion.Sample(b,Step);var pose=motion.Sample(b,Step*1.5);
+            Assert.AreEqual(3.5,pose.Altitude,1e-10);Assert.AreEqual(5,pose.Pitch,1e-10);Assert.AreEqual(10,pose.Roll,1e-10);Assert.AreEqual(.1,pose.Hull,1e-10);Assert.AreEqual(4,b.Altitude);
+        }
         [Test] public void EveryHighRefreshSubframeStaysBetweenReceivedEndpointsAndNeverExtrapolates()
         {
             var motion=new PlayableUnitMotion();var first=Entity(0);motion.BeginFrame(Frame(first,0));motion.Sample(first,0);

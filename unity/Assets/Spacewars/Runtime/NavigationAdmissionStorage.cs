@@ -188,6 +188,10 @@ namespace Spacewars.Runtime
     }
     public sealed partial class NavigationSession
     {
+        // Only an authority operation change is expected optimistic staleness.
+        // Structural read-set violations under the same operation remain errors.
+        private sealed class StaleAdmissionProjection : NavigationCommandRefused
+        {internal StaleAdmissionProjection(string message):base(message){}}
         private NavigationAdmissionStorage retiredAdmissions;
         private void RetireAdmissionNoThrow(NavigationAdmissionStorage owner)
         {if(owner!=null){owner.RetiredNext=retiredAdmissions;retiredAdmissions=owner;}}
@@ -224,19 +228,23 @@ namespace Spacewars.Runtime
             sourceProbes=sourceProbes??probes;
             if(targetCore!=null)NavStorageAdmission.RequireOwned(scope.OwnedReservation(),targetCore);
             int groupCount,requestCount;NavGeometry observedGeometry;NavigationProfile observedProfile;NavRetainedArray<NavNameReference> observedNames;
+            NavOwnedStorage geometryPin=null,profilePin=null;NavRetainedArray<NavNameReference> namesPin=null;bool previousPinned=false;
+            try{
             using(EnterTransport()){
-                if(operation!=authorityOperationIdentity)throw new InvalidOperationException("Admission read-set changed.");
+                if(operation!=authorityOperationIdentity)throw new StaleAdmissionProjection("Admission read-set changed.");
                 groupCount=sourceGroups.Count;requestCount=checked(sourcePending.Count+sourceProbes.Count);
                 observedGeometry=targetCore==null?navigationGeometry:(NavGeometry)targetCore.NavigationGeometry.Facade;observedProfile=targetCore==null?profile:(NavigationProfile)targetCore.Profile.Facade;observedNames=terrainNameOwners;
-                observedGeometry.StorageRoot.Retain();observedProfile.StorageRoot.Retain();observedNames.Retain();previous?.Retain();
+                var geometryRoot=observedGeometry.StorageRoot;NavStorageAdmission.RequireOwned(scope.OwnedReservation(),geometryRoot);geometryRoot.Retain();geometryPin=geometryRoot;
+                var profileRoot=observedProfile.StorageRoot;NavStorageAdmission.RequireOwned(scope.OwnedReservation(),profileRoot);profileRoot.Retain();profilePin=profileRoot;
+                observedNames.Retain();namesPin=observedNames;previous?.Retain();previousPinned=previous!=null;
             }
-            try{
                 using(NavStorageScratch.Reserve(scope.OwnedReservation(),checked(64L+8L*(groupCount+requestCount)))){
                     var versions=new NavOwnedStorage[groupCount];var requests=new NavOwnedStorage[requestCount];
                     NavRetainedArray<NavOwnedStorage> groupInputs=null,requestInputs=null;int g=0,r=0;
                     try{
                         using(EnterTransport()){
-                            if(operation!=authorityOperationIdentity||sourceGroups.Count!=groupCount||sourcePending.Count+sourceProbes.Count!=requestCount)throw new InvalidOperationException("Admission copy lost read-set.");
+                            if(operation!=authorityOperationIdentity)throw new StaleAdmissionProjection("Admission copy lost read-set.");
+                            if(sourceGroups.Count!=groupCount||sourcePending.Count+sourceProbes.Count!=requestCount)throw new InvalidOperationException("Admission copy lost read-set.");
                             for(int slot=0;slot<AdmissionSlotCount(sourceGroups);slot++)if(ReadAdmissionSlot(sourceGroups,slot,out long key,out _)){
                                 var version=replacement?.Data.GroupId==key?replacement:(sourceGroups as NavigationCommandSlots<long,GroupOrderState>)?.OwnerFor(key) is NavigationLiveGroup live?live.ImmutableVersion:null;
                                 for(int changed=0;changed<rebindGroupCount;changed++)if(rebindGroups[changed].Next.Data.GroupId==key)version=rebindGroups[changed].Next;
@@ -255,7 +263,7 @@ namespace Spacewars.Runtime
                         return NavigationAdmissionStorage.PrepareOwned(Generation,sequence,terrain,terrain?.Id??NavLocation.FlatSurface,terrain?.SurfaceSemanticsVersion??1,observedGeometry,observedProfile,observedNames,groupInputs,requestInputs,publication,previous,scope.OwnedReservation());
                     }finally{groupInputs?.Release();requestInputs?.Release();for(int i=0;i<g;i++)versions[i].Release();for(int i=0;i<r;i++)requests[i].Release();}
                 }
-            }finally{observedGeometry.StorageRoot.Release();observedProfile.StorageRoot.Release();observedNames.Release();previous?.Release();}
+            }finally{geometryPin?.Release();profilePin?.Release();namesPin?.Release();if(previousPinned)previous.Release();}
         }
     }
 }

@@ -6,8 +6,8 @@ namespace Spacewars.Presentation
 {
     public readonly struct PlayableDisplayPose
     {
-        public PlayableDisplayPose(NavPoint position,double hull,double turret){Position=position;Hull=hull;Turret=turret;}
-        public NavPoint Position{get;} public double Hull{get;} public double Turret{get;}
+        public PlayableDisplayPose(NavPoint position,double hull,double turret,double altitude=0,double pitch=0,double roll=0){Position=position;Hull=hull;Turret=turret;Altitude=altitude;Pitch=pitch;Roll=roll;}
+        public double Altitude{get;} public double Pitch{get;} public double Roll{get;} public NavPoint Position{get;} public double Hull{get;} public double Turret{get;}
     }
     // Derived presentation only. Never modifies or extrapolates an authority view.
     public sealed class PlayableUnitMotion
@@ -47,19 +47,19 @@ namespace Spacewars.Presentation
         }
         public PlayableDisplayPose Sample(PlayableEntitySnapshot entity,double now)
         {
-            var target=new PlayableDisplayPose(entity.Position,entity.HullHeading,entity.TurretHeading);
+            var target=new PlayableDisplayPose(entity.Position,entity.HullHeading,entity.TurretHeading,entity.Altitude,entity.Pitch,entity.Roll);
             string surface=entity.Location?.SurfaceId;
             if(!tracks.TryGetValue(entity.Id,out var track)){
                 var start=target;
                 if(preceding.TryGetValue(entity.Id,out var prior)&&prior.Owner==entity.Owner&&prior.Kind==entity.Kind&&
-                    prior.Location?.SurfaceId==surface&&!prior.Held&&!entity.Held)
-                    start=new PlayableDisplayPose(prior.Position,prior.HullHeading,prior.TurretHeading);
+                    prior.Location?.SurfaceId==surface&&((!prior.Held&&!entity.Held)||entity.Kind==PlayableEntityKind.Hawk))
+                    start=new PlayableDisplayPose(prior.Position,prior.HullHeading,prior.TurretHeading,prior.Altitude,prior.Pitch,prior.Roll);
                 track=new Track{From=start,To=start,Started=now,Owner=entity.Owner,Kind=entity.Kind,Surface=surface};
                 tracks.Add(entity.Id,track);
             }
-            if(snap||entity.Held||track.Owner!=entity.Owner||track.Kind!=entity.Kind||track.Surface!=surface){
+            if(snap||(entity.Held&&entity.Kind!=PlayableEntityKind.Hawk)||track.Owner!=entity.Owner||track.Kind!=entity.Kind||track.Surface!=surface){
                 track.From=track.To=target;track.Started=now;track.Owner=entity.Owner;track.Kind=entity.Kind;track.Surface=surface;
-            }else if(!track.To.Position.Equals(target.Position)||track.To.Hull!=target.Hull||track.To.Turret!=target.Turret){
+            }else if(!track.To.Position.Equals(target.Position)||track.To.Hull!=target.Hull||track.To.Turret!=target.Turret||track.To.Altitude!=target.Altitude||track.To.Pitch!=target.Pitch||track.To.Roll!=target.Roll){
                 // Use consecutive authority endpoints, not a diagonal shortcut from
                 // an unfinished display pose when the route turns a corner.
                 track.From=track.To;track.To=target;track.Started=now-age;
@@ -77,7 +77,7 @@ namespace Spacewars.Presentation
             if(alpha>=1)return track.To;
             var a=track.From;var b=track.To;
             return new PlayableDisplayPose(new NavPoint(a.Position.X+(b.Position.X-a.Position.X)*alpha,
-                a.Position.Z+(b.Position.Z-a.Position.Z)*alpha),Angle(a.Hull,b.Hull,alpha),Angle(a.Turret,b.Turret,alpha));
+                a.Position.Z+(b.Position.Z-a.Position.Z)*alpha),Angle(a.Hull,b.Hull,alpha),Angle(a.Turret,b.Turret,alpha),a.Altitude+(b.Altitude-a.Altitude)*alpha,a.Pitch+(b.Pitch-a.Pitch)*alpha,a.Roll+(b.Roll-a.Roll)*alpha);
         }
         private static double Angle(double a,double b,double alpha)
         {

@@ -19,7 +19,7 @@ namespace Spacewars.Tests.EditMode
             var n=Create();try{
                 var budget=n.PhysicalHostBudget;long physical=budget.PhysicalBytes,retained=budget.RetainedBytes;
                 using(var workspace=((INavCrowdStorageSource)n).CreateMotionWorkspace(n.Crowd)){
-                    Assert.AreEqual(1,workspace.Motion.Length);Assert.AreEqual(1,workspace.Proposals.Length);Assert.AreEqual(NavCrowdMotion.NeighborCapacity,workspace.Neighbors.Length);Assert.AreEqual(1,workspace.NeighborCounts.Length);
+                    Assert.AreEqual(1,workspace.Motion.Length);Assert.AreEqual(1,workspace.Proposals.Length);Assert.AreEqual(NavCrowdMotion.NeighborCapacity,workspace.Neighbors.Length);Assert.AreEqual(1,workspace.NeighborCounts.Length);Assert.AreEqual(1,workspace.ComponentLabels.Length);Assert.AreEqual(1,workspace.OriginalSpeeds.Length);
                     Assert.True(workspace.SourceCurrent(n.Crowd));Assert.GreaterOrEqual(budget.RetainedBytes-retained,NavStorageScratch.LeaseBytes+NavMotionWorkspace.HeaderBytes+NavMotionWorkspace.ArrayBytes(1));Assert.Greater(budget.ActiveScopes,0);
                 }
                 Assert.AreEqual(physical,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);int admissions=0;

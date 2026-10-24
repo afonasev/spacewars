@@ -26,11 +26,12 @@ namespace Spacewars.Runtime
         private NavPoint? PendingRally(int id)=>rallyWork.TryGetValue(id,out var work)?(NavPoint?)work.Target:null;
         private Building RallyProducer(int id,PlayableOwner owner)
             =>buildings.TryGetValue(id,out var b)&&b.Owner==owner&&b.Ready&&b.Sale==null&&
-              (b.Kind==PlayableBuildingKind.Factory||TerritoryRules.Center(b.Kind))?b:null;
+              (b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar||TerritoryRules.Center(b.Kind))?b:null;
         private PlayableCommandStatus Rally(int id,NavPoint target,PlayableOwner issuer,long sequence,out string message)
         {
             message="Select a ready live owned producer.";
             if(RallyProducer(id,issuer)==null||RallyProducer(id,issuer).Health<=0)return PlayableCommandStatus.InvalidEntity;
+            if(buildings[id].Kind==PlayableBuildingKind.Hangar){if(!AirInside(target))return PlayableCommandStatus.InvalidTarget;buildings[id].Rally=target;buildings[id].HasRally=true;message="Air rally set.";return PlayableCommandStatus.Applied;}
             if(rallyWork.TryGetValue(id,out var old))FinishRally(id,old,PlayableCommandStatus.Cancelled,"Superseded rally request.");
             rallyWork[id]=new RallyWork{Intent=new PlayableRallyIntentState{Generation=navigation.Generation,Sequence=sequence,Building=id,Owner=issuer,TargetX=target.X,TargetZ=target.Z}};
             // Complete route admission is external to the combat authority tick. The

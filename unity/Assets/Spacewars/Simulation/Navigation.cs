@@ -135,18 +135,23 @@ namespace Spacewars.Simulation
             return true;
         }
         public bool SegmentFree(NavPoint from, NavPoint to, double radius)
+            =>SegmentFree(from,to,radius,out _);
+        internal bool SegmentFree(NavPoint from,NavPoint to,double radius,out int blocker)
         {
-            if (!IsFree(from, radius) || !IsFree(to, radius)) return false;
-            return SegmentFreeBetweenFreeEndpoints(from,to,radius);
+            blocker=-1;if (!IsFree(from, radius) || !IsFree(to, radius)) return false;
+            return SegmentFreeBetweenFreeEndpoints(from,to,radius,out blocker);
         }
         // Internal callers must own exact free-footprint certificates for this immutable geometry.
         internal bool SegmentFreeBetweenFreeEndpoints(NavPoint from,NavPoint to,double radius)
+            =>SegmentFreeBetweenFreeEndpoints(from,to,radius,out _);
+        internal bool SegmentFreeBetweenFreeEndpoints(NavPoint from,NavPoint to,double radius,out int blocker)
         {
+            blocker=-1;
             double minX=Math.Min(from.X,to.X)-radius,minZ=Math.Min(from.Z,to.Z)-radius,maxX=Math.Max(from.X,to.X)+radius,maxZ=Math.Max(from.Z,to.Z)+radius;
             bool Hit(int i)=>maxX>=obstacles[i].MinX&&minX<=obstacles[i].MaxX&&maxZ>=obstacles[i].MinZ&&minZ<=obstacles[i].MaxZ&&(obstacles[i].Polygon!=null?obstacles[i].Polygon.SweepWithin(from,to,radius):SegmentRectDistanceSquared(from,to,obstacles[i])<=radius*radius);
             if(spatial!=null&&SmallQuery(minX,minZ,maxX,maxZ,out int left,out int bottom,out int right,out int top)){
-                for(int x=left;x<=right;x++)for(int z=bottom;z<=top;z++){var ids=spatial[x*SpatialWidth+z];if(ids!=null)for(int n=0;n<ids.Length;n++)if(Hit(ids[n]))return false;}
-            }else for(int i=0;i<obstacles.Length;i++)if(Hit(i))return false;
+                for(int x=left;x<=right;x++)for(int z=bottom;z<=top;z++){var ids=spatial[x*SpatialWidth+z];if(ids!=null)for(int n=0;n<ids.Length;n++)if(Hit(ids[n])){blocker=ids[n];return false;}}
+            }else for(int i=0;i<obstacles.Length;i++)if(Hit(i)){blocker=i;return false;}
             return true;
         }
         private int Bucket(double coordinate)=>(int)Math.Max(0,Math.Min(SpatialWidth-1,Math.Floor((coordinate+HalfExtent)/(2*HalfExtent)*SpatialWidth)));
@@ -215,18 +220,19 @@ namespace Spacewars.Simulation
         internal const int LegacyWireValueCount=14,CrowdWireValueCount=18,CrowdBindingMarker=0x43524D31;
         public int CrowdHeadingIntervals {get;private set;} public int CrowdSpeedBands {get;private set;} public int CrowdNeighborCap {get;private set;} public double CrowdLookaheadSeconds {get;private set;}
         public bool HasCrowdV1Defaults=>CrowdHeadingIntervals==CrowdV1HeadingIntervals&&CrowdSpeedBands==CrowdV1SpeedBands&&CrowdLookaheadSeconds==CrowdV1LookaheadSeconds&&CrowdNeighborCap==CrowdV1NeighborCap;
-        internal int WireValueCount=>HasCrowdV1Defaults?LegacyWireValueCount:CrowdWireValueCount;
+        public int GroupCorridorMaximumExcessPercent {get;private set;}
+        internal int WireValueCount=>GroupCorridorMaximumExcessPercent!=0?19:HasCrowdV1Defaults?LegacyWireValueCount:CrowdWireValueCount;
         public const string DefaultProfileId = "unity-navigation-diagnostic-v1";
         public NavigationProfile() : this(DefaultProfileId, 1, .72d, 4d, 4.5d, .8d, .15d, 3.6d, .08d) { }
-        public NavigationProfile(string profileId, int revision, double radius, double tankSpeed, double tankTurnSpeed, double gridCell, double arrivalTolerance, double localDetourDistance, double forwardAlignmentAngle, double cameraOrthoSize=56, double cameraHeight=85, double cameraOffsetZ=-40, double repairRetrySeconds=.3, double arrivalSlotSpacing=3.6, double blockedTimeoutSeconds=5, double localGridCell=.2,double crowdHeadingIntervals=CrowdV1HeadingIntervals,double crowdSpeedBands=CrowdV1SpeedBands,double crowdLookaheadSeconds=CrowdV1LookaheadSeconds,double crowdNeighborCap=CrowdV1NeighborCap)
-        { ProfileId = profileId; Revision = revision; Radius = radius; TankSpeed = tankSpeed; TankTurnSpeed = tankTurnSpeed; GridCell = gridCell; ArrivalTolerance = arrivalTolerance; LocalDetourDistance = localDetourDistance; ForwardAlignmentAngle = forwardAlignmentAngle; CameraOrthoSize=cameraOrthoSize; CameraHeight=cameraHeight; CameraOffsetZ=cameraOffsetZ; RepairRetrySeconds=repairRetrySeconds; ArrivalSlotSpacing=arrivalSlotSpacing; BlockedTimeoutSeconds=blockedTimeoutSeconds; LocalGridCell=localGridCell;CrowdHeadingIntervals=Count(crowdHeadingIntervals);CrowdSpeedBands=Count(crowdSpeedBands);CrowdLookaheadSeconds=crowdLookaheadSeconds;CrowdNeighborCap=Count(crowdNeighborCap); Validate(this); }
+        public NavigationProfile(string profileId, int revision, double radius, double tankSpeed, double tankTurnSpeed, double gridCell, double arrivalTolerance, double localDetourDistance, double forwardAlignmentAngle, double cameraOrthoSize=56, double cameraHeight=85, double cameraOffsetZ=-40, double repairRetrySeconds=.3, double arrivalSlotSpacing=3.6, double blockedTimeoutSeconds=5, double localGridCell=.2,double crowdHeadingIntervals=CrowdV1HeadingIntervals,double crowdSpeedBands=CrowdV1SpeedBands,double crowdLookaheadSeconds=CrowdV1LookaheadSeconds,double crowdNeighborCap=CrowdV1NeighborCap,int groupCorridorMaximumExcessPercent=0)
+        { ProfileId = profileId; Revision = revision; Radius = radius; TankSpeed = tankSpeed; TankTurnSpeed = tankTurnSpeed; GridCell = gridCell; ArrivalTolerance = arrivalTolerance; LocalDetourDistance = localDetourDistance; ForwardAlignmentAngle = forwardAlignmentAngle; CameraOrthoSize=cameraOrthoSize; CameraHeight=cameraHeight; CameraOffsetZ=cameraOffsetZ; RepairRetrySeconds=repairRetrySeconds; ArrivalSlotSpacing=arrivalSlotSpacing; BlockedTimeoutSeconds=blockedTimeoutSeconds; LocalGridCell=localGridCell;CrowdHeadingIntervals=Count(crowdHeadingIntervals);CrowdSpeedBands=Count(crowdSpeedBands);CrowdLookaheadSeconds=crowdLookaheadSeconds;CrowdNeighborCap=Count(crowdNeighborCap);GroupCorridorMaximumExcessPercent=groupCorridorMaximumExcessPercent; Validate(this); }
         public string ProfileId { get; private set; } public int Revision { get; private set; } public double Radius { get; private set; } public double TankSpeed { get; private set; } public double TankTurnSpeed { get; private set; } public double GridCell { get; private set; } public double ArrivalTolerance { get; private set; } public double LocalDetourDistance { get; private set; } public double ForwardAlignmentAngle { get; private set; }
         public double LocalGridCell {get;private set;}
         public double BlockedTimeoutSeconds {get;private set;}
         public double ArrivalSlotSpacing {get;private set;}
         public double RepairRetrySeconds {get;private set;}
         public double CameraOrthoSize {get;private set;} public double CameraHeight {get;private set;} public double CameraOffsetZ {get;private set;}
-        public NavigationProfile ForUnit(double radius,double speed,double turn)=>new NavigationProfile(ProfileId,Revision,radius,speed,turn,GridCell,ArrivalTolerance,LocalDetourDistance,ForwardAlignmentAngle,CameraOrthoSize,CameraHeight,CameraOffsetZ,RepairRetrySeconds,ArrivalSlotSpacing,BlockedTimeoutSeconds,LocalGridCell,CrowdHeadingIntervals,CrowdSpeedBands,CrowdLookaheadSeconds,CrowdNeighborCap);
+        public NavigationProfile ForUnit(double radius,double speed,double turn)=>new NavigationProfile(ProfileId,Revision,radius,speed,turn,GridCell,ArrivalTolerance,LocalDetourDistance,ForwardAlignmentAngle,CameraOrthoSize,CameraHeight,CameraOffsetZ,RepairRetrySeconds,ArrivalSlotSpacing,BlockedTimeoutSeconds,LocalGridCell,CrowdHeadingIntervals,CrowdSpeedBands,CrowdLookaheadSeconds,CrowdNeighborCap,GroupCorridorMaximumExcessPercent);
         public static NavigationProfile Default { get { return new NavigationProfile(); } }
         public static readonly IReadOnlyList<NavigationProfileField> Metadata = new[] {
             new NavigationProfileField("navigation.camera.orthoSize", "Camera", "View size", "Diagnostic camera orthographic half height.", "m",5,150,1,p=>p.CameraOrthoSize),
@@ -252,20 +258,21 @@ namespace Spacewars.Simulation
         };
         private static int Count(double value)
         {if(double.IsNaN(value)||double.IsInfinity(value)||value!=Math.Truncate(value)||value<int.MinValue||value>int.MaxValue)throw new ArgumentException("Crowd counts must be finite integers.");return (int)value;}
-        internal double WireValueAt(int index)=>index<LegacyWireValueCount?Metadata[index].Read(this):CrowdMetadata[index-LegacyWireValueCount].Read(this);
+        public static readonly NavigationProfileField GroupCorridorMetadata=new NavigationProfileField("navigation.groupCorridor.maximumExcessPercent","Group navigation","Group route excess","Per-member certified weighted route excess above its own global optimum; missing certificate uses exact routing.","%",15,15,1,p=>p.GroupCorridorMaximumExcessPercent);
+        internal double WireValueAt(int index)=>index==18?GroupCorridorMaximumExcessPercent:index<LegacyWireValueCount?Metadata[index].Read(this):CrowdMetadata[index-LegacyWireValueCount].Read(this);
         internal double[] CaptureWireValues(){var values=new double[WireValueCount];for(int i=0;i<values.Length;i++)values[i]=WireValueAt(i);return values;}
         internal bool MatchesWireValues(IReadOnlyList<double> values,bool ignoreMobility=false)
         {if(values==null||values.Count!=WireValueCount)return false;for(int i=0;i<values.Count;i++)if((!ignoreMobility||i<7||i>9)&&BitConverter.DoubleToInt64Bits(values[i])!=BitConverter.DoubleToInt64Bits(WireValueAt(i)))return false;return true;}
         internal static NavigationProfile FromWireValues(string id,int revision,IReadOnlyList<double> v)
         {
-            if(v==null||v.Count!=LegacyWireValueCount&&v.Count!=CrowdWireValueCount)throw new ArgumentException("Invalid navigation profile values.");bool extended=v.Count==CrowdWireValueCount;
-            var result=new NavigationProfile(id,revision,v[7],v[8],v[9],v[10],v[11],v[12],v[13],v[0],v[1],v[2],v[3],v[4],v[5],v[6],extended?v[14]:CrowdV1HeadingIntervals,extended?v[15]:CrowdV1SpeedBands,extended?v[16]:CrowdV1LookaheadSeconds,extended?v[17]:CrowdV1NeighborCap);
-            if(extended&&result.HasCrowdV1Defaults)throw new ArgumentException("Redundant default crowd profile extension.");return result;
+            if(v==null||v.Count!=LegacyWireValueCount&&v.Count!=CrowdWireValueCount&&v.Count!=19)throw new ArgumentException("Invalid navigation profile values.");bool extended=v.Count>=CrowdWireValueCount;
+            var result=new NavigationProfile(id,revision,v[7],v[8],v[9],v[10],v[11],v[12],v[13],v[0],v[1],v[2],v[3],v[4],v[5],v[6],extended?v[14]:CrowdV1HeadingIntervals,extended?v[15]:CrowdV1SpeedBands,extended?v[16]:CrowdV1LookaheadSeconds,extended?v[17]:CrowdV1NeighborCap,v.Count==19?Count(v[18]):0);
+            if(extended&&v.Count!=19&&result.HasCrowdV1Defaults)throw new ArgumentException("Redundant default crowd profile extension.");return result;
         }
         internal void WriteCrowdValues(BinaryWriter writer){for(int i=0;i<CrowdMetadata.Count;i++)writer.Write(CrowdMetadata[i].Read(this));}
-        internal void WriteCrowdBinding(BinaryWriter writer){if(HasCrowdV1Defaults)return;writer.Write(CrowdBindingMarker);writer.Write(1);WriteCrowdValues(writer);}
+        internal void WriteCrowdBinding(BinaryWriter writer){if(!HasCrowdV1Defaults){writer.Write(CrowdBindingMarker);writer.Write(1);WriteCrowdValues(writer);}if(GroupCorridorMaximumExcessPercent!=0){writer.Write("certified-group-corridor-v1");writer.Write(GroupCorridorMaximumExcessPercent);}}
         public static void Validate(NavigationProfile profile)
-        { if (profile == null || String.IsNullOrWhiteSpace(profile.ProfileId) || profile.Revision < 1) throw new ArgumentException("Navigation profile provenance is incomplete.");for(int i=0;i<Metadata.Count+CrowdMetadata.Count;i++){var field=i<Metadata.Count?Metadata[i]:CrowdMetadata[i-Metadata.Count];double value=field.Read(profile);if(Double.IsNaN(value)||Double.IsInfinity(value)||value<field.Minimum||value>field.Maximum)throw new ArgumentException("Invalid navigation profile field: "+field.Path);if(i>=Metadata.Count){double steps=(value-field.Minimum)/field.Step;if(Math.Abs(steps-Math.Round(steps))>1e-8)throw new ArgumentException("Crowd field must align to metadata step: "+field.Path);}} }
+        {if(profile!=null&&profile.GroupCorridorMaximumExcessPercent!=0&&profile.GroupCorridorMaximumExcessPercent!=15)throw new ArgumentException("Unapproved certified corridor quality."); if (profile == null || String.IsNullOrWhiteSpace(profile.ProfileId) || profile.Revision < 1) throw new ArgumentException("Navigation profile provenance is incomplete.");for(int i=0;i<Metadata.Count+CrowdMetadata.Count;i++){var field=i<Metadata.Count?Metadata[i]:CrowdMetadata[i-Metadata.Count];double value=field.Read(profile);if(Double.IsNaN(value)||Double.IsInfinity(value)||value<field.Minimum||value>field.Maximum)throw new ArgumentException("Invalid navigation profile field: "+field.Path);if(i>=Metadata.Count){double steps=(value-field.Minimum)/field.Step;if(Math.Abs(steps-Math.Round(steps))>1e-8)throw new ArgumentException("Crowd field must align to metadata step: "+field.Path);}} }
     }
 
     public struct NavRouteIdentity
@@ -312,6 +319,12 @@ namespace Spacewars.Simulation
         internal void ObserveState(out long observedRevision,out int observedCount){lock(gate){RejectTransferReentry();observedRevision=revision;observedCount=count;}}
         internal T ReadPreparedAt(long expected,int index){lock(gate){RejectTransferReentry();if(revision!=expected||index<0||index>=count)throw new InvalidOperationException("Mailbox changed before prepared observation.");return items[(head+index)%capacity];}}
         internal T[] CopyItemsAtRevision(long expected){lock(gate){RejectTransferReentry();if(revision!=expected)throw new InvalidOperationException("Mailbox changed before prepared snapshot.");var copy=new T[count];for(int i=0;i<count;i++)copy[i]=items[(head+i)%capacity];return copy;}}
+        // Expected optimistic-read drift is distinct from closed/reentrant mailbox misuse.
+        // The revision check and copy share the mailbox gate; a same-count replacement
+        // is still stale, and refusal never exposes a partial snapshot.
+        internal bool TryCopyItemsAtRevision(long expected,out T[] copy)
+        {lock(gate){RejectTransferReentry();if(revision!=expected){copy=null;return false;}copy=new T[count];for(int i=0;i<count;i++)copy[i]=items[(head+i)%capacity];return true;}}
+
         private void RejectTransferReentry(){if(closed)throw new ObjectDisposedException("NavMailbox");if(transferThread==System.Threading.Thread.CurrentThread.ManagedThreadId)throw new InvalidOperationException("Mailbox transfer callback cannot reenter its mailbox.");}
         public int Count{get{lock(gate)return count;}}
         public T[] CopyItems(){lock(gate){RejectTransferReentry();var copy=new T[count];for(int i=0;i<count;i++)copy[i]=items[(head+i)%capacity];return copy;}}

@@ -92,11 +92,13 @@ namespace Spacewars.Runtime
         public NavPoint[] ProjectedRoute()=>legs.Where(x=>x.Kind==NavTypedLegKind.Surface).Select(x=>x.To.Position).ToArray();
     }
 
-    [Serializable] public sealed class NavigationInstalledExecutionState
+    [Serializable] public sealed class NavigationInstalledExecutionState : INavInstalledExecutionRole
     {
+        void INavInstalledExecutionRole.SetDetachedNoThrow(bool detached)=>Detached=detached;
         internal NavigationInstalledExecutionOwner StorageOwner;
         public int Entity; public bool Detached; public NavCorridorDescriptor Corridor; public NavPoint[] InstalledRoute;
         public string ProfileId,HeldIdentity; public int ProfileRevision,GeometryIndex,BaseGeometryIndex;
+        public int ExecutionGeometryIndex=-1;
         public double[] ProfileValues;
         internal NavigationProfile Profile; internal NavGeometry MovementGeometry,BaseGeometry;
     }

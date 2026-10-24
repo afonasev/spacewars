@@ -44,27 +44,30 @@ namespace Spacewars.Runtime
                 Math.Max(previous,Math.Min(0,bestTravel-traveled));
         }
 
+        internal static double ProjectFromOrigin(NavCorridorDescriptor corridor,NavLocation position,double previous,double offset)
+            =>Math.Max(previous,offset+Math.Max(0,Project(corridor,position,double.NegativeInfinity)+Length(corridor)));
+
         // Shared by movement-only and projected result+movement preparation.
         // Actor rows and installed/group inputs are already private projections.
         internal static NavigationAuthorityGroup PrepareOwned(NavPreparedCrowdStep frame,NavigationAuthorityGroup source,NavigationInstalledExecutionOwner[] installed,bool[] detached,NavigationCommandSlots<int,long> memberGroups,double configuredStretch,int configuredRevision,double dt,INavStorageReservation reservation)
         {
-            var data=source.Data;if(data.MarchVersion!=1||(data.Kind!=PlayableCommandKind.Move&&data.Kind!=PlayableCommandKind.AttackMove))return null;
+            var data=source.Data;if(data.MarchVersion!=1&&data.MarchVersion!=2||(data.Kind!=PlayableCommandKind.Move&&data.Kind!=PlayableCommandKind.AttackMove))return null;
             int count=source.Members.Count;using(NavStorageScratch.Reserve(reservation,checked(512L+32L*count))){
-                var progress=new double[count];var requests=new long[count];var active=new bool[count];var rows=new int[count];
+                var progress=new double[count];var offsets=new double[count];var requests=new long[count];var active=new bool[count];var rows=new int[count];
                 double anchor=data.MarchAnchor,stretch=data.MarchProfileRevision==configuredRevision?data.MarchStretch:configuredStretch;bool initialized=data.MarchInitialized;int moving=0;double pace=double.PositiveInfinity,minimum=double.PositiveInfinity;
                 for(int i=0;i<count;i++){
-                    var member=((NavigationAuthorityMember)source.Members[i]).Data;progress[i]=member.Progress;requests[i]=member.ProgressRequest;int row=frame.Find(member.Entity);
+                    var member=((NavigationAuthorityMember)source.Members[i]).Data;progress[i]=member.Progress;offsets[i]=member.ProgressOffset;requests[i]=member.ProgressRequest;int row=frame.Find(member.Entity);
                     if(member.FormationReleased||row<0||!InstalledActive(frame.After[row],source,member,installed[row],detached[row],memberGroups))continue;
                     var actor=frame.After[row];var execution=installed[row].Corridor.Corridor;
-                    if(requests[i]!=execution.Request){progress[i]=double.NegativeInfinity;requests[i]=execution.Request;initialized=false;}
-                    progress[i]=Project(execution,actor.Location,progress[i]);active[i]=true;rows[i]=row;moving++;pace=Math.Min(pace,actor.Speed);minimum=Math.Min(minimum,progress[i]);
+                    if(requests[i]!=execution.Request){if(data.MarchVersion==2)offsets[i]=progress[i];else progress[i]=double.NegativeInfinity;requests[i]=execution.Request;initialized=false;}
+                    progress[i]=data.MarchVersion==2?ProjectFromOrigin(execution,actor.Location,progress[i],offsets[i]):Project(execution,actor.Location,progress[i]);active[i]=true;rows[i]=row;moving++;pace=Math.Min(pace,actor.Speed);minimum=Math.Min(minimum,progress[i]);
                 }
                 if(moving<2){anchor=0;initialized=false;}
                 else{anchor=Anchor(anchor,initialized,pace,dt,minimum);initialized=true;for(int i=0;i<count;i++)if(active[i]){int row=rows[i];frame.Preferred[row]=MaxSpeed(frame.After[row].Speed,pace,progress[i],anchor,stretch,dt);}}
                 var values=new NavigationAuthorityGroup.Values(data.WorldGeneration,data.GroupId,data.OrderRevision,data.CommandSequence,data.IssuedTick,data.MembershipRevision,data.JobId,data.ActionId,data.MarchVersion,configuredRevision,data.TeamId,data.TargetId,stretch,anchor,initialized,data.Origin,data.Kind,data.OriginalGoal,data.HasLocation,data.Location);
                 NavigationAuthorityGroup next=null;try{
                     for(int i=0;i<count;i++){
-                        var before=(NavigationAuthorityMember)source.Members[i];var d=before.Data;var changedValues=new NavigationAuthorityMember.Values(d.Entity,d.Slot,d.Incarnation,d.OrderRevision,d.MobilityRevision,d.Phase,d.Goal,d.Location,d.HasLocation,d.HasGoal,d.FormationReleased,d.Branch,d.Reservation,d.ContactTick,requests[i],progress[i]);if(changedValues.BitwiseSame(d))continue;
+                        var before=(NavigationAuthorityMember)source.Members[i];var d=before.Data;var changedValues=new NavigationAuthorityMember.Values(d.Entity,d.Slot,d.Incarnation,d.OrderRevision,d.MobilityRevision,d.Phase,d.Goal,d.Location,d.HasLocation,d.HasGoal,d.FormationReleased,d.Branch,d.Reservation,d.ContactTick,requests[i],progress[i],d.ProgressVersion,offsets[i]);if(changedValues.BitwiseSame(d))continue;
                         var changed=NavigationAuthorityMember.CopyWithValuesOwned(before,changedValues,reservation);try{var version=NavigationAuthorityGroup.CopyWithMemberAndMarchOwned(next??source,i,changed,values,reservation);next?.ReleaseStorage();next=version;}finally{changed.ReleaseStorage();}
                     }
                     if(next==null&&!values.BitwiseSame(data))next=NavigationAuthorityGroup.CopyWithValuesOwned(source,values,reservation);
@@ -109,11 +112,11 @@ namespace Spacewars.Runtime
         private void ValidateMarchCheckpoint()
         {
             foreach(var group in groups.Values){
-                if(group.MarchVersion!=1)continue;
+                if(group.MarchVersion!=1&&group.MarchVersion!=2)continue;
                 double longestBoundRoute=0;
                 foreach(var member in group.Members){
                     if(member.ProgressRequest==0){
-                        if(member.Progress!=0)throw new ArgumentException("Unbound march progress.");
+                        if(group.MarchVersion==1?member.Progress!=0:member.Progress!=member.ProgressOffset)throw new ArgumentException("Unbound march progress.");
                         continue;
                     }
                     if(!installedExecutions.TryGetValue(member.Entity,out var installed)||
@@ -121,11 +124,11 @@ namespace Spacewars.Runtime
                         installed.Corridor.Request!=member.ProgressRequest||
                         installed.Corridor.Incarnation!=member.Incarnation||
                         installed.Corridor.ActivationRevision!=member.OrderRevision||
-                        member.Progress < -GroupMarch.Length(installed.Corridor)-1e-6||member.Progress>0)
+                        (group.MarchVersion==1?member.Progress < -GroupMarch.Length(installed.Corridor)-1e-6||member.Progress>0:member.Progress<member.ProgressOffset||member.Progress>member.ProgressOffset+GroupMarch.Length(installed.Corridor)+1e-6))
                         throw new ArgumentException("Invalid installed march progress binding.");
                     longestBoundRoute=Math.Max(longestBoundRoute,GroupMarch.Length(installed.Corridor));
                 }
-                if(group.MarchInitialized&&(longestBoundRoute<=0||group.MarchAnchor < -longestBoundRoute-1e-6))
+                if(group.MarchVersion==1&&group.MarchInitialized&&(longestBoundRoute<=0||group.MarchAnchor < -longestBoundRoute-1e-6))
                     throw new ArgumentException("March anchor is outside installed route geometry.");
             }
         }
@@ -135,7 +138,7 @@ namespace Spacewars.Runtime
             Crowd.ClearPreferredMotion();
             if(!marchConfigured)return;
             foreach(var group in groups.Values.OrderBy(g=>g.GroupId)){
-                if(group.MarchVersion!=1||(group.Kind!=PlayableCommandKind.Move&&group.Kind!=PlayableCommandKind.AttackMove))continue;
+                if(group.MarchVersion!=1&&group.MarchVersion!=2||(group.Kind!=PlayableCommandKind.Move&&group.Kind!=PlayableCommandKind.AttackMove))continue;
                 if(group.MarchProfileRevision!=marchProfileRevision){
                     group.MarchProfileRevision=marchProfileRevision;group.MarchStretch=marchStretch;
                 }
@@ -144,10 +147,10 @@ namespace Spacewars.Runtime
                     if(member.FormationReleased||!Crowd.TryGet(member.Entity,out var actor)||!actor.Moving||actor.Held||
                         !TryActiveInstalledExecution(member.Entity,out var execution))continue;
                     if(member.ProgressRequest!=execution.Corridor.Request){
-                        member.Progress=double.NegativeInfinity;member.ProgressRequest=execution.Corridor.Request;
+                        if(group.MarchVersion==2)member.ProgressOffset=member.Progress;else member.Progress=double.NegativeInfinity;member.ProgressRequest=execution.Corridor.Request;
                         group.MarchInitialized=false;
                     }
-                    member.Progress=GroupMarch.Project(execution.Corridor,actor.Location,member.Progress);
+                    member.Progress=group.MarchVersion==2?GroupMarch.ProjectFromOrigin(execution.Corridor,actor.Location,member.Progress,member.ProgressOffset):GroupMarch.Project(execution.Corridor,actor.Location,member.Progress);
                     moving.Add(Tuple.Create(member,actor,execution));
                 }
                 if(moving.Count<2){group.MarchAnchor=0;group.MarchInitialized=false;continue;}

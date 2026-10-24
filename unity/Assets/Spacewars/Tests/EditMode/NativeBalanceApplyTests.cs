@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
@@ -31,6 +32,67 @@ namespace Spacewars.Tests.EditMode
             =>Assert.AreEqual(PlayableCommandStatus.Applied,Call(d,"Apply",new PlayableCommand(1,sequence,"player-1",kind,new[]{id}),null));
         private static object Restore(object d,PlayableProfile p)
             =>Domain.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{(byte[])Call(d,"CaptureWorldBytes",7,"lab"),p,7,"lab"});
+        private static void CloseCorridorHistoryDomain(object d)
+        {
+            if(d==null)return;
+            var nav=(NavigationSession)Domain.GetProperty("Navigation",F).GetValue(d);var budget=nav.PhysicalHostBudget;
+            nav.ReleaseCommittedHostRoot();Call(d,"DestroyOwnedNavigation");
+            Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+        }
+        private static void CheckCorridorHistoryRoundtrip(object d,PlayableProfile p,IDictionary<int,int> expected)
+        {
+            byte[] bytes=(byte[])Call(d,"CaptureWorldBytes",7,"lab");object restored=null;
+            try{
+                restored=Restore(d,p);
+                CollectionAssert.AreEqual(bytes,(byte[])Call(restored,"CaptureWorldBytes",7,"lab"));
+                var terms=(IDictionary<int,PlayableProfile>)Domain.GetField("termProfiles",F).GetValue(restored);
+                CollectionAssert.AreEquivalent(expected.Keys,terms.Keys);
+                foreach(var term in expected)Assert.AreEqual(term.Value,terms[term.Key].Navigation.GroupCorridorMaximumExcessPercent,"policy for paid term "+term.Key);
+                Call(d,"AdvanceProduction",.25d);Call(restored,"AdvanceProduction",.25d);
+                CollectionAssert.AreEqual((byte[])Call(d,"CaptureWorldBytes",7,"lab"),(byte[])Call(restored,"CaptureWorldBytes",7,"lab"),"same current continuation");
+            }finally{CloseCorridorHistoryDomain(restored);}
+        }
+        [TestCase(0)][TestCase(15)]
+        public void CurrentSingleCorridorTermRestoresExactly(int policy)
+        {
+            var data=PlayableProfile.Default.CopyData();data.groupCorridorMaximumExcessPercent=policy;var p=PlayableProfile.Create(data);object d=null;
+            try{d=New(p);CheckCorridorHistoryRoundtrip(d,p,new Dictionary<int,int>{{p.Revision,policy}});}
+            finally{CloseCorridorHistoryDomain(d);}
+        }
+        [TestCase(0,15)][TestCase(15,0)]
+        public void CurrentPaidCorridorHistoryRestoresAcrossBothPolicyTransitions(int first,int second)
+        {
+            var data=PlayableProfile.Default.CopyData();data.groupCorridorMaximumExcessPercent=first;var p=PlayableProfile.Create(data);object d=null;
+            try{
+                d=New(p);Call(d,"AddCredits",PlayableOwner.Player,10000d);
+                Assert.AreEqual(PlayableCommandStatus.Applied,Call(d,"BuildAt",1,1,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));
+                Call(d,"AdvanceFoundations");Call(d,"AdvanceBuildings",(double)p.FactoryBuildSeconds+1);
+                int factory=View(d).Buildings.Single(b=>b.Kind==PlayableBuildingKind.Factory).Id;
+                Send(d,1,PlayableCommandKind.QueueTank,factory);
+                var paid=View(d).Buildings.Single(b=>b.Id==factory).PrivateState.Orders[0];
+                var history=new Dictionary<int,int>{{p.Revision,first}};
+                CheckCorridorHistoryRoundtrip(d,p,history);
+                foreach(int policy in new[]{second,first}){
+                    data=p.CopyData();data.revision++;data.groupCorridorMaximumExcessPercent=policy;data.tankCreditCost+=10;data.tankProductionSeconds+=1;
+                    var next=PlayableProfile.Create(data);Assert.IsNull(Call(d,"ValidateBalance",next));Call(d,"ApplyBalance",next);p=next;history.Add(p.Revision,policy);
+                    CheckCorridorHistoryRoundtrip(d,p,history);
+                    var old=View(d).Buildings.Single(b=>b.Id==factory).PrivateState.Orders[0];
+                    Assert.AreEqual(paid.PaidCost,old.PaidCost);Assert.AreEqual(paid.Duration,old.Duration);
+                }
+                Send(d,2,PlayableCommandKind.QueueTank,factory);
+                var fresh=View(d).Buildings.Single(b=>b.Id==factory).PrivateState.Orders[1];
+                Assert.AreEqual(p.TankCreditCost,fresh.PaidCost);Assert.AreEqual(p.TankProductionSeconds,fresh.Duration);
+                CheckCorridorHistoryRoundtrip(d,p,history);
+            }finally{CloseCorridorHistoryDomain(d);}
+        }
+        [Test] public void CorridorTermDecodeDoesNotExpandPolicyOrLabRange()
+        {
+            var data=PlayableProfile.Default.CopyData();data.groupCorridorMaximumExcessPercent=4;Assert.Throws<ArgumentException>(()=>PlayableProfile.Create(data));
+            var field=PlayableProfileMetadata.Fields.Single(f=>f.Path==NavigationProfile.GroupCorridorMetadata.Path);
+            Assert.AreEqual(15,field.Minimum);Assert.AreEqual(15,field.Maximum);Assert.AreEqual(1,field.Step);
+            data.groupCorridorMaximumExcessPercent=0;field.Write(data,0);field.Write(data,15);
+            Assert.Throws<ArgumentOutOfRangeException>(()=>field.Write(data,0));Assert.Throws<ArgumentOutOfRangeException>(()=>field.Write(data,4));
+        }
         [Test]public void WebImpactRadiusIsPresentationMetadataWithHardBounds()
         {
             var data=PlayableProfile.Default.CopyData();Assert.That(PlayableProfile.Create(data).ImpactEffectRadius,Is.EqualTo(.22));

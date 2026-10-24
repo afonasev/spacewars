@@ -22,7 +22,7 @@ namespace Spacewars.Tests.PlayMode
         [TestCase("restrained")][TestCase("luminous")] public void NamedControlsValidateEveryRange(string variant)
         {
             var p=ActorMaterialProfile.Load(variant);p.Validate();Assert.AreEqual(variant,p.variant);
-            var parameters=p.Parameters().ToArray();Assert.AreEqual(11,parameters.Length);Assert.AreEqual(parameters.Length,parameters.Select(x=>x.Path).Distinct().Count());
+            var parameters=p.Parameters().ToArray();Assert.AreEqual(14,parameters.Length);Assert.AreEqual(parameters.Length,parameters.Select(x=>x.Path).Distinct().Count());
             foreach(var field in parameters){float original=field.Read();field.Write(field.Maximum+field.Step);Assert.Throws<ArgumentException>(()=>p.Validate(),field.Path);field.Write(float.NaN);Assert.Throws<ArgumentException>(()=>p.Validate());field.Write(original);}
             Assert.Greater(ActorMaterialProfile.Load("luminous").teamEmission,ActorMaterialProfile.Load().teamEmission);
         }
@@ -39,7 +39,7 @@ namespace Spacewars.Tests.PlayMode
                     foreach(var r in actor.Hull.GetComponentsInChildren<Renderer>())for(int slot=0;slot<r.sharedMaterials.Length;slot++){
                         var m=r.sharedMaterials[slot];var block=new MaterialPropertyBlock();r.GetPropertyBlock(block,slot);
                         if(m.name.EndsWith("team-primary")){Assert.AreEqual(StoredColor("_BaseColor",owner),block.GetColor("_BaseColor"));Assert.AreEqual(finish.armorSmoothness,block.GetFloat("_Smoothness"));Assert.AreEqual(finish.armorMetallic,block.GetFloat("_Metallic"));}
-                        if(m.name.EndsWith("team-emissive"))Assert.AreEqual(StoredColor("_EmissionColor",owner*finish.teamEmission),block.GetColor("_EmissionColor"));
+                        if(m.name.EndsWith("team-emissive"))Assert.AreEqual(StoredColor("_EmissionColor",owner*finish.TeamEmissionFor(m.name)),block.GetColor("_EmissionColor"));
                         if(m.name.EndsWith("chassis-emissive"))Assert.AreEqual(StoredColor("_EmissionColor",m.GetColor("_EmissionColor")*(float)PlayableProfile.Default.TankChassisGlowIntensity*finish.emissionGain),block.GetColor("_EmissionColor"));
                     }
                 }

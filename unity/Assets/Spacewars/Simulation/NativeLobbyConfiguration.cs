@@ -27,18 +27,26 @@ namespace Spacewars.Simulation
         {
             if(Participants != null)return;
             Participants=new List<NativeLobbyParticipant>();
+            if(CrimsonGrove){
+                for(int i=0;i<8;i++)Participants.Add(new NativeLobbyParticipant{Name=i==0&&HumanPresent?HumanName:"ИИ",Human=i==0&&HumanPresent,Team=i+1,Color=i,Difficulty=Difficulty});
+                return;
+            }
+            if(WhiteMeridian){
+                for(int i=0;i<4;i++)Participants.Add(new NativeLobbyParticipant{Name=i==0&&HumanPresent?HumanName:"ИИ",Human=i==0&&HumanPresent,Team=i/2+1,Color=i,Difficulty=Difficulty});
+                return;
+            }
             if(MossHighland){
-                for(int i=0;i<4;i++)Participants.Add(new NativeLobbyParticipant{Name=i==0&&HumanPresent?HumanName:"ИИ "+(i+1),Human=i==0&&HumanPresent,Team=i+1,Color=i,Difficulty=Difficulty});
+                for(int i=0;i<4;i++)Participants.Add(new NativeLobbyParticipant{Name=i==0&&HumanPresent?HumanName:"ИИ",Human=i==0&&HumanPresent,Team=i+1,Color=i,Difficulty=Difficulty});
                 return;
             }
             if(AiTestMap)
             {
-                for(int i=0;i<Spacewars.Simulation.AiTestMap.Capacity;i++)Participants.Add(new NativeLobbyParticipant{Name="ИИ "+(i+1),Team=i+1,Color=i,Difficulty=Difficulty});
+                for(int i=0;i<Spacewars.Simulation.AiTestMap.Capacity;i++)Participants.Add(new NativeLobbyParticipant{Name="ИИ",Team=i+1,Color=i,Difficulty=Difficulty});
                 return;
             }
             if(HumanPresent)Participants.Add(new NativeLobbyParticipant{Name=HumanName,Human=true,Team=Foundry?1:HumanTeam,Color=Foundry?0:HumanColor});
-            if(Foundry)for(int i=1;i<6;i++)Participants.Add(new NativeLobbyParticipant{Name="ИИ "+i,Team=i<3?1:2,Color=i,Difficulty=Difficulty});
-            else if(AiPresent)Participants.Add(new NativeLobbyParticipant{Name=MatchAiName,Team=AiTeam,Color=AiColor,Difficulty=Difficulty});
+            if(Foundry)for(int i=1;i<6;i++)Participants.Add(new NativeLobbyParticipant{Name="ИИ",Team=i<3?1:2,Color=i,Difficulty=Difficulty});
+            else if(AiPresent)Participants.Add(new NativeLobbyParticipant{Name="ИИ",Team=AiTeam,Color=AiColor,Difficulty=Difficulty});
         }
         public string AddParticipant(bool human,int deviceId,int capacity)
         {
@@ -48,12 +56,12 @@ namespace Spacewars.Simulation
             if(human&&Participants.Count(p=>p.Human)>=4)return "Доступно до четырёх локальных игроков.";
             int color=Enumerable.Range(0,ColorHex.Length).First(c=>Participants.All(p=>p.Color!=c));
             int team=NextParticipantTeam(capacity);
-            Participants.Add(new NativeLobbyParticipant{Name=human?"Игрок "+(Participants.Count(p=>p.Human)+1):"ИИ "+(Participants.Count(p=>!p.Human)+1),Human=human,DeviceId=deviceId,Color=color,Team=team,Difficulty=Difficulty});
+            Participants.Add(new NativeLobbyParticipant{Name=human?"Игрок "+(Participants.Count(p=>p.Human)+1):"ИИ",Human=human,DeviceId=deviceId,Color=color,Team=team,Difficulty=Difficulty});
             return null;
         }
         private int NextParticipantTeam(int capacity)
         {
-            if(!Foundry)return Enumerable.Range(1,8).First(team=>Participants.All(p=>p.Team!=team));
+            if(!Foundry&&!WhiteMeridian)return Enumerable.Range(1,8).First(team=>Participants.All(p=>p.Team!=team));
             int previous=Participants.Count==0?0:Participants[Participants.Count-1].Team;
             // Foundry is authored for two teams. Fill an available opposing team first,
             // without rewriting manual choices or exceeding a team's share of the map.
@@ -62,8 +70,10 @@ namespace Spacewars.Simulation
         }
         public bool Foundry;
         public bool AiTestMap;
+        public bool CrimsonGrove;
         public bool BasaltCrown;
         public bool MossHighland;
+        public bool WhiteMeridian;
         public string HumanName = "Игрок 1";
         public string AiName = "ИИ";
         public int HumanTeam = 1, AiTeam = 2;
@@ -75,7 +85,7 @@ namespace Spacewars.Simulation
         public int ExplicitSeed;
         public int ResolveSeed()=>AiMatchSeed.Resolve(HasExplicitSeed?(int?)ExplicitSeed:null);
         public string DifficultyLabel=>DifficultyNames[(int)Difficulty];
-        public static readonly string[] DifficultyNames = { "Новобранец", "Боец", "Ветеран" };
+        public static readonly string[] DifficultyNames = { "Кадет", "Боец", "Ветеран" };
         public static readonly string[] ColorNames = { "Голубой", "Красный", "Лайм", "Жёлтый", "Фиолетовый", "Оранжевый", "Мятный", "Белый" };
         public static readonly string[] ColorHex = { "#59d8ff", "#ff5a73", "#a8ff53", "#ffd34e", "#c682ff", "#ff9e58", "#54f0c4", "#f1f1f1" };
         public int Capacity(PlayableProfile profile) => profile.AuthoredMap == null ? 0 : profile.AuthoredMap.Sites(profile).Count(s => s.Kind == PlayableBuildingKind.Headquarters);
@@ -83,9 +93,10 @@ namespace Spacewars.Simulation
         {
             if(Participants!=null)
             {
+                if(WhiteMeridian&&(Participants.Count!=4||Participants.GroupBy(p=>p.Team).Count()!=2||Participants.GroupBy(p=>p.Team).Any(g=>g.Count()!=2)))return "Для Белого меридиана нужны две команды по два участника.";
                 if(Participants.Count<2)return "Добавьте не менее двух участников.";
                 if(Participants.Count>Capacity(profile))return "Состав превышает вместимость карты. Освободите лишние места.";
-                if(Participants.Any(p=>p==null||string.IsNullOrWhiteSpace(p.Name)||p.Name.Trim().Length>24))return "Укажите имена участников: не более 24 символов.";
+                if(Participants.Any(p=>p==null||p.Human&&(string.IsNullOrWhiteSpace(p.Name)||p.Name.Trim().Length>24)))return "Укажите имена участников: не более 24 символов.";
                 if(Participants.Any(p=>p.Team<1||p.Team>8))return "Команда: от 1 до 8.";
                 if(Participants.Select(p=>p.Team).Distinct().Count()<2)return "На карте нужны две противоборствующие команды.";
                 if(Participants.Any(p=>p.Color<0||p.Color>=ColorHex.Length)||Participants.Select(p=>p.Color).Distinct().Count()!=Participants.Count)return "Каждому участнику нужен уникальный цвет.";
@@ -98,8 +109,8 @@ namespace Spacewars.Simulation
             if (!Enum.IsDefined(typeof(AiDifficulty),Difficulty)) return "Выберите сложность ИИ.";
             if (Capacity(profile) != (Foundry?6:2)) return "Карта не соответствует составу матча.";
             if (!HumanPresent || !Foundry&&!AiPresent) return "Заполните оба игровых места.";
-            if (string.IsNullOrWhiteSpace(HumanName) || !Foundry&&string.IsNullOrWhiteSpace(AiName)) return "Укажите имена обоих участников.";
-            if (HumanName.Trim().Length > 24 || !Foundry&&AiName.Trim().Length > 24) return "Имя: не более 24 символов.";
+            if (string.IsNullOrWhiteSpace(HumanName)) return "Укажите имена обоих участников.";
+            if (HumanName.Trim().Length > 24) return "Имя: не более 24 символов.";
             if (HumanTeam < 1 || HumanTeam > 8 || AiTeam < 1 || AiTeam > 8) return "Команда: от 1 до 8.";
             if (!Foundry && HumanTeam == AiTeam) return "На карте нужны две противоборствующие команды.";
             if (HumanColor < 0 || HumanColor >= ColorHex.Length || AiColor < 0 || AiColor >= ColorHex.Length) return "Выберите цвет из палитры.";
@@ -107,14 +118,29 @@ namespace Spacewars.Simulation
             if (!keyboardConnected || !mouseConnected) return "Ожидание мыши и клавиатуры Игрока 1.";
             return null;
         }
-        public string ParticipantName(int slot)=>Participants!=null&&slot<Participants.Count?Participants[slot].Name.Trim():slot==0?MatchHumanName:"ИИ "+DifficultyLabel+" "+slot;
+        private string[] matchNames;
+        // Match-only identity; never changes the lobby draft or simulation random stream.
+        public void PrepareMatchNames()
+        {
+            int count=Participants?.Count??(Foundry?6:2);
+            var callsigns=NativeBotNames.Draw(count);
+            matchNames=new string[count];
+            for(int i=0;i<count;i++)
+            {
+                bool human=Participants!=null?Participants[i].Human:i==0;
+                var difficulty=Participants!=null?Participants[i].Difficulty:Difficulty;
+                matchNames[i]=human?(Participants!=null?Participants[i].Name.Trim():MatchHumanName):callsigns[i]+" ("+DifficultyNames[(int)difficulty]+")";
+            }
+        }
+        public string ParticipantName(int slot)=>matchNames!=null?matchNames[slot]:Participants!=null&&slot<Participants.Count?(Participants[slot].Human?Participants[slot].Name.Trim():"ИИ"):slot==0?MatchHumanName:"ИИ";
         public int ParticipantColor(int slot)=>Participants!=null&&slot<Participants.Count?Participants[slot].Color:Foundry?slot:slot==0?HumanColor:AiColor;
         public NativeLobbyConfiguration Copy()
         {
             var copy=(NativeLobbyConfiguration)MemberwiseClone();
-            copy.Participants=Participants?.Select(p=>p.Copy()).ToList();return copy;
+            copy.Participants=Participants?.Select(p=>p.Copy()).ToList();
+            copy.matchNames=(string[])matchNames?.Clone();return copy;
         }
         public string MatchHumanName => HumanName.Trim();
-        public string MatchAiName => AiName.Trim() == "ИИ" ? "ИИ "+DifficultyLabel+" 1" : AiName.Trim();
+        public string MatchAiName => ParticipantName(Participants!=null?Math.Max(0,Participants.FindIndex(p=>!p.Human)):1);
     }
 }

@@ -21,11 +21,11 @@ namespace Spacewars.Runtime
         internal NavigationRequest[] RestoreWorldState(NavigationSessionState state)
         {
             if(state==null||state.Generation!=Generation)throw new ArgumentException("Navigation restore generation mismatch.");
-            NavigationAuthorityOwners sourceAuthority;NavigationHostRoot sourceHost;NavigationCommandAuthority sourceBacking;NavigationAdmission sourceAdmission;NavigationInstalledExecutions sourceInstalled;
+            NavPagedList<long> sourceBank;NavigationTrafficAuthority sourceTraffic;NavigationAuthorityOwners sourceAuthority;NavigationHostRoot sourceHost;NavigationCommandAuthority sourceBacking;NavigationAdmission sourceAdmission;NavigationInstalledExecutions sourceInstalled;
             NavigationCommandSlots<NavigationAnswer,NavigationHostAnswer> sourceTracking;int trackingRevision;NavCrowd sourceCrowd;long operation,requestsRevision,answersRevision;NavigationRetentionBudget budget;
             using(EnterTransport()){
                 if(certifiedHost!=null||hostAllocationThread!=0||admissionBatchDepth!=0||commandGroup!=null||Crowd.Units.Count!=0||pending.Count!=0||orders.Count!=0||Requests.Count!=0||Answers.Count!=0||(ownedAnswerTracking?.Count??0)!=0||countedCorridorAnswers.Count!=0)throw new ArgumentException("Navigation restore destination is not detached and empty.");
-                sourceAuthority=authorityOwners;sourceHost=committedHostRoot;sourceBacking=groupCommandBacking;sourceAdmission=admission;sourceCrowd=Crowd;sourceInstalled=installedExecutions;sourceTracking=ownedAnswerTracking;trackingRevision=sourceTracking?.Revision??0;sourceTracking?.Retain();
+                sourceBank=creditBank;sourceBank?.Retain();sourceTraffic=trafficAuthority;sourceTraffic?.Retain();sourceAuthority=authorityOwners;sourceHost=committedHostRoot;sourceBacking=groupCommandBacking;sourceAdmission=admission;sourceCrowd=Crowd;sourceInstalled=installedExecutions;sourceTracking=ownedAnswerTracking;trackingRevision=sourceTracking?.Revision??0;sourceTracking?.Retain();
                 operation=authorityOperationIdentity;requestsRevision=Requests.Revision;answersRevision=Answers.Revision;budget=physicalHostBudget;
                 sourceAuthority?.Retain();sourceHost?.Retain();sourceBacking?.Retain();sourceInstalled?.Retain();
             }
@@ -51,27 +51,27 @@ namespace Spacewars.Runtime
                         candidate.Session.arrivalProjectionLeases.Values.CopyTo(candidate.Leases,0);
                             scope.Attach(candidate);NavigationAuthorityOwners retiredAuthority=null;NavigationHostRoot retiredHost=null;NavigationCommandAuthority retiredBacking=null;NavigationTransportOwner retiredTransport=null;NavMailbox<NavigationAnswer> retiredAnswers=null;NavRetainedArray<NavNameReference> retiredTerrain=null;NavigationInstalledExecutions retiredInstalled=null;NavigationLiveArrivalTables retiredArrival=null;NavigationLiveArrivalLeaseTable retiredLeases=null;NavigationLiveRegistrations retiredRegistered=null;NavigationCommandSlots<int,NavigationRequest> retiredProbes=null;NavigationLiveProbeAnswers retiredProbeAnswers=null;NavigationCommandSlots<NavigationAnswer,NavigationHostAnswer> retiredTracking=null;NavigationBarrierReceipt retiredBarrier=null,retiredLegacyProbe=null;
                             scope.Publish(candidate,_=>{using(EnterTransport()){
-                                if(!ReferenceEquals(sourceTracking,ownedAnswerTracking)||(ownedAnswerTracking?.Revision??0)!=trackingRevision||operation!=authorityOperationIdentity||!ReferenceEquals(sourceAuthority,authorityOwners)||!ReferenceEquals(sourceHost,committedHostRoot)||!ReferenceEquals(sourceBacking,groupCommandBacking)||!ReferenceEquals(sourceAdmission,admission)||!ReferenceEquals(sourceInstalled,installedExecutions)||!ReferenceEquals(sourceCrowd,Crowd)||Requests.Revision!=requestsRevision||Answers.Revision!=answersRevision||Requests.Count!=0||Answers.Count!=0||Crowd.Units.Count!=0||certifiedHost!=null||hostAllocationThread!=0||commandGroup!=null||admissionBatchDepth!=0||scope.IsCancelled)throw new InvalidOperationException("Cold restore lost destination source.");
+                                if(!ReferenceEquals(sourceBank,creditBank)||!ReferenceEquals(sourceTracking,ownedAnswerTracking)||(ownedAnswerTracking?.Revision??0)!=trackingRevision||operation!=authorityOperationIdentity||!ReferenceEquals(sourceTraffic,trafficAuthority)||!ReferenceEquals(sourceAuthority,authorityOwners)||!ReferenceEquals(sourceHost,committedHostRoot)||!ReferenceEquals(sourceBacking,groupCommandBacking)||!ReferenceEquals(sourceAdmission,admission)||!ReferenceEquals(sourceInstalled,installedExecutions)||!ReferenceEquals(sourceCrowd,Crowd)||Requests.Revision!=requestsRevision||Answers.Revision!=answersRevision||Requests.Count!=0||Answers.Count!=0||Crowd.Units.Count!=0||certifiedHost!=null||hostAllocationThread!=0||commandGroup!=null||admissionBatchDepth!=0||scope.IsCancelled)throw new InvalidOperationException("Cold restore lost destination source.");
                                 foreach(var group in candidate.Groups)if(!group.BelongsToSession(candidate.Session))throw new InvalidOperationException("Cold group changed before installation.");
-                                retiredAuthority=authorityOwners;retiredHost=committedHostRoot;retiredBacking=groupCommandBacking;retiredTransport=transportOwner;retiredAnswers=Answers;retiredTerrain=terrainNameOwners;retiredInstalled=installedExecutions;retiredArrival=liveArrivalTables;retiredLeases=liveArrivalLeaseTable;retiredRegistered=liveRegistrations;retiredProbes=ownedProbes;retiredProbeAnswers=liveProbeAnswers;retiredTracking=ownedAnswerTracking;retiredBarrier=barrierPayloads;retiredLegacyProbe=legacyProbePayloads;
+                                retiredAuthority=authorityOwners;trafficAuthority=null;retiredHost=committedHostRoot;retiredBacking=groupCommandBacking;retiredTransport=transportOwner;retiredAnswers=Answers;retiredTerrain=terrainNameOwners;retiredInstalled=installedExecutions;retiredArrival=liveArrivalTables;retiredLeases=liveArrivalLeaseTable;retiredRegistered=liveRegistrations;retiredProbes=ownedProbes;retiredProbeAnswers=liveProbeAnswers;retiredTracking=ownedAnswerTracking;retiredBarrier=barrierPayloads;retiredLegacyProbe=legacyProbePayloads;
                                 Requests.CloseNoThrow();Answers.CloseNoThrow();
                                 foreach(var group in candidate.Groups)group.ActivateNoThrow(this);for(int i=0;i<candidate.LeaseCount;i++)candidate.Leases[i].Session=this;
                                 AdoptColdStateNoThrow(candidate.Session);authorityOperationIdentity=operation+1;candidate.Transferred=true;
                             }});
-                            scope.ResolveCommitted();retiredBarrier?.Release();retiredLegacyProbe?.Release();sourceCrowd.ReleaseCrowdStorage();retiredTracking?.Release();retiredProbes?.Release();retiredProbeAnswers?.Release();retiredRegistered?.Release();retiredLeases?.Release();retiredArrival?.Release();retiredInstalled?.Release();retiredTerrain?.Release();retiredAnswers.ReleaseRetention();retiredTransport?.Release();retiredHost?.Release();retiredBacking?.ReleaseStorage();retiredAuthority?.Release();
+                            scope.ResolveCommitted();sourceTraffic?.Release();retiredBarrier?.Release();retiredLegacyProbe?.Release();sourceCrowd.ReleaseCrowdStorage();retiredTracking?.Release();retiredProbes?.Release();retiredProbeAnswers?.Release();retiredRegistered?.Release();retiredLeases?.Release();retiredArrival?.Release();retiredInstalled?.Release();retiredTerrain?.Release();retiredAnswers.ReleaseRetention();retiredTransport?.Release();retiredHost?.Release();sourceBank?.Release();retiredBacking?.ReleaseStorage();retiredAuthority?.Release();
                         return candidate.Requests;
                     }finally{candidate?.Dispose();}
                 }
-            }finally{sourceTracking?.Release();sourceInstalled?.Release();sourceBacking?.Release();sourceHost?.Release();sourceAuthority?.Release();}
+            }finally{sourceBank?.Release();sourceTraffic?.Release();sourceTracking?.Release();sourceInstalled?.Release();sourceBacking?.Release();sourceHost?.Release();sourceAuthority?.Release();}
         }
         private void AdoptColdStateNoThrow(NavigationSession candidate)
         {
-            authorityOwners=candidate.authorityOwners;terrainNameOwners=candidate.terrainNameOwners;
+            trafficAuthority=candidate.trafficAuthority;candidate.trafficAuthority=null;authorityOwners=candidate.authorityOwners;terrainNameOwners=candidate.terrainNameOwners;
             geometry=candidate.geometry;
             navigationGeometry=candidate.navigationGeometry;
             profile=candidate.profile;
             Crowd=candidate.Crowd;Crowd.StorageSource=this;
-            committedHostRoot=candidate.committedHostRoot;
+            committedHostRoot=candidate.committedHostRoot;creditBank=candidate.creditBank;candidate.creditBank=null;accruedCreditsEnabled=candidate.accruedCreditsEnabled;accruedCreditCap=candidate.accruedCreditCap;
             groupCommandBacking=candidate.groupCommandBacking;
             transportOwner=candidate.transportOwner;
             Requests=candidate.Requests;
@@ -120,7 +120,7 @@ namespace Spacewars.Runtime
             arrivalAcquisitionSequence=candidate.arrivalAcquisitionSequence;
             arrivalRetirementSequence=candidate.arrivalRetirementSequence;
             arrivalReleaseSequence=candidate.arrivalReleaseSequence;
-            physicalArrivalEnabled=candidate.physicalArrivalEnabled;
+            physicalArrivalEnabled=candidate.physicalArrivalEnabled;replayOnlyProjection=candidate.replayOnlyProjection;
         }
     }
 }

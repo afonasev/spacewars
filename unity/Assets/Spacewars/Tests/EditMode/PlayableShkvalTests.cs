@@ -49,7 +49,7 @@ namespace Spacewars.Tests.EditMode
         {
             int id=Spawn(PlayableOwner.Player,PlayableEntityKind.Shkval,-12,0),target=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-5,0),friend=Spawn(PlayableOwner.Player,PlayableEntityKind.Tank,-5,1.5);
             Set(friend,"Reload",999d);Set(target,"Reload",999d);Combat(60);Assert.IsEmpty(View().Projectiles);Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.Attack,id,target:target));Combat(45);
-            Assert.AreEqual(p.TankHealth-p.ShkvalDamage,Get<int>(friend,"Health"));Assert.AreEqual(p.TankHealth-p.ShkvalDamage,Get<int>(target,"Health"));
+            Assert.AreEqual(p.TankHealth-p.ShkvalDamage,Get<double>(friend,"Health"));Assert.AreEqual(p.TankHealth-p.ShkvalDamage,Get<double>(target,"Health"));
         }
         [Test]public void HiddenEntitiesCannotChangeAutomaticChoice()
         {

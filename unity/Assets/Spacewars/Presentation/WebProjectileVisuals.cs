@@ -91,10 +91,14 @@ namespace Spacewars.Presentation
             }
             return Part("Web impact flash",parent,mesh,Material("#ffd183",false,transparent:true));
         }
+        private readonly DetailedImpactVisuals detailedImpact=new DetailedImpactVisuals();
+        public GameObject DirectImpact(Transform parent,int seed=0)=>detailedImpact.Create(parent,seed);
+        public void UpdateDirectImpact(GameObject root,float age,float radius,float sparkLength,float width,float glow,float smoke)
+            =>detailedImpact.Update(root,age,radius,sparkLength,width,glow,smoke);
         public static void Opacity(GameObject g,float alpha)
         {
             var r=g.GetComponent<Renderer>();var b=new MaterialPropertyBlock();r.GetPropertyBlock(b);var color=r.sharedMaterial.GetColor("_BaseColor");color.a=alpha;b.SetColor("_BaseColor",color);r.SetPropertyBlock(b);
         }
-        public void Dispose(){foreach(var r in resources)if(Application.isPlaying)UnityEngine.Object.Destroy(r);else UnityEngine.Object.DestroyImmediate(r);resources.Clear();meshes.Clear();materials.Clear();}
+        public void Dispose(){detailedImpact.Dispose();foreach(var r in resources)if(Application.isPlaying)UnityEngine.Object.Destroy(r);else UnityEngine.Object.DestroyImmediate(r);resources.Clear();meshes.Clear();materials.Clear();}
     }
 }

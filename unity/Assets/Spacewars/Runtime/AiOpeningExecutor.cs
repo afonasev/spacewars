@@ -13,6 +13,7 @@ namespace Spacewars.Runtime
         public long StartedTick{get;internal set;}=-1;
         public long ProgressTick{get;internal set;}=-1;
         public int Replans{get;internal set;} public string Reason{get;internal set;}="not started";
+        public bool InitialForceFulfilled{get;internal set;}
         public IReadOnlyList<string> Completed{get;internal set;}=Array.Empty<string>();
         public string Fallback=>Phase==PlayableAiOpeningPhase.Aborted?"ordinary-macro-army":null;
     }
@@ -25,11 +26,13 @@ namespace Spacewars.Runtime
         private readonly HashSet<string> completed=new HashSet<string>(StringComparer.Ordinal);
         private long started=-1,progress=-1,pressureReceipt=-1;
         private int replans,producer,expansionSite;
+        // Historical observation of the initial live force; later loss/replan cannot reopen growth.
+        private bool initialForceFulfilled;
         private PlayableAiOpeningPhase phase=PlayableAiOpeningPhase.Active;
         private string reason="not started";
         public AiOpeningExecutor(PlayableAiOpeningCompositionState opening,long generation)
         {owner=opening.OwnerId;this.generation=generation;definition=AiOpeningCatalog.For(opening.Opening);}
-        public AiOpeningExecutionState Capture()=>new AiOpeningExecutionState{Template=definition.Id,Phase=phase,StartedTick=started,ProgressTick=progress,Replans=replans,Reason=reason,Completed=definition.Milestones.Where(m=>completed.Contains(m.Id)).Select(m=>m.Id).ToArray()};
+        public AiOpeningExecutionState Capture()=>new AiOpeningExecutionState{Template=definition.Id,Phase=phase,StartedTick=started,ProgressTick=progress,Replans=replans,Reason=reason,InitialForceFulfilled=initialForceFulfilled,Completed=definition.Milestones.Where(m=>completed.Contains(m.Id)).Select(m=>m.Id).ToArray()};
         private bool Enabled(AiOpeningMilestone m)=>!completed.Contains(m.Id)&&m.Dependencies.All(completed.Contains);
         private bool Wants(AiOpeningGoal goal)=>phase==PlayableAiOpeningPhase.Active&&definition.Milestones.Any(m=>m.Goal==goal&&Enabled(m));
         public AiScoutPlan ScoutPlan=>phase!=PlayableAiOpeningPhase.Active?AiScoutPlan.Standard:definition.Opening==PlayableAiOpening.BlindRush?AiScoutPlan.BlindRush:definition.Opening==PlayableAiOpening.ExplorerAllIn?AiScoutPlan.ScoutLed:AiScoutPlan.Standard;
@@ -46,6 +49,30 @@ namespace Spacewars.Runtime
         internal bool HomeEconomyReady(PlayableAiObservation o,AiProfile ai)
             =>o.HomeSiteId>0&&HomeBuildings(o,PlayableBuildingKind.Factory).Any(b=>b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true)&&
               HomeBuildings(o,PlayableBuildingKind.Refinery).Count(b=>b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true)>=IncomeCount(ai);
+        internal bool InitialGrowthCommitmentPending(PlayableAiObservation o,AiProfile ai)
+        {
+            if(!HomeEconomyReady(o,ai))return false;
+            return !initialForceFulfilled;
+        }
+        internal int InitialForceFundingProtection(PlayableAiObservation o,PlayableProfile profile,AiProfile ai,AiBudgetState budget)
+        {
+            if(!InitialGrowthCommitmentPending(o,ai))return 0;
+            int cost=PlayableUnitRules.Cost(profile,PlayableEntityKind.Tank);
+            int covered=o.Entities.Count(u=>u.Owner==o.Owner&&u.Kind==PlayableEntityKind.Tank&&u.Health>0);
+            var factories=o.Buildings.Where(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.Factory&&b.Health>0&&b.PrivateState!=null).ToArray();
+            var pending=(budget?.Reserved??Array.Empty<AiBudgetEntry>()).Concat(budget?.Unpaid??Array.Empty<AiBudgetEntry>())
+                .Where(e=>e.Purpose!="factory-startup"&&e.Action.PlayerId==owner&&e.Action.Kind==PlayableCommandKind.QueueTank&&e.Action.UnitKind==PlayableEntityKind.Tank)
+                .ToArray();
+            foreach(var factory in factories)
+            {
+                int queued=factory.PrivateState.Orders.Count(q=>q.Kind==PlayableEntityKind.Tank);
+                int reserved=pending.Count(e=>e.Action.EntityIds.Contains(factory.Id));
+                covered+=Math.Max(queued,reserved);
+            }
+            if(budget!=null)covered+=budget.Reserved.Where(e=>e.Purpose=="factory-startup").Sum(e=>e.Amount/cost);
+            int required=(int)ai.Value("opening.forceUnits");
+            return Math.Max(0,required-covered)*cost;
+        }
         internal int HomeEconomyQuote(PlayableAiObservation o,PlayableProfile p,AiProfile ai,IEnumerable<AiEconomyCandidate> normal)
             =>MacroRequests(o,p,ai,normal).Where(c=>(c.Legal||c.Reason=="insufficient credits")&&c.Policy=="economy"&&c.Action.Kind==PlayableCommandKind.BuildAt&&
                 c.Action.SiteId==o.HomeSiteId&&((c.Action.BuildingKind==PlayableBuildingKind.Factory&&(Wants(AiOpeningGoal.Factory)||phase!=PlayableAiOpeningPhase.Active)&&HomeBuildings(o,PlayableBuildingKind.Factory).Count(b=>b.Health>0&&b.PrivateState?.Lifecycle?.Selling!=true)<1)||
@@ -64,6 +91,7 @@ namespace Spacewars.Runtime
             if(o.OwnerId!=owner||o.Generation!=generation)throw new ArgumentException("Opening observation binding");
             if(knowledge!=null&&(knowledge.OwnerId!=owner||knowledge.Generation!=generation||knowledge.ObservationTick!=o.Tick))throw new ArgumentException("Opening knowledge binding");
             if(deployment!=null&&(deployment.OwnerId!=owner||deployment.Generation!=generation||deployment.Seed!=o.Seed||deployment.ProfileId!=o.ProfileId||deployment.ProfileRevision!=o.ProfileRevision||deployment.ObservedTick!=o.Tick||deployment.StartedTick>o.Tick||deployment.ArmyId<=0))throw new ArgumentException("Opening deployment binding");
+            if(!initialForceFulfilled&&o.Entities.Count(u=>u.Owner==o.Owner&&u.Kind==PlayableEntityKind.Tank&&u.Health>0)>=ai.Value("opening.forceUnits"))initialForceFulfilled=true;
             if(phase!=PlayableAiOpeningPhase.Active)return;
             if(started<0){started=o.Tick;progress=o.Tick;reason="executing";}
             if(o.Tick-started>=AiProfile.SecondsToTicks(ai.Value("opening.deadlineSeconds"),30)){Abort("opening deadline reached");return;}
@@ -113,9 +141,10 @@ namespace Spacewars.Runtime
                 pressureReceipt=receipt.ApplicationTick;
             else if(receipt.Status==PlayableAiDeliveryStatus.Rejected||receipt.Status==PlayableAiDeliveryStatus.Cancelled)reason="request terminal: "+receipt.Message;
         }
-        public IReadOnlyList<AiEconomyCandidate> MacroRequests(PlayableAiObservation o,PlayableProfile p,AiProfile ai,IEnumerable<AiEconomyCandidate> normal)
+        public IReadOnlyList<AiEconomyCandidate> MacroRequests(PlayableAiObservation o,PlayableProfile p,AiProfile ai,IEnumerable<AiEconomyCandidate> normal,bool initialGrowthCommitmentPending=false)
         {
-            if(phase!=PlayableAiOpeningPhase.Active)return normal.ToArray();
+            if(phase!=PlayableAiOpeningPhase.Active)
+                return initialGrowthCommitmentPending&&HomeEconomyReady(o,ai)?normal.Where(c=>c.Policy=="production").ToArray():normal.ToArray();
             var requests=new List<AiEconomyCandidate>();
             foreach(var kind in new[]{PlayableBuildingKind.Factory,PlayableBuildingKind.Refinery})
             {
@@ -150,15 +179,17 @@ namespace Spacewars.Runtime
         }
         internal void WriteState(BinaryWriter w)
         {
-            WorldWire.String(w,definition.Id);w.Write((int)phase);w.Write(started);w.Write(progress);w.Write(pressureReceipt);w.Write(replans);w.Write(producer);w.Write(expansionSite);WorldWire.String(w,reason);
+            WorldWire.String(w,definition.Id);w.Write((int)phase);w.Write(started);w.Write(progress);w.Write(pressureReceipt);w.Write(replans);w.Write(producer);w.Write(expansionSite);WorldWire.String(w,reason);w.Write(initialForceFulfilled);
             WorldWire.Array(w,definition.Milestones.Where(m=>completed.Contains(m.Id)).Select(m=>m.Id).ToArray(),s=>WorldWire.String(w,s));
         }
         internal void ReadState(BinaryReader r,long tick)
         {
             AiStateWire.Require(WorldWire.String(r)==definition.Id,"opening template binding");phase=WorldWire.EnumValue<PlayableAiOpeningPhase>(r);started=r.ReadInt64();progress=r.ReadInt64();pressureReceipt=r.ReadInt64();replans=r.ReadInt32();producer=r.ReadInt32();expansionSite=r.ReadInt32();reason=WorldWire.String(r);
+            initialForceFulfilled=WorldWire.Boolean(r);
             AiStateWire.Require(started>=-1&&started<=tick&&progress>=started&&progress<=tick&&pressureReceipt>=-1&&pressureReceipt<=tick&&replans>=0&&producer>=0&&expansionSite>=0&&!string.IsNullOrWhiteSpace(reason),"opening execution clocks/values");
             foreach(var id in WorldWire.Array(r,()=>WorldWire.String(r)))AiStateWire.Require(definition.Milestones.Any(m=>m.Id==id)&&completed.Add(id),"opening milestone identity");
-            AiStateWire.Require(definition.Milestones.Where(m=>completed.Contains(m.Id)).All(m=>m.Dependencies.All(completed.Contains))&& (phase!=PlayableAiOpeningPhase.Complete||completed.Count==definition.Milestones.Count),"opening DAG progress");
+            AiStateWire.Require(definition.Milestones.Where(m=>completed.Contains(m.Id)).All(m=>m.Dependencies.All(completed.Contains))&&
+                (phase!=PlayableAiOpeningPhase.Complete||completed.Count==definition.Milestones.Count)&&(!completed.Contains("force")||initialForceFulfilled),"opening DAG progress");
         }
     }
 }

@@ -1,0 +1,38 @@
+diff --git a/unity/Assets/Spacewars/Simulation/NavigationDemandExact.cs b/unity/Assets/Spacewars/Simulation/NavigationDemandExact.cs
+index 9f32a0a7..186de1ce 100644
+--- a/unity/Assets/Spacewars/Simulation/NavigationDemandExact.cs
++++ b/unity/Assets/Spacewars/Simulation/NavigationDemandExact.cs
+@@ -19,13 +19,13 @@ namespace Spacewars.Simulation
+         private void StepExactConnector()
+         {
+             if(phase==Phase.Seed){
+-                if(starts.TrySuccessor(seed,out var next)){var value=NavExactCost.FromDouble(next.Value);exactDistance[next.Key]=value;exactFrontier.Add(ExactEntry(next.Key,value));seed=next.Key;}else phase=Phase.Pop;return;
++                if(starts.TrySuccessor(seed,out var next)){var value=NavExactCost.FromDouble(next.Value);exactDistance[next.Key]=value;exactFrontier.Add(ExactEntry(next.Key,value));NavExactDemandProbeQa.Insert?.Invoke(next.Key,value,false,default);seed=next.Key;}else phase=Phase.Pop;return;
+             }
+             if(phase==Phase.Pop){
+                 if(exactFrontier.Count==0||chosen>=0&&exactFrontier.Min.Cost>exactBest){if(chosen<0)Finish(NavSolveStatus.UnreachableInGraph);else{traceNode=chosen;phase=Phase.Trace;}return;}
+                 var item=exactFrontier.Min;exactFrontier.Remove(item);
+                 if(!exactDistance.TryGetValue(item.Node,out var known)||ExactEntry(item.Node,known).Cost!=item.Cost)throw new InvalidOperationException("Exact frontier/label mismatch.");
+-                current=item.Node;candidate=locations[current].SurfaceId!=request.Subscription.AssignedEndpoint.SurfaceId?request.Region.Candidates.Count:0;direction=0;phase=candidate==request.Region.Candidates.Count?Phase.Edges:Phase.Candidates;return;
++                NavExactDemandProbeQa.AstarPop?.Invoke(item.Node,known,item.Cost);current=item.Node;candidate=locations[current].SurfaceId!=request.Subscription.AssignedEndpoint.SurfaceId?request.Region.Candidates.Count:0;direction=0;phase=candidate==request.Region.Candidates.Count?Phase.Edges:Phase.Candidates;return;
+             }
+             if(phase==Phase.Candidates&&candidate==request.Region.Candidates.Count)phase=Phase.Edges;
+             if(phase==Phase.Edges&&!pending&&direction==4){phase=Phase.Pop;current=-1;StepExactConnector();return;}
+@@ -40,7 +40,7 @@ namespace Spacewars.Simulation
+                 bool had=exactDistance.TryGetValue(arc.To,out var old);
+                 if(!had||value<old){
+                     if(!had&&exactDistance.Count==request.MaxLabels){Finish(NavSolveStatus.CapacityExceeded);return;}
+-                    if(had)exactFrontier.Remove(ExactEntry(arc.To,old));exactDistance[arc.To]=value;previous[arc.To]=arc;exactFrontier.Add(ExactEntry(arc.To,value));
++                    if(had)exactFrontier.Remove(ExactEntry(arc.To,old));exactDistance[arc.To]=value;previous[arc.To]=arc;exactFrontier.Add(ExactEntry(arc.To,value));NavExactDemandProbeQa.Insert?.Invoke(arc.To,value,had,old);
+                 }
+                 NavStoragePayload<NavGraphArc>.Release(pendingArc);pendingArc=default;pending=false;return;
+             }
+@@ -52,7 +52,7 @@ namespace Spacewars.Simulation
+             else{
+                 var total=exactRoutePrefix.Add(ends[chosenCandidate]);if(total!=exactBest)throw new InvalidOperationException("Exact reconstructed objective differs from best.");
+                 double finalFold=routeCost+Cost(request.Region.Candidates[chosenCandidate],request.Subscription.AssignedEndpoint);if(!NavPhysicalSolveValidation.Cost(finalFold))throw new ArgumentException("Public flattened route fold is not finite.");
+-                AddSurface(request.Region.Candidates[chosenCandidate],request.Subscription.AssignedEndpoint);exactRoutePrefix=total;Route=new NavTypedRoute(request.Subscription,legs,routeCost,NavStorageLayout.Before(reserve,128),true);Finish(NavSolveStatus.Ready);
++                AddSurface(request.Region.Candidates[chosenCandidate],request.Subscription.AssignedEndpoint);exactRoutePrefix=total;Route=new NavTypedRoute(request.Subscription,legs,routeCost,NavStorageLayout.Before(reserve,128),true);Finish(NavSolveStatus.Ready);NavExactDemandProbeQa.Ready?.Invoke(exactBest,exactRoutePrefix,routeCost);NavExactDemandProbeQa.Qualification?.Invoke(HeuristicActive,EffectiveMetricContract);
+             }reconstruct++;
+         }
+         private void ValidateExact()

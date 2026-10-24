@@ -6,15 +6,17 @@ namespace Spacewars.Presentation
 {
     public sealed partial class PlayableWorld
     {
-        private void CreateMossHighland(MossHighlandMap map,MossHighlandArtProfile selectedArt=null)
+        private System.Collections.IEnumerator CreateMossHighland(MossHighlandMap map,MossHighlandArtProfile selectedArt=null)
         {
+            var budget=new LoadingFrameBudget();
             var art=selectedArt??MossHighlandArtProfile.Load();art.Validate();
             mossTerrainMaterial=art.Material(Fog.Texture,new Vector4((float)map.HalfExtent,(float)map.HalfExtent,0,0),new Color((float)profile.FogTintR,(float)profile.FogTintG,(float)profile.FogTintB));
-            var masks=BuildMossPaintMasks(map,art,profile);mossPaintMask=masks[0];mossAccentMask=masks[1];mossTransitionMask=masks[2];
+            Texture2D[] masks=null;yield return PrepareMossPaintMasks(map,art,profile,value=>masks=value);mossPaintMask=masks[0];mossAccentMask=masks[1];mossTransitionMask=masks[2];
             mossTerrainMaterial.SetTexture("_PaintA",mossPaintMask);mossTerrainMaterial.SetTexture("_PaintB",mossAccentMask);mossTerrainMaterial.SetTexture("_Transitions",mossTransitionMask);
             // Ramp precedence and flat supports come from the navigation provider.
             // Clip the underlying decks around ramps so no flat cap covers the slope.
             foreach(var support in map.Supports){
+                if(budget.Expired){yield return null;budget.Restart();}
                 var pieces=new List<NavObstacle>{support.Bounds};
                 if(support.Id!="plateau-ramp")foreach(var ramp in map.Supports)if(ramp.Id=="plateau-ramp")pieces=Subtract(pieces,ramp.Bounds);
                 foreach(var b in pieces)Prism(support.Id,b,-1,support.Height,support.HeightAt);
@@ -23,6 +25,7 @@ namespace Spacewars.Presentation
             // It samples only original solid cells; relief retreats below their authored tops.
             var levels=new float[64,64];
             for(int z=0;z<64;z++)for(int x=0;x<64;x++){
+                if(x==0&&budget.Expired){yield return null;budget.Restart();}
                 var at=new NavPoint(x*2-63,z*2-63);
                 levels[x,z]=(float)map.OriginalRidges.Where(r=>r.Contains(at)).Select(r=>r.Top).DefaultIfEmpty(0).Max();
             }
@@ -54,6 +57,7 @@ namespace Spacewars.Presentation
                 return original;
             }
             for(int z=0;z<64;z++)for(int x=0;x<64;x++){
+                if(x==0&&budget.Expired){yield return null;budget.Restart();}
                 float level=levels[x,z];if(level<=0)continue;
                 float xx=x*2-64,zz=z*2-64;
                 Vector3 P(float u,float v,float l)=>Skin(xx+u,zz+v,l);
@@ -127,6 +131,11 @@ namespace Spacewars.Presentation
         }
         public static Texture2D[] BuildMossPaintMasks(MossHighlandMap map,MossHighlandArtProfile art,PlayableProfile gameplay)
         {
+            Texture2D[] result=null;LoadingPreparation.Drain(PrepareMossPaintMasks(map,art,gameplay,value=>result=value));return result;
+        }
+        private static System.Collections.IEnumerator PrepareMossPaintMasks(MossHighlandMap map,MossHighlandArtProfile art,PlayableProfile gameplay,System.Action<Texture2D[]> ready)
+        {
+            var budget=new LoadingFrameBudget();
             art.Validate();
             // Fixed bounded raster precision: finer than the authored 2m source cells.
             const int size=512;int length=size*size;float step=(float)(map.HalfExtent*2/size);
@@ -144,6 +153,7 @@ namespace Spacewars.Presentation
             foreach(var site in map.Sites(gameplay).Where(s=>TerritoryRules.Center(s.Kind))){
                 var bounds=MossApronBounds(site,gameplay,art);
                 for(int z=0;z<size;z++)for(int x=0;x<size;x++){
+                    if(x==0&&budget.Expired){yield return null;budget.Restart();}
                     var point=new NavPoint((x+.5)*step-map.HalfExtent,(z+.5)*step-map.HalfExtent);
                     if(!bounds.Contains(point))continue;
                     // Mirror ridge notches too, so clipping cannot shift the visible center.
@@ -163,6 +173,7 @@ namespace Spacewars.Presentation
             var ramps=map.Supports.Where(s=>s.Id=="plateau-ramp").ToArray();
             float Distance(NavObstacle b,double x,double z)=>(float)System.Math.Sqrt(b.DistanceSquared(new NavPoint(x,z)));
             for(int z=0;z<size;z++)for(int x=0;x<size;x++){
+                    if(x==0&&budget.Expired){yield return null;budget.Restart();}
                 int i=z*size+x;double xx=(x+.5)*step-map.HalfExtent,zz=(z+.5)*step-map.HalfExtent;
                 float rock=art.screeReach,apron=art.apronEdgeReach;
                 foreach(var b in map.Solids)rock=Mathf.Min(rock,Distance(b,xx,zz));
@@ -190,7 +201,7 @@ namespace Spacewars.Presentation
                 c[i]=new Color(fields[4][i]/total,fields[5][i]/total,fields[6][i]/total,0);
             }
             Texture2D Mask(string name,Color[] pixels){var t=new Texture2D(size,size,TextureFormat.RGBA32,false,true){name=name,wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};t.SetPixels(pixels);t.Apply(false,false);return t;}
-            return new[]{Mask("Moss Highland ground role weights",a),Mask("Moss Highland accent role weights",c),Mask("Moss Highland transition distances",transitions)};
+            ready(new[]{Mask("Moss Highland ground role weights",a),Mask("Moss Highland accent role weights",c),Mask("Moss Highland transition distances",transitions)});
         }
     }
 }

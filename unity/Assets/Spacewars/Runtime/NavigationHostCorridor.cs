@@ -18,6 +18,7 @@ namespace Spacewars.Runtime
         internal NavigationHostRequest RequestOwner=>requestRoot;
         internal NavigationHostProvider ProviderOwner=>providerRoot;
         internal NavTypedRoute TypedRoute=>routeRoot;
+        internal NavScheduledRequest Recipe=>(NavScheduledRequest)recipeRoot.Facade;
         private bool released;
         internal override bool IsImmutableCaptureRoot=>Corridor!=null;
         public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(NavPhysicalStorageKind.HostCorridor);

@@ -51,8 +51,8 @@ public sealed class NativeMainMenuTests
         {
             var root=go.GetComponent<UIDocument>().rootVisualElement;
             var actions=root.Query<Button>().ToList();
-            CollectionAssert.AreEqual(new[]{"В бой!","Сетевая игра","Настройки","Управление","Что нового","Лаборатория геймдизайна","Выйти","Обновить","Отменить загрузку","Перезапустить"},actions.ConvertAll(b=>b.text));
-            Assert.False(actions[1].enabledSelf);Assert.That(root.Q<Button>("main-restart").style.display.value,Is.EqualTo(DisplayStyle.None));Assert.IsNull(root.Q<Button>("main-check"));
+            CollectionAssert.AreEqual(new[]{"В бой!","Кампания","Сетевая игра","Настройки","Управление","Что нового","Лаборатория геймдизайна","Выйти","Обновить","Отменить загрузку","Перезапустить"},actions.ConvertAll(b=>b.text));
+            Assert.False(actions[2].enabledSelf);Assert.That(root.Q<Button>("main-restart").style.display.value,Is.EqualTo(DisplayStyle.None));Assert.IsNull(root.Q<Button>("main-check"));
             Assert.IsNull(root.Q(className:"orbital-hints"));
             Assert.AreEqual(DisplayStyle.Flex,root.Q("main-update-panel").style.display.value,"Panel is visible before startup status is received");
             Assert.AreEqual(DisplayStyle.None,root.Q<Button>("main-update").style.display.value);
@@ -64,6 +64,23 @@ public sealed class NativeMainMenuTests
         }
         finally{UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",endpoint);}
     }
+    [UnityTest] public IEnumerator CampaignStartUsesInstalledPlayAdmissionAndKeepsBriefingOnRefusal()
+    {
+        var saved=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT");Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",null);
+        var go=new GameObject("campaign installed play gate");var menu=go.AddComponent<NativeMainMenu>();int launched=0;menu.Campaign=()=>launched++;yield return null;
+        var listener=new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);listener.Start();string requested=null;
+        var server=System.Threading.Tasks.Task.Run(()=>{using(var client=listener.AcceptTcpClient())using(var stream=client.GetStream()){var reader=new System.IO.StreamReader(stream);requested=reader.ReadLine();string line;while(!string.IsNullOrEmpty(line=reader.ReadLine())){}var bytes=System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 409 Conflict\r\nContent-Length: 11\r\nConnection: close\r\n\r\nunavailable");stream.Write(bytes,0,bytes.Length);}});
+        try
+        {
+            var root=go.GetComponent<UIDocument>().rootVisualElement;var field=typeof(NativeMainMenu).GetField("endpoint",BindingFlags.Instance|BindingFlags.NonPublic);field.SetValue(menu,"http://127.0.0.1:"+((System.Net.IPEndPoint)listener.LocalEndpoint).Port);
+            menu.Navigation.ActivateElement(root.Q<Button>("main-campaign"));menu.Navigation.ActivateElement(root.Q<Button>("campaign-mission-1"));menu.Navigation.ActivateElement(root.Q<Button>("campaign-start"));
+            double until=Time.realtimeSinceStartupAsDouble+5;while((!server.IsCompleted||(bool)typeof(NativeMainMenu).GetField("busy",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(menu))&&Time.realtimeSinceStartupAsDouble<until)yield return null;
+            Assert.True(server.IsCompleted&&!server.IsFaulted,server.Exception?.ToString());StringAssert.StartsWith("POST /play ",requested);Assert.AreEqual(0,launched);Assert.IsNotNull(root.Q("campaign-briefing"),"denied launch retains the briefing for retry");
+            field.SetValue(menu,null);menu.Navigation.ActivateElement(root.Q<Button>("campaign-start"));yield return null;Assert.AreEqual(1,launched);Assert.IsNull(root.Q("campaign-menu"));
+        }
+        finally{listener.Stop();UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",saved);}
+    }
+
     [UnityTest] public IEnumerator DownloadAndPreparedUpdateKeepPlayAvailableUntilExplicitRestart()
     {
         var endpoint=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT");Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",null);

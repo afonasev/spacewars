@@ -61,6 +61,17 @@ namespace Spacewars.Runtime
         private void SetPumpStage(PumpStage value){lock(pumpFrameGate)pumpStage=value;}
         private long reservedCorridorBytes;
         private bool allocating;
+        private int allocationOwnerThread;
+        internal bool OwnsAllocationThread(int thread)=>allocating&&thread!=0&&allocationOwnerThread==thread;
+        // The token remains recorded after EndHostAllocation; it is not authority
+        // to reopen allocation. Used only with a pinned same-quantum completion.
+        internal bool CompletedAllocationOnThread(int thread)=>!allocating&&thread!=0&&allocationOwnerThread==thread;
+        private long BeginAllocation(NavigationRoutePort port)
+        {
+            var floor=port.BeginHostAllocation();
+            allocationOwnerThread=System.Threading.Thread.CurrentThread.ManagedThreadId;
+            return floor;
+        }
         internal Action BeforePrepare;
         internal Action<ArrivalProjectionDelta,ArrivalProjection> BeforeArrivalProjectionCommit;
         internal Func<bool> Continue;
@@ -177,7 +188,7 @@ namespace Spacewars.Runtime
             SetPumpStage(PumpStage.PreFlush);
             port.RunHostStep(()=>{UpdateReservation();Flush(port,budget);});
             SetPumpStage(PumpStage.Allocation);
-            reservedCorridorBytes=port.BeginHostAllocation();allocating=true;
+            reservedCorridorBytes=BeginAllocation(port);allocating=true;
             lock(pumpFrameGate)pumpAllocationFloor=reservedCorridorBytes;
             try {ServiceOwned(port,budget);}
             finally {
@@ -341,6 +352,25 @@ namespace Spacewars.Runtime
         // outside transportGate, then publishes the owned scheduler/row/queue
         // and the mailbox transfer at one Session boundary. Pump switches to
         // this caller only when its solve/projection/flush stages use this root.
+        // Ordinary registration and solve own a private-fork refusal boundary.
+        // Preserve allocator/ledger/scratch identity so the fork can unwind all
+        // births, while invariant exceptions still escape to the worker.
+        private sealed class OrdinaryPreparationReservation : INavStorageReservation,
+            INavStorageScratchAllocator,INavStorageLedgerIdentity,INavStorageLocalBirthAllocator,INavStoragePreparationOwner
+        {
+            public object PreparationOwner=>scope;
+            internal const long Bytes=64;
+            internal sealed class Refused : Exception { }
+            private readonly NavigationRetentionBudget.Scope scope;
+            internal OrdinaryPreparationReservation(NavigationRetentionBudget.Scope scope){this.scope=scope;}
+            public bool TryReserve(long bytes)
+            {if(!scope.TryReserve(bytes))throw new Refused();return true;}
+            public void Register(NavOwnedStorage storage)=>((INavStorageAllocator)scope).Register(storage);
+            public bool TryRegisterLocalBirth(NavOwnedStorage storage)=>scope.TryRegisterLocalBirth(storage);
+            public object Identity=>((INavStorageLedgerIdentity)scope).Identity;
+            public bool Owns(NavOwnedStorage storage)=>((INavStorageLedgerIdentity)scope).Owns(storage);
+            public IDisposable ClaimScratch(long bytes)=>((INavStorageScratchAllocator)scope).ClaimScratch(bytes);
+        }
         internal bool TryRegisterPhysicalOrdinary(PlayableRouteBinding binding)
         {
             var port=binding.RoutePort;
@@ -352,10 +382,11 @@ namespace Spacewars.Runtime
             NavigationRetentionBudget.Scope scope=null;
             NavigationHostRoot candidate=null;
             try{
-                if(!port.TryOpenPhysicalHostScope(NavigationPreparationKind.Admission,epoch,
+                if(!port.TryOpenPhysicalHostScope(NavigationPreparationKind.RouteAdmission,epoch,
                     observed.PublicationIdentity,out scope))return false;
-                var reservation=scope.OwnedReservation();
-                candidate=source==null?NavigationHostRoot.CreateOwned(reservation):
+                if(!scope.TryReserve(OrdinaryPreparationReservation.Bytes))return false;
+                var reservation=new OrdinaryPreparationReservation(scope);
+                candidate=source==null?port.CreatePhysicalHostRoot(reservation):
                     source.ForkOwned(reservation);
                 if(source==null)port.StageRetainedPhysicalArrivals(candidate,reservation);
                 BeforePrepare?.Invoke();
@@ -365,7 +396,8 @@ namespace Spacewars.Runtime
                 // conservative construction reservation used by arrivals.
                 long construction=ProspectiveProviderConstruction(observed,ingress.Geometry);
                 NavNameKey key;
-                using(NavStorageScratch.Reserve(reservation,construction)){
+                if(!NavStorageScratch.TryReserve(reservation,construction,out var constructionLease))return false;
+                using(constructionLease){
                     ILayeredNavigationProvider provider=observed.AuthoredTerrain==null?
                         NavigationAdmission.CertifiedFlatProvider(ingress.Geometry):
                         new PartitionNavigationProvider(observed.AuthoredTerrain,
@@ -383,6 +415,8 @@ namespace Spacewars.Runtime
                 port.PublishRegisteredPhysicalHost(scope,source,candidate,observed,ingress,key);
                 ProgressSequence++;return true;
             }catch(NavigationSession.PhysicalIngressRefused){return false;}
+            catch(PartitionNavigationProvider.CopyScratchRefused){return false;}
+            catch(OrdinaryPreparationReservation.Refused){return false;}
             finally{
                 candidate?.ReleaseStorage();
                 scope?.Discard();
@@ -392,6 +426,7 @@ namespace Spacewars.Runtime
 
         internal int AdvancePhysicalOrdinary(PlayableRouteBinding binding,int workLimit)
         {
+            using var measured=PerformanceProfile.Measure(ProfileStage.PhysicalSolve);
             var port=binding.RoutePort;
             if(port==null||workLimit<0)throw new ArgumentException("Invalid physical solver allotment.");
             Attach(port);
@@ -402,7 +437,8 @@ namespace Spacewars.Runtime
             try{
                 if(!port.TryOpenPhysicalHostScope(NavigationPreparationKind.Solve,epoch,
                     port.Admission.PublicationIdentity,out scope))return 0;
-                var reservation=scope.OwnedReservation();
+                if(!scope.TryReserve(OrdinaryPreparationReservation.Bytes))return 0;
+                var reservation=new OrdinaryPreparationReservation(scope);
                 candidate=source.ForkOwned(reservation);
                 bool Current(NavScheduledIdentity id)
                 {
@@ -413,11 +449,15 @@ namespace Spacewars.Runtime
                         entry is NavigationHostRow row&&row.Answer==null&&row.Solved==null;
                 }
                 long nextEpoch=source.Epoch;
-                int consumed=candidate.Scheduler.Advance(nextEpoch,Quota,Current,workLimit);
-                if(consumed==0&&candidate.Scheduler.NeedsNextEpoch){
-                    nextEpoch++;
+                int consumed;
+                using(PerformanceProfile.Measure(ProfileStage.SchedulerAdvance)){
                     consumed=candidate.Scheduler.Advance(nextEpoch,Quota,Current,workLimit);
+                    if(consumed==0&&candidate.Scheduler.NeedsNextEpoch){
+                        nextEpoch++;
+                        consumed=candidate.Scheduler.Advance(nextEpoch,Quota,Current,workLimit);
+                    }
                 }
+                PerformanceProfile.Add(ProfileWork.OrdinaryConsumed,consumed);
                 if(consumed==0&&nextEpoch==source.Epoch)return 0;
                 var frame=CapturePumpFrontier();
                 bool inPump=frame.Stage==PumpStage.Solve&&frame.OriginalBudget>0;
@@ -432,6 +472,11 @@ namespace Spacewars.Runtime
                 candidate.SealPrepared();scope.Attach(candidate);
                 port.PublishPhysicalHostRoot(scope,source,candidate);
                 epoch=nextEpoch;ProgressSequence=checked(source.Progress+(consumed>0?1:0));return consumed;
+            }catch(OrdinaryPreparationReservation.Refused){
+                // Discard the entire tentative compiler/scheduler prefix: its
+                // cursor and paid quota may already have advanced before a
+                // trace scratch reservation refused. Nothing was published.
+                return 0;
             }finally{
                 candidate?.ReleaseStorage();scope?.Discard();source.Release();
             }
@@ -450,7 +495,7 @@ namespace Spacewars.Runtime
                 if(source.Scheduler.ReadyCount==0||limit==0||
                     !port.TryOpenPhysicalHostScope(NavigationPreparationKind.Projection,
                         source.Epoch,port.Admission.PublicationIdentity,out scope))return 0;
-                var reservation=scope.OwnedReservation();
+                var reservation=scope.CapacityReservationOwned();
                 candidate=source.ForkOwned(reservation);
                 int moved=0;
                 while(moved<limit&&candidate.Scheduler.ReadyCount>0&&
@@ -467,13 +512,14 @@ namespace Spacewars.Runtime
                 candidate.SealPrepared();scope.Attach(candidate);
                 port.PublishPhysicalHostRoot(scope,source,candidate);
                 ProgressSequence=checked(ProgressSequence+moved);return moved;
-            }finally{
+            }catch(NavigationRetentionBudget.CapacityRefused){return 0;}finally{
                 candidate?.ReleaseStorage();scope?.Discard();source.Release();
             }
         }
 
         internal int ProjectPhysicalOrdinary(PlayableRouteBinding binding,int allowance)
         {
+            using var measured=PerformanceProfile.Measure(ProfileStage.PhysicalProjection);
             var port=binding.RoutePort;
             if(port==null||allowance<0)throw new ArgumentException("Invalid physical projection allotment.");
             Attach(port);
@@ -485,8 +531,39 @@ namespace Spacewars.Runtime
                 if(source.Projection.Count==0||allowance==0||
                     !port.TryOpenPhysicalHostScope(NavigationPreparationKind.Projection,
                         source.Epoch,port.Admission.PublicationIdentity,out scope))return 0;
-                var reservation=scope.OwnedReservation();
+                var reservation=scope.CapacityReservationOwned();
                 candidate=source.ForkOwned(reservation);
+                var key=candidate.Projection.First;
+                if(!StageNextPhysicalProjection(candidate,reservation,out var failure))return 0;
+                if(failure!=null)LastProjectionFailure=failure;
+                var frame=CapturePumpFrontier();
+                bool inPump=frame.Stage==PumpStage.Projection&&frame.OriginalBudget>0;
+                int budget=inPump?frame.OriginalBudget:
+                    Math.Max(1,checked((allowance+15)/16));
+                candidate.SetFrontier(new PumpFrontier(PumpStage.Projection,budget,
+                    inPump?frame.ScansUsed:0,inPump?frame.TransfersUsed:0,
+                    inPump?frame.ReadyUsed:0,inPump?frame.ProjectionUsed+1:1,
+                    checked(budget*16),
+                    inPump?frame.SolveWorkLimit:0,inPump?frame.SolveConsumed:0,
+                    inPump?frame.AllocationFloor:source.Frontier.AllocationFloor,
+                    inPump?frame.PhaseUsed:0,inPump?frame.ScanAllowance:0),
+                    source.Epoch,checked(source.Progress+1));
+                candidate.SetOperation(new NavigationHostRoot.OperationDescriptor(
+                    PumpStage.Projection,inPump?frame.ProjectionUsed:0,true,true,key.Reference));
+                candidate.SealPrepared();scope.Attach(candidate);
+                port.PublishPhysicalHostRoot(scope,source,candidate);
+                ProgressSequence++;return 1;
+            }catch(NavigationRetentionBudget.CapacityRefused){return 0;}finally{
+                candidate?.ReleaseStorage();scope?.Discard();source.Release();
+            }
+        }
+
+        // The same paid projection action is used by the ordinary host and
+        // the source-runner qualification; no synchronous solver substitute.
+        internal static bool StageNextPhysicalProjection(NavigationHostRoot candidate,
+            INavStorageReservation reservation,out string failure)
+        {
+            failure=null;
                 var key=candidate.Projection.First;
                 if(candidate.Rows.TryGetValue(key,out var entry)&&
                     entry is NavigationHostRow row&&row.Answer==null&&row.Solved?.Route!=null){
@@ -513,13 +590,10 @@ namespace Spacewars.Runtime
                             if(valid){leg.RequireCanonicalProviderBinding(row.Provider,reservation);portalName=leg.CanonicalPortalName(row.Provider);}
                         }else valid=false;
                         if(valid){
-                            var step=state.ForkOwned(reservation);
-                            try{
-                                step.AdvanceLeg(leg,portalName);step.SealPrepared();
-                                candidate.StageProjectionStep(key,step,reservation);
-                            }finally{step.ReleaseStorage();}
+                            candidate.StageProjectionTransition(key,NavigationHostRow.ProjectionTransition.Leg,
+                                portalName,default,null,reservation);
                         }else{
-                            LastProjectionFailure="physical leg qualification";
+                            failure="physical leg qualification";
                             candidate.StageProjectionFailure(key,reservation);
                         }
                     }else if(row.Provider is PartitionNavigationProvider actual&&
@@ -530,14 +604,11 @@ namespace Spacewars.Runtime
                                 row.Scheduled.Clearance,out var reached,out var trace)){
                                 var names=trace.Where(leg=>leg.Kind==NavTypedLegKind.Portal)
                                     .Select(leg=>PhysicalSeamName(actual,leg.PortalId)).ToArray();
-                                var step=state.ForkOwned(reservation);
-                                try{
-                                    step.AdvanceReplay(reached,names);step.SealPrepared();
-                                    candidate.StageProjectionStep(key,step,reservation);
-                                }finally{step.ReleaseStorage();}
+                                candidate.StageProjectionTransition(key,NavigationHostRow.ProjectionTransition.Replay,
+                                    default,reached,names,reservation);
                             }else{
-                                LastProjectionFailure="physical XZ replay trace";
-                                candidate.StageProjectionFailure(key,reservation);
+                                failure="physical XZ replay trace";
+                                candidate.StageReplayFailure(key,reservation);
                             }
                         }
                     }else if(state.LegCursor==route.Legs.Count&&state.PointCount>0&&
@@ -547,30 +618,11 @@ namespace Spacewars.Runtime
                             state.ReplayCursor==state.PointCount&&state.At.Equals(state.Expected)&&
                             state.PortalsMatch()))candidate.StageReady(key,reservation);
                     else{
-                        LastProjectionFailure="physical XZ replay sequence/end";
-                        candidate.StageProjectionFailure(key,reservation);
+                        failure="physical XZ replay sequence/end";
+                        candidate.StageReplayFailure(key,reservation);
                     }
-                }else if(!candidate.SkipCompletedProjection(reservation))return 0;
-                var frame=CapturePumpFrontier();
-                bool inPump=frame.Stage==PumpStage.Projection&&frame.OriginalBudget>0;
-                int budget=inPump?frame.OriginalBudget:
-                    Math.Max(1,checked((allowance+15)/16));
-                candidate.SetFrontier(new PumpFrontier(PumpStage.Projection,budget,
-                    inPump?frame.ScansUsed:0,inPump?frame.TransfersUsed:0,
-                    inPump?frame.ReadyUsed:0,inPump?frame.ProjectionUsed+1:1,
-                    checked(budget*16),
-                    inPump?frame.SolveWorkLimit:0,inPump?frame.SolveConsumed:0,
-                    inPump?frame.AllocationFloor:source.Frontier.AllocationFloor,
-                    inPump?frame.PhaseUsed:0,inPump?frame.ScanAllowance:0),
-                    source.Epoch,checked(source.Progress+1));
-                candidate.SetOperation(new NavigationHostRoot.OperationDescriptor(
-                    PumpStage.Projection,inPump?frame.ProjectionUsed:0,true,true,key.Reference));
-                candidate.SealPrepared();scope.Attach(candidate);
-                port.PublishPhysicalHostRoot(scope,source,candidate);
-                ProgressSequence++;return 1;
-            }finally{
-                candidate?.ReleaseStorage();scope?.Discard();source.Release();
-            }
+                }else if(!candidate.SkipCompletedProjection(reservation))return false;
+            return true;
         }
 
         internal bool FlushPhysicalOrdinary(PlayableRouteBinding binding)
@@ -586,7 +638,7 @@ namespace Spacewars.Runtime
                 if(source.Completion.Count==0||
                     !port.TryOpenPhysicalHostScope(NavigationPreparationKind.Projection,
                         source.Epoch,port.Admission.PublicationIdentity,out scope))return false;
-                var reservation=scope.OwnedReservation();
+                var reservation=scope.CapacityReservationOwned();
                 candidate=source.ForkOwned(reservation);
                 var key=candidate.Completion.First;
                 bool tombstone=!candidate.Rows.ContainsKey(key);
@@ -607,7 +659,7 @@ namespace Spacewars.Runtime
                 candidate.SealPrepared();
                 if(tombstone){scope.Attach(candidate);port.PublishPhysicalHostRoot(scope,source,candidate);}else if(!port.PublishCompletedPhysicalHost(scope,source,candidate,key))return false;
                 if(!tombstone)ProgressSequence++;return true;
-            }finally{
+            }catch(NavigationRetentionBudget.CapacityRefused){return false;}finally{
                 candidate?.ReleaseStorage();scope?.Discard();source.Release();
             }
         }
@@ -632,7 +684,7 @@ namespace Spacewars.Runtime
                 }
                 if(!found||!port.TryOpenPhysicalHostScope(NavigationPreparationKind.Projection,
                     source.Epoch,port.Admission.PublicationIdentity,out scope))return false;
-                var reservation=scope.OwnedReservation();
+                var reservation=scope.CapacityReservationOwned();
                 candidate=source.ForkOwned(reservation);
                 candidate.StageRetireDelivered(key,reservation);
                 candidate.SetFrontier(source.Frontier,source.Epoch,checked(source.Progress+1));
@@ -641,7 +693,7 @@ namespace Spacewars.Runtime
                 candidate.SealPrepared();scope.Attach(candidate);
                 port.PublishPhysicalHostRoot(scope,source,candidate);
                 ProgressSequence++;return true;
-            }finally{
+            }catch(NavigationRetentionBudget.CapacityRefused){return false;}finally{
                 candidate?.ReleaseStorage();scope?.Discard();source.Release();
             }
         }
@@ -656,16 +708,7 @@ namespace Spacewars.Runtime
         }
 
         private static long ProspectiveProviderConstruction(NavigationAdmission admission,NavGeometry geometry)
-        {
-            if(admission.AuthoredTerrain==null)
-                return checked(4096L+1024+2048+512+
-                    geometry.Obstacles.Sum(o=>512L+128L*(o.Polygon?.Vertices.Count??4))+4096);
-            var terrain=admission.AuthoredTerrain;
-            long edges=terrain.Supports.Sum(v=>(long)(v.Bounds.Polygon?.Vertices.Count??4));
-            return checked(8192L+1024L*terrain.Supports.Count+512L*edges+
-                512L*edges*(2*edges+1)+256L*terrain.SurfaceTransitions.Count+
-                geometry.Obstacles.Sum(o=>512L+128L*(o.Polygon?.Vertices.Count??0)));
-        }
+            =>NavigationProviderConstructionBound.Estimate(admission.AuthoredTerrain,geometry);
 
         private static NavScheduledRequest BuildScheduled(NavigationAdmission admission,
             NavigationRequest request,ILayeredNavigationProvider provider)

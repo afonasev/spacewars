@@ -12,5 +12,7 @@
   "teamEmission": 4.4,
   "bloomIntensity": 0.32,
   "bloomThreshold": 1.2,
-  "bloomScatter": 0.58
+  "bloomScatter": 0.58,
+  "refineryBeaconEmission": 0.9,
+  "buildingLampEmission": 0.9
 }

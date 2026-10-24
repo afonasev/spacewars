@@ -21,7 +21,7 @@ namespace Spacewars.Presentation
             hudFocusButton.style.width=72;hudFocusButton.style.flexShrink=0;hudFocusButton.style.whiteSpace=WhiteSpace.NoWrap;hudFocusButton.style.fontSize=12;hudFocusButton.style.unityTextOutlineWidth=.15f;hudFocusButton.style.unityTextOutlineColor=PanelColor;hudFocusButton.style.unityTextAlign=TextAnchor.MiddleLeft;hudFocusButton.style.paddingTop=0;hudFocusButton.style.paddingBottom=0;hudFocusButton.style.marginTop=0;hudFocusButton.style.marginRight=0;hudFocusButton.style.paddingLeft=24;hudFocusButton.style.paddingRight=4;hudFocusButton.style.height=24;hudFocusButton.style.minHeight=24;hudFocusButton.style.marginBottom=0;hudFocusButton.style.backgroundColor=Color.clear;
             hudFocusButton.style.borderTopWidth=hudFocusButton.style.borderBottomWidth=hudFocusButton.style.borderRightWidth=0;hudFocusButton.style.borderLeftWidth=1;
             var army=new OrbitalGlyph("army"){name="army-icon"};army.style.position=Position.Absolute;army.style.left=4;army.style.top=5;army.style.width=16;army.style.height=14;hudFocusButton.Add(army);
-            OrbitalPrecision.Frame(armyRegion,flush:true);armyRegion.style.paddingTop=10;armyRegion.style.paddingBottom=10;armyRegion.style.paddingLeft=12;armyRegion.style.paddingRight=12;
+            armyRegion.style.paddingTop=10;armyRegion.style.paddingBottom=10;armyRegion.style.paddingLeft=12;armyRegion.style.paddingRight=12;
             selectionLabel.style.fontSize=16;selectionLabel.style.paddingLeft=28;selectionLabel.style.minHeight=20;selectionLabel.style.marginBottom=3;
             selectionLabel.name="context-title";
             contextStats=new Label{name="context-stats"};contextStats.style.fontSize=12;contextStats.style.color=Muted;contextStats.style.whiteSpace=WhiteSpace.Normal;contextStats.style.marginLeft=28;contextStats.style.marginBottom=4;armyRegion.Insert(1,contextStats);
@@ -31,6 +31,7 @@ namespace Spacewars.Presentation
             contextHealthText=new Label();contextHealthText.style.fontSize=12;contextHealthText.style.marginLeft=8;contextHealthText.style.color=Muted;healthRow.Add(contextHealthText);
             queueLabel.style.fontSize=12;queueLabel.style.color=Muted;queueLabel.style.whiteSpace=WhiteSpace.Normal;queueLabel.style.marginBottom=6;
             var frame=root.Q("tactical-minimap-frame");OrbitalPrecision.Frame(frame,MinimapOutline,true);frame.style.paddingLeft=frame.style.paddingRight=frame.style.paddingTop=frame.style.paddingBottom=4;frame.style.width=(float)profile.MinimapCompactSize+8;frame.style.marginRight=0;
+            ConfigureBuildingDock();
             mapClock.style.fontSize=12;mapClock.style.color=Ink;mapClock.style.marginTop=mapClock.style.marginBottom=0;mapClock.style.height=20;
         }
         private string packedCredits,packedCapacity;
@@ -56,13 +57,14 @@ namespace Spacewars.Presentation
             var entity=ownSelected.FirstOrDefault(e=>e.Id==primarySelection)??ownSelected.FirstOrDefault();
             contextStats.style.display=building==null&&entity!=null?DisplayStyle.Flex:DisplayStyle.None;
             contextStats.text=entity==null?"":"Скорость "+PlayableUnitRules.Speed(profile,entity.Kind,entity.Upgraded).ToString("0.#")+" · Обзор "+PlayableUnitRules.Vision(profile,entity.Kind).ToString("0.#")+" · Дальность "+PlayableUnitRules.Range(profile,entity.Kind,entity.Upgraded).ToString("0.#")+(ownSelected.Length>1?" · Выбрано "+ownSelected.Length:"")+(entity.Held?" · HOLD":"");
-            contextIcon.Set(building!=null?OrbitalPrecision.BuildingGlyph(building.Kind):entity==null?"building":entity.Kind==PlayableEntityKind.Explorer?"explorer":entity.Kind==PlayableEntityKind.Shkval?"shkval":"tank",Ink);
+            contextIcon.Set(building!=null?OrbitalPrecision.BuildingGlyph(building.Kind):entity==null?"building":entity.Kind==PlayableEntityKind.Hawk?"hawk":entity.Kind==PlayableEntityKind.Explorer?"explorer":entity.Kind==PlayableEntityKind.Shkval?"shkval":"tank",Ink);
             var healthRow=armyRegion.Q("context-health");healthRow.style.display=building!=null||entity!=null?DisplayStyle.Flex:DisplayStyle.None;
             if(building!=null){contextHealth.style.width=Length.Percent((float)(100*building.Health/(double)TerritoryRules.Health(profile,building.Kind)));selectionLabel.text=BuildingName(building.Kind).ToUpperInvariant();contextHealthText.text=building.Health+" / "+TerritoryRules.Health(profile,building.Kind);}
-            else if(entity!=null){selectionLabel.text=UnitName(entity.Kind);contextHealth.style.width=Length.Percent((float)(100*entity.Health/PlayableUnitRules.Health(profile,entity.Kind)));contextHealthText.text=entity.Health+" / "+PlayableUnitRules.Health(profile,entity.Kind);}
+            else if(entity!=null){selectionLabel.text=UnitName(entity.Kind);contextHealth.style.width=Length.Percent((float)(100*PlayableUnitRules.HealthRatio(profile,entity)));contextHealthText.text=entity.Health+" / "+PlayableUnitRules.MaximumHealth(profile,entity).ToString("0.#");}
             // Production progress belongs to its active card; preserve construction/upgrade bars.
-            if(building?.Kind==PlayableBuildingKind.Factory&&building.Progress>=1)progress.style.display=DisplayStyle.None;
+            if(building!=null&&building.Progress>=1&&(building.Kind==PlayableBuildingKind.Factory||building.Kind==PlayableBuildingKind.Hangar&&building.LaunchPhase==0))progress.style.display=DisplayStyle.None;
             if(building?.PrivateState?.Lifecycle!=null){var s=building.PrivateState.Lifecycle;lifecycleLabel.style.display=s.Selling||s.Repairing?DisplayStyle.Flex:DisplayStyle.None;}
+            UpdateBuildingDock(building,entity);
             armyRegion.MarkDirtyRepaint();
         }
     }

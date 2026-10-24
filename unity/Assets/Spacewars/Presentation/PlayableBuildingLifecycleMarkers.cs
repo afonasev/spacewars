@@ -23,7 +23,7 @@ namespace Spacewars.Presentation
         }
         private readonly HashSet<int> activeLifecycleMarkers=new HashSet<int>();
         private readonly List<int> staleLifecycleMarkers=new List<int>();
-        private double BuildingVisualHeight(PlayableBuildingKind kind)=>kind==PlayableBuildingKind.Factory?profile.FactoryModelHeightMeters*profile.FactoryModelScale:
+        private double BuildingVisualHeight(PlayableBuildingKind kind)=>kind==PlayableBuildingKind.Hangar?profile.HangarModelHeightMeters*profile.HangarModelScale:kind==PlayableBuildingKind.Factory?profile.FactoryModelHeightMeters*profile.FactoryModelScale:
             kind==PlayableBuildingKind.ScientificCenter?profile.ScienceModelHeightMeters*profile.ScienceModelScale:
             kind==PlayableBuildingKind.Refinery?profile.RefineryModelHeightMeters*profile.RefineryModelScale:
             kind==PlayableBuildingKind.Outpost?profile.OutpostModelHeightMeters*profile.OutpostModelScale:

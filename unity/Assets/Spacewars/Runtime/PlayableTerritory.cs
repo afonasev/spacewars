@@ -31,7 +31,7 @@ namespace Spacewars.Runtime
             }
             else
             {
-                if(kind!=PlayableBuildingKind.Factory&&kind!=PlayableBuildingKind.Refinery&&kind!=PlayableBuildingKind.ScientificCenter)return PlayableCommandStatus.InvalidTarget;
+                if(kind!=PlayableBuildingKind.Factory&&kind!=PlayableBuildingKind.Refinery&&kind!=PlayableBuildingKind.ScientificCenter&&kind!=PlayableBuildingKind.Hangar)return PlayableCommandStatus.InvalidTarget;
                 if(!buildings.TryGetValue(site.CenterId,out var parent)||parent.Id!=parentId||!parent.Ready||parent.Sale!=null||parent.Owner!=owner||slotId<1||slotId>site.Site.Slots.Count)return PlayableCommandStatus.InvalidTarget;
                 foreach(var b in buildings.Values)if(b.SiteId==siteId&&b.SlotId==slotId){message="Slot occupied.";return PlayableCommandStatus.OccupiedPad;}
                 var slot=site.Site.Slots[slotId-1];position=slot.Position;heading=slot.Heading;
@@ -77,7 +77,7 @@ namespace Spacewars.Runtime
             {
                 if(state.Locked.HasValue||state.CenterId!=0){state.Contested=false;continue;}
                 var present=new HashSet<PlayableOwner>();double radius=TerritoryRules.CaptureRadius(profile,state.Site.Kind);
-                foreach(var u in units.Values)if(!eliminated.Contains(u.Owner)&&navigation.Crowd.TryGet(u.Id,out var n)&&Distance(n.Position,state.Site.Position)<=radius)present.Add(u.Owner);
+                foreach(var u in units.Values)if(!eliminated.Contains(u.Owner)&&TryActor(u.Id,out var n)&&Distance(n.Position,state.Site.Position)<=radius)present.Add(u.Owner);
                 state.Contested=present.Select(TeamOf).Distinct().Count()>1;if(state.Contested)continue;
                 double delta=dt/TerritoryRules.CaptureSeconds(profile,state.Site.Kind);
                 var captureOwner=Owners.Where(present.Contains).Select(x=>(PlayableOwner?)x).FirstOrDefault();
@@ -102,7 +102,7 @@ namespace Spacewars.Runtime
                 bool occupied=false,enemy=false;
                 foreach(var u in units.Values)
                 {
-                    if(!navigation.Crowd.TryGet(u.Id,out var n)||!InFootprint(b,n.Position,n.Radius))continue;
+                    if(!TryActor(u.Id,out var n)||!InFootprint(b,n.Position,n.Radius))continue;
                     occupied=true;
                     if(u.Owner!=b.Owner){enemy=true;continue;}
                     if(b.Evacuated.Contains(u.Id)&&(n.Moving||navigation.IsPending(u.Id)))continue;

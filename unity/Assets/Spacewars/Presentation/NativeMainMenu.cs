@@ -10,7 +10,7 @@ namespace Spacewars.Presentation
     public sealed class NativeMainMenu : MonoBehaviour
     {
         [Serializable] private sealed class UpdateState { public string version,available,state,error,notice; public long done,total; }
-        public Action Play, Laboratory;
+        public Action Play, Laboratory, Campaign;
         public VisualElement HostRoot;
         public NativeMenuNavigation Navigation;
         public VisualElement ScreenRoot { get; private set; }
@@ -36,6 +36,7 @@ namespace Spacewars.Presentation
             card=new VisualElement();card.AddToClassList("orbital-main-stack");ScreenRoot.Add(card);
             card.Add(OrbitalTheme.Text("SPACEWARS","orbital-logo"));
             playButton=OrbitalTheme.Action("В бой!",()=>StartCoroutine(EnterGame()),"main-play",true);card.Add(playButton);
+            card.Add(OrbitalTheme.Action("Кампания",OpenCampaign,"main-campaign"));
             var network=OrbitalTheme.Action("Сетевая игра",()=>{},"main-network");network.SetEnabled(false);network.style.display=DisplayStyle.None;network.tooltip="Пока недоступно";card.Add(network);
             var settings=OrbitalTheme.Action("Настройки",()=>OpenSettings(),"main-settings");card.Add(settings);
             card.Add(OrbitalTheme.Action("Управление",()=>{ScreenRoot.style.display=DisplayStyle.None;NativeControlsHelp.Open(HostRoot??GetComponent<UIDocument>().rootVisualElement,Navigation,()=>RestoreFocus(card.Q<Button>("main-controls")));},"main-controls"));
@@ -64,6 +65,20 @@ namespace Spacewars.Presentation
             });
             updateButton.SetEnabled(false);RestoreFocus(playButton);
             if(!string.IsNullOrEmpty(endpoint))StartCoroutine(Poll());
+        }
+        private void OpenCampaign()
+        {
+            ScreenRoot.style.display=DisplayStyle.None;
+            var host=HostRoot??GetComponent<UIDocument>().rootVisualElement;
+            var page=OrbitalTheme.Screen(host,"campaign-menu",true);var content=OrbitalTheme.Card(page,"campaign-card");
+            content.Add(OrbitalTheme.Text("КАМПАНИЯ","orbital-title"));
+            var list=new VisualElement();content.Add(list);
+            var brief=new VisualElement{name="campaign-briefing"};brief.style.display=DisplayStyle.None;content.Add(brief);
+            list.Add(OrbitalTheme.Action("Спорная территория · "+(PlayerPrefs.GetInt("campaign.disputed-territory.completed",0)==1?"пройдена":"не пройдена"),()=>{list.style.display=DisplayStyle.None;brief.style.display=DisplayStyle.Flex;Navigation.SetScope(page,Back,brief.Q<Button>("campaign-start"));},"campaign-mission-1",true));
+            brief.Add(OrbitalTheme.Text("Спорная территория","orbital-title"));var description=OrbitalTheme.Text(Spacewars.Simulation.CampaignReconOpening.Briefing);description.style.whiteSpace=WhiteSpace.Normal;brief.Add(description);
+            brief.Add(OrbitalTheme.Action("Начать миссию",()=>StartCoroutine(EnterGame(()=>{page.RemoveFromHierarchy();Campaign?.Invoke();})),"campaign-start",true));
+            void Back(){page.RemoveFromHierarchy();RestoreFocus(card.Q<Button>("main-campaign"));}
+            content.Add(OrbitalTheme.Action("Назад",Back,"campaign-back"));Navigation.SetScope(page,Back,list.Q<Button>());
         }
         public void RestoreFocus(VisualElement preferred=null)
         {ScreenRoot.style.display=DisplayStyle.Flex;Navigation.SetScope(ScreenRoot,null,preferred??playButton);}
@@ -123,11 +138,11 @@ namespace Spacewars.Presentation
             if(!string.IsNullOrEmpty(statusError))stateLabel.text=statusError;
             if(!string.IsNullOrEmpty(current.notice))stateLabel.text=current.notice+" "+stateLabel.text;
         }
-        private IEnumerator EnterGame()
+        private IEnumerator EnterGame(Action route=null)
         {
             if(busy)yield break;busy=true;playButton.SetEnabled(false);
             bool allowed=string.IsNullOrEmpty(endpoint);if(!allowed)yield return Request("/play","POST",s=>allowed=s!=null);
-            if(allowed){var action=Play;ScreenRoot.style.display=DisplayStyle.None;Navigation.SetScope(null);action?.Invoke();Destroy(gameObject);}else{busy=false;playButton.SetEnabled(true);}
+            if(allowed){var action=route??Play;ScreenRoot.style.display=DisplayStyle.None;Navigation.SetScope(null);action?.Invoke();Destroy(gameObject);}else{busy=false;playButton.SetEnabled(true);}
         }
         private IEnumerator UpdateGame()
         {

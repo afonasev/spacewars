@@ -55,6 +55,27 @@ namespace Spacewars.Tests.EditMode
             System.IO.File.WriteAllText(System.IO.Path.Combine(folder, "descriptor.sha256"), PlayableAiCanonical.Hash(descriptor));
             TestContext.WriteLine("map=" + map.Id + "@" + map.Revision + " capacity=8 content_sha256=" + PlayableAiCanonical.Hash(descriptor));
         }
+        [Test] public void LobbyPublishesAuthoredTerrainForCertifiedRouteProvider()
+        {
+            var p = Profile(); var setup = new NativeLobbyConfiguration { AiTestMap = true, HasExplicitSeed = true, ExplicitSeed = 19 };
+            setup.InitializeParticipants();
+            using (var runtime = PlayableRuntime.CreateLobbyMatch(p, 4, setup, true))
+            {
+                var binding = runtime.NavigationBinding;
+                Assert.NotNull(binding.RoutePort);
+                Assert.IsInstanceOf<AiTestMap>(binding.Admission.AuthoredTerrain);
+                var map = binding.Admission.AuthoredTerrain;
+                Assert.True(PartitionNavigationProvider.SupportsTerrain(map));
+                var provider = new PartitionNavigationProvider(map, binding.Admission.Geometry, null);
+                var same = new PartitionNavigationProvider(map, binding.Admission.Geometry, null);
+                Assert.AreEqual(provider.Binding, same.Binding);
+                Assert.AreEqual(map.Id, binding.Admission.SurfaceProviderId);
+                var clearance = new NavClearanceProfile("explorer", 1, "ground", 1, p.ExplorerCollisionRadius);
+                foreach (var entity in runtime.SpectatorFrame(PlayableRuntime.LocalSpectatorId).Overview.Entities.Where(e => e.Kind == PlayableEntityKind.Explorer))
+                    Assert.True(provider.TryLocate(entity.Position, clearance, out _));
+                runtime.RequestStop(); Assert.True(SpinWait.SpinUntil(() => runtime.IsStopped, 3000));
+            }
+        }
         [Test] public void EightAiLobbyOwnersBindToIndependentStarts()
         {
             var p = Profile(); var setup = new NativeLobbyConfiguration { AiTestMap = true, HasExplicitSeed = true, ExplicitSeed = 7108 };

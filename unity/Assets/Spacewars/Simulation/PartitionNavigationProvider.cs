@@ -13,6 +13,7 @@ namespace Spacewars.Simulation
         private readonly TerrainLocations locations;
         private readonly string terrainId,holdBinding;
         private readonly int terrainRevision,surfaceSemanticsVersion;
+        internal IReadOnlyList<NavObstacle> ExclusionObstacles=>locations.Geometry.Obstacles;
         internal string TerrainId=>terrainId; internal string HoldBinding=>holdBinding;
         internal int TerrainRevision=>terrainRevision; internal int SurfaceSemanticsVersion=>surfaceSemanticsVersion;
         internal NavLocation OwnedCheckpointLocation(NavLocation location)=>locations.OwnedCheckpointLocation(location);
@@ -20,7 +21,7 @@ namespace Spacewars.Simulation
 
         // Admission and host construction must agree on the same immutable map set.
         public static bool SupportsTerrain(IPlayableTerrain terrain)
-            =>terrain is ThreeCrossingsMap||terrain is FoundryMap||terrain is BasaltCrownMap||terrain is MossHighlandMap;
+            =>terrain is ThreeCrossingsMap||terrain is FoundryMap||terrain is BasaltCrownMap||terrain is MossHighlandMap||terrain is CampaignOpeningMap||terrain is WhiteMeridianMap||terrain is AiTestMap||terrain is ProvingGroundMap||terrain is CrimsonGroveMap;
 
         public PartitionNavigationProvider(IPlayableTerrain terrain, NavGeometry movementGeometry, string holdBinding)
         {
@@ -32,7 +33,9 @@ namespace Spacewars.Simulation
             if (movementGeometry.Obstacles.Count > 2048 || movementGeometry.Obstacles.Any(o =>
                 o.Polygon != null && o.Polygon.Vertices.Count > 256))
                 throw new ArgumentException("Partition movement geometry capacity exceeded.", nameof(movementGeometry));
-            locations = new TerrainLocations(movementGeometry, terrain.Supports, terrain.SurfaceTransitions);
+            locations = terrain is INavArrivalPointTerrain authored
+                ?new TerrainLocations(movementGeometry,authored.ArrivalLocations)
+                :new TerrainLocations(movementGeometry, terrain.Supports, terrain.SurfaceTransitions);
             HalfExtent = terrain.HalfExtent;
             Seams = locations.Seams;
             Surfaces = Array.AsReadOnly(terrain.Supports.Select(s => new NavLayerSurface(
@@ -79,6 +82,7 @@ namespace Spacewars.Simulation
         public string Binding { get; }
         public double HalfExtent { get; }
         public long EstimatedRetainedBytes { get; }
+        internal bool SameArrangement(PartitionNavigationProvider other)=>other!=null&&locations.SameArrangement(other.locations);
         internal int TracePortalBound=>locations.TracePortalBound;
         internal long TraceScratchBound=>locations.TraceScratchBound;
         public IReadOnlyList<NavLayerSurface> Surfaces { get; private set; }
@@ -91,9 +95,18 @@ namespace Spacewars.Simulation
         public bool IsValid(NavLocation location, NavClearanceProfile clearance)
             => locations.Valid(location, clearance.Radius);
         public bool CanSweep(NavLocation from, NavLocation to, NavClearanceProfile clearance)
-            => from.SurfaceId == to.SurfaceId &&
+        {using var measured=PerformanceProfile.Sample(ProfileStage.GeometrySweep);
+            return from.SurfaceId == to.SurfaceId &&
                locations.TryGraphTrace(from, to.Position, clearance.Radius, out var reached, out var trace) &&
-               reached.Equals(to) && trace.All(l => l.Kind == NavTypedLegKind.Surface);
+               reached.Equals(to) && trace.All(l => l.Kind == NavTypedLegKind.Surface);}
+
+        internal bool CanSweep(NavLocation from,NavLocation to,NavClearanceProfile clearance,out int blocker)
+        {
+            using var measured=PerformanceProfile.Sample(ProfileStage.GeometrySweep);
+            blocker=-1;return from.SurfaceId==to.SurfaceId&&locations.TryGraphTrace(from,to.Position,clearance.Radius,out var reached,out var trace,out blocker)&&reached.Equals(to)&&trace.All(l=>l.Kind==NavTypedLegKind.Surface);
+        }
+        internal bool RejectTerminalRectangle(NavPoint from,NavHeuristicBox candidates,double radius,int blocker,bool corners=false)
+            =>blocker>=0&&blocker<ExclusionObstacles.Count&&NavTerminalRectangleProof.Reject(from,candidates,radius,ExclusionObstacles[blocker],corners);
         public bool TryTraverse(NavLocation from, NavPoint to, NavClearanceProfile clearance, out NavLocation reached)
             => locations.Traverse(from, to, clearance.Radius, out reached);
         public bool TryTrace(NavLocation from, NavPoint to, NavClearanceProfile clearance,
@@ -111,7 +124,7 @@ namespace Spacewars.Simulation
         internal bool TryGraphTraceValidated(NavLocation from,NavPoint to,NavClearanceProfile clearance,out NavLocation reached,out IReadOnlyList<NavTypedLeg> trace)
             =>locations.TryGraphTraceValidated(from,to,clearance.Radius,out reached,out trace);
         internal bool TryGraphTraceValidatedOwned(NavLocation from,NavPoint to,NavClearanceProfile clearance,out NavLocation reached,out IReadOnlyList<NavTypedLeg> trace,INavStorageReservation reservation)
-        {if(StorageRoot!=null)NavStorageAdmission.RequireOwned(reservation,StorageRoot);return locations.TryGraphTraceValidated(from,to,clearance.Radius,out reached,out trace,reservation,this);}
+        {using var measured=PerformanceProfile.Sample(ProfileStage.GeometryTrace);if(StorageRoot!=null)NavStorageAdmission.RequireOwned(reservation,StorageRoot);return locations.TryGraphTraceValidated(from,to,clearance.Radius,out reached,out trace,reservation,this);}
         public NavConnectorResult QualifyPortal(string portalId, NavClearanceProfile clearance)
             => new NavConnectorResult(NavConnectorStatus.UnknownPortal, Binding, portalId, default, default, default, default, 0);
         public NavConnectorResult Connect(string portalId, NavLocation origin, NavLocation endpoint, NavClearanceProfile clearance)

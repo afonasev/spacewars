@@ -1,0 +1,51 @@
+diff --git a/unity/Assets/Spacewars/Simulation/NavigationDemandQuery.cs b/unity/Assets/Spacewars/Simulation/NavigationDemandQuery.cs
+index 4171175c..287d1424 100644
+--- a/unity/Assets/Spacewars/Simulation/NavigationDemandQuery.cs
++++ b/unity/Assets/Spacewars/Simulation/NavigationDemandQuery.cs
+@@ -72,7 +72,7 @@ namespace Spacewars.Simulation
+         {
+             double h=request.DemandQueryV4?nodeBounds[node]:request.DemandQueryV3?TypedLowerBound(locations[node].Position,request.Subscription.AssignedEndpoint.Position,Provider.DemandSurfaceBounds(request.Subscription.AssignedEndpoint.SurfaceId)):Cost(locations[node],request.Subscription.AssignedEndpoint);
+             double margin=8.0*(locations.Count+4)*(Provider.TracePortalBound+4.0)*2.2204460492503131e-16;
+-            return new NavQueueEntry{Node=node,Cost=request.DemandQueryV4?ConservativeSeamPriority(cost,h,margin):Math.Max(0,(cost+h)*(1-margin))};
++            var qaEntry=new NavQueueEntry{Node=node,Cost=request.DemandQueryV4?ConservativeSeamPriority(cost,h,margin):Math.Max(0,(cost+h)*(1-margin))};NavDemandReopenProbeQa.Entry(node,cost,h,qaEntry.Cost);return qaEntry;
+         }
+         internal void StepGraph()
+         {
+@@ -90,7 +90,7 @@ namespace Spacewars.Simulation
+             try{
+                 if(!found||!reached.Equals(locations[to]))return;
+                 bool portal=false;double sum=0;string name=null;foreach(var leg in trace){sum+=leg.Cost;if(leg.Kind==NavTypedLegKind.Portal){portal=true;if(name==null)name=leg.PortalId;}}
+-                double arcCost=portal?sum:Cost(from,locations[to]);if(request.DemandQueryV3&&distance.TryGetValue(to,out double known)&&distance[current]+arcCost>=known)return;
++                double arcCost=portal?sum:Cost(from,locations[to]);if(request.DemandQueryV3&&distance.TryGetValue(to,out double known)){double qaFromG=distance[current],qaCandidate=qaFromG+arcCost;bool qaRejected=qaCandidate>=known;NavDemandReopenProbeQa.Attempt("G",to,current,qaCandidate,known,qaFromG,arcCost,true,qaRejected);if(qaRejected)return;}
+                 pendingArc=new NavGraphArc(current,to,arcCost,portal?NavGraphArcKind.Portal:NavGraphArcKind.Surface,name,portal?trace:null);
+                 NavStoragePayload<NavGraphArc>.ValidateActive(pendingArc,this);NavStoragePayload<NavGraphArc>.Retain(pendingArc);pending=true;
+             }finally{if(owner!=null)(trace as NavOwnedStorage)?.ReleaseOwner();}
+@@ -108,11 +108,11 @@ namespace Spacewars.Simulation
+                 if(starts.Count==0||ends.Count==0){Finish(NavSolveStatus.BlockedConnector);return;}phase=Phase.Seed;return;
+             }
+             if(phase==Phase.Seed){
+-                if(starts.TrySuccessor(seed,out var next)){if(!EnsureBound(next.Key))return;seed=next.Key;distance[seed]=next.Value;frontier.Add(Entry(seed,next.Value));}else phase=Phase.Pop;return;
++                if(starts.TrySuccessor(seed,out var next)){if(!EnsureBound(next.Key))return;seed=next.Key;distance[seed]=next.Value;var qaSeedEntry=Entry(seed,next.Value);bool qaSeedAdded=frontier.Add(qaSeedEntry);NavDemandReopenProbeQa.Seed(seed,next.Value,qaSeedEntry.Cost,qaSeedAdded);}else phase=Phase.Pop;return;
+             }
+             if(phase==Phase.Pop){
+                 if(frontier.Count==0||frontier.Min.Cost>best){if(chosen<0)Finish(NavSolveStatus.UnreachableInGraph);else{traceNode=chosen;phase=Phase.Trace;}return;}
+-                var item=frontier.Min;frontier.Remove(item);if(!distance.TryGetValue(item.Node,out double known)||item.Cost!=Entry(item.Node,known).Cost)return;
++                var item=frontier.Min;bool qaPopRemoved=frontier.Remove(item);NavDemandReopenProbeQa.Remove("Q",item.Node,0,item.Cost,qaPopRemoved);if(!distance.TryGetValue(item.Node,out double known)||item.Cost!=Entry(item.Node,known).Cost)return;NavDemandReopenProbeQa.Pop(item.Node,known,item.Cost,qaPopRemoved);
+                 current=item.Node;candidate=request.DemandQueryV3&&locations[current].SurfaceId!=request.Subscription.AssignedEndpoint.SurfaceId?request.Region.Candidates.Count:0;direction=0;phase=request.DemandQueryV3&&candidate==request.Region.Candidates.Count?Phase.Edges:Phase.Candidates;return;
+             }
+             if(request.DemandQueryV2&&phase==Phase.Candidates&&candidate==request.Region.Candidates.Count)phase=Phase.Edges;
+@@ -125,11 +125,11 @@ namespace Spacewars.Simulation
+             }
+             if(phase==Phase.Edges){
+                 if(!pending){phase=Phase.Pop;current=-1;return;}
+-                var arc=pendingArc;double value=distance[current]+arc.Cost;
+-                if(!distance.TryGetValue(arc.To,out double old)||value<old){
++                var arc=pendingArc;double qaParentG=distance[current],value=qaParentG+arc.Cost;bool qaHad=distance.TryGetValue(arc.To,out double old),qaImproves=!qaHad||value<old;NavDemandReopenProbeQa.Attempt("R",arc.To,current,value,old,qaParentG,arc.Cost,qaHad,qaImproves);
++                if(qaImproves){
+                     if(!distance.ContainsKey(arc.To)&&distance.Count==request.MaxLabels){Finish(NavSolveStatus.CapacityExceeded);return;}
+                     if(!EnsureBound(arc.To))return;
+-                    if(distance.ContainsKey(arc.To))frontier.Remove(Entry(arc.To,old));distance[arc.To]=value;previous[arc.To]=arc;frontier.Add(Entry(arc.To,value));
++                    bool qaRemoved=false;if(distance.ContainsKey(arc.To)){var qaOldEntry=Entry(arc.To,old);qaRemoved=frontier.Remove(qaOldEntry);NavDemandReopenProbeQa.Remove("D",arc.To,old,qaOldEntry.Cost,qaRemoved);}distance[arc.To]=value;previous[arc.To]=arc;var qaNewEntry=Entry(arc.To,value);bool qaAdded=frontier.Add(qaNewEntry);NavDemandReopenProbeQa.Update(arc.To,current,value,old,qaParentG,arc.Cost,qaHad,qaRemoved,qaAdded);
+                 }
+                 NavStoragePayload<NavGraphArc>.Release(pendingArc);pendingArc=default;pending=false;return;
+             }

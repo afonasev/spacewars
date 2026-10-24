@@ -2,6 +2,9 @@ Shader "Spacewars/ConstructionApron"
 {
     Properties
     {
+        [HideInInspector] _SrcBlend("Source blend", Float) = 1
+        [HideInInspector] _DstBlend("Destination blend", Float) = 0
+        [HideInInspector] _ZWrite("Depth write", Float) = 1
         _BaseColor("Tint",Color)=(1,1,1,1)
         _ConcreteTex("Authored concrete",2D)="white" {}
         _FogMask("Team fog",2D)="black" {}
@@ -13,6 +16,8 @@ Shader "Spacewars/ConstructionApron"
         Tags {"RenderPipeline"="UniversalPipeline" "RenderType"="Opaque" "Queue"="Geometry"}
         Pass
         {
+            Blend [_SrcBlend] [_DstBlend]
+            ZWrite [_ZWrite]
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
@@ -39,7 +44,7 @@ Shader "Spacewars/ConstructionApron"
                 Light light=GetMainLight();half3 lit=surface*(SampleSH(normalize(i.normalWS))+light.color*saturate(dot(normalize(i.normalWS),light.direction)));
                 half fog=SAMPLE_TEXTURE2D(_FogMask,sampler_FogMask,i.positionWS.xz/(2*_FogBounds.xy)+.5).r;
                 half grey=dot(lit,half3(.2126,.7152,.0722));lit=lerp(lit,grey.xxx,fog);
-                return half4(lerp(lit,_FogColor.rgb,fog),1);
+                return half4(lerp(lit,_FogColor.rgb,fog),_BaseColor.a);
             }
             ENDHLSL
         }

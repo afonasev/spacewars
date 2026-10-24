@@ -27,6 +27,18 @@ namespace Spacewars.Tests.EditMode
             var scenario=noFactorySlot?slots.Select((s,i)=>new OfflineScenarioBuilding(1,i==0?PlayableBuildingKind.Refinery:PlayableBuildingKind.ScientificCenter,1,s.Id,s.Position,s.Heading)).ToArray():Array.Empty<OfflineScenarioBuilding>();
             return new OfflineMatchConfiguration(p,"o3-diagnostic-funded","o3-flat-two-starts","UnityHostRouteService",seed,new[]{new OfflineParticipant("west-owner",1,1,OfflineControl.Ai),new OfflineParticipant("east-owner",2,2,OfflineControl.Human)},starts,sites,Array.Empty<NavObstacle>(),new double[,]{{0,48},{48,0}},scenarioBuildings:scenario);
         }
+        private static PlayableAiObservation FundingView(int tanks=0,int queuedTanks=0)
+        {
+            var p=PlayableProfile.Default;var site=TerritoryRules.Sites(p).First(s=>s.Kind==PlayableBuildingKind.Headquarters);
+            var orders=Enumerable.Range(1,queuedTanks).Select(i=>new PlayableProductionOrderSnapshot(i,PlayableEntityKind.Tank,p.TankCreditCost,p.TankPopulationCost,p.TankProductionSeconds,p.TankProductionSeconds,i==1)).ToArray();
+            var buildings=new[]{
+                new PlayableBuildingSnapshot(1,PlayableOwner.Player,PlayableBuildingKind.Headquarters,site.Position,p.HeadquartersHealth,1,0,0,default(NavPoint),siteId:site.Id,phase:ConstructionPhase.Ready),
+                new PlayableBuildingSnapshot(2,PlayableOwner.Player,PlayableBuildingKind.Factory,site.Slots[0].Position,p.FactoryHealth,1,queuedTanks,0,default(NavPoint),siteId:site.Id,slotId:site.Slots[0].Id,parentId:1,phase:ConstructionPhase.Ready,orders:orders),
+                new PlayableBuildingSnapshot(3,PlayableOwner.Player,PlayableBuildingKind.Refinery,site.Slots[1].Position,p.RefineryHealth,1,0,0,default(NavPoint),siteId:site.Id,slotId:site.Slots[1].Id,parentId:1,phase:ConstructionPhase.Ready)};
+            var entities=Enumerable.Range(0,tanks).Select(i=>new PlayableEntitySnapshot(100+i,PlayableOwner.Player,PlayableEntityKind.Tank,site.Position,p.TankHealth,false,0,0,0)).ToArray();
+            return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,entities,buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,
+                sites:new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,1,true)},owner:PlayableOwner.Player,ownerId:"player-1",homeSiteId:site.Id));
+        }
         private static void Force(PlayableAuthorityTick a,PlayableAiOpening opening)
         {
             var owner=Owner(a);var state=PlayableAiOpeningComposition.Initialize(19092026,"west-owner",forcedOpening:opening);
@@ -35,6 +47,21 @@ namespace Spacewars.Tests.EditMode
         }
         private static void Step(PlayableAuthorityTick a,UnityHostRouteService host)
         {for(int i=0;i<512;i++){if(a.TryAdvance())return;host.Service(a,64);}Assert.Fail("native route barrier at tick "+a.Tick);}
+        [Test] public void InitialForceFundingProtectsOnlyTheUncoveredTankShortfall()
+        {
+            var p=PlayableProfile.Default;var ai=AiProfile.Initial;var executor=new AiOpeningExecutor(PlayableAiOpeningComposition.Initialize(7,"player-1",forcedOpening:PlayableAiOpening.GreedyMine),71);
+            var ledger=new AiBudgetLedger("player-1",71);ledger.ObserveBank(1000);int cost=PlayableUnitRules.Cost(p,PlayableEntityKind.Tank);
+            var startupAction=new PlayableAiAction(1,"player-1",p.ProfileId,p.Revision,71,0,PlayableCommandKind.QueueTank,new[]{2},unitKind:PlayableEntityKind.Tank,seed:7,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            Assert.True(ledger.Reserve(new AiBudgetEntry("factory-startup:1:1","factory-startup",startupAction,2*cost,1,0,100,"paid factory launch cycles",new[]{"factory-startup:1:1"},p.ProfileId+"@"+p.Revision)));
+            int protection=executor.InitialForceFundingProtection(FundingView(),p,ai,ledger.Capture());Assert.AreEqual(cost,protection,"two held startup cycles leave only the third initial Tank to protect");
+            var discretionary=new AiIntent("remote-growth","expansion",startupAction,100,(int)ledger.Available,0,Array.Empty<string>());
+            Assert.True(AiExpansionFinancial.FullyFundable(ledger,0,discretionary));Assert.False(AiExpansionFinancial.FullyFundable(ledger,protection,discretionary),"a remote saving equal to available cash cannot consume the third Tank quote");
+            Assert.AreEqual(0,executor.InitialForceFundingProtection(FundingView(queuedTanks:1),p,ai,ledger.Capture()),"queued production and held startup cycles already cover the opening floor");
+            ledger.Release("factory-startup:1:1");
+            Assert.AreEqual(cost,executor.InitialForceFundingProtection(FundingView(tanks:1,queuedTanks:1),p,ai,ledger.Capture()),"one living plus one queued Tank leave one payable shortfall");
+            var fulfilled=FundingView(tanks:(int)ai.Value("opening.forceUnits"));executor.Observe(fulfilled,null,null,ai);
+            Assert.AreEqual(0,executor.InitialForceFundingProtection(fulfilled,p,ai,ledger.Capture()),"the hold ends only after the required living force exists");
+        }
         [TestCase(PlayableAiOpening.Safe)][TestCase(PlayableAiOpening.GreedySafe)][TestCase(PlayableAiOpening.GreedyMine)][TestCase(PlayableAiOpening.BlindRush)][TestCase(PlayableAiOpening.ExplorerAllIn)]
         public void AllTemplates_ExecuteOrdinaryMacroAndArmyRequests(PlayableAiOpening opening)
         {
@@ -44,7 +71,7 @@ namespace Spacewars.Tests.EditMode
             {
                 for(int i=0;i<3650&&Executor(a).Capture().Phase==PlayableAiOpeningPhase.Active;i++)Step(a,host);
                 var state=Executor(a).Capture();var paid=ledger.Capture().Paid;
-                Assert.AreEqual(PlayableAiOpeningPhase.Complete,state.Phase,state.Template+": "+state.Reason+" completed="+string.Join(",",state.Completed));
+                Assert.AreEqual(PlayableAiOpeningPhase.Complete,state.Phase,state.Template+": "+state.Reason+" completed="+string.Join(",",state.Completed));Assert.True(state.InitialForceFulfilled,"opening completion records its actual live initial force");
                 CollectionAssert.AreEquivalent(AiOpeningCatalog.For(opening).Milestones.Select(m=>m.Id),state.Completed);
                 Assert.True(paid.Any(e=>e.Action.Kind==PlayableCommandKind.BuildAt&&e.Action.BuildingKind==PlayableBuildingKind.Factory));
                 Assert.True(paid.Any(e=>e.Action.Kind==PlayableCommandKind.QueueTank));
@@ -56,7 +83,7 @@ namespace Spacewars.Tests.EditMode
                     var army=(AiArmyPlanner)Get(Owner(a),"armyPlanner");var registry=(AiArmyRegistry)Get(Owner(a),"armies");
                     Assert.NotNull(army.Deployment(view,registry),"receipt plus effective Registry-owned order required");registry.AssertInvariants();
                 }
-                var bytes=a.CaptureBytes();var restored=PlayableAuthorityTick.RestoreBytes(bytes,c);CollectionAssert.AreEqual(bytes,restored.CaptureBytes());
+                var bytes=a.CaptureBytes();var restored=PlayableAuthorityTick.RestoreBytes(bytes,c);CollectionAssert.AreEqual(bytes,restored.CaptureBytes());Assert.True(((PlayableAiOwnerLoop)Owner(restored)).Checkpoint.OpeningExecution.InitialForceFulfilled,"the one-time latch survives exact whole-world restore");
                 for(int i=0;i<90;i++){Step(a,host);Step(restored,host);CollectionAssert.AreEqual(a.CaptureBytes(),restored.CaptureBytes());}
             }
         }
@@ -77,7 +104,7 @@ namespace Spacewars.Tests.EditMode
             var units=Enumerable.Range(10,tanks).Select(id=>new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(id,0),100,false,0,0,0)).ToArray();
             return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,7,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,10000,null,units,buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,1,true)},population:new PlayablePopulationSnapshot(tanks,0,p.ArmyCapacity)));
         }
-        private static PlayableAiObservation HomeEconomyObservation(int tick,int readyHomeRefineries,bool readyHomeFactory,bool readyNonhomeEconomy)
+        private static PlayableAiObservation HomeEconomyObservation(int tick,int readyHomeRefineries,bool readyHomeFactory,bool readyNonhomeEconomy,bool publicEnemyStart=false,int tanks=0)
         {
             var p=PlayableProfile.Default;var home=TerritoryRules.Sites(p).First(s=>s.Kind==PlayableBuildingKind.Headquarters);
             var nonhome=new TerritorySite(99,PlayableBuildingKind.Outpost,new NavPoint(-10,20),p);
@@ -93,7 +120,68 @@ namespace Spacewars.Tests.EditMode
                 buildings.Add(new PlayableBuildingSnapshot(52,PlayableOwner.Player,PlayableBuildingKind.Factory,nonhome.Slots[1].Position,100,1,0,0,default,siteId:nonhome.Id,slotId:nonhome.Slots[1].Id,parentId:50));
                 sites.Add(new TerritorySiteSnapshot(nonhome,PlayableOwner.Player,PlayableOwner.Player,1,false,50,true));
             }
-            return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,7,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,10000,null,Array.Empty<PlayableEntitySnapshot>(),buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:sites.ToArray(),homeSiteId:home.Id));
+            var objectives=publicEnemyStart?new[]{new PlayablePublicScoutObjective(77,new NavPoint(24,24),PlayablePublicScoutObjectiveRole.PossibleEnemyStart,true)}:Array.Empty<PlayablePublicScoutObjective>();
+            var units=Enumerable.Range(100,tanks).Select(id=>new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(id,0),100,false,0,0,0)).ToArray();
+            return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,7,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,10000,null,units,buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:sites.ToArray(),homeSiteId:home.Id,publicScoutObjectives:objectives));
+        }
+        [Test] public void InitialForceLatchRequiresLiveOwnedTanksAndSurvivesLossReplan()
+        {
+            var ai=AiProfile.Initial;var e=new AiOpeningExecutor(PlayableAiOpeningComposition.Initialize(7,"player-1",forcedOpening:PlayableAiOpening.BlindRush),71);int required=(int)ai.Value("opening.forceUnits");
+            e.Observe(Observation(1,true),null,null,ai);Assert.False(e.Capture().InitialForceFulfilled,"a ready factory is not a live force");
+            e.Observe(Observation(2,true,required),null,null,ai);Assert.True(e.Capture().InitialForceFulfilled);CollectionAssert.Contains(e.Capture().Completed,"force");
+            e.Observe(Observation(3,false),null,null,ai);Assert.AreEqual(1,e.Capture().Replans,"loss still follows the existing replan path");Assert.True(e.Capture().InitialForceFulfilled,"later loss must not reset the one-time latch");
+        }
+        [Test] public void InitialForceLatchCanCompleteAfterOpeningAbort()
+        {
+            var ai=AiProfile.Initial;var e=new AiOpeningExecutor(PlayableAiOpeningComposition.Initialize(7,"player-1",forcedOpening:PlayableAiOpening.BlindRush),71);int required=(int)ai.Value("opening.forceUnits");
+            e.Observe(Observation(1,true),null,null,ai);e.Observe(Observation(3601,true),null,null,ai);Assert.AreEqual(PlayableAiOpeningPhase.Aborted,e.Capture().Phase);Assert.False(e.Capture().InitialForceFulfilled);
+            e.Observe(Observation(3602,true,required),null,null,ai);Assert.True(e.Capture().InitialForceFulfilled,"post-abort observations still latch actual living force");
+        }
+        [Test] public void FirstLiveForceReleasesGrowthWithoutAStandingArmyOrFreshReconGate()
+        {
+            var ai=AiProfile.Initial;var e=new AiOpeningExecutor(PlayableAiOpeningComposition.Initialize(7,"player-1",forcedOpening:PlayableAiOpening.Safe),71);int required=(int)ai.Value("opening.forceUnits");
+            var first=HomeEconomyObservation(10,1,true,false,true);e.Observe(first,null,null,ai);
+            Assert.True(e.InitialGrowthCommitmentPending(first,ai),"the initial live force is still missing");
+            var force=HomeEconomyObservation(11,1,true,false,true,required);e.Observe(force,null,null,ai);Assert.True(e.Capture().InitialForceFulfilled);
+            Assert.False(e.InitialGrowthCommitmentPending(force,ai),"actual live force ends the one-time growth protection without waiting for an intel freshness clock");
+            var laterLoss=HomeEconomyObservation(12,1,true,false,true);e.Observe(laterLoss,null,null,ai);
+            Assert.True(e.Capture().InitialForceFulfilled);Assert.False(e.InitialGrowthCommitmentPending(laterLoss,ai),"later force loss cannot reopen the fulfilled initial gate");
+        }
+        [Test] public void ProfileRebindPreservesInitialForceLatch()
+        {
+            var ai=AiProfile.Initial;var opening=PlayableAiOpeningComposition.Initialize(7,"player-1",forcedOpening:PlayableAiOpening.BlindRush);
+            var owner=new PlayableAiOwnerLoop(PlayableProfile.Default,opening,71,null,ai,AiDifficulty.Fighter);var executor=(AiOpeningExecutor)Get(owner,"openingExecutor");
+            executor.Observe(Observation(1,true,(int)ai.Value("opening.forceUnits")),null,null,ai);Assert.True(executor.Capture().InitialForceFulfilled);
+            var data=ai.CopyData();data.revision++;owner.Rebind(new AiProfile(data));Assert.True(executor.Capture().InitialForceFulfilled,"AI profile rebind preserves the historical actual-force fact");
+        }
+        [Test] public void AbortedOpeningDoesNotLeakOrdinaryGrowthBuildingsPastInitialForce()
+        {
+            var ai=AiProfile.Initial;var p=PlayableProfile.Default;var e=new AiOpeningExecutor(PlayableAiOpeningComposition.Initialize(7,"player-1",forcedOpening:PlayableAiOpening.BlindRush),71);
+            e.Observe(Observation(1,true),null,null,ai);e.Observe(Observation(3601,true),null,null,ai);Assert.AreEqual(PlayableAiOpeningPhase.Aborted,e.Capture().Phase);
+            var o=HomeEconomyObservation(3601,1,true,false);int producer=o.Buildings.Single(b=>b.Kind==PlayableBuildingKind.Factory).Id;var slot=o.Sites.Single(s=>s.Site.Id==o.HomeSiteId).Site.Slots.Last();
+            var grow=new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.BuildAt,siteId:o.HomeSiteId,slotId:slot.Id,parentId:o.Sites.Single(s=>s.Site.Id==o.HomeSiteId).CenterId,buildingKind:PlayableBuildingKind.Factory,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            var queue=new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.QueueTank,new[]{producer},unitKind:PlayableEntityKind.Tank,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            var projected=e.MacroRequests(o,p,ai,new[]{new AiEconomyCandidate("economy",grow,null,1),new AiEconomyCandidate("production",queue,null,1)},true);
+            Assert.AreEqual(1,projected.Count);Assert.AreEqual(PlayableCommandKind.QueueTank,projected[0].Action.Kind,"fallback keeps unit production and suppresses ordinary growth buildings");
+        }
+        [Test] public void PrivateAiSchemaRejectsLegacyThirteenExplicitly()
+        {
+            using(var stream=new System.IO.MemoryStream())using(var writer=new System.IO.BinaryWriter(stream))
+            {
+                writer.Write(13);writer.Flush();stream.Position=0;using(var reader=new System.IO.BinaryReader(stream))
+                    StringAssert.Contains("unsupported scheduler schema",Assert.Throws<ArgumentException>(()=>AiAuthorityScheduler.ReadState(reader,PlayableProfile.Default,AiProfile.Initial,71,7,0,Array.Empty<string>())).Message);
+            }
+        }
+        [Test] public void InitialForceLatchRejectsMalformedBooleanTag()
+        {
+            var opening=PlayableAiOpeningComposition.Initialize(7,"player-1",forcedOpening:PlayableAiOpening.BlindRush);var source=new AiOpeningExecutor(opening,71);byte[] bytes;
+            using(var stream=new System.IO.MemoryStream())using(var writer=new System.IO.BinaryWriter(stream)){source.WriteState(writer);writer.Flush();bytes=stream.ToArray();}
+            using(var stream=new System.IO.MemoryStream(bytes))using(var reader=new System.IO.BinaryReader(stream))
+            {
+                WorldWire.String(reader);reader.ReadInt32();reader.ReadInt64();reader.ReadInt64();reader.ReadInt64();reader.ReadInt32();reader.ReadInt32();reader.ReadInt32();WorldWire.String(reader);bytes[stream.Position]=2;
+            }
+            var restored=new AiOpeningExecutor(opening,71);using(var stream=new System.IO.MemoryStream(bytes))using(var reader=new System.IO.BinaryReader(stream))
+                Assert.Throws<ArgumentException>(()=>restored.ReadState(reader,0),"corrupted boolean tags remain rejected");
         }
         [Test] public void HomeEconomyGateRequiresActualReadyBuildingsAtHomeAndProtectsCurrentOpeningQuote()
         {

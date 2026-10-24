@@ -36,8 +36,10 @@ namespace Spacewars.Simulation
             :base(NodeBytes)
             {Key=key;Value=value;Left=left;Right=right;Height=1+Math.Max(H(left),H(right));Count=1+C(left)+C(right);}
             private int ownedEdges;
-            internal void AcquireEdges(){if(IsRegistered){if(Left!=null)RequireEdge(Left);if(Right!=null)RequireEdge(Right);}NavStoragePayload<TKey>.ValidateActive(Key,this);NavStoragePayload<TValue>.ValidateActive(Value,this);Left?.Retain();ownedEdges|=1;Right?.Retain();ownedEdges|=2;NavStoragePayload<TKey>.Retain(Key);ownedEdges|=4;NavStoragePayload<TValue>.Retain(Value);ownedEdges|=8;}
-            protected override void ReleaseEdges(){if((ownedEdges&1)!=0)Left?.Release();if((ownedEdges&2)!=0)Right?.Release();if((ownedEdges&4)!=0)NavStoragePayload<TKey>.Release(Key);if((ownedEdges&8)!=0)NavStoragePayload<TValue>.Release(Value);}
+            // Value fallbacks have no active-name or ownership work. Preserve every
+            // typed/reference hook and the exact edge flags/allocation sequence.
+            internal void AcquireEdges(){if(IsRegistered){if(Left!=null)RequireEdge(Left);if(Right!=null)RequireEdge(Right);}if(NavStoragePayload<TKey>.HasOwnership)NavStoragePayload<TKey>.ValidateActive(Key,this);if(NavStoragePayload<TValue>.HasOwnership)NavStoragePayload<TValue>.ValidateActive(Value,this);Left?.Retain();ownedEdges|=1;Right?.Retain();ownedEdges|=2;if(NavStoragePayload<TKey>.HasOwnership)NavStoragePayload<TKey>.Retain(Key);ownedEdges|=4;if(NavStoragePayload<TValue>.HasOwnership)NavStoragePayload<TValue>.Retain(Value);ownedEdges|=8;}
+            protected override void ReleaseEdges(){if((ownedEdges&1)!=0)Left?.Release();if((ownedEdges&2)!=0)Right?.Release();if((ownedEdges&4)!=0&&NavStoragePayload<TKey>.HasOwnership)NavStoragePayload<TKey>.Release(Key);if((ownedEdges&8)!=0&&NavStoragePayload<TValue>.HasOwnership)NavStoragePayload<TValue>.Release(Value);}
         }
         internal static readonly long NodeBytes=NavStorageLayout.NodeBytes<TKey,TValue>();
         private NavStorageAllocation allocation;
@@ -88,6 +90,11 @@ namespace Spacewars.Simulation
             var successor=n.Right;while(successor.Left!=null)successor=successor.Left;
             return Balance(Make(successor.Key,successor.Value,n.Left,Delete(n.Right,successor.Key)));
         }
+        private Node DeleteMin(Node n,out TKey minimum)
+        {
+            if(n.Left==null){minimum=n.Key;return n.Right;}
+            return Balance(Make(n.Key,n.Value,DeleteMin(n.Left,out minimum),n.Right));
+        }
         internal NavCowDictionary<TKey,TValue> ForkPrepared(Func<long,bool> reserve)
         {
             if(!frozen)throw new InvalidOperationException("Seal committed map before preparing a fork.");
@@ -115,14 +122,35 @@ namespace Spacewars.Simulation
             for(var n=root;n!=null;){int cmp=comparer.Compare(key,n.Key);if(cmp==0){value=n.Value;return true;}n=cmp<0?n.Left:n.Right;}
             value=default;return false;
         }
+        // Strict AVL successor: no insertion-order scan and no temporary iterator.
+        internal bool TrySuccessor(TKey key,out KeyValuePair<TKey,TValue> result)
+        {
+            Node found=null;
+            for(var n=root;n!=null;)if(comparer.Compare(n.Key,key)>0){found=n;n=n.Left;}else n=n.Right;
+            result=found==null?default:new KeyValuePair<TKey,TValue>(found.Key,found.Value);return found!=null;
+        }
         public bool ContainsKey(TKey key)=>TryGetValue(key,out _);
         public TValue this[TKey key]
         {
             get{if(!TryGetValue(key,out var value))throw new KeyNotFoundException();return value;}
-            set{if(frozen)throw new InvalidOperationException("Committed map cannot be mutated.");NavStoragePayload<TKey>.ValidateActive(key,this);NavStoragePayload<TValue>.ValidateActive(value,this);bool added=!ContainsKey(key);try{using(allocation=new NavStorageAllocation(reserve,true)){var next=Put(root,key,value);next?.Retain();var old=root;root=next;old?.Release();}}finally{allocation=null;}if(added)order?.Add(key);}
+            set{using var measured=PerformanceProfile.Sample(ProfileStage.TreeMutation);if(frozen)throw new InvalidOperationException("Committed map cannot be mutated.");NavStoragePayload<TKey>.ValidateActive(key,this);NavStoragePayload<TValue>.ValidateActive(value,this);bool added=!ContainsKey(key);try{using(allocation=new NavStorageAllocation(reserve,true)){var next=Put(root,key,value);next?.Retain();var old=root;root=next;old?.Release();}}finally{allocation=null;}if(added)order?.Add(key);}
         }
         public void Add(TKey key,TValue value){if(ContainsKey(key))throw new ArgumentException("Duplicate persistent key.");this[key]=value;}
-        internal bool Remove(TKey key){if(frozen)throw new InvalidOperationException("Committed map cannot be mutated.");if(!ContainsKey(key))return false;try{using(allocation=new NavStorageAllocation(reserve,true)){var next=Delete(root,key);next?.Retain();var old=root;root=next;old?.Release();}}finally{allocation=null;}return true;}
+        internal bool Remove(TKey key){using var measured=PerformanceProfile.Sample(ProfileStage.TreeMutation);if(frozen)throw new InvalidOperationException("Committed map cannot be mutated.");if(!ContainsKey(key))return false;try{using(allocation=new NavStorageAllocation(reserve,true)){var next=Delete(root,key);next?.Retain();var old=root;root=next;old?.Release();}}finally{allocation=null;}return true;}
+        // The extracted key is borrowed; the exact frontier caller uses a pure
+        // numeric value. Publish it only after the allocation transaction ends.
+        internal bool TryTakeMin(out TKey minimum)
+        {
+            using var measured=PerformanceProfile.Sample(ProfileStage.TreeMutation);
+            minimum=default;
+            if(frozen)throw new InvalidOperationException("Committed map cannot be mutated.");
+            if(root==null)return false;
+            TKey extracted;
+            try{using(allocation=new NavStorageAllocation(reserve,true)){
+                var next=DeleteMin(root,out extracted);next?.Retain();var old=root;root=next;old?.Release();
+            }}finally{allocation=null;}
+            minimum=extracted;return true;
+        }
         internal NavTreeShape<TKey> SaveShape()
         {
             var keys=new List<TKey>();var left=new List<int>();var right=new List<int>();
@@ -183,6 +211,7 @@ namespace Spacewars.Simulation
         internal bool Contains(T value)=>values.ContainsKey(value);
         internal bool Add(T value){if(Contains(value))return false;values.Add(value,true);return true;}
         internal bool Remove(T value)=>values.Remove(value);
+        internal bool TryTakeMin(out T minimum)=>values.TryTakeMin(out minimum);
         internal void UnionWith(IEnumerable<T> items){foreach(var value in items)Add(value);}
         public IEnumerator<T> GetEnumerator()=>values.Keys.GetEnumerator();
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()=>GetEnumerator();
@@ -368,11 +397,64 @@ namespace Spacewars.Simulation
             adjacencyStorageBytes += pendingOutgoing.CommittedStorageBytes(128) - prior;
             pendingOutgoing.ReleaseStorage(); pendingOutgoing = null; pendingOutgoingNode = 0;
         }
+        // A region exists only for one adjacency-list mutation. Immutable map
+        // nodes keep their original allocator and their existing local journal.
+        private sealed class AdjacencyBirthRegion : INavStorageReservation, INavStorageLedgerIdentity, IDisposable
+        {
+            // x64: four references + bool + 16-byte object header <=64.
+            // Unity Mono Delegate has twelve pointer/reference fields + bool;
+            // MulticastDelegate adds one reference: aligned header+fields =128.
+            // Direct method-group construction has no DelegateData/invocation array.
+            internal const long RegionBytes=64, DelegateBytes=128;
+            private Func<long,bool> parent;
+            private IDisposable scratch;
+            private NavOwnedStorage births;
+            internal readonly Func<long,bool> Reserve;
+            private bool disposed;
+            private AdjacencyBirthRegion(Func<long,bool> parent,IDisposable scratch)
+            {this.parent=parent;this.scratch=scratch;Reserve=TryReserve;}
+            internal static AdjacencyBirthRegion Open(Func<long,bool> parent,NavOwnedStorage index)
+            {
+                var target=parent?.Target;
+                // This opaque adapter advertises optional capabilities even when
+                // its wrapped allocator lacks them. Preserve its legacy path.
+                if(target is NavStorageReservation||!(target is INavStorageLocalBirthAllocator)||
+                    !(target is INavStorageScratchAllocator)||!(target is INavStorageReservation owner)||
+                    !(target is INavStorageLedgerIdentity))return null;
+                NavStorageAdmission.RequireOwned(owner,index);
+                var scratch=NavStorageScratch.Reserve(parent,RegionBytes+DelegateBytes);
+                try{return new AdjacencyBirthRegion(parent,scratch);}catch{scratch.Dispose();throw;}
+            }
+            public bool TryReserve(long bytes)
+            {if(disposed)throw new InvalidOperationException("Adjacency birth region is closed.");return parent(bytes);}
+            public void Register(NavOwnedStorage storage)
+            {
+                if(disposed)throw new InvalidOperationException("Adjacency birth region is closed.");
+                var target=parent.Target;
+                if(((INavStorageLocalBirthAllocator)target).TryRegisterLocalBirth(storage)){
+                    storage.BirthNext=births;births=storage;
+                }else ((INavStorageAllocator)target).Register(storage);
+            }
+            public object Identity=>((INavStorageLedgerIdentity)parent.Target).Identity;
+            public bool Owns(NavOwnedStorage storage)=>((INavStorageLedgerIdentity)parent.Target).Owns(storage);
+            public void Dispose()
+            {
+                if(disposed)return;disposed=true;
+                try{while(births!=null){var next=births.BirthNext;births.BirthNext=null;births.Release();births=next;}}
+                finally{parent=null;var value=scratch;scratch=null;value.Dispose();}
+            }
+        }
         private void AppendAdjacency(NavCowDictionary<int,NavPagedList<NavGraphArc>> index,int node,NavGraphArc arc)
         {
             bool existed=index.TryGetValue(node,out var priorList);long prior=existed?priorList.CommittedStorageBytes(128):0;
-            var list=existed?priorList.Fork(preparedReservation??Unbudgeted):NavPagedList<NavGraphArc>.Create(preparedReservation,4);
-            try{list.Add(arc);list.Seal();index[node]=list;adjacencyStorageBytes+=list.CommittedStorageBytes(128)-prior;}finally{list.ReleaseStorage();}
+            using(var region=AdjacencyBirthRegion.Open(preparedReservation,index)){
+                var reserve=region?.Reserve??preparedReservation;
+                NavPagedList<NavGraphArc> list=null;
+                try{
+                    list=existed?priorList.Fork(reserve??Unbudgeted):NavPagedList<NavGraphArc>.Create(reserve,4);
+                    list.Add(arc);list.Seal();index[node]=list;adjacencyStorageBytes+=list.CommittedStorageBytes(128)-prior;
+                }finally{list?.ReleaseStorage();}
+            }
         }
         internal void SealPrepared()
         {

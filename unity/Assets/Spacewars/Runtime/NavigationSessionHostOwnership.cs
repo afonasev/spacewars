@@ -19,15 +19,53 @@ namespace Spacewars.Runtime
         {
             get{using(EnterTransport())return physicalHostBudget;}
         }
+        // Bound the authority destination from the same concrete layouts used
+        // by single Ready publication. Map/route history is borrowed. Include a
+        // concurrent birth, both supported publication carriers, staging scratch,
+        // whole mutable map copies and conservative complete COW-page rewrites.
+        private long LivePublicationBound()
+        {
+            int actors=checked(Crowd.Units.Count+1),attempts=arrivalAttempts.Count,leases=arrivalProjectionLeases.Count,groupCount=groups.Count;
+            long bytes=checked(NavStorageLayout.Charge(NavigationPreparedReady.Layout(actors,attempts,leases))+NavStorageLayout.Charge(PreparedResultBatch.Layout(1,actors,attempts,1,groupCount))+
+                NavStorageScratch.LeaseBytes+Math.Max(RebindStagingScratchBound(actors,Math.Max(1,retainedGoals.Count),navigationGeometry.Obstacles.Count),8192L+4096L*actors+1024L*attempts+512L*leases));
+            long Root(object value)=>(value as NavOwnedStorage)?.StorageBytes??0;
+            long Pages(NavPagedList<NavOwnedStorage> values)=>values==null?0:checked(values.ForkReserveBytes+values.AppendGrowthBytes(8,Math.Max(1,values.Count)));
+            if(groupCommandBacking!=null)bytes=checked(bytes+Root(groupCommandBacking.Pending)+Root(groupCommandBacking.Ledger)+Root(groupCommandBacking.Failures));
+            if(liveArrivalTables!=null)bytes=checked(bytes+Root(liveArrivalTables)+Root(liveArrivalTables.Attempts)+Root(liveArrivalTables.References)+Root(liveArrivalTables.Ids));
+            if(admissionOwner!=null){
+                bytes=checked(bytes+Root(admissionOwner)+Pages(admissionOwner.Groups)+Pages(admissionOwner.Requests)+NavStorageScratch.LeaseBytes+64L+8L*(groupCount+pending.Count+probes.Count)+NavStorageLayout.Charge(96L+8L*groupCount)+NavStorageLayout.Charge(96L+8L*(pending.Count+probes.Count)));
+                for(int g=0;g<admissionOwner.Groups.Count;g++){var group=(NavigationAdmissionGroupStorage)admissionOwner.Groups[g];bytes=checked(bytes+Root(group)+Pages(group.Members));for(int m=0;m<group.Members.Count;m++)bytes=checked(bytes+Root(group.Members[m]));}
+            }
+            if(groupCommandBacking!=null)for(int slot=0;slot<groupCommandBacking.Groups.Capacity;slot++){
+                if(!groupCommandBacking.Groups.TryReadSlot(slot,out long key,out _))continue;
+                var version=((NavigationLiveGroup)groupCommandBacking.Groups.OwnerFor(key)).ImmutableVersion;
+                bytes=checked(bytes+version.StorageBytes+NavStorageLayout.Charge(NavStorageLayout.ObjectBytesBound(typeof(NavigationPreparedGroupWrite)))+NavStorageScratch.LeaseBytes+NavStorageLayout.ObjectBytesBound(typeof(GroupOrderState))+NavStorageLayout.ObjectBytesBound(typeof(GroupMemberState)));
+                if(version.Members is NavPagedList<NavOwnedStorage> pages)bytes=checked(bytes+Pages(pages));else bytes=checked(bytes+NavPagedList<NavOwnedStorage>.InitialStorageBytes+((NavOwnedStorage)version.Members).StorageBytes);
+                for(int m=0;m<version.Members.Count;m++)bytes=checked(bytes+version.Members[m].StorageBytes);
+            }
+            return bytes;
+        }
         internal bool TryOpenPhysicalHostScope(NavigationPreparationKind kind,long owner,long publication,
             out NavigationRetentionBudget.Scope scope)
+            =>TryOpenPhysicalHostScope(kind,owner,publication,out scope,out _);
+        internal bool TryOpenPhysicalHostScope(NavigationPreparationKind kind,long owner,long publication,
+            out NavigationRetentionBudget.Scope scope,out bool resolvingRefusal)
         {
-            NavigationRetentionBudget budget;
+            NavigationRetentionBudget budget;Action resume;
             using(EnterTransport()){
                 if(physicalHostBudget==null)physicalHostBudget=new NavigationRetentionBudget();
-                budget=physicalHostBudget;
+                budget=physicalHostBudget;resume=HostChanged;
+                budget.ObservePublicationBound(LivePublicationBound());
+                if(!budget.TryProtectLive(checked(BirthHeadroom(Crowd.Units.Count)+budget.AuthorityPublicationBound),Crowd.Units.Count)){scope=null;resolvingRefusal=false;return false;}
+                budget.ObserveLiveShape(Crowd.Units.Count,checked(barrierAnswers.Count+Answers.InstanceCapacity));
+                long install=checked(BirthHeadroom(Crowd.Units.Count)+budget.AuthorityPublicationBound);
+                if(committedHostRoot!=null)foreach(var entry in committedHostRoot.Rows){var answer=((NavigationHostRow)entry.Value).Answer;if(answer?.Status==NavSolveStatus.Ready)install=Math.Max(install,ReadyInstallationHeadroom(answer,budget.LiveActorBound,budget.LiveBarrierBound,budget.AuthorityPublicationBound));}
+                if(committedHostRoot!=null)foreach(var entry in committedHostRoot.Delivered){var answer=((NavigationHostRow)entry.Value).Answer;if(answer?.Status==NavSolveStatus.Ready)install=Math.Max(install,ReadyInstallationHeadroom(answer,budget.LiveActorBound,budget.LiveBarrierBound,budget.AuthorityPublicationBound));}
+                Answers.ObserveState(out var answerRevision,out var answerCount);for(int i=0;i<answerCount;i++){var answer=Answers.ReadPreparedAt(answerRevision,i);if(answer.Status==NavSolveStatus.Ready)install=Math.Max(install,ReadyInstallationHeadroom(answer,budget.LiveActorBound,budget.LiveBarrierBound,budget.AuthorityPublicationBound));}
+                foreach(var answer in barrierAnswers)if(answer.Status==NavSolveStatus.Ready)install=Math.Max(install,ReadyInstallationHeadroom(answer,budget.LiveActorBound,budget.LiveBarrierBound,budget.AuthorityPublicationBound));
+                if(!budget.TryProtectLive(install)){scope=null;resolvingRefusal=false;return false;}
             }
-            return budget.TryOpenScope(kind,owner,publication,out scope);
+            return budget.TryOpenScope(kind,owner,publication,out scope,resume,out resolvingRefusal);
         }
         // The caller releases its pin after traversal or after preparing a fork.
         // Capture never follows mutable in-flight dictionaries under the gate.
@@ -56,6 +94,7 @@ namespace Spacewars.Runtime
         internal void PublishPhysicalHostRoot(NavigationRetentionBudget.Scope scope,
             NavigationHostRoot expected,NavigationHostRoot candidate,Action publishAuthority)
         {
+            using var measured=PerformanceProfile.Measure(ProfileStage.HostPublish);
             if(scope==null||candidate==null||publishAuthority==null||!candidate.IsImmutableCaptureRoot)
                 throw new ArgumentException("Missing sealed physical host publication.");
             NavigationHostRoot retired=null;
@@ -197,12 +236,12 @@ namespace Spacewars.Runtime
         }
         internal void ReleaseCommittedHostRoot()
         {
-            NavigationHostRoot retired;
+            NavigationHostRoot retired;NavPagedList<long> retiredBank;
             using(EnterTransport()){
                 if(hostAllocationThread!=0)throw new InvalidOperationException("Cannot release allocating physical host.");
-                retired=committedHostRoot;committedHostRoot=null;
+                retired=committedHostRoot;committedHostRoot=null;retiredBank=creditBank;creditBank=null;
             }
-            retired?.Release();
+            retired?.Release();retiredBank?.Release();
         }
     }
 }

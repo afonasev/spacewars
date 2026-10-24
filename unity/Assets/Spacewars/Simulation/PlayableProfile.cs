@@ -7,12 +7,70 @@ namespace Spacewars.Simulation
     [Serializable]
     public sealed class PlayableProfileData
     {
+        public int provingGroundStartingCredits=10000;
+        // hawk-match-v1: all designer values participate in the normal Balance Lab metadata.
+        public double hawkModelScale=.35;
+        public double hawkAimTolerance=0.04;
+        public double hawkPreparationYawSpeed=0.25;
+        public double hawkMissileLength=0.55;
+        public double hawkDebrisSeconds=0.8;
+        public double hawkDebrisSpeed=3;
+        public double hawkDebrisGravity=9.81;
+        public double hawkDebrisCount=6;
+        public double hawkHealth=60;
+        public double hawkCreditCost=225;
+        public double hawkPopulationCost=3;
+        public double hawkProductionSeconds=20;
+        public double hawkRadius=1;
+        public double hawkSpeed=7.5;
+        public double hawkReverseSpeed=2.5;
+        public double hawkStrafeSpeed=8;
+        public double hawkAcceleration=7;
+        public double hawkBraking=12;
+        public double hawkShortSeconds=0.8;
+        public double hawkShortDistance=4;
+        public double hawkYawSpeed=4;
+        public double hawkYawAcceleration=10;
+        public double hawkCruisePitch=12;
+        public double hawkAccelerationPitch=10;
+        public double hawkBank=20;
+        public double hawkAttitudeSpeed=60;
+        public double hawkClearance=3;
+        public double hawkClimbSpeed=4;
+        public double hawkDescentSpeed=2;
+        public double hawkLookahead=12;
+        public double hawkSeparation=0.25;
+        public double hawkRoofSeconds=1;
+        public double hawkPlatformSeconds=1;
+        public double hawkSpinSeconds=1;
+        public double hawkRotorSpeed=2160;
+        public double hawkRange=10;
+        public double hawkPreparationSeconds=3;
+        // hawk-salvo-research-v1: independent preparation, intra-salvo delay and reload.
+        public double hawkSalvoResearchCost=300, hawkSalvoResearchSeconds=30;
+        public double hawkUpgradedPreparationSeconds=1.5, hawkUpgradedSalvoDelay=0.18, hawkUpgradedReloadSeconds=2;
+        public double hawkDamage=10;
+        public double hawkSalvoDelay=0.5;
+        public double hawkReloadSeconds=3;
+        public double hawkMissileSpeed=16;
+        public double hawkMissileTurn=0.8;
+        public double hawkMissileRadius=0.07;
+        public int groupCorridorMaximumExcessPercent;
         public int schemaVersion;
         public double crowdMotionHeadingIntervals=NavigationProfile.CrowdV1HeadingIntervals,crowdMotionSpeedBands=NavigationProfile.CrowdV1SpeedBands,crowdMotionLookaheadSeconds=NavigationProfile.CrowdV1LookaheadSeconds,crowdMotionNeighborCap=NavigationProfile.CrowdV1NeighborCap;
         internal void ResetCrowdMotionV1(){crowdMotionHeadingIntervals=NavigationProfile.CrowdV1HeadingIntervals;crowdMotionSpeedBands=NavigationProfile.CrowdV1SpeedBands;crowdMotionLookaheadSeconds=NavigationProfile.CrowdV1LookaheadSeconds;crowdMotionNeighborCap=NavigationProfile.CrowdV1NeighborCap;}
 
+        public double groundTrailLifetimeSeconds=10;
         public double selectionRingPadding=.10, selectionRingWidth=.055, selectionRingLift=.045;
         public double healthBarOutlineWidth=.035, buildingSelectionPadding=.35, buildingSelectionWidth=.10;
+        // ring-hangar-v1 defaults also initialize profiles saved before this building existed.
+        public int hangarHealth = 250;
+        public int hangarBuildSeconds = 15;
+        public int hangarCreditCost = 300;
+        public double hangarVisionRange = 14;
+        public double hangarFootprintRadius = 1.45;
+        public double hangarModelHeightMeters = 1.25;
+        public double hangarModelScale = 1;
         public double scienceHealth;
         public double scienceBuildSeconds;
         public double scienceVisionRange;
@@ -26,6 +84,31 @@ namespace Spacewars.Simulation
         public double refineryTurbineSpeed;
         public double tankChassisGlowIntensity;
         public double tankChassisCost, tankChassisSeconds, tankChassisSpeed;
+        public double weaponSystemsLevel1Cost=300;
+        public double weaponSystemsLevel1Seconds=30;
+        public double weaponSystemsLevel1BonusPercent=15;
+        public double weaponSystemsLevel2Cost=500;
+        public double weaponSystemsLevel2Seconds=45;
+        public double weaponSystemsLevel2BonusPercent=30;
+        public double defensiveSystemsLevel1Cost=300;
+        public double defensiveSystemsLevel1Seconds=30;
+        public double defensiveSystemsLevel1BonusPercent=15;
+        public double defensiveSystemsLevel2Cost=500;
+        public double defensiveSystemsLevel2Seconds=45;
+        public double defensiveSystemsLevel2BonusPercent=30;
+        public double armySystemsMinimumUnits=10;
+        public double aiArmySystemsRecruitDelaySeconds=420;
+        public double aiArmySystemsRecruitLevel2DelaySeconds=600;
+        public double aiArmySystemsRecruitUtilityScale=0.15;
+        public double aiArmySystemsFighterDelaySeconds=300;
+        public double aiArmySystemsFighterLevel2DelaySeconds=480;
+        public double aiArmySystemsFighterUtilityScale=1;
+        public double aiArmySystemsVeteranDelaySeconds=180;
+        public double aiArmySystemsVeteranLevel2DelaySeconds=360;
+        public double aiArmySystemsVeteranUtilityScale=3;
+        public double aiArmySystemsFighterCatchupSeconds=60;
+        public double aiArmySystemsVeteranCatchupSeconds=0;
+
         public double explorerAssaultCost, explorerAssaultSeconds, explorerAssaultBurstSize, explorerAssaultSpreadDeg;
         public double shkvalGuidanceCost, shkvalGuidanceSeconds, shkvalGuidanceRange;
 
@@ -147,6 +230,8 @@ namespace Spacewars.Simulation
         public double shkvalExhaustOpacity;
         public double weaponMuzzleCoreRatio;
         public double impactEffectSec;
+        public double directImpactSparkWidth=.035,directImpactGlow=1.5,directImpactSmokeOpacity=.22;
+        public double directImpactRadius=0.18, directImpactSeconds=0.16, directImpactSparkLength=0.45, explorerImpactScale=0.4;
         public double unitWreckLifetimeSeconds=1;
         public double impactEffectRadius=0.22; // Web default-v2; presentation only.
         public double ballisticWallHeight;
@@ -200,6 +285,7 @@ namespace Spacewars.Simulation
         public double headquartersFootprintRadius, headquartersModelHeightMeters, headquartersModelScale;
         public int factoryHealth, factoryBuildSeconds, factoryCreditCost;
         public double factoryFootprintRadius, factoryModelHeightMeters, factoryModelScale;
+        public double factoryGateSeconds=.35, factoryRolloutSpeed=1.5;
         public int refineryHealth, refineryBuildSeconds, refineryCreditCost, refineryIncomePerPeriod;
         public double refineryFootprintRadius, refineryModelHeightMeters, refineryModelScale;
 
@@ -209,6 +295,9 @@ namespace Spacewars.Simulation
         public double centralObstacleHalfWidth, centralObstacleHalfDepth, passageHalfWidth;
         public double enemyAdvanceDelaySeconds, attackApproachRangeRatio, attackRepathSeconds, factoryExitDistance, defaultRallyDistance, targetPickRadiusMultiplier, buildingPickRadius;
         public double defenderOffsetX, defenderOffsetZ;
+        // Zero means the optional extension is absent in legacy profiles. Do not
+        // normalize it into old revisions or include it in their wire binding.
+        public int navigationMaxAccruedCredits;
         public int navigationRequestsPerFrame, renderTargetFramesPerSecond;
         public double cameraEdgePanSpeed=8, cameraEdgePanZonePixels=28;
         public double cameraOrthoSize, cameraHeight, cameraOffsetX, cameraOffsetZ, cameraPanSpeed, cameraMinZoom, cameraMaxZoom, cameraZoomSpeed, selectionDragPixels;
@@ -245,6 +334,61 @@ namespace Spacewars.Simulation
         public double FogTintB {get; private set;}
         public double FogMemoryBrightness {get; private set;}
         public double FogMemoryDesaturation {get; private set;}
+        public double HawkModelScale {get; private set;}
+        public double HawkAimTolerance {get; private set;}
+public double HawkPreparationYawSpeed {get; private set;}
+public double HawkMissileLength {get; private set;}
+public double HawkDebrisSeconds {get; private set;}
+public double HawkDebrisSpeed {get; private set;}
+public double HawkDebrisGravity {get; private set;}
+public double HawkDebrisCount {get; private set;}
+        public double HawkHealth {get; private set;}
+public double HawkCreditCost {get; private set;}
+public double HawkPopulationCost {get; private set;}
+public double HawkProductionSeconds {get; private set;}
+public double HawkRadius {get; private set;}
+public double HawkSpeed {get; private set;}
+public double HawkReverseSpeed {get; private set;}
+public double HawkStrafeSpeed {get; private set;}
+public double HawkAcceleration {get; private set;}
+public double HawkBraking {get; private set;}
+public double HawkShortSeconds {get; private set;}
+public double HawkShortDistance {get; private set;}
+public double HawkYawSpeed {get; private set;}
+public double HawkYawAcceleration {get; private set;}
+public double HawkCruisePitch {get; private set;}
+public double HawkAccelerationPitch {get; private set;}
+public double HawkBank {get; private set;}
+public double HawkAttitudeSpeed {get; private set;}
+public double HawkClearance {get; private set;}
+public double HawkClimbSpeed {get; private set;}
+public double HawkDescentSpeed {get; private set;}
+public double HawkLookahead {get; private set;}
+public double HawkSeparation {get; private set;}
+public double HawkRoofSeconds {get; private set;}
+public double HawkPlatformSeconds {get; private set;}
+public double HawkSpinSeconds {get; private set;}
+public double HawkRotorSpeed {get; private set;}
+public double HawkRange {get; private set;}
+public double HawkPreparationSeconds {get; private set;}
+public double HawkDamage {get; private set;}
+public double HawkSalvoDelay {get; private set;}
+public double HawkReloadSeconds {get; private set;}
+public double HawkSalvoResearchCost {get; private set;}
+public double HawkSalvoResearchSeconds {get; private set;}
+public double HawkUpgradedPreparationSeconds {get; private set;}
+public double HawkUpgradedSalvoDelay {get; private set;}
+public double HawkUpgradedReloadSeconds {get; private set;}
+public double HawkMissileSpeed {get; private set;}
+public double HawkMissileTurn {get; private set;}
+public double HawkMissileRadius {get; private set;}
+        public int HangarHealth {get; private set;}
+        public int HangarBuildSeconds {get; private set;}
+        public int HangarCreditCost {get; private set;}
+        public double HangarVisionRange {get; private set;}
+        public double HangarFootprintRadius {get; private set;}
+        public double HangarModelHeightMeters {get; private set;}
+        public double HangarModelScale {get; private set;}
         public double ScienceHealth {get; private set;}
         public double ScienceBuildSeconds {get; private set;}
         public double ScienceVisionRange {get; private set;}
@@ -257,6 +401,35 @@ namespace Spacewars.Simulation
         public double RefineryUpgradedIncome {get; private set;}
         public double RefineryTurbineSpeed {get; private set;}
         public double TankChassisGlowIntensity {get;private set;}
+        public double WeaponSystemsLevel1Cost => sourceData.weaponSystemsLevel1Cost;
+        public double WeaponSystemsLevel1Seconds => sourceData.weaponSystemsLevel1Seconds;
+        public double WeaponSystemsLevel1BonusPercent => sourceData.weaponSystemsLevel1BonusPercent;
+        public double WeaponSystemsLevel2Cost => sourceData.weaponSystemsLevel2Cost;
+        public double WeaponSystemsLevel2Seconds => sourceData.weaponSystemsLevel2Seconds;
+        public double WeaponSystemsLevel2BonusPercent => sourceData.weaponSystemsLevel2BonusPercent;
+        public double DefensiveSystemsLevel1Cost => sourceData.defensiveSystemsLevel1Cost;
+        public double DefensiveSystemsLevel1Seconds => sourceData.defensiveSystemsLevel1Seconds;
+        public double DefensiveSystemsLevel1BonusPercent => sourceData.defensiveSystemsLevel1BonusPercent;
+        public double DefensiveSystemsLevel2Cost => sourceData.defensiveSystemsLevel2Cost;
+        public double DefensiveSystemsLevel2Seconds => sourceData.defensiveSystemsLevel2Seconds;
+        public double DefensiveSystemsLevel2BonusPercent => sourceData.defensiveSystemsLevel2BonusPercent;
+        public double ArmySystemsMinimumUnits => sourceData.armySystemsMinimumUnits;
+        public double ArmySystemsAiDelaySeconds(Spacewars.Simulation.Ai.AiDifficulty difficulty,int level=1)=>difficulty switch {
+            Spacewars.Simulation.Ai.AiDifficulty.Recruit=>level==1?sourceData.aiArmySystemsRecruitDelaySeconds:sourceData.aiArmySystemsRecruitLevel2DelaySeconds,
+            Spacewars.Simulation.Ai.AiDifficulty.Fighter=>level==1?sourceData.aiArmySystemsFighterDelaySeconds:sourceData.aiArmySystemsFighterLevel2DelaySeconds,
+            Spacewars.Simulation.Ai.AiDifficulty.Veteran=>level==1?sourceData.aiArmySystemsVeteranDelaySeconds:sourceData.aiArmySystemsVeteranLevel2DelaySeconds,
+            _=>throw new ArgumentOutOfRangeException(nameof(difficulty))};
+        public double ArmySystemsAiUtilityScale(Spacewars.Simulation.Ai.AiDifficulty difficulty)=>difficulty switch {
+            Spacewars.Simulation.Ai.AiDifficulty.Recruit=>sourceData.aiArmySystemsRecruitUtilityScale,
+            Spacewars.Simulation.Ai.AiDifficulty.Fighter=>sourceData.aiArmySystemsFighterUtilityScale,
+            Spacewars.Simulation.Ai.AiDifficulty.Veteran=>sourceData.aiArmySystemsVeteranUtilityScale,
+            _=>throw new ArgumentOutOfRangeException(nameof(difficulty))};
+        public double ArmySystemsAiCatchupSeconds(Spacewars.Simulation.Ai.AiDifficulty difficulty)=>difficulty switch {
+            Spacewars.Simulation.Ai.AiDifficulty.Recruit=>0,
+            Spacewars.Simulation.Ai.AiDifficulty.Fighter=>sourceData.aiArmySystemsFighterCatchupSeconds,
+            Spacewars.Simulation.Ai.AiDifficulty.Veteran=>sourceData.aiArmySystemsVeteranCatchupSeconds,
+            _=>throw new ArgumentOutOfRangeException(nameof(difficulty))};
+
         public double TankChassisCost {get; private set;} public double TankChassisSeconds {get; private set;} public double TankChassisSpeed {get; private set;}
         public double ExplorerAssaultCost {get; private set;} public double ExplorerAssaultSeconds {get; private set;} public int ExplorerAssaultBurstSize {get; private set;} public double ExplorerAssaultSpreadDeg {get; private set;}
         public double ShkvalGuidanceCost {get; private set;} public double ShkvalGuidanceSeconds {get; private set;} public double ShkvalGuidanceRange {get; private set;}
@@ -298,6 +471,13 @@ namespace Spacewars.Simulation
         public double ShkvalExhaustOpacity {get; private set;}
         public double WeaponMuzzleCoreRatio {get; private set;}
         public double ImpactEffectSec {get; private set;}
+        public double DirectImpactSparkWidth {get; private set;}
+        public double DirectImpactGlow {get; private set;}
+        public double DirectImpactSmokeOpacity {get; private set;}
+        public double DirectImpactRadius {get; private set;}
+        public double DirectImpactSeconds {get; private set;}
+        public double DirectImpactSparkLength {get; private set;}
+        public double ExplorerImpactScale {get; private set;}
         public double UnitWreckLifetimeSeconds {get; private set;}
         public double ImpactEffectRadius {get; private set;}
         public double BallisticWallHeight {get; private set;}
@@ -386,6 +566,9 @@ namespace Spacewars.Simulation
             ShkvalExhaustOpacity=data.shkvalExhaustOpacity;
             WeaponMuzzleCoreRatio=data.weaponMuzzleCoreRatio;
             ImpactEffectSec=data.impactEffectSec;
+            DirectImpactSparkWidth=data.directImpactSparkWidth;DirectImpactGlow=data.directImpactGlow;DirectImpactSmokeOpacity=data.directImpactSmokeOpacity;
+            DirectImpactRadius=data.directImpactRadius;DirectImpactSeconds=data.directImpactSeconds;
+            DirectImpactSparkLength=data.directImpactSparkLength;ExplorerImpactScale=data.explorerImpactScale;
             UnitWreckLifetimeSeconds=data.unitWreckLifetimeSeconds;
             ImpactEffectRadius=data.impactEffectRadius;
             BallisticWallHeight=data.ballisticWallHeight;
@@ -413,6 +596,53 @@ namespace Spacewars.Simulation
             ExplorerTracerLength=data.explorerTracerLength;
             ExplorerTracerThickness=data.explorerTracerThickness;
             ExplorerMuzzleOffset=data.explorerMuzzleOffset;
+            HawkModelScale=data.hawkModelScale;HawkAimTolerance=data.hawkAimTolerance;HawkPreparationYawSpeed=data.hawkPreparationYawSpeed;HawkMissileLength=data.hawkMissileLength;HawkDebrisSeconds=data.hawkDebrisSeconds;HawkDebrisSpeed=data.hawkDebrisSpeed;HawkDebrisGravity=data.hawkDebrisGravity;HawkDebrisCount=data.hawkDebrisCount;HawkHealth=data.hawkHealth;
+HawkCreditCost=data.hawkCreditCost;
+HawkPopulationCost=data.hawkPopulationCost;
+HawkProductionSeconds=data.hawkProductionSeconds;
+HawkRadius=data.hawkRadius;
+HawkSpeed=data.hawkSpeed;
+HawkReverseSpeed=data.hawkReverseSpeed;
+HawkStrafeSpeed=data.hawkStrafeSpeed;
+HawkAcceleration=data.hawkAcceleration;
+HawkBraking=data.hawkBraking;
+HawkShortSeconds=data.hawkShortSeconds;
+HawkShortDistance=data.hawkShortDistance;
+HawkYawSpeed=data.hawkYawSpeed;
+HawkYawAcceleration=data.hawkYawAcceleration;
+HawkCruisePitch=data.hawkCruisePitch;
+HawkAccelerationPitch=data.hawkAccelerationPitch;
+HawkBank=data.hawkBank;
+HawkAttitudeSpeed=data.hawkAttitudeSpeed;
+HawkClearance=data.hawkClearance;
+HawkClimbSpeed=data.hawkClimbSpeed;
+HawkDescentSpeed=data.hawkDescentSpeed;
+HawkLookahead=data.hawkLookahead;
+HawkSeparation=data.hawkSeparation;
+HawkRoofSeconds=data.hawkRoofSeconds;
+HawkPlatformSeconds=data.hawkPlatformSeconds;
+HawkSpinSeconds=data.hawkSpinSeconds;
+HawkRotorSpeed=data.hawkRotorSpeed;
+HawkRange=data.hawkRange;
+HawkPreparationSeconds=data.hawkPreparationSeconds;
+HawkDamage=data.hawkDamage;
+HawkSalvoDelay=data.hawkSalvoDelay;
+HawkReloadSeconds=data.hawkReloadSeconds;
+HawkSalvoResearchCost=data.hawkSalvoResearchCost;
+HawkSalvoResearchSeconds=data.hawkSalvoResearchSeconds;
+HawkUpgradedPreparationSeconds=data.hawkUpgradedPreparationSeconds;
+HawkUpgradedSalvoDelay=data.hawkUpgradedSalvoDelay;
+HawkUpgradedReloadSeconds=data.hawkUpgradedReloadSeconds;
+HawkMissileSpeed=data.hawkMissileSpeed;
+HawkMissileTurn=data.hawkMissileTurn;
+HawkMissileRadius=data.hawkMissileRadius;
+            HangarHealth=data.hangarHealth;
+            HangarBuildSeconds=data.hangarBuildSeconds;
+            HangarCreditCost=data.hangarCreditCost;
+            HangarVisionRange=data.hangarVisionRange;
+            HangarFootprintRadius=data.hangarFootprintRadius;
+            HangarModelHeightMeters=data.hangarModelHeightMeters;
+            HangarModelScale=data.hangarModelScale;
             ScienceHealth=data.scienceHealth;
             ScienceBuildSeconds=data.scienceBuildSeconds;
             ScienceVisionRange=data.scienceVisionRange;
@@ -476,11 +706,12 @@ namespace Spacewars.Simulation
             SchemaVersion = data.schemaVersion; ProfileId = data.profileId; Revision = data.revision;
             SourceCommit = data.sourceCommit; SourceProfileId = data.sourceProfileId; SourceProfileRevision = data.sourceProfileRevision; SourceManifestSha256 = data.sourceManifestSha256;
             HealthBarOutlineWidth=data.healthBarOutlineWidth;BuildingSelectionPadding=data.buildingSelectionPadding;BuildingSelectionWidth=data.buildingSelectionWidth;
-            SelectionRingPadding=data.selectionRingPadding;SelectionRingWidth=data.selectionRingWidth;SelectionRingLift=data.selectionRingLift;
+            GroundTrailLifetimeSeconds=data.groundTrailLifetimeSeconds;SelectionRingPadding=data.selectionRingPadding;SelectionRingWidth=data.selectionRingWidth;SelectionRingLift=data.selectionRingLift;
             UnitOrderQueueLimit=(int)data.unitOrderQueueLimit;GroupMarchMaximumStretch=data.groupMarchMaximumStretch;FollowDistance=data.followDistance;FollowArrivalTolerance=data.followArrivalTolerance;IdleAutoDefenseMultiplier=data.idleAutoDefenseMultiplier;TankCollisionRadius = data.tankCollisionRadius; TankModelRadius = data.tankModelRadius; TankModelScale = data.tankModelScale; TankSpeed = data.tankSpeed; TankTurnSpeed = data.tankTurnSpeed; TankTurretTurnSpeed = data.tankTurretTurnSpeed; TankAimToleranceRadians = data.tankAimToleranceRadians; TankRange = data.tankRange; TankVisionRange = data.tankVisionRange;
             TankHealth = data.tankHealth; TankFiresWhileMoving = data.tankFiresWhileMoving; TankStopForMilliseconds = data.tankStopForMilliseconds; TankPopulationCost = data.tankPopulationCost; TankCreditCost = data.tankCreditCost; TankProductionMenuOrder = data.tankProductionMenuOrder; TankProductionSeconds = data.tankProductionSeconds; TankWeaponDamage = data.tankWeaponDamage; TankWeaponReloadMilliseconds = data.tankWeaponReloadMilliseconds; TankProjectileType = data.tankProjectileType; TankProjectileSpeed = data.tankProjectileSpeed; TankProjectileCollisionRadius = data.tankProjectileCollisionRadius; ProjectileExtraRangePercent = data.projectileExtraRangePercent;
             MatchScoreEarnedCreditsDivisor=data.matchScoreEarnedCreditsDivisor; ArmyCapacity = data.armyCapacity; StartingCredits = data.startingCredits; IncomePeriodSeconds = data.incomePeriodSeconds; BuildingCancellationRefundRatio = data.buildingCancellationRefundRatio; UnitCancellationRefundRatio = data.unitCancellationRefundRatio;
             RallyFlagHeight=data.rallyFlagHeight; HeadquartersHealth = data.headquartersHealth; HeadquartersBuildSeconds = data.headquartersBuildSeconds; HeadquartersCreditCost = data.headquartersCreditCost; HeadquartersIncomePerPeriod = data.headquartersIncomePerPeriod; HeadquartersFootprintRadius = data.headquartersFootprintRadius; HeadquartersModelHeightMeters = data.headquartersModelHeightMeters; HeadquartersModelScale = data.headquartersModelScale;
+            FactoryGateSeconds=data.factoryGateSeconds;FactoryRolloutSpeed=data.factoryRolloutSpeed;
             FactoryHealth = data.factoryHealth; FactoryBuildSeconds = data.factoryBuildSeconds; FactoryCreditCost = data.factoryCreditCost; FactoryFootprintRadius = data.factoryFootprintRadius; FactoryModelHeightMeters = data.factoryModelHeightMeters; FactoryModelScale = data.factoryModelScale;
             RefineryHealth = data.refineryHealth; RefineryBuildSeconds = data.refineryBuildSeconds; RefineryCreditCost = data.refineryCreditCost; RefineryIncomePerPeriod = data.refineryIncomePerPeriod; RefineryFootprintRadius = data.refineryFootprintRadius; RefineryModelHeightMeters = data.refineryModelHeightMeters; RefineryModelScale = data.refineryModelScale;
             ArenaHalfExtent = data.arenaHalfExtent; PlayerHeadquartersX = data.playerHeadquartersX; EnemyHeadquartersX = data.enemyHeadquartersX; HeadquartersZ = data.headquartersZ;
@@ -489,7 +720,7 @@ namespace Spacewars.Simulation
             CentralObstacleHalfWidth = data.centralObstacleHalfWidth; CentralObstacleHalfDepth = data.centralObstacleHalfDepth; PassageHalfWidth = data.passageHalfWidth;
             EnemyAdvanceDelaySeconds = data.enemyAdvanceDelaySeconds; AttackApproachRangeRatio = data.attackApproachRangeRatio; AttackRepathSeconds = data.attackRepathSeconds; FactoryExitDistance = data.factoryExitDistance; DefaultRallyDistance = data.defaultRallyDistance; TargetPickRadiusMultiplier = data.targetPickRadiusMultiplier; BuildingPickRadius = data.buildingPickRadius; NavigationRequestsPerFrame = data.navigationRequestsPerFrame; RenderTargetFramesPerSecond = data.renderTargetFramesPerSecond;
             CameraOrthoSize = data.cameraOrthoSize; CameraHeight = data.cameraHeight; CameraOffsetX = data.cameraOffsetX; CameraOffsetZ = data.cameraOffsetZ; CameraPanSpeed = data.cameraPanSpeed; CameraEdgePanSpeed=data.cameraEdgePanSpeed; CameraEdgePanZonePixels=data.cameraEdgePanZonePixels; CameraMinZoom = data.cameraMinZoom; CameraMaxZoom = data.cameraMaxZoom; CameraZoomSpeed = data.cameraZoomSpeed; SelectionDragPixels = data.selectionDragPixels;
-            Navigation = new NavigationProfile(ProfileId, Revision, TankCollisionRadius, TankSpeed, TankTurnSpeed, .8d, .15d, 3.6d, .08d,crowdHeadingIntervals:data.crowdMotionHeadingIntervals,crowdSpeedBands:data.crowdMotionSpeedBands,crowdLookaheadSeconds:data.crowdMotionLookaheadSeconds,crowdNeighborCap:data.crowdMotionNeighborCap);
+            Navigation = new NavigationProfile(ProfileId, Revision, TankCollisionRadius, TankSpeed, TankTurnSpeed, .8d, .15d, 3.6d, .08d,crowdHeadingIntervals:data.crowdMotionHeadingIntervals,crowdSpeedBands:data.crowdMotionSpeedBands,crowdLookaheadSeconds:data.crowdMotionLookaheadSeconds,crowdNeighborCap:data.crowdMotionNeighborCap,groupCorridorMaximumExcessPercent:data.groupCorridorMaximumExcessPercent);
         }
 
         public double OutpostHealth {get; private set;}
@@ -529,6 +760,8 @@ namespace Spacewars.Simulation
         public int SchemaVersion { get; private set; } public string ProfileId { get; private set; } public int Revision { get; private set; }
         public string SourceCommit { get; private set; } public string SourceProfileId { get; private set; } public int SourceProfileRevision { get; private set; } public string SourceManifestSha256 { get; private set; }
         public double HealthBarOutlineWidth {get;private set;} public double BuildingSelectionPadding {get;private set;} public double BuildingSelectionWidth {get;private set;}
+        public double GroundTrailLifetimeSeconds {get;private set;}
+        public int GroundTrailLifetimeTicks => (int)Math.Round(GroundTrailLifetimeSeconds*30);
         public double SelectionRingPadding {get;private set;} public double SelectionRingWidth {get;private set;} public double SelectionRingLift {get;private set;}
         public double TankCollisionRadius { get; private set; } public double TankModelRadius { get; private set; } public double TankModelScale { get; private set; } public double TankSpeed { get; private set; } public double TankTurnSpeed { get; private set; } public double TankTurretTurnSpeed { get; private set; } public double TankAimToleranceRadians { get; private set; } public double TankRange { get; private set; } public double TankVisionRange { get; private set; }
         public int TankHealth { get; private set; } public bool TankFiresWhileMoving { get; private set; } public int TankStopForMilliseconds { get; private set; } public int TankPopulationCost { get; private set; } public int TankCreditCost { get; private set; } public int TankProductionMenuOrder { get; private set; } public int TankProductionSeconds { get; private set; } public int TankWeaponDamage { get; private set; } public int TankWeaponReloadMilliseconds { get; private set; } public string TankProjectileType { get; private set; } public double TankProjectileSpeed { get; private set; } public double TankProjectileCollisionRadius { get; private set; } public double ProjectileExtraRangePercent { get; private set; }
@@ -541,6 +774,7 @@ namespace Spacewars.Simulation
         public int ArmyCapacity { get; private set; } public int StartingCredits { get; private set; } public int IncomePeriodSeconds { get; private set; } public double BuildingCancellationRefundRatio { get; private set; } public double UnitCancellationRefundRatio { get; private set; }
         public int HeadquartersHealth { get; private set; } public int HeadquartersBuildSeconds { get; private set; } public int HeadquartersCreditCost { get; private set; } public int HeadquartersIncomePerPeriod { get; private set; } public double HeadquartersFootprintRadius { get; private set; } public double HeadquartersModelHeightMeters { get; private set; } public double HeadquartersModelScale { get; private set; }
         public double RallyFlagHeight { get; private set; }
+        public double FactoryGateSeconds {get;private set;} public double FactoryRolloutSpeed {get;private set;}
         public int FactoryHealth { get; private set; } public int FactoryBuildSeconds { get; private set; } public int FactoryCreditCost { get; private set; } public double FactoryFootprintRadius { get; private set; } public double FactoryModelHeightMeters { get; private set; } public double FactoryModelScale { get; private set; }
         public int RefineryHealth { get; private set; } public int RefineryBuildSeconds { get; private set; } public int RefineryCreditCost { get; private set; } public int RefineryIncomePerPeriod { get; private set; } public double RefineryFootprintRadius { get; private set; } public double RefineryModelHeightMeters { get; private set; } public double RefineryModelScale { get; private set; }
         public double HeadquartersIncomePerSecond { get { return HeadquartersIncomePerPeriod / (double)IncomePeriodSeconds; } } public double RefineryIncomePerSecond { get { return RefineryIncomePerPeriod / (double)IncomePeriodSeconds; } }
@@ -550,26 +784,33 @@ namespace Spacewars.Simulation
         public double CentralObstacleHalfWidth { get; private set; } public double CentralObstacleHalfDepth { get; private set; } public double PassageHalfWidth { get; private set; }
         public double EnemyAdvanceDelaySeconds { get; private set; } public double AttackApproachRangeRatio { get; private set; } public double AttackRepathSeconds { get; private set; } public double FactoryExitDistance { get; private set; } public double DefaultRallyDistance { get; private set; } public double TargetPickRadiusMultiplier { get; private set; } public double BuildingPickRadius { get; private set; } public int NavigationRequestsPerFrame { get; private set; } public int RenderTargetFramesPerSecond { get; private set; }
         public double CameraOrthoSize { get; private set; } public double CameraHeight { get; private set; } public double CameraOffsetX { get; private set; } public double CameraOffsetZ { get; private set; } public double CameraEdgePanSpeed { get; private set; } public double CameraEdgePanZonePixels { get; private set; } public double CameraPanSpeed { get; private set; } public double CameraMinZoom { get; private set; } public double CameraMaxZoom { get; private set; } public double CameraZoomSpeed { get; private set; } public double SelectionDragPixels { get; private set; }
+        public int ProvingGroundStartingCredits=>sourceData.provingGroundStartingCredits;
+        public int MaxAccruedCredits=>sourceData.navigationMaxAccruedCredits==0?600:sourceData.navigationMaxAccruedCredits;
+        public bool HasAccruedCreditExtension=>sourceData.navigationMaxAccruedCredits!=0;
         public NavigationProfile Navigation { get; private set; }
 
         public IPlayableTerrain AuthoredMap { get; private set; }
         public NavPoint Headquarters(PlayableOwner owner)=>AuthoredMap!=null?AuthoredMap.Headquarters(owner):new NavPoint(owner==PlayableOwner.Player?PlayerHeadquartersX:EnemyHeadquartersX,HeadquartersZ);
         public static PlayableProfile Create(PlayableProfileData data,IPlayableTerrain map=null,string displayName=null) { Validate(data); var result=new PlayableProfile(data); result.DisplayName=displayName??"Основной";result.AuthoredMap=map;if(map!=null)result.ArenaHalfExtent=map.HalfExtent; TerritoryRules.ValidateArena(result); return result; }
         public static PlayableProfile ThreeCrossingsDefault=>Create(DefaultData(),ThreeCrossingsMap.Default);
+        public static PlayableProfile CertifiedGroupCorridorDefault {get{var data=DefaultData();data.groupCorridorMaximumExcessPercent=15;var result=Create(data,ThreeCrossingsMap.Default);result.DisplayName="certified-group-corridor-v1";return result;}}
         public static PlayableProfile Default { get { return Create(DefaultData()); } }
 
         public static void Validate(PlayableProfileData data)
         {
             if (data != null && data.matchScoreEarnedCreditsDivisor<1) throw new ArgumentException("Score divisor must be positive.");
+            if(data!=null&&data.navigationMaxAccruedCredits<0)throw new ArgumentException("Invalid accrued credit extension.");
             if (data == null) throw new ArgumentNullException("data");
             if (data.schemaVersion != RequiredSchemaVersion || data.profileId != RequiredProfileId || data.revision < 1) throw new ArgumentException("Unsupported playable profile identity.", "data");
             if (String.IsNullOrWhiteSpace(data.sourceCommit) || String.IsNullOrWhiteSpace(data.sourceProfileId) || data.sourceProfileRevision < 1 || String.IsNullOrWhiteSpace(data.sourceManifestSha256)) throw new ArgumentException("Playable profile provenance is incomplete.", "data");
             if (data.tankProjectileType != "kinetic-shell") throw new ArgumentException("Playable profile requires the release tank projectile type.", "data");
             if(data.shkvalMarkerStartRadius<data.shkvalBlastRadius)throw new ArgumentException("Artillery marker must cover blast radius.");
-            foreach (PlayableProfileField field in PlayableProfileMetadata.Fields) { double value = field.Read(data); if (Double.IsNaN(value) || Double.IsInfinity(value) || value < field.Minimum || value > field.Maximum) throw new ArgumentException("Invalid playable profile field: " + field.Path, "data"); }
+            foreach (PlayableProfileField field in PlayableProfileMetadata.Fields) { double value = field.Read(data); if(field.FieldName==nameof(PlayableProfileData.groupCorridorMaximumExcessPercent)&&value==0)continue; if (Double.IsNaN(value) || Double.IsInfinity(value) || value < field.Minimum || value > field.Maximum) throw new ArgumentException("Invalid playable profile field: " + field.Path, "data"); }
             foreach(var field in PlayableProfileMetadata.Fields)if(field.Path.StartsWith("system.follow.")){double steps=(field.Read(data)-field.Minimum)/field.Step;if(Math.Abs(steps-Math.Round(steps))>1e-8)throw new ArgumentException("Follow value must align to source metadata step: "+field.Path);}
             foreach(var field in PlayableProfileMetadata.Fields)if(field.Path.StartsWith("groupMarch.")){double steps=(field.Read(data)-field.Minimum)/field.Step;if(Math.Abs(steps-Math.Round(steps))>1e-8)throw new ArgumentException("March value must align to metadata step: "+field.Path);}
             foreach(var field in PlayableProfileMetadata.CrowdFields){double steps=(field.Read(data)-field.Minimum)/field.Step;if(Math.Abs(steps-Math.Round(steps))>1e-8||field.Step==1&&field.Read(data)!=Math.Truncate(field.Read(data)))throw new ArgumentException("Crowd value must align to metadata: "+field.Path);}
+            if(data.weaponSystemsLevel2BonusPercent<data.weaponSystemsLevel1BonusPercent||data.defensiveSystemsLevel2BonusPercent<data.defensiveSystemsLevel1BonusPercent)throw new ArgumentException("Army systems levels must be cumulative.");
+            foreach(var field in PlayableProfileMetadata.Fields.Where(f=>f.Path.StartsWith("research.weaponSystems.")||f.Path.StartsWith("research.defensiveSystems.")||f.Path=="ai.research.armySystemsMinimumUnits"||f.Path.StartsWith("ai.research.armySystems."))){double steps=(field.Read(data)-field.Minimum)/field.Step;if(Math.Abs(steps-Math.Round(steps))>1e-8)throw new ArgumentException("Army systems value must align to metadata: "+field.Path);}
             if(data.unitOrderQueueLimit!=Math.Truncate(data.unitOrderQueueLimit))throw new ArgumentException("Queue limit must be an integer.");
             if(data.fogExploredOpacity>=data.fogUnseenOpacity)throw new ArgumentException("Explored terrain must be clearer than unseen terrain.");
             if (data.headquartersSlots != Math.Floor(data.headquartersSlots) || data.outpostSlots != Math.Floor(data.outpostSlots)) throw new ArgumentException("Slot counts must be integers.");
@@ -680,7 +921,7 @@ namespace Spacewars.Simulation
                 followDistance=2, followArrivalTolerance=.25, idleAutoDefenseMultiplier=1.1, tankCollisionRadius=.72d, tankModelRadius=.65d, tankModelScale=1d, tankSpeed=4d, tankTurnSpeed=4.5d, tankTurretTurnSpeed=6d, tankAimToleranceRadians=.034906585d, tankRange=10d, tankVisionRange=13d, tankHealth=100, tankFiresWhileMoving=true, tankStopForMilliseconds=0, tankPopulationCost=3, tankCreditCost=150, tankProductionMenuOrder=20, tankProductionSeconds=15, tankWeaponDamage=8, tankWeaponReloadMilliseconds=900, tankProjectileType="kinetic-shell", tankProjectileSpeed=15d, tankProjectileCollisionRadius=.06d, projectileExtraRangePercent=20d,
                 buildingSaleRefundRatio=0.75d,buildingSaleCombatLockoutSec=5d,buildingSaleDemolitionSec=2d,buildingRepairDurationSec=30d,buildingRepairCostRatio=0.5d,buildingRepairCombatLockoutSec=5d,saleMarkerScale=0.7d,
                 lifecycleMarkerPixels=30d,lifecycleMarkerPulseHz=1d,lifecycleMarkerMinOpacity=0.4d,lifecycleMarkerOffsetMeters=0.8d,
-                scienceHealth=250, scienceBuildSeconds=20, scienceVisionRange=14, scienceFootprintRadius=1.45, scienceCreditCost=300, scienceModelHeightMeters=1.6407, scienceModelScale=0.8, refineryUpgradeCost=200, refineryUpgradeSeconds=20, refineryUpgradedIncome=15, refineryTurbineSpeed=90,tankChassisGlowIntensity=1.2,tankChassisCost=300,tankChassisSeconds=30,tankChassisSpeed=6,explorerAssaultCost=300,explorerAssaultSeconds=30,explorerAssaultBurstSize=6,explorerAssaultSpreadDeg=5,shkvalGuidanceCost=600,shkvalGuidanceSeconds=30,shkvalGuidanceRange=16, startingCredits=500, incomePeriodSeconds=5, buildingCancellationRefundRatio=.75d, unitCancellationRefundRatio=1d, headquartersHealth=400, headquartersBuildSeconds=25, headquartersCreditCost=600, headquartersIncomePerPeriod=20, headquartersFootprintRadius=2.05d, headquartersModelHeightMeters=4.6d, headquartersModelScale=.7d, factoryHealth=250, factoryBuildSeconds=15, factoryCreditCost=300, factoryFootprintRadius=1.45d, factoryModelHeightMeters=2.5d, factoryModelScale=.7d, refineryHealth=200, refineryBuildSeconds=10, refineryCreditCost=200, refineryIncomePerPeriod=10, refineryFootprintRadius=1.35d, refineryModelHeightMeters=2.6d, refineryModelScale=.8d,
+                scienceHealth=250, scienceBuildSeconds=20, scienceVisionRange=14, scienceFootprintRadius=1.45, scienceCreditCost=300, scienceModelHeightMeters=1.6407, scienceModelScale=0.8, refineryUpgradeCost=200, refineryUpgradeSeconds=20, refineryUpgradedIncome=15, refineryTurbineSpeed=90,tankChassisGlowIntensity=1.2,tankChassisCost=300,tankChassisSeconds=30,tankChassisSpeed=6,explorerAssaultCost=300,explorerAssaultSeconds=30,explorerAssaultBurstSize=6,explorerAssaultSpreadDeg=5,shkvalGuidanceCost=300,shkvalGuidanceSeconds=30,shkvalGuidanceRange=16, startingCredits=500, incomePeriodSeconds=5, buildingCancellationRefundRatio=.75d, unitCancellationRefundRatio=1d, headquartersHealth=400, headquartersBuildSeconds=25, headquartersCreditCost=600, headquartersIncomePerPeriod=20, headquartersFootprintRadius=2.05d, headquartersModelHeightMeters=4.6d, headquartersModelScale=.7d, factoryHealth=250, factoryBuildSeconds=15, factoryCreditCost=300, factoryFootprintRadius=1.45d, factoryModelHeightMeters=2.5d, factoryModelScale=.7d, refineryHealth=200, refineryBuildSeconds=10, refineryCreditCost=200, refineryIncomePerPeriod=10, refineryFootprintRadius=1.35d, refineryModelHeightMeters=2.6d, refineryModelScale=.8d,
                 arenaHalfExtent=32d, playerHeadquartersX=-21d, enemyHeadquartersX=21d, headquartersZ=0d, playerFactoryPadX=-15d, playerFactoryPadZ=-9d, playerRefineryPadX=-15d, playerRefineryPadZ=9d, enemyFactoryPadX=15d, enemyFactoryPadZ=9d, enemyRefineryPadX=15d, enemyRefineryPadZ=-9d, centralObstacleHalfWidth=3d, centralObstacleHalfDepth=24d, passageHalfWidth=4d, enemyAdvanceDelaySeconds=180d, attackApproachRangeRatio=.85d, attackRepathSeconds=.5d, factoryExitDistance=3d, defaultRallyDistance=7d, targetPickRadiusMultiplier=1.8d, buildingPickRadius=2.3d, navigationRequestsPerFrame=4, renderTargetFramesPerSecond=60, cameraOrthoSize=9.6d, cameraHeight=26d, cameraOffsetX=0d, cameraOffsetZ=-37d, cameraPanSpeed=12d, cameraMinZoom=4.27d, cameraMaxZoom=12.8d, cameraZoomSpeed=.013d, selectionDragPixels=6d
             };
         }
@@ -702,9 +943,17 @@ namespace Spacewars.Simulation
             new PlayableProfileField("presentation.healthBar.outlineWidth","Интерфейс · Здоровье","Толщина чёрного контура","Внешний чёрный контур полоски здоровья для чтения на светлом и тёмном фоне.","m",.005,.15,.005,p=>p.healthBarOutlineWidth,nameof(PlayableProfileData.healthBarOutlineWidth)),
             new PlayableProfileField("presentation.buildingSelection.padding","Интерфейс · Выбор здания","Запас рамки здания","Расстояние от углов нижнего основания до зелёной окружности выбора; не меняет коллизии.","m",.1,2,.05,p=>p.buildingSelectionPadding,nameof(PlayableProfileData.buildingSelectionPadding)),
             new PlayableProfileField("presentation.buildingSelection.width","Интерфейс · Выбор здания","Толщина рамки здания","Толщина зелёной окружности выбора здания на земле.","m",.03,.3,.01,p=>p.buildingSelectionWidth,nameof(PlayableProfileData.buildingSelectionWidth)),
+            new PlayableProfileField("presentation.groundTrails.lifetimeSeconds","Следы техники","Время жизни следов","Время до исчезновения отпечатка в игровых секундах. Пауза останавливает отсчёт. Полное выключение — в настройках графики.","s",1,60,1,p=>p.groundTrailLifetimeSeconds,nameof(PlayableProfileData.groundTrailLifetimeSeconds)),
             new PlayableProfileField("presentation.selectionRing.padding","Selection ring","Ring padding","Space between model footprint and selection circle.","m",0,1,.01,p=>p.selectionRingPadding,nameof(PlayableProfileData.selectionRingPadding)),
             new PlayableProfileField("presentation.selectionRing.width","Selection ring","Ring width","Width of the green ground circle.","m",.01,.2,.005,p=>p.selectionRingWidth,nameof(PlayableProfileData.selectionRingWidth)),
             new PlayableProfileField("presentation.selectionRing.lift","Selection ring","Surface lift","Avoids depth flicker against the terrain.","m",.01,.15,.005,p=>p.selectionRingLift,nameof(PlayableProfileData.selectionRingLift)),
+            new PlayableProfileField("hangar.hangarHealth","Здания · Ангар","Здоровье","Максимальное здоровье ангара.","HP",1,10000,1,p=>p.hangarHealth,nameof(PlayableProfileData.hangarHealth)),
+            new PlayableProfileField("hangar.hangarBuildSeconds","Здания · Ангар","Время строительства","Длительность строительства ангара.","s",1,300,1,p=>p.hangarBuildSeconds,nameof(PlayableProfileData.hangarBuildSeconds)),
+            new PlayableProfileField("hangar.hangarCreditCost","Здания · Ангар","Цена","Стоимость заказа ангара.","credits",0,100000,1,p=>p.hangarCreditCost,nameof(PlayableProfileData.hangarCreditCost)),
+            new PlayableProfileField("hangar.hangarVisionRange","Здания · Ангар","Обзор","Радиус обзора готового ангара.","m",1,50,1,p=>p.hangarVisionRange,nameof(PlayableProfileData.hangarVisionRange)),
+            new PlayableProfileField("hangar.hangarFootprintRadius","Здания · Ангар","Радиус основания","Полуразмер непроходимого основания ангара.","m",0.1,20,0.01,p=>p.hangarFootprintRadius,nameof(PlayableProfileData.hangarFootprintRadius)),
+            new PlayableProfileField("hangar.hangarModelHeightMeters","Здания · Ангар","Высота модели","Высота модели до относительного масштабирования.","m",0.1,20,0.1,p=>p.hangarModelHeightMeters,nameof(PlayableProfileData.hangarModelHeightMeters)),
+            new PlayableProfileField("hangar.hangarModelScale","Здания · Ангар","Масштаб модели","Визуальный масштаб без изменения коллизии.","ratio",0.25,3,0.05,p=>p.hangarModelScale,nameof(PlayableProfileData.hangarModelScale)),
             new PlayableProfileField("science.scienceHealth","Science and refinery","Science health","Maximum science building health","HP",1,10000,10,p=>p.scienceHealth,nameof(PlayableProfileData.scienceHealth)),
             new PlayableProfileField("science.scienceBuildSeconds","Science and refinery","Science construction time","Time to complete science construction","s",0.1,300,0.5,p=>p.scienceBuildSeconds,nameof(PlayableProfileData.scienceBuildSeconds)),
             new PlayableProfileField("science.scienceVisionRange","Science and refinery","Science vision","Radius revealing nearby terrain and entities","m",1,100,0.5,p=>p.scienceVisionRange,nameof(PlayableProfileData.scienceVisionRange)),
@@ -717,6 +966,30 @@ namespace Spacewars.Simulation
             new PlayableProfileField("science.refineryUpgradedIncome","Science and refinery","Upgraded income","Credits per shared income period after completion","credits",0,500,1,p=>p.refineryUpgradedIncome,nameof(PlayableProfileData.refineryUpgradedIncome)),
             new PlayableProfileField("science.refineryTurbineSpeed","Science and refinery","Turbine rotation","Visible completed refinery turbine speed","degrees/s",1,720,1,p=>p.refineryTurbineSpeed,nameof(PlayableProfileData.refineryTurbineSpeed)),
             new PlayableProfileField("unitUpgrades.tankChassis.glowIntensity","Танк · Улучшение шасси","Улучшение: яркость подсветки","Яркость тонких полос на улучшенных гусеничных обтекателях. Ноль выключает свечение, сохраняя геометрию.","×",0.0,5.0,0.1,p=>p.tankChassisGlowIntensity,nameof(PlayableProfileData.tankChassisGlowIntensity)),
+            new PlayableProfileField("research.weaponSystems.level1.cost","Исследования / Оружейные системы","Цена · уровень 1","Кредиты, списываемые при старте исследования.","кредиты",0,10000,1,p=>p.weaponSystemsLevel1Cost,nameof(PlayableProfileData.weaponSystemsLevel1Cost)),
+            new PlayableProfileField("research.weaponSystems.level1.seconds","Исследования / Оружейные системы","Длительность · уровень 1","Длительность активного исследования в секундах симуляции.","с",0.5,300,0.5,p=>p.weaponSystemsLevel1Seconds,nameof(PlayableProfileData.weaponSystemsLevel1Seconds)),
+            new PlayableProfileField("research.weaponSystems.level1.bonusPercent","Исследования / Оружейные системы","Суммарный бонус · уровень 1","Суммарное усиление относительно базового значения; второй уровень заменяет бонус первого.","%",0,300,1,p=>p.weaponSystemsLevel1BonusPercent,nameof(PlayableProfileData.weaponSystemsLevel1BonusPercent)),
+            new PlayableProfileField("research.weaponSystems.level2.cost","Исследования / Оружейные системы","Цена · уровень 2","Кредиты, списываемые при старте исследования.","кредиты",0,10000,1,p=>p.weaponSystemsLevel2Cost,nameof(PlayableProfileData.weaponSystemsLevel2Cost)),
+            new PlayableProfileField("research.weaponSystems.level2.seconds","Исследования / Оружейные системы","Длительность · уровень 2","Длительность активного исследования в секундах симуляции.","с",0.5,300,0.5,p=>p.weaponSystemsLevel2Seconds,nameof(PlayableProfileData.weaponSystemsLevel2Seconds)),
+            new PlayableProfileField("research.weaponSystems.level2.bonusPercent","Исследования / Оружейные системы","Суммарный бонус · уровень 2","Суммарное усиление относительно базового значения; второй уровень заменяет бонус первого.","%",0,300,1,p=>p.weaponSystemsLevel2BonusPercent,nameof(PlayableProfileData.weaponSystemsLevel2BonusPercent)),
+            new PlayableProfileField("research.defensiveSystems.level1.cost","Исследования / Защитные системы","Цена · уровень 1","Кредиты, списываемые при старте исследования.","кредиты",0,10000,1,p=>p.defensiveSystemsLevel1Cost,nameof(PlayableProfileData.defensiveSystemsLevel1Cost)),
+            new PlayableProfileField("research.defensiveSystems.level1.seconds","Исследования / Защитные системы","Длительность · уровень 1","Длительность активного исследования в секундах симуляции.","с",0.5,300,0.5,p=>p.defensiveSystemsLevel1Seconds,nameof(PlayableProfileData.defensiveSystemsLevel1Seconds)),
+            new PlayableProfileField("research.defensiveSystems.level1.bonusPercent","Исследования / Защитные системы","Суммарный бонус · уровень 1","Суммарное усиление относительно базового значения; второй уровень заменяет бонус первого.","%",0,300,1,p=>p.defensiveSystemsLevel1BonusPercent,nameof(PlayableProfileData.defensiveSystemsLevel1BonusPercent)),
+            new PlayableProfileField("research.defensiveSystems.level2.cost","Исследования / Защитные системы","Цена · уровень 2","Кредиты, списываемые при старте исследования.","кредиты",0,10000,1,p=>p.defensiveSystemsLevel2Cost,nameof(PlayableProfileData.defensiveSystemsLevel2Cost)),
+            new PlayableProfileField("research.defensiveSystems.level2.seconds","Исследования / Защитные системы","Длительность · уровень 2","Длительность активного исследования в секундах симуляции.","с",0.5,300,0.5,p=>p.defensiveSystemsLevel2Seconds,nameof(PlayableProfileData.defensiveSystemsLevel2Seconds)),
+            new PlayableProfileField("research.defensiveSystems.level2.bonusPercent","Исследования / Защитные системы","Суммарный бонус · уровень 2","Суммарное усиление относительно базового значения; второй уровень заменяет бонус первого.","%",0,300,1,p=>p.defensiveSystemsLevel2BonusPercent,nameof(PlayableProfileData.defensiveSystemsLevel2BonusPercent)),
+            new PlayableProfileField("ai.research.armySystems.recruit.delaySeconds","ИИ / Системы армии","Новичок · Уровень I: не раньше","Минимальное время матча для первого уровня обеих веток. Наблюдение у врага обходит срок с учётом задержки реакции; новичок не реагирует.","с",0,1800,30,p=>p.aiArmySystemsRecruitDelaySeconds,nameof(PlayableProfileData.aiArmySystemsRecruitDelaySeconds)),
+            new PlayableProfileField("ai.research.armySystems.recruit.level2DelaySeconds","ИИ / Системы армии","Новичок · Уровень II: не раньше","Минимальное время матча для второго уровня обеих веток. Наблюдение у врага обходит срок с учётом задержки реакции; новичок не реагирует.","с",0,1800,30,p=>p.aiArmySystemsRecruitLevel2DelaySeconds,nameof(PlayableProfileData.aiArmySystemsRecruitLevel2DelaySeconds)),
+            new PlayableProfileField("ai.research.armySystems.recruit.utilityScale","ИИ / Системы армии","Новичок · Ценность систем армии","Множитель полезности оружейной и защитной веток.","вес",0.05,10,0.05,p=>p.aiArmySystemsRecruitUtilityScale,nameof(PlayableProfileData.aiArmySystemsRecruitUtilityScale)),
+            new PlayableProfileField("ai.research.armySystems.fighter.delaySeconds","ИИ / Системы армии","Боец · Уровень I: не раньше","Минимальное время матча для первого уровня обеих веток. Наблюдение у врага обходит срок с учётом задержки реакции; новичок не реагирует.","с",0,1800,30,p=>p.aiArmySystemsFighterDelaySeconds,nameof(PlayableProfileData.aiArmySystemsFighterDelaySeconds)),
+            new PlayableProfileField("ai.research.armySystems.fighter.level2DelaySeconds","ИИ / Системы армии","Боец · Уровень II: не раньше","Минимальное время матча для второго уровня обеих веток. Наблюдение у врага обходит срок с учётом задержки реакции; новичок не реагирует.","с",0,1800,30,p=>p.aiArmySystemsFighterLevel2DelaySeconds,nameof(PlayableProfileData.aiArmySystemsFighterLevel2DelaySeconds)),
+            new PlayableProfileField("ai.research.armySystems.fighter.utilityScale","ИИ / Системы армии","Боец · Ценность систем армии","Множитель полезности оружейной и защитной веток.","вес",0.05,10,0.05,p=>p.aiArmySystemsFighterUtilityScale,nameof(PlayableProfileData.aiArmySystemsFighterUtilityScale)),
+            new PlayableProfileField("ai.research.armySystems.veteran.delaySeconds","ИИ / Системы армии","Ветеран · Уровень I: не раньше","Минимальное время матча для первого уровня обеих веток. Наблюдение у врага обходит срок с учётом задержки реакции; новичок не реагирует.","с",0,1800,30,p=>p.aiArmySystemsVeteranDelaySeconds,nameof(PlayableProfileData.aiArmySystemsVeteranDelaySeconds)),
+            new PlayableProfileField("ai.research.armySystems.veteran.level2DelaySeconds","ИИ / Системы армии","Ветеран · Уровень II: не раньше","Минимальное время матча для второго уровня обеих веток. Наблюдение у врага обходит срок с учётом задержки реакции; новичок не реагирует.","с",0,1800,30,p=>p.aiArmySystemsVeteranLevel2DelaySeconds,nameof(PlayableProfileData.aiArmySystemsVeteranLevel2DelaySeconds)),
+            new PlayableProfileField("ai.research.armySystems.veteran.utilityScale","ИИ / Системы армии","Ветеран · Ценность систем армии","Множитель полезности оружейной и защитной веток.","вес",0.05,10,0.05,p=>p.aiArmySystemsVeteranUtilityScale,nameof(PlayableProfileData.aiArmySystemsVeteranUtilityScale)),
+            new PlayableProfileField("ai.research.armySystems.fighter.catchupSeconds","ИИ / Системы армии","Боец · Реакция на отставание","Игровых секунд с первого наблюдения вражеского уровня до приоритетного накопления. Новичок не учитывает вражеские апгрейды.","с",0,300,1,p=>p.aiArmySystemsFighterCatchupSeconds,nameof(PlayableProfileData.aiArmySystemsFighterCatchupSeconds)),
+            new PlayableProfileField("ai.research.armySystems.veteran.catchupSeconds","ИИ / Системы армии","Ветеран · Реакция на отставание","Игровых секунд с первого наблюдения вражеского уровня до приоритетного накопления. Новичок не учитывает вражеские апгрейды.","с",0,300,1,p=>p.aiArmySystemsVeteranCatchupSeconds,nameof(PlayableProfileData.aiArmySystemsVeteranCatchupSeconds)),
+            new PlayableProfileField("ai.research.armySystemsMinimumUnits","Исследования / ИИ / Исследования","Минимум юнитов для оружия и защиты","Живые собственные юниты поштучно, включая Исследователей. Ограничивает только новые исследования ИИ в двух глобальных ветках.","юниты",0,1000,1,p=>p.armySystemsMinimumUnits,nameof(PlayableProfileData.armySystemsMinimumUnits)),
             new PlayableProfileField("research.tankChassisCost","Research / tank chassis","Chassis price","Credits charged when chassis research starts","credits",0,5000,10,p=>p.tankChassisCost,nameof(PlayableProfileData.tankChassisCost)),
             new PlayableProfileField("research.tankChassisSeconds","Research / tank chassis","Chassis duration","Active simulation time for chassis research","s",0.5,300,0.5,p=>p.tankChassisSeconds,nameof(PlayableProfileData.tankChassisSeconds)),
             new PlayableProfileField("research.tankChassisSpeed","Research / tank chassis","Chassis tank speed","Owner tank speed after completed chassis research","m/s",0.1,50,0.1,p=>p.tankChassisSpeed,nameof(PlayableProfileData.tankChassisSpeed)),
@@ -833,6 +1106,13 @@ namespace Spacewars.Simulation
             new PlayableProfileField("artillery.exhaustStartBoost", "Бой · Дульные вспышки", "Шквал · усиление старта", "Увеличение размера огня при запуске по сравнению с ровным полётом.", "×", 1, 5, 0.1, p=>p.shkvalExhaustStartBoost,nameof(PlayableProfileData.shkvalExhaustStartBoost)),
             new PlayableProfileField("artillery.exhaustOpacity", "Бой · Дульные вспышки", "Шквал · яркость огня", "Непрозрачность светящегося огня у сопла в течение полёта.", "доля", 0.1, 1, 0.05, p=>p.shkvalExhaustOpacity,nameof(PlayableProfileData.shkvalExhaustOpacity)),
             new PlayableProfileField("artillery.weaponMuzzleCoreRatio", "Бой · Дульные вспышки", "Сердцевина вспышки", "Размер жёлто-белой сердцевины внутри оранжевого края.", "доля", 0.1, 0.9, 0.05, p=>p.weaponMuzzleCoreRatio,nameof(PlayableProfileData.weaponMuzzleCoreRatio)),
+            new PlayableProfileField("presentation.directImpact.sparkWidth", "Бой · Попадания", "Толщина тонкой искры", "Ширина искры относительно радиуса эффекта; не меняет пули.", "доля", .01, .12, .005, p=>p.directImpactSparkWidth,nameof(PlayableProfileData.directImpactSparkWidth)),
+            new PlayableProfileField("presentation.directImpact.glow", "Бой · Попадания", "Жар металла", "Яркость бело-горячей сердцевины и мягкого янтарного свечения.", "×", .25, 4, .05, p=>p.directImpactGlow,nameof(PlayableProfileData.directImpactGlow)),
+            new PlayableProfileField("presentation.directImpact.smokeOpacity", "Бой · Попадания", "Лёгкий дым", "Прозрачность короткого дымка; у исследователя слабее.", "доля", 0, .5, .01, p=>p.directImpactSmokeOpacity,nameof(PlayableProfileData.directImpactSmokeOpacity)),
+            new PlayableProfileField("presentation.directImpact.radius", "Бой · Попадания", "Размер попадания", "Радиус короткой вспышки прямого попадания; не влияет на урон.", "м", .03, .5, .01, p=>p.directImpactRadius,nameof(PlayableProfileData.directImpactRadius)),
+            new PlayableProfileField("presentation.directImpact.seconds", "Бой · Попадания", "Длительность попадания", "Время вспышки и искр в игровом времени.", "с", .033, .5, .01, p=>p.directImpactSeconds,nameof(PlayableProfileData.directImpactSeconds)),
+            new PlayableProfileField("presentation.directImpact.sparkLength", "Бой · Попадания", "Разлёт искр", "Длина небольших искр от точки попадания.", "м", .03, 1, .01, p=>p.directImpactSparkLength,nameof(PlayableProfileData.directImpactSparkLength)),
+            new PlayableProfileField("presentation.directImpact.explorerScale", "Бой · Попадания", "Слабое попадание исследователя", "Размер вспышки и искр каждой попавшей пули относительно танка.", "доля", .1, 1, .05, p=>p.explorerImpactScale,nameof(PlayableProfileData.explorerImpactScale)),
             new PlayableProfileField("artillery.impactEffectRadius", "Бой · Остовы и эффекты", "Размер эффекта попадания", "Радиус локальной вспышки по правилам веб-версии; не радиус урона.", "м", .03, 1, .01, p=>p.impactEffectRadius,nameof(PlayableProfileData.impactEffectRadius)),
             new PlayableProfileField("presentation.unitWreck.lifetimeSeconds", "Бой · Остовы и эффекты", "Время жизни остова", "Игровое время после вспышки уничтожения. Остов не мешает проезду.", "с", 0.1, 10, 0.1, p=>p.unitWreckLifetimeSeconds,nameof(PlayableProfileData.unitWreckLifetimeSeconds)),
             new PlayableProfileField("artillery.impactEffectSec", "Бой · Остовы и эффекты", "Эффект попадания", "Продолжительность локального эффекта контакта.", "с", 0.033, 1, 0.01, p=>p.impactEffectSec,nameof(PlayableProfileData.impactEffectSec)),
@@ -886,6 +1166,7 @@ new PlayableProfileField("explorer.muzzleOffset", "Explorer", "Muzzle distance",
             new PlayableProfileField("system.follow.distance", "Follow", "Following distance", "Source distance behind the leader", "m", 1, 10, .1, p=>p.followDistance,nameof(PlayableProfileData.followDistance)),
             new PlayableProfileField("system.follow.arrivalTolerance", "Follow", "Following arrival tolerance", "Source stationary follow tolerance", "m", .05, 1, .05, p=>p.followArrivalTolerance,nameof(PlayableProfileData.followArrivalTolerance)),
             new PlayableProfileField("system.idleAutoDefenseMultiplier", "System", "Idle auto-defense range", "Source range multiplier for idle target acquisition; does not authorize movement or extend weapon range.", "ratio", 1, 3, .05, p=>p.idleAutoDefenseMultiplier,nameof(PlayableProfileData.idleAutoDefenseMultiplier)),
+            new PlayableProfileField("navigation.groupCorridor.maximumExcessPercent","Group navigation","Group route excess","Per-member certified weighted route excess above its own global optimum; missing certificate uses exact routing.","%",15,15,1,p=>p.groupCorridorMaximumExcessPercent,nameof(PlayableProfileData.groupCorridorMaximumExcessPercent)),
             new PlayableProfileField("groupMarch.maximumStretch", "Group march", "Maximum stretch", "Maximum centerline lead before a moving member yields to regroup.", "m", .5, 40, .1, p=>p.groupMarchMaximumStretch,nameof(PlayableProfileData.groupMarchMaximumStretch)),
             new PlayableProfileField("system.unitOrderQueueLimit", "System", "Deferred unit orders", "Maximum deferred tactical orders per unit; overflow silently preserves the existing FIFO.", "orders", 1, 4096, 1, p=>p.unitOrderQueueLimit,nameof(PlayableProfileData.unitOrderQueueLimit)),
             new PlayableProfileField("behavior.enemyAdvanceDelaySeconds", "Behavior", "Enemy advance delay", "Enemy waits to assemble before its first advance.", "s", 1, 600, 1, p=>p.enemyAdvanceDelaySeconds,nameof(PlayableProfileData.enemyAdvanceDelaySeconds)), new PlayableProfileField("behavior.attackApproachRangeRatio", "Behavior", "Attack approach", "Fraction of attack range retained while approaching a target.", "ratio", .1, 1, .01, p=>p.attackApproachRangeRatio,nameof(PlayableProfileData.attackApproachRangeRatio)), new PlayableProfileField("behavior.attackRepathSeconds", "Behavior", "Attack repath", "Minimum interval between attack path requests.", "s", .05, 10, .05, p=>p.attackRepathSeconds,nameof(PlayableProfileData.attackRepathSeconds)), new PlayableProfileField("production.factoryExitDistance", "Production", "Factory exit", "Distance a new unit clears from its factory.", "m", .5, 20, .5, p=>p.factoryExitDistance,nameof(PlayableProfileData.factoryExitDistance)), new PlayableProfileField("production.defaultRallyDistance", "Production", "Default rally", "Factory default rally distance.", "m", 1, 32, .5, p=>p.defaultRallyDistance,nameof(PlayableProfileData.defaultRallyDistance)), new PlayableProfileField("input.targetPickRadiusMultiplier", "Input", "Target pick multiplier", "Multiplier applied to a unit footprint for pointer target picking.", "ratio", .5, 5, .1, p=>p.targetPickRadiusMultiplier,nameof(PlayableProfileData.targetPickRadiusMultiplier)), new PlayableProfileField("input.buildingPickRadius", "Input", "Building pick radius", "Pointer pick radius for buildings.", "m", .5, 20, .1, p=>p.buildingPickRadius,nameof(PlayableProfileData.buildingPickRadius)), new PlayableProfileField("navigation.requestsPerFrame", "Navigation", "Requests per frame", "Maximum navigation requests admitted per frame.", "requests", 1, 64, 1, p=>p.navigationRequestsPerFrame,nameof(PlayableProfileData.navigationRequestsPerFrame)),
@@ -897,7 +1178,60 @@ new PlayableProfileField("explorer.muzzleOffset", "Explorer", "Muzzle distance",
         public static readonly IReadOnlyList<PlayableProfileField> CrowdFields=new[]{
             CrowdField(0,p=>p.crowdMotionHeadingIntervals,nameof(PlayableProfileData.crowdMotionHeadingIntervals)),CrowdField(1,p=>p.crowdMotionSpeedBands,nameof(PlayableProfileData.crowdMotionSpeedBands)),CrowdField(2,p=>p.crowdMotionLookaheadSeconds,nameof(PlayableProfileData.crowdMotionLookaheadSeconds)),CrowdField(3,p=>p.crowdMotionNeighborCap,nameof(PlayableProfileData.crowdMotionNeighborCap))
         };
-        public static readonly IReadOnlyList<PlayableProfileField> Fields=PreCrowdFields.Concat(CrowdFields).ToArray();
+        public static readonly PlayableProfileField AccruedCreditField=new PlayableProfileField("navigation.maxAccruedCredits","Navigation","Лимит накопленного бюджета навигации","Максимум ожидающих квантов; при заполнении отбрасывается новый. Не меняет точность поиска и работу одного кванта. 600 = существующий горизонт сборки 20 секунд × 30 Гц.","квант",1,600,1,p=>p.navigationMaxAccruedCredits==0?600:p.navigationMaxAccruedCredits,nameof(PlayableProfileData.navigationMaxAccruedCredits));
+        public static readonly IReadOnlyList<PlayableProfileField> HawkFields=new[]{
+new PlayableProfileField("hawk.aimTolerance","Ястреб · hawk-match-v1","Точность наведения","Допустимая ошибка направления корпуса перед пуском.","rad",0.001,1,0.001,p=>p.hawkAimTolerance,nameof(PlayableProfileData.hawkAimTolerance)),
+new PlayableProfileField("hawk.preparationYawSpeed","Ястреб · hawk-match-v1","Сброс подготовки поворотом","Вращение быстрее порога сбрасывает подготовку залпа.","rad/s",0.01,10,0.01,p=>p.hawkPreparationYawSpeed,nameof(PlayableProfileData.hawkPreparationYawSpeed)),
+new PlayableProfileField("hawk.missileLength","Ястреб · hawk-match-v1","Длина ракеты","Размер корпуса ракеты в отображении.","m",0.1,3,0.01,p=>p.hawkMissileLength,nameof(PlayableProfileData.hawkMissileLength)),
+new PlayableProfileField("hawk.debrisSeconds","Ястреб · hawk-match-v1","Время обломков","Максимальное время безвредных обломков; касание земли прекращает эффект раньше.","s",0.1,5,0.1,p=>p.hawkDebrisSeconds,nameof(PlayableProfileData.hawkDebrisSeconds)),
+new PlayableProfileField("hawk.debrisSpeed","Ястреб · hawk-match-v1","Разлёт обломков","Начальная скорость разлёта визуальных обломков.","m/s",0.1,20,0.1,p=>p.hawkDebrisSpeed,nameof(PlayableProfileData.hawkDebrisSpeed)),
+new PlayableProfileField("hawk.debrisGravity","Ястреб · hawk-match-v1","Падение обломков","Ускорение падения визуальных обломков, без физического урона.","m/s2",0.1,30,0.01,p=>p.hawkDebrisGravity,nameof(PlayableProfileData.hawkDebrisGravity)),
+new PlayableProfileField("hawk.debrisCount","Ястреб · hawk-match-v1","Число обломков","Число видимых фрагментов при воздушном уничтожении.","count",1,16,1,p=>p.hawkDebrisCount,nameof(PlayableProfileData.hawkDebrisCount)),
+new PlayableProfileField("hawk.modelScale","Ястреб · hawk-match-v1","Масштаб модели","Размер модели относительно её авторских метров.","ratio",.05,5,.01,p=>p.hawkModelScale,nameof(PlayableProfileData.hawkModelScale)),
+            new PlayableProfileField("hawk.health","Ястреб · hawk-match-v1","Прочность","Полное здоровье базового Ястреба.","HP",1,10000,1,p=>p.hawkHealth,nameof(PlayableProfileData.hawkHealth)),
+            new PlayableProfileField("hawk.creditCost","Ястреб · hawk-match-v1","Цена","Стоимость одного Ястреба в кредитах.","credits",1,100000,1,p=>p.hawkCreditCost,nameof(PlayableProfileData.hawkCreditCost)),
+            new PlayableProfileField("hawk.populationCost","Ястреб · hawk-match-v1","Лимит армии","Место одного Ястреба в лимите армии.","population",1,100,1,p=>p.hawkPopulationCost,nameof(PlayableProfileData.hawkPopulationCost)),
+            new PlayableProfileField("hawk.productionSeconds","Ястреб · hawk-match-v1","Производство","Время оплаченного производства до начала выпуска.","s",1,300,1,p=>p.hawkProductionSeconds,nameof(PlayableProfileData.hawkProductionSeconds)),
+            new PlayableProfileField("hawk.radius","Ястреб · hawk-match-v1","Безопасный радиус","Горизонтальный габарит разделения; минимум покрывает корпус, хвост и вращающийся винт утверждённой модели.","m",1,5,0.01,p=>p.hawkRadius,nameof(PlayableProfileData.hawkRadius)),
+            new PlayableProfileField("hawk.speed","Ястреб · hawk-match-v1","Полёт вперёд","Предельная скорость прямого полёта.","m/s",0.1,50,0.1,p=>p.hawkSpeed,nameof(PlayableProfileData.hawkSpeed)),
+            new PlayableProfileField("hawk.reverseSpeed","Ястреб · hawk-match-v1","Отход назад","Скорость короткого отхода без разворота.","m/s",0.1,50,0.1,p=>p.hawkReverseSpeed,nameof(PlayableProfileData.hawkReverseSpeed)),
+            new PlayableProfileField("hawk.strafeSpeed","Ястреб · hawk-match-v1","Боковое смещение","Предельная скорость короткого бокового манёвра.","m/s",0.1,50,0.1,p=>p.hawkStrafeSpeed,nameof(PlayableProfileData.hawkStrafeSpeed)),
+            new PlayableProfileField("hawk.acceleration","Ястреб · hawk-match-v1","Разгон","Изменение горизонтальной скорости при разгоне.","m/s2",0.1,100,0.1,p=>p.hawkAcceleration,nameof(PlayableProfileData.hawkAcceleration)),
+            new PlayableProfileField("hawk.braking","Ястреб · hawk-match-v1","Торможение","Изменение горизонтальной скорости при остановке.","m/s2",0.1,100,0.1,p=>p.hawkBraking,nameof(PlayableProfileData.hawkBraking)),
+            new PlayableProfileField("hawk.shortSeconds","Ястреб · hawk-match-v1","Отход до разворота","Длительность дальнего отхода с удержанием оружейной цели перед обычным разворотом; ближнее смещение ограничено своей дистанцией.","s",0.1,5,0.05,p=>p.hawkShortSeconds,nameof(PlayableProfileData.hawkShortSeconds)),
+            new PlayableProfileField("hawk.shortDistance","Ястреб · hawk-match-v1","Ближний манёвр","Максимальная дальность короткого смещения без удержания оружейной цели.","m",0.1,20,0.1,p=>p.hawkShortDistance,nameof(PlayableProfileData.hawkShortDistance)),
+            new PlayableProfileField("hawk.yawSpeed","Ястреб · hawk-match-v1","Скорость разворота","Предельная угловая скорость корпуса.","rad/s",0.1,30,0.1,p=>p.hawkYawSpeed,nameof(PlayableProfileData.hawkYawSpeed)),
+            new PlayableProfileField("hawk.yawAcceleration","Ястреб · hawk-match-v1","Разгон разворота","Плавность набора и снижения угловой скорости.","rad/s2",0.1,100,0.1,p=>p.hawkYawAcceleration,nameof(PlayableProfileData.hawkYawAcceleration)),
+            new PlayableProfileField("hawk.cruisePitch","Ястреб · hawk-match-v1","Наклон вперёд","Наклон носа при установившемся полёте вперёд.","deg",0,45,1,p=>p.hawkCruisePitch,nameof(PlayableProfileData.hawkCruisePitch)),
+            new PlayableProfileField("hawk.accelerationPitch","Ястреб · hawk-match-v1","Наклон на разгоне","Дополнительный наклон носа при разгоне и торможении.","deg",0,45,1,p=>p.hawkAccelerationPitch,nameof(PlayableProfileData.hawkAccelerationPitch)),
+            new PlayableProfileField("hawk.bank","Ястреб · hawk-match-v1","Боковой крен","Предельный крен при боковом ускорении и повороте.","deg",0,60,1,p=>p.hawkBank,nameof(PlayableProfileData.hawkBank)),
+            new PlayableProfileField("hawk.attitudeSpeed","Ястреб · hawk-match-v1","Плавность наклонов","Предельная скорость изменения pitch и roll.","deg/s",1,360,1,p=>p.hawkAttitudeSpeed,nameof(PlayableProfileData.hawkAttitudeSpeed)),
+            new PlayableProfileField("hawk.clearance","Ястреб · hawk-match-v1","Просвет над геометрией","Безопасная высота над землёй, скалами и зданиями.","m",0.5,30,0.1,p=>p.hawkClearance,nameof(PlayableProfileData.hawkClearance)),
+            new PlayableProfileField("hawk.climbSpeed","Ястреб · hawk-match-v1","Набор высоты","Скорость вертикального подъёма; горизонтальный полёт ждёт безопасного просвета.","m/s",0.1,30,0.1,p=>p.hawkClimbSpeed,nameof(PlayableProfileData.hawkClimbSpeed)),
+            new PlayableProfileField("hawk.descentSpeed","Ястреб · hawk-match-v1","Снижение","Скорость плавного снижения после препятствия.","m/s",0.1,30,0.1,p=>p.hawkDescentSpeed,nameof(PlayableProfileData.hawkDescentSpeed)),
+            new PlayableProfileField("hawk.lookahead","Ястреб · hawk-match-v1","Опережение рельефа","Дальность проверки высоты впереди по назначению.","m",1,100,0.5,p=>p.hawkLookahead,nameof(PlayableProfileData.hawkLookahead)),
+            new PlayableProfileField("hawk.separation","Ястреб · hawk-match-v1","Зазор между вертолётами","Дополнительный зазор между безопасными габаритами любых воздушных юнитов.","m",0.05,5,0.05,p=>p.hawkSeparation,nameof(PlayableProfileData.hawkSeparation)),
+            new PlayableProfileField("hawk.roofSeconds","Ястреб · hawk-match-v1","Лепестки крыши","Длительность открытия или закрытия люка.","s",0.1,20,0.1,p=>p.hawkRoofSeconds,nameof(PlayableProfileData.hawkRoofSeconds)),
+            new PlayableProfileField("hawk.platformSeconds","Ястреб · hawk-match-v1","Подъёмная платформа","Длительность подъёма или опускания платформы.","s",0.1,20,0.1,p=>p.hawkPlatformSeconds,nameof(PlayableProfileData.hawkPlatformSeconds)),
+            new PlayableProfileField("hawk.spinSeconds","Ястреб · hawk-match-v1","Раскрутка винта","Пауза раскрутки перед началом самостоятельного взлёта.","s",0.1,20,0.1,p=>p.hawkSpinSeconds,nameof(PlayableProfileData.hawkSpinSeconds)),
+            new PlayableProfileField("hawk.rotorSpeed","Ястреб · hawk-match-v1","Основной винт","Установившаяся скорость вращения винта в отображении.","deg/s",10,3000,10,p=>p.hawkRotorSpeed,nameof(PlayableProfileData.hawkRotorSpeed)),
+            new PlayableProfileField("hawk.range","Ястреб · hawk-match-v1","Дальность оружия","Дальность по горизонтальной проекции независимо от разницы высот.","m",1,100,0.1,p=>p.hawkRange,nameof(PlayableProfileData.hawkRange)),
+            new PlayableProfileField("hawk.salvoResearchCost","Ястреб · hawk-salvo-research-v1","Цена исследования","Списание при старте исследования залпового огня.","credits",0,5000,10,p=>p.hawkSalvoResearchCost,nameof(PlayableProfileData.hawkSalvoResearchCost)),
+            new PlayableProfileField("hawk.salvoResearchSeconds","Ястреб · hawk-salvo-research-v1","Время исследования","Длительность исследования залпового огня.","s",0.5,300,0.5,p=>p.hawkSalvoResearchSeconds,nameof(PlayableProfileData.hawkSalvoResearchSeconds)),
+            new PlayableProfileField("hawk.upgradedPreparationSeconds","Ястреб · hawk-salvo-research-v1","Подготовка после улучшения","Непрерывная подготовка после остановки; перезарядка идёт независимо.","s",0.1,10,0.1,p=>p.hawkUpgradedPreparationSeconds,nameof(PlayableProfileData.hawkUpgradedPreparationSeconds)),
+            new PlayableProfileField("hawk.upgradedSalvoDelay","Ястреб · hawk-salvo-research-v1","Интервал после улучшения","Пауза между двумя ракетами улучшенного Ястреба.","s",0.01,2,0.01,p=>p.hawkUpgradedSalvoDelay,nameof(PlayableProfileData.hawkUpgradedSalvoDelay)),
+            new PlayableProfileField("hawk.upgradedReloadSeconds","Ястреб · hawk-salvo-research-v1","Перезарядка после улучшения","Перезарядка после полного или прерванного залпа; движение не сокращает её.","s",0.1,20,0.1,p=>p.hawkUpgradedReloadSeconds,nameof(PlayableProfileData.hawkUpgradedReloadSeconds)),
+            new PlayableProfileField("hawk.preparationSeconds","Ястреб · hawk-match-v1","Подготовка залпа","Непрерывная подготовка после остановки и наведения; вертикальное движение её не сбрасывает.","s",0.1,10,0.1,p=>p.hawkPreparationSeconds,nameof(PlayableProfileData.hawkPreparationSeconds)),
+            new PlayableProfileField("hawk.damage","Ястреб · hawk-match-v1","Урон ракеты","Прямой урон одной ракеты без взрыва по площади.","HP",1,1000,1,p=>p.hawkDamage,nameof(PlayableProfileData.hawkDamage)),
+            new PlayableProfileField("hawk.salvoDelay","Ястреб · hawk-match-v1","Интервал двух ракет","Задержка между левым и правым пусками по одной зафиксированной цели.","s",0.01,2,0.01,p=>p.hawkSalvoDelay,nameof(PlayableProfileData.hawkSalvoDelay)),
+            new PlayableProfileField("hawk.reloadSeconds","Ястреб · hawk-match-v1","Перезарядка","Перезарядка после полного или прерванного залпа.","s",0.1,20,0.1,p=>p.hawkReloadSeconds,nameof(PlayableProfileData.hawkReloadSeconds)),
+            new PlayableProfileField("hawk.missileSpeed","Ястреб · hawk-match-v1","Скорость ракеты","Скорость трёхмерного полёта ракеты.","m/s",1,100,1,p=>p.hawkMissileSpeed,nameof(PlayableProfileData.hawkMissileSpeed)),
+            new PlayableProfileField("hawk.missileTurn","Ястреб · hawk-match-v1","Доворот ракеты","Предельная угловая скорость ограниченного самонаведения.","rad/s",0.01,10,0.01,p=>p.hawkMissileTurn,nameof(PlayableProfileData.hawkMissileTurn)),
+            new PlayableProfileField("hawk.missileRadius","Ястреб · hawk-match-v1","Габарит ракеты","Радиус физического swept-контакта ракеты.","m",0.01,1,0.01,p=>p.hawkMissileRadius,nameof(PlayableProfileData.hawkMissileRadius))};
+        public static readonly IReadOnlyList<PlayableProfileField> FactoryFields=new[]{
+            new PlayableProfileField("factory.gateSeconds","Factory release","Gate motion","Time to fully open or close the factory gate.","s",.1,3,.05,p=>p.factoryGateSeconds,nameof(PlayableProfileData.factoryGateSeconds)),
+            new PlayableProfileField("factory.rolloutSpeed","Factory release","Exit speed","Protected drive-out speed before control and vulnerability activate together.","m/s",.25,4,.05,p=>p.factoryRolloutSpeed,nameof(PlayableProfileData.factoryRolloutSpeed))};
+        public static readonly IReadOnlyList<PlayableProfileField> Fields=PreCrowdFields.Concat(HawkFields).Concat(FactoryFields).Concat(CrowdFields).Concat(new[]{AccruedCreditField,new PlayableProfileField("provingGround.startingCredits","Полигон · balance-proving-ground-v1","Начальные кредиты","Средства каждой стороны после подготовки и сброса полигона. Расстановка бесплатна.","кредиты",0,100000,1,p=>p.provingGroundStartingCredits,nameof(PlayableProfileData.provingGroundStartingCredits))}).ToArray();
     }
 
     public static class PlayableMap

@@ -16,14 +16,22 @@ namespace Spacewars.Runtime
             if(!research.TryGetValue(owner,out var orders))research.Add(owner,orders=new List<ResearchOrder>());
             return orders;
         }
-        private bool HasResearch(PlayableOwner owner,PlayableResearchKind kind)=>Research(owner).Any(o=>o.Kind==kind&&o.Complete);
-        private bool HasActiveResearch(PlayableOwner owner,PlayableResearchKind kind)=>Research(owner).Any(o=>o.Kind==kind&&!o.Complete);
+        private bool HasResearch(PlayableOwner owner,PlayableResearchKind kind)=>research.TryGetValue(owner,out var orders)&&orders.Any(o=>o.Kind==kind&&o.Complete);
+        private bool HasActiveResearch(PlayableOwner owner,PlayableResearchKind kind)=>research.TryGetValue(owner,out var orders)&&orders.Any(o=>o.Kind==kind&&!o.Complete);
+        private bool ResearchProducerReady(PlayableOwner owner,PlayableResearchKind kind)
+        {
+            var producer=PlayableResearchRules.Producer(kind);
+            return !producer.HasValue||buildings.Values.Any(b=>b.Owner==owner&&b.Kind==producer.Value&&b.Ready&&b.Health>0&&b.Sale==null);
+        }
         private double ResearchCost(PlayableResearchKind kind)=>Spacewars.Simulation.Ai.AiResearchCatalog.For(kind).Cost(profile);
         private double ResearchDuration(PlayableResearchKind kind)=>Spacewars.Simulation.Ai.AiResearchCatalog.For(kind).Duration(profile);
         private PlayableCommandStatus QueueResearch(int centerId,PlayableOwner owner,PlayableResearchKind kind,out string message)
         {
             message="Нужен готовый собственный Научный центр";
             if(!buildings.TryGetValue(centerId,out var center)||center.Owner!=owner||center.Kind!=PlayableBuildingKind.ScientificCenter||!center.Ready||center.Sale!=null)return PlayableCommandStatus.InvalidEntity;
+            if(!Enum.IsDefined(typeof(PlayableResearchKind),kind)){message="Неизвестное исследование";return PlayableCommandStatus.Rejected;}
+            if(!ResearchProducerReady(owner,kind)){message=PlayableResearchRules.ProducerRequirement(kind);return PlayableCommandStatus.Rejected;}
+            var previous=PlayableResearchRules.Previous(kind);if(previous.HasValue&&!HasResearch(owner,previous.Value)){message="Сначала завершите первый уровень";return PlayableCommandStatus.Rejected;}
             var orders=Research(owner);if(HasResearch(owner,kind)||HasActiveResearch(owner,kind)){message="Исследование уже заказано";return PlayableCommandStatus.Rejected;}
             if(orders.Count(o=>!o.Complete)>=MaximumResearchOrders){message="Очередь исследований заполнена";return PlayableCommandStatus.Overflow;}
             if(Balance(owner)<ResearchCost(kind)){message="Недостаточно кредитов";return PlayableCommandStatus.InsufficientCredits;}
@@ -44,7 +52,7 @@ namespace Spacewars.Runtime
             var active=Research(owner).FirstOrDefault(o=>o.Active&&!o.Complete);if(active!=null)return;
             var next=Research(owner).FirstOrDefault(o=>!o.Active&&!o.Complete);if(next==null)return;
             var center=ReadyResearchCenter(next.CenterId,owner)?buildings[next.CenterId]:buildings.Values.Where(b=>ReadyResearchCenter(b.Id,owner)).OrderBy(b=>b.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),StringComparer.Ordinal).FirstOrDefault();
-            if(center==null)return;
+            if(center==null||!ResearchProducerReady(owner,next.Kind))return;
             double cost=ResearchCost(next.Kind);if(Balance(owner)<cost)return;
             AddCredits(owner,-cost);next.CenterId=center.Id;next.PaidCost=cost;next.Duration=ResearchDuration(next.Kind);next.Elapsed=0;next.Active=true;Sound(PlayableSoundKind.ResearchStarted,center.Position,PlayableEntityKind.Tank,owner,true);
         }
@@ -57,7 +65,8 @@ namespace Spacewars.Runtime
                 var active=Research(owner).FirstOrDefault(o=>o.Active&&!o.Complete);
                 if(active!=null&&!ReadyResearchCenter(active.CenterId,owner)){Sound(PlayableSoundKind.ResearchCancelled,default(NavPoint),PlayableEntityKind.Tank,owner,true);Research(owner).Remove(active);active=null;}
                 // Source Number.EPSILON tolerance is a fixed floating-point parity rule, not a Balance Lab value.
-                if(active!=null){active.Elapsed=Math.Min(active.Duration,active.Elapsed+dt);if(active.Duration-active.Elapsed<=2.220446049250313e-16*active.Duration*128){active.Elapsed=active.Duration;active.Active=false;active.Complete=true;var center=buildings[active.CenterId];Sound(PlayableSoundKind.ResearchComplete,center.Position,PlayableEntityKind.Tank,owner,true);if(active.Kind==PlayableResearchKind.TankChassis)foreach(var u in units.Values)if(u.Owner==owner&&u.Kind==PlayableEntityKind.Tank&&!u.AuthoredUpgrade.HasValue)navigation.Crowd.SetSpeed(u.Id,profile.TankChassisSpeed);}}
+                if(active!=null){active.Elapsed=Math.Min(active.Duration,active.Elapsed+dt);if(active.Duration-active.Elapsed<=2.220446049250313e-16*active.Duration*128){active.Elapsed=active.Duration;double previousMaximum=HealthMultiplier(owner);active.Active=false;active.Complete=true;
+                    if(PlayableResearchRules.Defense(active.Kind)){double ratio=HealthMultiplier(owner)/previousMaximum;foreach(var unit in units.Values)if(unit.Owner==owner)unit.Health=Math.Min(UnitMaximumHealth(owner,unit.Kind),unit.Health*ratio);}var center=buildings[active.CenterId];Sound(PlayableSoundKind.ResearchComplete,center.Position,PlayableEntityKind.Tank,owner,true);if(active.Kind==PlayableResearchKind.TankChassis)foreach(var u in units.Values)if(u.Owner==owner&&u.Kind==PlayableEntityKind.Tank&&!u.AuthoredUpgrade.HasValue)navigation.Crowd.SetSpeed(u.Id,profile.TankChassisSpeed);}}
                 StartResearchIfPossible(owner);
             }
         }
@@ -103,9 +112,41 @@ namespace Spacewars.Runtime
             }
             foreach(var owner in research.Keys.ToArray())if(Chassis(owner))foreach(var unit in units.Values)if(unit.Owner==owner&&unit.Kind==PlayableEntityKind.Tank&&!unit.AuthoredUpgrade.HasValue)navigation.Crowd.SetSpeed(unit.Id,profile.TankChassisSpeed);
         }
-        private PlayableResearchOrderSnapshot[] ResearchSnapshot(PlayableOwner owner)=>Research(owner).Select(o=>new PlayableResearchOrderSnapshot(o.Id,o.Kind,o.CenterId,o.PaidCost,o.Elapsed,o.Duration,o.Active,o.Complete)).ToArray();
-        private PlayableResearchAvailabilitySnapshot[] ResearchAvailability(PlayableOwner owner)=>Spacewars.Simulation.Ai.AiResearchCatalog.All.Select(d=>d.Kind).Select(kind=>new PlayableResearchAvailabilitySnapshot(kind,ResearchCost(kind),!HasResearch(owner,kind)&&!HasActiveResearch(owner,kind))).ToArray();
-        private bool UnitUpgraded(Unit u)=>u.AuthoredUpgrade??(u.Kind==PlayableEntityKind.Tank?Chassis(u.Owner):u.Kind==PlayableEntityKind.Explorer?Assault(u.Owner):Guidance(u.Owner));
+        private PlayableResearchOrderSnapshot[] ResearchSnapshot(PlayableOwner owner)=>research.TryGetValue(owner,out var orders)?orders.Select(o=>new PlayableResearchOrderSnapshot(o.Id,o.Kind,o.CenterId,o.PaidCost,o.Elapsed,o.Duration,o.Active,o.Complete)).ToArray():Array.Empty<PlayableResearchOrderSnapshot>();
+        private string ResearchBlockedReason(PlayableOwner owner,PlayableResearchKind kind)
+        {
+            if(research.TryGetValue(owner,out var orders)&&orders.Any(o=>o.Kind==kind&&(o.Complete||o.Active)))return null;
+            if(!ResearchProducerReady(owner,kind))return PlayableResearchRules.ProducerRequirement(kind);
+            var previous=PlayableResearchRules.Previous(kind);
+            return previous.HasValue&&!HasResearch(owner,previous.Value)?"Сначала завершите первый уровень":null;
+        }
+        private PlayableResearchAvailabilitySnapshot[] ResearchAvailability(PlayableOwner owner)=>Spacewars.Simulation.Ai.AiResearchCatalog.All.Select(d=>d.Kind).Select(kind=>
+        {
+            var blocked=ResearchBlockedReason(owner,kind);
+            return new PlayableResearchAvailabilitySnapshot(kind,ResearchCost(kind),!HasResearch(owner,kind)&&!HasActiveResearch(owner,kind)&&blocked==null,blocked);
+        }).ToArray();
+        private double SystemsMultiplier(PlayableOwner owner,bool weapon)
+        {
+            var advanced=weapon?PlayableResearchKind.AdvancedWeaponSystems:PlayableResearchKind.AdvancedDefensiveSystems;
+            var improved=weapon?PlayableResearchKind.ImprovedWeaponSystems:PlayableResearchKind.ImprovedDefensiveSystems;
+            return 1+(HasResearch(owner,advanced)?PlayableResearchRules.Bonus(profile,advanced):HasResearch(owner,improved)?PlayableResearchRules.Bonus(profile,improved):0)/100;
+        }
+        private double WeaponMultiplier(PlayableOwner owner)=>SystemsMultiplier(owner,true);
+        private double HealthMultiplier(PlayableOwner owner)=>SystemsMultiplier(owner,false);
+        private int ArmySystemsLevel(PlayableOwner owner,bool weapon)
+        {
+            int level=0;
+            if(research.TryGetValue(owner,out var orders))foreach(var order in orders)
+                if(order.Complete&&(weapon?PlayableResearchRules.Weapon(order.Kind):PlayableResearchRules.Defense(order.Kind)))
+                    level=Math.Max(level,PlayableResearchRules.Previous(order.Kind).HasValue?2:1);
+            return level;
+        }
+        private double UnitMaximumHealth(PlayableOwner owner,PlayableEntityKind kind)=>PlayableUnitRules.Health(profile,kind)*HealthMultiplier(owner);
+        private bool UnitUpgraded(Unit u)=>u.Kind==PlayableEntityKind.Hawk?false:u.AuthoredUpgrade??(u.Kind==PlayableEntityKind.Tank?Chassis(u.Owner):u.Kind==PlayableEntityKind.Explorer?Assault(u.Owner):Guidance(u.Owner));
+        private bool HawkSalvo(PlayableOwner owner)=>HasResearch(owner,PlayableResearchKind.HawkSalvoSystems);
+        private double HawkPreparation(Unit u)=>HawkSalvo(u.Owner)?profile.HawkUpgradedPreparationSeconds:profile.HawkPreparationSeconds;
+        private double HawkReload(Unit u)=>HawkSalvo(u.Owner)?profile.HawkUpgradedReloadSeconds:profile.HawkReloadSeconds;
+        private double HawkSalvoDelay(Unit u)=>HawkSalvo(u.Owner)?profile.HawkUpgradedSalvoDelay:profile.HawkSalvoDelay;
         private bool Chassis(PlayableOwner owner)=>HasResearch(owner,PlayableResearchKind.TankChassis);
         private bool Assault(PlayableOwner owner)=>HasResearch(owner,PlayableResearchKind.ExplorerAssaultGuns);
         private bool Guidance(PlayableOwner owner)=>HasResearch(owner,PlayableResearchKind.ShkvalGuidance);

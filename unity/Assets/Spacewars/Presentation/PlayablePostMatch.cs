@@ -19,6 +19,7 @@ namespace Spacewars.Presentation
         private void UpdatePostMatch()
         {
             if(localCoordinator!=null)return;
+            if(campaignConfiguration!=null){finishMatch.style.display=resultReopen.style.display=DisplayStyle.None;return;}
             finishMatch.style.display=view.Outcome==PlayableMatchOutcome.Playing&&paused&&!restarting?DisplayStyle.Flex:DisplayStyle.None;
             resultReopen.style.display=resultOverview&&runtime?.Result!=null?DisplayStyle.Flex:DisplayStyle.None;
             if(runtime?.Result==null||restarting||returningToLobby)return;

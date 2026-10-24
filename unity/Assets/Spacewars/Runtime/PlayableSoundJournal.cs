@@ -10,12 +10,22 @@ namespace Spacewars.Runtime
         {internal PlayableSoundEvent Event;internal int Mask;internal PlayableOwner? SubjectOwner;}
         private readonly Queue<ObservedSound> soundJournal=new Queue<ObservedSound>();
         private long nextSoundEvent;
-        private void Sound(PlayableSoundKind kind,NavPoint position,PlayableEntityKind weapon,PlayableOwner? subjectOwner=null,bool building=false,int unitId=0,double hullHeading=0)
+        private void Sound(PlayableSoundKind kind,NavPoint position,PlayableEntityKind weapon,PlayableOwner? subjectOwner=null,bool building=false,int unitId=0,double hullHeading=0,double altitude=0)
         {
+            PublishSound(new PlayableSoundEvent(++nextSoundEvent,Tick,kind,position,weapon,building,unitId,hullHeading,altitude:altitude,owner:subjectOwner),subjectOwner);
+        }
+        private void DirectImpactSound(Projectile projectile,int targetId,NavPoint position,bool building=false)
+        {
+            var contact=new PlayableDirectContact(projectile.Id,targetId,new BallisticPoint(projectile.Position.X,projectile.Height,projectile.Position.Z));
+            PublishSound(new PlayableSoundEvent(++nextSoundEvent,Tick,PlayableSoundKind.Impact,position,projectile.Kind,building,contact:contact),null);
+        }
+        private void PublishSound(PlayableSoundEvent fact,PlayableOwner? subjectOwner)
+        {
+            var kind=fact.Kind;var position=fact.Position;
             int mask=0;
             foreach(var owner in Owners)if(subjectOwner==owner||!PlayableSoundPolicy.OwnerOnly(kind)&&Vision(owner).IsVisible(position))mask|=1<<(int)owner;
             while(soundJournal.Count>0&&(soundJournal.Count>=256||Tick-soundJournal.Peek().Event.Tick>30))soundJournal.Dequeue();
-            soundJournal.Enqueue(new ObservedSound{Event=new PlayableSoundEvent(++nextSoundEvent,Tick,kind,position,weapon,building,unitId,hullHeading),Mask=mask,SubjectOwner=subjectOwner});
+            soundJournal.Enqueue(new ObservedSound{Event=fact,Mask=mask,SubjectOwner=subjectOwner});
         }
         private PlayableSoundEvent[] Sounds(PlayableOwner? observer=null)
             =>soundJournal.Where(e=>Tick-e.Event.Tick<=30&&(!observer.HasValue||
@@ -24,7 +34,7 @@ namespace Spacewars.Runtime
         private readonly Dictionary<int,bool> soundMotion=new Dictionary<int,bool>();
         private void ObserveSoundMotion()
         {
-            foreach(var u in units.Values)if(navigation.Crowd.TryGet(u.Id,out var n))
+            foreach(var u in units.Values)if(TryActor(u.Id,out var n))
             {
                 if(soundMotion.TryGetValue(u.Id,out var wasMoving)&&wasMoving!=n.Moving)
                     Sound(n.Moving?PlayableSoundKind.MovementStarted:PlayableSoundKind.MovementStopped,n.Position,u.Kind,u.Owner);
@@ -34,7 +44,7 @@ namespace Spacewars.Runtime
         }
         private void SoundUnitDamage(Unit u)
         {
-            if(u.Health>0&&navigation.Crowd.TryGet(u.Id,out var n))Sound(PlayableSoundKind.HeavyDamage,n.Position,u.Kind,u.Owner);
+            if(u.Health>0&&TryActor(u.Id,out var n))Sound(PlayableSoundKind.HeavyDamage,n.Position,u.Kind,u.Owner);
         }
     }
 }

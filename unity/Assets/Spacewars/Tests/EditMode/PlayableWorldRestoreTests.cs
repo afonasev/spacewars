@@ -59,7 +59,11 @@ namespace Spacewars.Tests.EditMode
             {"NavUnit.routeView","Read-only view of route"},
             {"NavGeometry.obstacleView","Read-only view of obstacles"},
             {"PlayableVision.cached","Derived immutable fog projection cache"},
+            {"PlayableDomain.targetSpatialIndex","Derived combat-phase broad phase; cache-neutral current capture and hot/cold target continuation qualified by PlayableTargetSpatialIndexTests"},
             {"NavigationAuthorityGroup.MemberParentIdentity","Process-local candidate provenance points at the prior VersionIdentity; neither is serialized or used by future live edits"},
+            {"NavigationAuthorityGroup.ChangedMemberIndex","Local delta capability paired with excluded MemberParentIdentity/versionIdentity; cold publication rebuilds full owners and fresh capability, all member values/roles/layout remain visited"},
+            {"NavigationSession.<LastNavigationStepPath>k__BackingField","Per-step diagnostic marker; never persisted or read by navigation decisions"},
+            {"NavigationSession.barrierPayloadRevision","Session-local observation stamp for exact-root guarded preparation; cold restore installs a fresh stamp, payload and owner roles remain included"},
             {"NavigationAuthorityGroup.versionIdentity","Process-local COW version birth token; primitive preflight49 forbids allocation-history IDs and restores fresh mutation tokens"},
             {"NavigationLiveGroup.installToken","Consumed private installation capability; PhaseLive and exact Session/ledger ownership remain checked"},
             {"NavigationLiveGroup.generation","Local observed-write generation reseeded with cold live owner; immutable group/member values remain included"},
@@ -160,7 +164,34 @@ namespace Spacewars.Tests.EditMode
             public int GetHashCode(object value)=>System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(value);
         }
         private static bool FactOwnsExactFacade(NavOwnedStorage owner,object facade)
-            =>owner is NavDeclarationStorage declaration&&ReferenceEquals(declaration.Facade,facade)||owner is NavLiveUnitStorage unit&&ReferenceEquals(unit.Unit,facade)||owner is NavigationHostAnswer answer&&ReferenceEquals(answer.Answer,facade)||owner is NavGeometry.OwnedBuffers geometry&&ReferenceEquals(geometry.Facade,facade)||owner is NavPolygon.OwnedBuffers polygon&&ReferenceEquals(polygon.Facade,facade);
+            =>owner is NavDeclarationStorage declaration&&ReferenceEquals(declaration.Facade,facade)||owner is NavLiveUnitStorage unit&&ReferenceEquals(unit.Unit,facade)||owner is NavigationHostAnswer answer&&ReferenceEquals(answer.Answer,facade)||owner is NavGeometry.OwnedBuffers geometry&&ReferenceEquals(geometry.Facade,facade)||owner is NavPolygon.OwnedBuffers polygon&&ReferenceEquals(polygon.Facade,facade)
+                ||owner is NavigationSession.NavigationLiveArrivalAttempt attempt&&ReferenceEquals(attempt.Record,facade)
+                ||owner is NavigationSession.NavigationLiveArrivalProvider provider&&ReferenceEquals(provider.Record,facade)
+                ||owner is NavigationSession.NavigationLiveArrivalLease lease&&ReferenceEquals(lease.Record,facade);
+        private static void ValidateLiveArrivalFacade(INavStorageFacade facade)
+        {
+            NavOwnedStorage owner;object record;
+            if(facade is NavigationSession.ArrivalAttempt attempt){owner=attempt.StorageOwner;record=attempt.StorageOwner?.Record;}
+            else if(facade is NavigationSession.ArrivalProviderRecord provider){owner=provider.StorageOwner;record=provider.StorageOwner?.Record;}
+            else if(facade is ArrivalProviderLease lease){owner=lease.StorageOwner;record=lease.StorageOwner?.Record;}
+            else return;
+            if(owner==null)return; // Legacy managed records are not trusted owned backreferences.
+            Assert.Greater(owner.References,0,"Live arrival record requires a positive owner");
+            Assert.AreSame(owner,facade.StorageRoot);Assert.AreSame(facade,record,"Live arrival owner must point at this exact Record");
+        }
+        private static void ValidateMetadataFacade(INavMetadataFacade facade)
+        {
+            var owner=facade.StorageRoot;if(owner==null)return; // Public authoring/profile values remain plain values.
+            var expected=facade is NavClearanceProfile?NavMetadataRole.Clearance:facade is NavGraphProfile?NavMetadataRole.GraphProfile:facade is NavRouteSubscription?NavMetadataRole.Subscription:facade is NavGraphCompileLimits?NavMetadataRole.CompileLimits:0;
+            Assert.AreNotEqual(0,(int)expected,"Unknown concrete metadata facade");Assert.AreEqual(expected,facade.MetadataRole,"Metadata typed role");
+            Assert.Greater(owner.References,0,"Metadata facade requires a live owner");object field=null;
+            if(owner is NavGraphMetadata aggregate){
+                switch(expected){case NavMetadataRole.Clearance:field=aggregate.Clearance;break;case NavMetadataRole.GraphProfile:field=aggregate.Profile;break;case NavMetadataRole.CompileLimits:field=aggregate.Limits;break;}
+            }else if(owner is NavDeclarationStorage storage&&storage.Facade is NavScheduledRequest recipe){
+                switch(expected){case NavMetadataRole.Clearance:field=recipe.Clearance;break;case NavMetadataRole.GraphProfile:field=recipe.Profile;break;case NavMetadataRole.Subscription:field=recipe.Subscription;break;case NavMetadataRole.CompileLimits:field=recipe.Limits;break;}
+            }else if(owner is NavDeclarationStorage standalone&&standalone.Facade is NavRouteSubscription subscription&&expected==NavMetadataRole.Subscription)field=subscription;
+            Assert.AreSame(facade,field,"Metadata facade must be its live owner's reference-exact typed field");
+        }
         private static bool ValidateFootprintCache(TerrainLocations locations)
         {
             var type=typeof(TerrainLocations);var cache=(IDictionary)type.GetField("footprints",F).GetValue(locations);var fifo=(IEnumerable)type.GetField("footprintOrder",F).GetValue(locations);
@@ -203,6 +234,64 @@ namespace Spacewars.Tests.EditMode
                 var left=new AuthoritySlotMap<int,int>();var right=new AuthoritySlotMap<int,int>();foreach(var map in new[]{left,right}){map.Add(1,10);map.Add(2,20);}left.Remove(1);left.Remove(2);right.Remove(2);right.Remove(1);CollectionAssert.AreNotEqual(FactBytes(left,true),FactBytes(right,true));
                 var cycle=new FactCycle();cycle.Next=cycle;StringAssert.Contains("reference cycle",Assert.Throws<InvalidOperationException>(()=>FactBytes(cycle,true)).Message);
             }finally{first?.StorageRoot.Release();second?.StorageRoot.Release();unit?.Release();ownedGeometry?.StorageRoot.Release();ownedPolygon?.StorageRoot.Release();scope.Discard();}Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+        }
+        [Test] public void IndependentOraclePackedHostLifecycleIgnoresOnlyCreatorRetirement()
+        {
+            var budget=new NavigationRetentionBudget();Assert.True(budget.TryOpenScope(NavigationPreparationKind.Admission,1,1,out var scope));
+            NavigationHostRoot root=null;
+            try{
+                root=NavigationHostRoot.CreateOwned(scope.OwnedReservation());
+                var lifecycle=typeof(NavigationHostRoot).GetField("lifecycle",F);byte original=(byte)lifecycle.GetValue(root);int refs=root.References;
+                var before=ExactOracle(root);
+                try{
+                    lifecycle.SetValue(root,(byte)(original^2));CollectionAssert.AreEqual(before,ExactOracle(root));Assert.AreEqual(refs,root.References);
+                    foreach(byte bit in new byte[]{1,4,8,16,32,64,128}){
+                        lifecycle.SetValue(root,(byte)(original^bit));CollectionAssert.AreNotEqual(before,ExactOracle(root),"Retain noncreator lifecycle bit "+bit);
+                    }
+                }finally{lifecycle.SetValue(root,original);}
+                var epoch=typeof(NavigationHostRoot).GetField("<Epoch>k__BackingField",F);var oldEpoch=epoch.GetValue(root);
+                try{epoch.SetValue(root,(long)oldEpoch+1);CollectionAssert.AreNotEqual(before,ExactOracle(root),"Host metadata remains visible");}finally{epoch.SetValue(root,oldEpoch);}
+                var delivered=typeof(NavigationHostRoot).GetField("<Delivered>k__BackingField",F);var prior=root.Delivered;root.Requests.Retain();
+                try{delivered.SetValue(root,root.Requests);CollectionAssert.AreNotEqual(before,ExactOracle(root),"Owned payload aliases remain visible");}finally{delivered.SetValue(root,prior);root.Requests.Release();}
+                CollectionAssert.AreEqual(before,ExactOracle(root));Assert.AreEqual(refs,root.References);
+                var references=typeof(NavOwnedStorage).GetField("references",F);
+                try{references.SetValue(root,0);Assert.Throws<AssertionException>(()=>FactBytes(root,true));}finally{references.SetValue(root,refs);}
+                CollectionAssert.AreEqual(before,ExactOracle(root));
+            }finally{root?.ReleaseStorage();scope.Discard();}
+            Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+        }
+        private sealed class WrongRoleMetadataFacade:INavMetadataFacade
+        {
+            internal NavOwnedStorage Owner;public NavOwnedStorage StorageRoot=>Owner;public NavMetadataRole MetadataRole=>NavMetadataRole.GraphProfile;
+        }
+        [Test] public void IndependentOracleMetadataBackrefsValidateExactOwnersRolesAndPayload()
+        {
+            var budget=new NavigationRetentionBudget();Assert.True(budget.TryOpenScope(NavigationPreparationKind.Reconstruction,1,1,out var scope));
+            var c=new NavClearanceProfile("ground",1,"ground",1,.25);var p=new NavGraphProfile(new string('c',64),"distance",1,1);var limits=new NavGraphCompileLimits(64,64,256);
+            NavGraphMetadata a=null,b=null;LayeredNavigationProvider provider=null;NavScheduledRequest recipe=null;NavRouteSubscription standalone=null;
+            try{
+                a=NavGraphMetadata.CopyOwned(c,p,limits,scope.OwnedReservation());b=NavGraphMetadata.CopyOwned(c,p,limits,scope.OwnedReservation());
+                foreach(var value in new object[]{a,a.Clearance,a.Profile,a.Limits})ExactOracle(value);
+                CollectionAssert.AreNotEqual(ExactOracle(new object[]{a.Clearance,a.Clearance}),ExactOracle(new object[]{a.Clearance,b.Clearance}),"Distinct equal owners retain distinct aliases");
+                CollectionAssert.AreNotEqual(ExactOracle(new object[]{a.Clearance,a.Profile}),ExactOracle(new object[]{a.Profile,a.Clearance}),"Roles remain distinct");
+                var fake=new NavClearanceProfile(c.Id,c.Revision,c.MobilityClass,c.MobilityRevision,c.Radius){MetadataOwner=a};Assert.Throws<AssertionException>(()=>FactBytes(fake,true));
+                foreach(var plain in new object[]{c,p,limits})ExactOracle(plain);
+                var ownedFacts=ExactOracle(a);
+                try{a.Clearance.MetadataOwner=null;CollectionAssert.AreNotEqual(ownedFacts,ExactOracle(a),"Losing an owned graph backreference remains visible");}finally{a.Clearance.MetadataOwner=a;}
+                try{a.Clearance.MetadataOwner=b;Assert.Throws<AssertionException>(()=>FactBytes(a.Clearance,true));}finally{a.Clearance.MetadataOwner=a;}
+                Assert.Throws<AssertionException>(()=>FactBytes(new WrongRoleMetadataFacade{Owner=a},true));
+                var refs=typeof(NavOwnedStorage).GetField("references",F);int priorRefs=a.References;
+                try{refs.SetValue(a,0);Assert.Throws<AssertionException>(()=>FactBytes(a.Clearance,true));}finally{refs.SetValue(a,priorRefs);}
+                var radius=typeof(NavClearanceProfile).GetField("<Radius>k__BackingField",F);var before=ExactOracle(a);var prior=radius.GetValue(a.Clearance);
+                try{radius.SetValue(a.Clearance,.5d);CollectionAssert.AreNotEqual(before,ExactOracle(a),"Metadata payload remains visible");}finally{radius.SetValue(a.Clearance,prior);}
+                var input=NavigationAdmission.CertifiedFlatProvider(new NavGeometry(2,Array.Empty<NavObstacle>(),1));provider=LayeredNavigationProvider.CopyOwned(input,scope.OwnedReservation());
+                var origin=new NavLocation(new NavPoint(-1,0),"flat");var goal=new NavLocation(new NavPoint(1,0),"flat");var sub=new NavRouteSubscription(1,1,1,1,0,1,1,0,1,1,1,origin,goal,null);
+                recipe=NavScheduledRequest.CopyOwned(new NavScheduledRequest(input,c,p,limits,null,sub,64,true),provider,scope.OwnedReservation());
+                foreach(var value in new object[]{recipe,recipe.Clearance,recipe.Profile,recipe.Subscription,recipe.Limits})ExactOracle(value);
+                standalone=NavRouteSubscription.CopyOwned(sub,scope.OwnedReservation());ExactOracle(standalone);ExactOracle(standalone.MetadataOwner);
+                var cycle=new FactCycle();cycle.Next=cycle;StringAssert.Contains("reference cycle",Assert.Throws<InvalidOperationException>(()=>FactBytes(cycle,true)).Message);
+            }finally{standalone?.MetadataOwner.Release();recipe?.StorageRoot.Release();provider?.StorageRoot.Release();a?.Release();b?.Release();scope.Discard();}
+            Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
         }
         [Test] public void IndependentOracleMailboxRotationRetainsPayloadAliasesAndChecksBacking()
         {
@@ -273,17 +362,22 @@ namespace Spacewars.Tests.EditMode
                     if(positions!=null)positions[memory.Position]=string.Join(" -> ",path);
                     if(v==null){VisitValue(v);return;}
                     var type=v.GetType();
+                    if(authority&&v is INavMetadataFacade metadata)ValidateMetadataFacade(metadata);
+                    if(authority&&v is INavStorageFacade liveFacade)ValidateLiveArrivalFacade(liveFacade);
                     if(v is IntPtr||v is UIntPtr||v is System.Reflection.Pointer||type.IsPointer)throw new InvalidOperationException("Independent oracle native pointer: "+string.Join(" -> ",path)+" -> "+type.FullName);
                     if(path.Count>128)throw new InvalidOperationException("Independent oracle traversal depth: "+string.Join(" -> ",path));
                     bool track=!type.IsValueType&&!(v is string)&&!identities.ContainsKey(v);
-                    if(track&&active.Contains(v)&&v is INavStorageFacade facade&&facade.StorageRoot is NavOwnedStorage root&&FactOwnsExactFacade(root,v)&&identities.TryGetValue(root,out int ownerId)){
-                        if(cachedNames)writer.Write(TypeName(type));else writer.Write(type.FullName);writer.Write("owner-facade-backref");writer.Write(ownerId);return;
+                    // Owned metadata was independently matched to its exact live field/role above.
+                    if(track&&active.Contains(v)&&v is INavStorageFacade facade&&facade.StorageRoot is NavOwnedStorage root&&(FactOwnsExactFacade(root,v)||authority&&v is INavMetadataFacade)&&identities.TryGetValue(root,out int ownerId)){
+                        if(cachedNames)writer.Write(TypeName(type));else writer.Write(type.FullName);writer.Write("owner-facade-backref");writer.Write(ownerId);if(authority&&v is INavMetadataFacade typedMetadata)writer.Write((int)typedMetadata.MetadataRole);return;
                     }
                     if(track&&!active.Add(v))throw new InvalidOperationException("Independent oracle reference cycle: "+string.Join(" -> ",path)+" -> "+type.FullName);
                     path.Add(type.FullName);try{VisitValue(v);}finally{path.RemoveAt(path.Count-1);if(track)active.Remove(v);}
                 }
                 void VisitValue(object v){
-                    if(v==null){writer.Write("null");return;}var t=v.GetType();if(cachedNames)writer.Write(TypeName(t));else Name(t.FullName);
+                    if(v==null){writer.Write("null");return;}
+                    if(authority&&v is NavigationHostRoot retainedHost)Assert.Greater(retainedHost.References,0,"Retained host root requires positive references");
+                    var t=v.GetType();if(cachedNames)writer.Write(TypeName(t));else Name(t.FullName);
                     if(v is string str){writer.Write(str);return;}if(v is double number){writer.Write(number);return;}
                     if(v is int integer){writer.Write(integer);return;}if(v is long wide){writer.Write(wide);return;}if(v is bool flag){writer.Write(flag);return;}if(v is byte octet){writer.Write(octet);return;}if(v is sbyte signedByte){writer.Write(signedByte);return;}if(v is short narrow){writer.Write(narrow);return;}if(v is ushort unsignedNarrow){writer.Write(unsignedNarrow);return;}if(v is uint unsigned){writer.Write(unsigned);return;}if(v is ulong unsignedWide){writer.Write(unsignedWide);return;}if(v is float single){writer.Write(single);return;}if(v is decimal precise){writer.Write(precise);return;}if(v is char character){writer.Write(character);return;}
                     if(t.IsEnum){writer.Write(Convert.ToInt32(v));return;}
@@ -317,13 +411,19 @@ namespace Spacewars.Tests.EditMode
                     if(cachedNames&&v is int[] integers){writer.Write(integers.Length);var name=TypeName(typeof(int));foreach(int item in integers){writer.Write(name);writer.Write(item);}return;}
                     if(v is IEnumerable rows){var items=rows.Cast<object>().ToArray();if(t.IsGenericType&&t.GetGenericTypeDefinition()==typeof(HashSet<>))items=items.OrderBy(x=>Convert.ToString(x,CultureInfo.InvariantCulture)).ToArray();writer.Write(items.Length);foreach(var row in items)Visit(row);return;}
                     if(cachedNames){foreach(var reader in authority?Describe(t).Authority:Describe(t).Projection){
-                        writer.Write(reader.Name);if(linkedRequests.Contains(v)&&(reader.MemberName=="TransportNext"||reader.MemberName=="TransportPrevious")){writer.Write("validated-transport-link");continue;}var item=reader.Read(v);path.Add(reader.MemberName);try{
+                        writer.Write(reader.Name);if(linkedRequests.Contains(v)&&(reader.MemberName=="TransportNext"||reader.MemberName=="TransportPrevious")){writer.Write("validated-transport-link");continue;}var item=reader.Read(v);
+                        // Same creator-handle rule as NavigationHostRoot.released above;
+                        // packed lifecycle retains every policy and unknown bit except 2.
+                        if(authority&&t==typeof(NavigationHostRoot)&&reader.MemberName=="lifecycle")item=(byte)((byte)item&~2);
+                        path.Add(reader.MemberName);try{
                         if(authority&&reader.Ordered){var dictionary=(IDictionary)item;foreach(object knownKey in dictionary.Keys.Cast<object>().OrderBy(x=>(int)x)){Visit(knownKey);Visit(dictionary[knownKey]);}}else Visit(item);
                         }finally{path.RemoveAt(path.Count-1);}
                     }return;}
                     if(authority){foreach(var f in Fields(t,true)){
                         if(ExcludeField(f))continue;
-                        Name(f.Name);if(linkedRequests.Contains(v)&&(f.Name=="TransportNext"||f.Name=="TransportPrevious")){writer.Write("validated-transport-link");continue;}var item=f.GetValue(v);path.Add(f.Name);try{
+                        Name(f.Name);if(linkedRequests.Contains(v)&&(f.Name=="TransportNext"||f.Name=="TransportPrevious")){writer.Write("validated-transport-link");continue;}var item=f.GetValue(v);
+                        if(f.DeclaringType==typeof(NavigationHostRoot)&&f.Name=="lifecycle")item=(byte)((byte)item&~2);
+                        path.Add(f.Name);try{
                         // Vision memory and crowd lookup tables do not use insertion order for decisions;
                         // all mutable facts/counters are still read independently.
                         if(t==typeof(PlayableVision)&&f.Name=="known"||t==typeof(NavCrowd)&&f.Name=="units"){var dictionary=(IDictionary)item;foreach(object knownKey in dictionary.Keys.Cast<object>().OrderBy(x=>(int)x)){Visit(knownKey);Visit(dictionary[knownKey]);}}else Visit(item);

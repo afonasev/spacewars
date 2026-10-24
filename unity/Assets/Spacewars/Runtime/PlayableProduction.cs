@@ -18,7 +18,7 @@ namespace Spacewars.Runtime
             public bool Active;
         }
         private Building Producer(int id,PlayableOwner owner)
-            =>buildings.TryGetValue(id,out var b)&&b.Owner==owner&&b.Kind==PlayableBuildingKind.Factory&&b.Ready&&b.Sale==null?b:null;
+            =>buildings.TryGetValue(id,out var b)&&b.Owner==owner&&(b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar)&&b.Ready&&b.Sale==null?b:null;
         private ProductionOrder NewOrder(PlayableEntityKind kind,bool active)
             =>new ProductionOrder{TermsRevision=profile.Revision,Id=nextProductionSequence++,Kind=kind,PaidCost=PlayableUnitRules.Cost(profile,kind),
                 PopulationCost=PlayableUnitRules.Population(profile,kind),Duration=PlayableUnitRules.Duration(profile,kind),Remaining=PlayableUnitRules.Duration(profile,kind),Active=active};
@@ -26,8 +26,7 @@ namespace Spacewars.Runtime
         private PlayableCommandStatus QueueUnit(int id,PlayableOwner owner,PlayableEntityKind kind,out string message)
         {
             var b=Producer(id,owner);message="Select a ready factory.";
-            if(b==null||!PlayableUnitRules.Supported(kind))return PlayableCommandStatus.InvalidEntity;
-            b.RepeatTank=false;
+            if(b==null||!PlayableUnitRules.Supported(kind)||(b.Kind==PlayableBuildingKind.Hangar)!=(kind==PlayableEntityKind.Hawk))return PlayableCommandStatus.InvalidEntity;
             if(b.Orders.Count>=MaximumProductionOrders){message="Production queue is full.";return PlayableCommandStatus.Overflow;}
             if(Balance(owner)<PlayableUnitRules.Cost(profile,kind)){message="Insufficient credits.";return PlayableCommandStatus.InsufficientCredits;}
             var order=NewOrder(kind,false);AddCredits(owner,-order.PaidCost);b.Orders.Add(order);Fact(owner,MatchFactKind.UnitOrdered,order.PaidCost,(int)order.Kind,order.Kind.ToString());
@@ -39,23 +38,21 @@ namespace Spacewars.Runtime
             if(b==null)return PlayableCommandStatus.InvalidEntity;
             int index=b.Orders.FindIndex(o=>o.Id==orderId);
             if(index<0)return PlayableCommandStatus.InvalidTarget;
-            var order=b.Orders[index];b.Orders.RemoveAt(index);b.RepeatTank=false;
+            var order=b.Orders[index];b.Orders.RemoveAt(index);
+            if(index==0&&b.Kind==PlayableBuildingKind.Factory&&b.LaunchPhase>0){b.LaunchPhase=FactoryReleaseRules.Closing;b.LaunchTime=0;}
+            if(index==0&&b.Kind==PlayableBuildingKind.Hangar&&b.LaunchPhase>0&&b.LaunchPhase<4){b.LaunchPhase=5;b.LaunchTime=0;}
             AddCredits(owner,Math.Floor(order.PaidCost*profile.UnitCancellationRefundRatio));
             Sound(PlayableSoundKind.ProductionCancelled,b.Position,order.Kind,owner,true);message="Order cancelled.";return PlayableCommandStatus.Applied;
         }
         private PlayableCommandStatus ToggleRepeat(int id,PlayableOwner owner,out string message,PlayableEntityKind kind=PlayableEntityKind.Tank)
         {
             var b=Producer(id,owner);message="Select a ready factory.";
-            if(b==null||!PlayableUnitRules.Supported(kind))return PlayableCommandStatus.InvalidEntity;
+            if(b==null||!PlayableUnitRules.Supported(kind)||(b.Kind==PlayableBuildingKind.Hangar)!=(kind==PlayableEntityKind.Hawk))return PlayableCommandStatus.InvalidEntity;
             if(b.RepeatTank&&b.RepeatKind==kind)b.RepeatTank=false;
             else
             {
-                foreach(var order in b.Orders)
-                {
-                    AddCredits(owner,Math.Floor(order.PaidCost*profile.UnitCancellationRefundRatio));
-                    Sound(PlayableSoundKind.ProductionCancelled,b.Position,order.Kind,owner,true);
-                }
-                b.Orders.Clear();b.RepeatTank=true;b.RepeatKind=kind;
+                // Repeat is an unpaid tail intent; existing paid work keeps its order and progress.
+                b.RepeatTank=true;b.RepeatKind=kind;
             }
             message="Repeat updated.";return PlayableCommandStatus.Applied;
         }
@@ -70,18 +67,18 @@ namespace Spacewars.Runtime
             =>b.Orders.Select(o=>new PlayableProductionOrderSnapshot(o.Id,o.Kind,o.PaidCost,o.PopulationCost,o.Duration,o.Remaining,o.Active)).ToArray();
         private void AdvanceProduction(double dt)
         {
-            var factories=buildings.Values.Where(b=>b.Kind==PlayableBuildingKind.Factory&&b.Ready&&b.Sale==null&&!eliminated.Contains(b.Owner)).OrderBy(b=>b.Id).ToArray();
+            var factories=buildings.Values.Where(b=>(b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar)&&b.Ready&&b.Sale==null&&!eliminated.Contains(b.Owner)).OrderBy(b=>b.Id).ToArray();
             foreach(PlayableOwner owner in Owners)
             {
                 var population=Population(owner);int usage=population.Living+population.Reserved;
-                foreach(var b in factories.Where(b=>b.Owner==owner&&b.Orders.Count>0&&!b.Orders[0].Active).OrderBy(b=>b.Orders[0].Id).ThenBy(b=>b.Id))
+                foreach(var b in factories.Where(b=>b.Owner==owner&&b.Orders.Count>0&&!b.Orders[0].Active&&b.LaunchPhase==0).OrderBy(b=>b.Orders[0].Id).ThenBy(b=>b.Id))
                 {
                     var order=b.Orders[0];if(usage+PlayableUnitRules.Population(profile,order.Kind)>profile.ArmyCapacity)continue;
                     order.Active=true;Sound(PlayableSoundKind.ProductionStarted,b.Position,order.Kind,owner,true);usage+=PlayableUnitRules.Population(profile,order.Kind);
                 }
                 foreach(var b in factories)
                 {
-                    if(b.Owner!=owner||!b.RepeatTank||b.Orders.Count!=0||usage+PlayableUnitRules.Population(profile,b.RepeatKind)>profile.ArmyCapacity||Balance(owner)<PlayableUnitRules.Cost(profile,b.RepeatKind))continue;
+                    if(b.Owner!=owner||!b.RepeatTank||b.Orders.Count!=0||b.LaunchPhase!=0||usage+PlayableUnitRules.Population(profile,b.RepeatKind)>profile.ArmyCapacity||Balance(owner)<PlayableUnitRules.Cost(profile,b.RepeatKind))continue;
                     var order=NewOrder(b.RepeatKind,true);AddCredits(owner,-order.PaidCost);b.Orders.Add(order);Fact(owner,MatchFactKind.UnitOrdered,order.PaidCost,(int)order.Kind,order.Kind.ToString());usage+=PlayableUnitRules.Population(profile,order.Kind);
                     Sound(PlayableSoundKind.ProductionQueued,b.Position,order.Kind,owner,true);
                     Sound(PlayableSoundKind.ProductionStarted,b.Position,order.Kind,owner,true);
@@ -90,13 +87,17 @@ namespace Spacewars.Runtime
             foreach(var b in factories)
             {
                 ObserveProductionLimit(b);
+                if(b.Kind==PlayableBuildingKind.Factory&&b.LaunchPhase!=0){AdvanceFactoryRelease(b,dt);continue;}
+                if(b.Kind==PlayableBuildingKind.Hangar&&b.LaunchPhase!=0){AdvanceHangar(b,dt);continue;}
                 if(b.Orders.Count==0||!b.Orders[0].Active)continue;
                 var order=b.Orders[0];order.Remaining=Math.Max(0,order.Remaining-dt);
                 if(order.Remaining>1e-9)continue;
                 order.Remaining=0;
+                if(b.Kind==PlayableBuildingKind.Hangar){AdvanceHangar(b,dt);continue;}
+                if(b.Kind==PlayableBuildingKind.Factory){AdvanceFactoryRelease(b,dt);continue;}
                 if(!TryFactoryExit(b,order.Kind,out var spawn))continue;
                 // Owner-thread transaction: there is no published gap between reserve and living population.
-                SpawnProduced(spawn,b.HasRally?(NavPoint?)b.Rally:null,b.Owner,order.Kind);
+                if(!TrySpawnProduced(spawn,b.HasRally?(NavPoint?)b.Rally:null,b.Owner,order.Kind))continue;
                 Sound(PlayableSoundKind.ProductionComplete,b.Position,order.Kind,b.Owner,true);b.Orders.RemoveAt(0);
             }
         }
@@ -104,7 +105,7 @@ namespace Spacewars.Runtime
         private void ObserveProductionLimit(Building b)
         {
             string reason="";
-            if(b.Orders.Count>0&&!b.Orders[0].Active)reason="capacity";
+            if(b.Orders.Count>0&&!b.Orders[0].Active&&b.LaunchPhase==0)reason="capacity";
             else if(b.RepeatTank&&b.Orders.Count==0)reason=Population(b.Owner).Living+Population(b.Owner).Reserved+PlayableUnitRules.Population(profile,b.RepeatKind)>profile.ArmyCapacity?"capacity":Balance(b.Owner)<PlayableUnitRules.Cost(profile,b.RepeatKind)?"credits":"";
             else if(b.Orders.Count>0&&b.Orders[0].Remaining<=1e-9&&!TryFactoryExit(b,b.Orders[0].Kind,out _))reason="exit";
             if(soundProductionLimits.TryGetValue(b.Id,out var previous)&&previous!=reason&&reason.Length>0)
@@ -118,6 +119,7 @@ namespace Spacewars.Runtime
             =>FactoryProductionAnchors.Candidates(b.Position,BuildingRadius(b.Kind),PlayableUnitRules.Radius(profile,kind),new[]{FactoryExit(b)});
         private bool TryFactoryExit(Building b,PlayableEntityKind kind,out NavPoint spawn)
         {
+            if(b.Kind==PlayableBuildingKind.Factory)return FactoryCorridorFree(b,kind,out spawn);
             double radius=PlayableUnitRules.Radius(profile,kind);
             foreach(var candidate in FactoryExitCandidates(b,kind))
             {

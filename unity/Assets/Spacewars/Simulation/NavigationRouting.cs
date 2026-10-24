@@ -166,6 +166,12 @@ namespace Spacewars.Simulation
                 bool free=geometry.SegmentFree(Point(from,geometry.HalfExtent,gridCell),Point(to,geometry.HalfExtent,gridCell),radius);EdgeComputations++;
                 values[index]=WithTrit(value,power,free?2:1);return free;
             }
+            // Dense expansion already proves these array indices and direction.
+            // Unknown predicates still use the original exact computation/cache.
+            internal bool DenseCellFree(Cell cell,int index)
+            {int answer=values[index]%3;return answer!=0?answer==2:CellFree(cell);}
+            internal bool DenseEdgeFree(Cell from,Cell to,int index,int direction)
+            {int power=direction==0?3:direction==1?9:direction==2?27:81;int answer=values[index]/power%3;return answer!=0?answer==2:EdgeFree(from,to);}
         }
         public int RebuildCount { get; private set; }
         public int FieldCacheHits {get;private set;}
@@ -266,6 +272,7 @@ namespace Spacewars.Simulation
         }
         private void ExpandUntil(Field field,IReadOnlyList<Cell> required)
         {
+            if(preparation!=null&&field.Distance.Dense!=null){ExpandPreparedDense(field,required);if(field.Frontier.Count==0)closedReachability=field.Distance;return;}
             if(denseWidth>0&&field.Distance.Dense!=null){ExpandDense(field,required);if(field.Frontier.Count==0)closedReachability=field.Distance;return;}
             bool Ready(){for(int i=0;i<required.Count;i++)if(!field.Distance.ContainsKey(required[i]))return false;return true;}
             // BFS discovery fixes shortest distance. When a required cell is discovered,
@@ -284,6 +291,30 @@ namespace Spacewars.Simulation
                 }
             }
             if(field.Frontier.Count==0)closedReachability=field.Distance;
+        }
+        private void ExpandPreparedDense(Field field,IReadOnlyList<Cell> required)
+        {
+            int side=preparation.AllocatedSide,remaining=0;var distances=field.Distance.Dense;var wanted=new int[required.Count];
+            for(int i=0;i<required.Count;i++){
+                var cell=required[i];int index=cell.X< -1||cell.Z< -1||cell.X>=side-1||cell.Z>=side-1?-1:(cell.Z+1)*side+cell.X+1;
+                // An outside required cell keeps the original exhaustion behavior.
+                wanted[i]=index;if(index<0||distances[index]==0)remaining++;
+            }
+            while(field.Frontier.Count>0&&remaining>0){
+                var cell=field.Frontier.Dequeue();
+#if UNITY_INCLUDE_TESTS
+                testFieldDequeued?.Invoke(cell.X,cell.Z);
+#endif
+                ExpandedCells++;int index=(cell.Z+1)*side+cell.X+1,d=distances[index]-1;
+                for(int direction=0;direction<4;direction++){
+                    var next=Neighbor(cell,direction);
+                    if(next.X< -1||next.Z< -1||next.X>=side-1||next.Z>=side-1)continue;
+                    int ni=(next.Z+1)*side+next.X+1;
+                    if(distances[ni]!=0||!preparation.DenseCellFree(next,ni)||!preparation.DenseEdgeFree(cell,next,index,direction))continue;
+                    field.Distance.AddDense(ni,d+1);CachedCells++;field.Frontier.Enqueue(next);
+                    for(int i=0;i<wanted.Length;i++)if(ni==wanted[i])remaining--;
+                }
+            }
         }
         private void ExpandDense(Field field,IReadOnlyList<Cell> required)
         {

@@ -630,7 +630,7 @@ namespace Spacewars.Tests.EditMode
         [TestCase(6)][TestCase(7)][TestCase(8)][TestCase(9)][TestCase(10)][TestCase(11)][TestCase(12)] public void DefenseRecovery_PrivateSchemaRejectsHistoricalVersionsWithoutMutation(int schema)
         {
             var c=DefenseConfig();var a=new PlayableAuthorityTick(c,71);var original=a.CaptureBytes();var state=PlayableWorldState.Decode(original);
-            Assert.AreEqual(13,BitConverter.ToInt32(state.AiAuthority,4));Buffer.BlockCopy(BitConverter.GetBytes(schema),0,state.AiAuthority,4,4);
+            Assert.AreEqual(15,BitConverter.ToInt32(state.AiAuthority,4));Buffer.BlockCopy(BitConverter.GetBytes(schema),0,state.AiAuthority,4,4);
             Assert.Throws<ArgumentException>(()=>PlayableAuthorityTick.RestoreBytes(state.Encode(),c));CollectionAssert.AreEqual(original,a.CaptureBytes());a.Stop();
         }
         [Test] public void DefenseRecovery_ProgressClockUsesObservedMovementAndDamageNotReceipts()

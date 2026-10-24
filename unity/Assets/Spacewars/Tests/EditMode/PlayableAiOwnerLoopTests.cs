@@ -1,16 +1,40 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
 using NUnit.Framework;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
+using Spacewars.Simulation.Ai;
 using Spacewars.Presentation;
 
 namespace Spacewars.Tests.EditMode
 {
     public sealed class PlayableAiOwnerLoopTests
     {
+        private static bool SameOrder(PlayableAiAction action,PlayableEntitySnapshot unit,bool applied=true,string policy=AiArmyPlanner.Policy,string owner="player-1",long generation=71)=>(bool)typeof(PlayableAiOwnerLoop)
+            .GetMethod("SameOrder",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{action,unit,policy,applied,owner,generation});
+        [Test]
+        public void DeliveryTreatsOnlyExactViableOwnerPendingAttackMoveAsRedundant()
+        {
+            var point=new NavPoint(8,0);var profile=PlayableProfile.Default;
+            PlayableAiAction Action(PlayableCommandKind kind=PlayableCommandKind.AttackMove,int site=77,NavPoint? target=null)=>new PlayableAiAction(9,"player-1",profile.ProfileId,profile.Revision,71,1,kind,new[]{1},target??point,siteId:site,seed:19092026,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            PlayableEntitySnapshot Unit(bool viable,PlayableCommandKind kind=PlayableCommandKind.AttackMove,int site=77,NavPoint? anchor=null)
+            {
+                var pending=new PlayableQueuedOrderSnapshot(1,4,5,6,kind,new NavLocation(anchor??point,NavLocation.FlatSurface),0,site,42);
+                return new PlayableEntitySnapshot(1,PlayableOwner.Player,PlayableEntityKind.Tank,default,100,false,0,0,0,
+                    queue:new PlayableUnitQueueSnapshot(null,pending,Array.Empty<PlayableQueuedOrderSnapshot>(),null,viable));
+            }
+            Assert.True(SameOrder(Action(),Unit(true)),"Mission provenance plus the exact viable owner queue binding is sufficient; trace-ring retention is not authority.");
+            Assert.False(SameOrder(Action(site:78),Unit(true)),"Changed public target must remain deliverable.");
+            Assert.False(SameOrder(Action(kind:PlayableCommandKind.Move),Unit(true)),"Changed order kind must remain deliverable.");
+            Assert.False(SameOrder(Action(),Unit(false)),"Terminal or unbound pending data cannot suppress retry.");
+            Assert.False(SameOrder(Action(),Unit(true),applied:false),"A new mission without its own applied command must be allowed to bind.");
+            Assert.False(SameOrder(Action(),Unit(true),owner:"enemy-1"),"The owner proposal must match the current owner binding.");
+            Assert.False(SameOrder(new PlayableAiAction(9,"player-1",profile.ProfileId,profile.Revision,72,1,PlayableCommandKind.AttackMove,new[]{1},point,siteId:77,seed:19092026,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity),Unit(true)),"The proposal generation must match the current owner binding.");
+        }
+
         private static PlayableAiOwnerCheckpoint Enemy(PlayableRuntime runtime)
         {
             var legacy=(PlayableAiOwnerCheckpoint)typeof(PlayableRuntime).GetProperty("EnemyAiCheckpoint",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(runtime);

@@ -18,13 +18,19 @@ namespace Spacewars.Runtime
                 observed=navigationGeometry;operation=authorityOperationIdentity;
             }
             if(!TryOpenPhysicalHostScope(NavigationPreparationKind.Capture,Generation,Admission.PublicationIdentity,out var scope))throw new InvalidOperationException("Empty host capture admission refused.");
-            NavigationHostRoot root=null;
+            NavigationHostRoot root=null;NavPagedList<long> bank=null;NavigationCreditPublication holder=null;
             using(scope){try{
-                root=NavigationHostRoot.CreateOwned(scope.OwnedReservation());root.StageAuthorityGeometry(observed,scope.OwnedReservation());StageRetainedPhysicalArrivals(root,scope.OwnedReservation());
+                root=CreatePhysicalHostRoot(scope.OwnedReservation());root.StageAuthorityGeometry(observed,scope.OwnedReservation());StageRetainedPhysicalArrivals(root,scope.OwnedReservation());
                 root.SetFrontier(new CertifiedRouteKernel.PumpFrontier(CertifiedRouteKernel.PumpStage.Idle,0,0,0,0,0,0,0,0,0),0,0);
-                root.SealPrepared();scope.Attach(root);
-                PublishPhysicalHostRoot(scope,null,root,()=>{if(operation!=authorityOperationIdentity||!ReferenceEquals(observed,navigationGeometry))throw new InvalidOperationException("Authority changed during empty host capture.");});
-            }finally{root?.ReleaseStorage();}}
+                root.SealPrepared();
+                if(accruedCreditsEnabled){
+                    bank=NavigationAccruedCredits.Create(Generation,accruedCreditCap,scope.OwnedReservation());holder=NavigationCreditPublication.Create(root,bank,scope.OwnedReservation());scope.Attach(holder);
+                    scope.Publish(holder,_=>{using(EnterTransport()){
+                        if(operation!=authorityOperationIdentity||!ReferenceEquals(observed,navigationGeometry)||committedHostRoot!=null||creditBank!=null)throw new PhysicalIngressRefused("Accrued host birth lost source.");
+                        root.Retain();bank.Retain();committedHostRoot=root;creditBank=bank;
+                    }});scope.ResolveCommitted();
+                }else{scope.Attach(root);PublishPhysicalHostRoot(scope,null,root,()=>{if(operation!=authorityOperationIdentity||!ReferenceEquals(observed,navigationGeometry))throw new InvalidOperationException("Authority changed during empty host capture.");});}
+            }finally{holder?.Dispose();bank?.ReleaseStorage();root?.ReleaseStorage();}}
         }
         private NavigationCaptureBytes CaptureHostAuthority(NavigationHostRoot root,NavigationAuthorityOwners authority,NavigationSessionState state)
         {
@@ -39,10 +45,11 @@ namespace Spacewars.Runtime
                             var roles=new int[state.Requests.Length];for(int i=0;i<roles.Length;i++)roles[i]=CatalogRoleMask(state,i);
                             snapshot=NavigationAuthorityOwners.CreateCatalogOwned(authority,state.CaptureRequests,state.CaptureGeometries,state.CaptureGroups,state.CaptureIdentities,state.CaptureCrowdNames,state.CaptureCrowdKeys,state.CaptureCrowdPoints,state.CaptureCrowdFlags,roles,state.GroupLayouts.Concat(state.CollectionLayouts).Concat(state.CaptureExtraLayouts).ToArray(),state.CaptureTerrainNames,state.CaptureActorGlobal,state.CaptureActorLocal,state.CaptureInstalled,scope.OwnedReservation(),state.CaptureArrivalCatalog,state.CaptureLeaseCatalog,state.CaptureProbeAnswers,state.CaptureMailboxAnswers,state.CaptureBarrierAnswers,state.CaptureAnswerTrackingLayout,state.CaptureAnswerTrackingOwners);
                         }
-                        var envelope=NavigationHostEnvelope.CreateOwned(root,snapshot,scope.OwnedReservation(),state.AdmissionPublicationIdentity);
+                        if(root.AccruedCredits)NavigationAccruedCredits.Validate(state.CaptureBank,root,Generation,state.RequestSequence,long.MaxValue-1);
+                        NavOwnedStorage envelope=root.AccruedCredits?(NavOwnedStorage)NavigationAccruedHostEnvelope.Create(root,snapshot,state.CaptureTraffic,state.CaptureBank,state.AdmissionPublicationIdentity,scope.OwnedReservation()):NavigationHostEnvelope.CreateOwned(root,snapshot,scope.OwnedReservation(),state.AdmissionPublicationIdentity,state.CaptureTraffic);
                     try{output=NavigationCaptureBytes.Write(scope.OwnedReservation(),
                         writer=>NavPhysicalBodyWire.WriteTo(writer,envelope,scope.OwnedReservation()));}
-                    finally{envelope.ReleaseStorage();}
+                    finally{envelope.ReleaseOwner();}
                         scope.Attach(output);scope.Commit(output,_=>{});
                         snapshot.Retain();var pinnedCore=state.CaptureAuthority;state.CaptureAuthority=snapshot;pinnedCore?.Release();
                         state.CaptureTerrainNames?.Release();state.CaptureTerrainNames=null;return output;
@@ -53,17 +60,17 @@ namespace Spacewars.Runtime
         internal static void DecodeDetachedHostAuthority(byte[] bytes,NavigationRetentionBudget budget,out NavigationHostRoot host,out NavigationAuthorityOwners authority)
             =>DecodeDetachedHostAuthority(bytes,budget,out host,out authority,out _);
         internal static void DecodeDetachedHostAuthority(byte[] bytes,NavigationRetentionBudget budget,out NavigationHostRoot host,out NavigationAuthorityOwners authority,out long publication)
-            =>DecodeDetachedHostAuthority(bytes,budget,null,out host,out authority,out publication);
+        {DecodeDetachedHostAuthority(bytes,budget,null,out host,out authority,out publication,out var traffic,out var bank);traffic?.Release();if(bank!=null){bank.Release();host?.Release();authority?.Release();host=null;authority=null;throw new ArgumentException("Accrued decode requires a matching bank owner.");}}
         internal static void DecodeDetachedHostAuthority(NavigationSessionState state,NavigationDecodeTransaction transaction,out NavigationHostRoot host,out NavigationAuthorityOwners authority,out long publication)
         {
             if(state==null||transaction==null)throw new ArgumentNullException();
             if(state.HostAuthority==null&&state.DecodeHostOwner==null){DecodeDetachedHostAuthority((byte[])null,transaction.Budget,out host,out authority,out publication);return;}
             transaction.RequirePrivateBytes(state.DecodeHostOwner,state.HostAuthority);
-            DecodeDetachedHostAuthority(state.HostAuthority,transaction.Budget,state.DecodeHostOwner,out host,out authority,out publication);
+            DecodeDetachedHostAuthority(state.HostAuthority,transaction.Budget,state.DecodeHostOwner,out host,out authority,out publication,out var traffic,out var bank);state.PreparedTraffic=traffic;state.PreparedBank=bank;
         }
-        private static void DecodeDetachedHostAuthority(byte[] bytes,NavigationRetentionBudget budget,NavigationDecodeTransaction.PrivateValue<byte[]> privateOwner,out NavigationHostRoot host,out NavigationAuthorityOwners authority,out long publication)
+        private static void DecodeDetachedHostAuthority(byte[] bytes,NavigationRetentionBudget budget,NavigationDecodeTransaction.PrivateValue<byte[]> privateOwner,out NavigationHostRoot host,out NavigationAuthorityOwners authority,out long publication,out NavigationTrafficAuthority traffic,out NavPagedList<long> bank)
         {
-            host=null;authority=null;publication=0;if(bytes==null)return;
+            host=null;authority=null;traffic=null;bank=null;publication=0;if(bytes==null)return;
             if(bytes.Length<1||bytes.Length>32*1024*1024)throw new ArgumentException("Invalid private host BODY input.");
             if(budget==null||!budget.TryOpenScope(NavigationPreparationKind.Decode,0,0,out var scope))throw new InvalidOperationException("Host decode admission refused.");
             NavOwnedStorage decoded=null;
@@ -75,12 +82,13 @@ namespace Spacewars.Runtime
                         var input=privateOwner==null?(byte[])bytes.Clone():bytes;
                         using(var reader=new BinaryReader(new MemoryStream(input,false))){
                             decoded=NavPhysicalBodyWire.ReadFrom(reader,scope.OwnedReservation(),NavigationHostBodyExtension.Instance);
-                            if(!(decoded is NavigationHostRoot)&&!(decoded is NavigationHostEnvelope)||reader.BaseStream.Position!=reader.BaseStream.Length)throw new ArgumentException("Invalid host BODY tail.");
+                            if(!(decoded is NavigationHostRoot)&&!(decoded is NavigationHostEnvelope)&&!(decoded is NavigationAccruedHostEnvelope)||reader.BaseStream.Position!=reader.BaseStream.Length)throw new ArgumentException("Invalid host BODY tail.");
                         }
                     }
                     scope.Attach(decoded);scope.Commit(decoded,_=>{});
-                    if(decoded is NavigationHostEnvelope envelope){publication=envelope.PublicationIdentity;host=envelope.Host;authority=envelope.Authority;host.Retain();authority.Retain();envelope.ReleaseStorage();}
-                    else host=(NavigationHostRoot)decoded;
+                    if(decoded is NavigationAccruedHostEnvelope accrued){publication=accrued.PublicationIdentity;host=accrued.Host;authority=accrued.Authority;traffic=accrued.Traffic;bank=accrued.Bank;bank.Retain();traffic?.Retain();host.Retain();authority.Retain();accrued.ReleaseStorage();}
+                    else if(decoded is NavigationHostEnvelope envelope){publication=envelope.PublicationIdentity;host=envelope.Host;authority=envelope.Authority;traffic=envelope.Traffic;traffic?.Retain();host.Retain();authority.Retain();envelope.ReleaseStorage();}
+                    else{host=(NavigationHostRoot)decoded;if(host.AccruedCredits)throw new ArgumentException("Accrued host requires its envelope and bank.");}
                 }catch{decoded?.ReleaseOwner();throw;}
                 finally{if(retained)privateOwner.Release();}
             }

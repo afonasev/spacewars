@@ -119,7 +119,13 @@ namespace Spacewars.Simulation
         public NavPoint Point(double x,double z)=>new NavPoint(x*Scale,z*Scale);
         private NavObstacle Box(double x,double z,double xx,double zz)=>new NavObstacle(x*Scale,z*Scale,xx*Scale,zz*Scale);
         private NavObstacle Rock(double x,double z,double xx,double zz,double top)=>new NavObstacle(new NavPolygon(new[]{Point(x,z),Point(xx,z),Point(xx,zz),Point(x,zz)}),0,top);
-        public MapSupport SupportAt(NavPoint p)=>Supports.FirstOrDefault(s=>s.Contains(p));
+        public MapSupport SupportAt(NavPoint p)
+        {
+            // Preserve declaration precedence at shared seams without allocating a
+            // closure and LINQ enumerator for every ballistic terrain sample.
+            for(int i=0;i<Supports.Count;i++){var support=Supports[i];if(support.Contains(p))return support;}
+            return null;
+        }
         public double SurfaceHeight(NavPoint p)=>SupportAt(p)?.HeightAt(p)??0;
         public NavPoint SurfaceGradient(NavPoint p)=>SupportAt(p)?.Gradient??default(NavPoint);
         public bool SupportsFootprint(NavPoint p,double radius)=>geometry.IsFree(p,radius)&&SupportAt(p)!=null;

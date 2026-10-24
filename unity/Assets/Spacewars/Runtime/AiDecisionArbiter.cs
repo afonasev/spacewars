@@ -63,7 +63,7 @@ namespace Spacewars.Runtime
             if(proposals==null||credits<0||freePopulation<0||actionLimit<1)throw new ArgumentException("Invalid ledger.");
             rejections.Clear();
             var all=proposals.ToArray();
-            if(all.Any(x=>x.Id==FundingMemoKey||x.Id==AiExpansionFinancial.MemoKey))throw new ArgumentException("Funding memo is not a gameplay intent.");
+            if(all.Any(x=>x.Id==FundingMemoKey||x.Id==AiExpansionFinancial.MemoKey||x.Id.StartsWith(ArmyResearchMemoPrefix,StringComparison.Ordinal)))throw new ArgumentException("Funding memo is not a gameplay intent.");
             if(all.Select(x=>x.Id).Distinct(StringComparer.Ordinal).Count()!=all.Length)throw new ArgumentException("Duplicate intent identity.");
             var candidates=new List<AiIntent>();
             foreach(var p in all.OrderBy(x=>x.Id,StringComparer.Ordinal))
@@ -119,7 +119,7 @@ namespace Spacewars.Runtime
             }
             // Bound stale diagnostic history; pending entries are fed back before next decision.
             var present=new HashSet<string>(all.Select(p=>p.Id),StringComparer.Ordinal);
-            foreach(var key in history.Keys.Where(k=>k!=FundingMemoKey&&k!=AiExpansionFinancial.MemoKey&&!present.Contains(k)).OrderBy(k=>history[k].FirstTick).ThenBy(k=>k,StringComparer.Ordinal).Take(Math.Max(0,history.Count-(history.ContainsKey(FundingMemoKey)?1:0)-(history.ContainsKey(AiExpansionFinancial.MemoKey)?1:0)-128)).ToArray())history.Remove(key);
+            foreach(var key in history.Keys.Where(k=>k!=FundingMemoKey&&k!=AiExpansionFinancial.MemoKey&&!k.StartsWith(ArmyResearchMemoPrefix,StringComparison.Ordinal)&&!present.Contains(k)).OrderBy(k=>history[k].FirstTick).ThenBy(k=>k,StringComparer.Ordinal).Take(Math.Max(0,history.Count-history.Keys.Count(k=>k.StartsWith(ArmyResearchMemoPrefix,StringComparison.Ordinal))-(history.ContainsKey(FundingMemoKey)?1:0)-(history.ContainsKey(AiExpansionFinancial.MemoKey)?1:0)-128)).ToArray())history.Remove(key);
 #if UNITY_INCLUDE_TESTS
             if(captureSelection)SelectionReadbackForTests(new AiArbiterSelectionReadback(budget?.OwnerId,actualOrder,actualBands));
 #endif

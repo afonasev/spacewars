@@ -253,13 +253,87 @@ namespace Spacewars.Tests.EditMode
         }
         private PlayableBuildingSnapshot AwaitAdditionalFactory(PlayableAuthorityTick a,OfflineMatchConfiguration c,int original)
         {
-            for(int i=0;i<3000;i++){Step(a);if(a.Tick%300==0)FundingEvidence(a,c);var b=EconomyView(a,c).Buildings.FirstOrDefault(x=>x.Owner==PlayableOwner.Player&&x.Kind==PlayableBuildingKind.Factory&&x.Id!=original);if(b!=null)return b;}
+            for(int i=0;i<3000;i++){Step(a);if(a.Tick%300==0)FundingEvidence(a,c);var b=EconomyView(a,c).Buildings.FirstOrDefault(x=>x.Owner==PlayableOwner.Player&&x.Kind==PlayableBuildingKind.Factory&&x.Id!=original);if(b!=null){TestContext.WriteLine("STARTUP_FACTORY_PRECONDITION "+Newtonsoft.Json.JsonConvert.SerializeObject(new{a.Tick,a.Latest.Outcome,Factory=b,Ledger=Budget(EconomyOwner(a,c)).Capture()}));return b;}}
             Assert.Fail("Expected real additional factory");return null;
         }
         private static OfflineMatchConfiguration WithEconomyProfile(OfflineMatchConfiguration c,PlayableProfile p)
         {
             var costs=new double[c.Starts.Count,c.Starts.Count];for(int i=0;i<c.Starts.Count;i++)for(int j=0;j<c.Starts.Count;j++)costs[i,j]=c.RouteCost(i,j);
             return new OfflineMatchConfiguration(p,c.SourceIdentity,c.MapIdentity,c.RouteProvenance,c.Seed,c.Roster.ToArray(),c.Starts.ToArray(),c.Sites.ToArray(),c.Obstacles.ToArray(),costs,scenarioBuildings:c.ScenarioBuildings.ToArray());
+        }
+        [Test] public void PendingFactoryRetainsStartupThroughReviewsRestoreAndOrdinaryProduction()
+        {
+            var c=RichEconomyConfig();var a=new PlayableAuthorityTick(c,71);
+            FactoryFirst(a,c,PlayableAiOpening.Safe);int original=PrepareLine(a,c,true);
+            var extra=AwaitAdditionalFactory(a,c,original);
+            Assert.AreEqual(ConstructionPhase.Pending,extra.Phase);
+            Assert.Zero(extra.Health,"the paid blocked foundation is not a production target");
+            var hold=Budget(EconomyOwner(a,c)).Capture().Reserved.Single(x=>x.Purpose=="factory-startup");
+            Assert.AreEqual(PlayableCommandKind.BuildAt,hold.Action.Kind);
+            Assert.AreEqual(extra.SiteId,hold.Action.SiteId);Assert.AreEqual(extra.SlotId,hold.Action.SlotId);
+            var restored=PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c);
+            // Direct human QA decision: full world at scenario boundaries;
+            // every ordinary tick still compares the affected financial/production contract.
+            object ActionBinding(PlayableAiAction action)=>new{action.ActionId,action.PlayerId,action.ProfileId,action.ProfileRevision,action.Generation,action.SnapshotSequence,action.Seed,action.SourceIdentity,
+                action.Kind,action.SiteId,action.SlotId,action.ParentId,action.BuildingKind,action.UnitKind,action.ResearchKind,action.TargetId,action.ProductionOrderId,action.Target.X,action.Target.Z,Entities=string.Join(",",action.EntityIds)};
+            object Entry(AiBudgetEntry entry)=>entry==null?null:new{entry.Id,entry.Purpose,entry.Amount,entry.Priority,entry.CreatedTick,entry.ExpiresTick,entry.Terms,entry.ReleaseCondition,
+                entry.AwaitingPayment,entry.ExactSettled,Receipt=entry.Receipt?.Id,Claims=string.Join("|",entry.Claims),Action=ActionBinding(entry.Action)};
+            object Order(PlayableProductionOrderSnapshot order)=>new{order.Id,order.Kind,order.PaidCost,order.PopulationCost,order.Duration,order.Remaining,order.Active,order.Progress};
+            void AssertStartupProductionMatches()
+            {
+                string context="startup/production at tick "+a.Tick;
+                Assert.AreEqual(a.Tick,restored.Tick,context);
+                var hotBudget=Budget(EconomyOwner(a,c)).Capture();var coldBudget=Budget(EconomyOwner(restored,c)).Capture();
+                Assert.AreEqual(Entry(hotBudget.Reserved.SingleOrDefault(x=>x.Id==hold.Id)),Entry(coldBudget.Reserved.SingleOrDefault(x=>x.Id==hold.Id)),context+" held id/amount/deadlines/action binding");
+                bool OnNewLine(AiBudgetEntry entry)=>entry.Action.Kind==PlayableCommandKind.QueueTank&&entry.Action.EntityIds.Contains(extra.Id);
+                CollectionAssert.AreEqual(hotBudget.Paid.Where(OnNewLine).OrderBy(x=>x.Receipt?.Id,StringComparer.Ordinal).Select(Entry).ToArray(),coldBudget.Paid.Where(OnNewLine).OrderBy(x=>x.Receipt?.Id,StringComparer.Ordinal).Select(Entry).ToArray(),context+" paid startup cycles");
+                CollectionAssert.AreEqual(hotBudget.Unpaid.Where(OnNewLine).OrderBy(x=>x.Receipt?.Id,StringComparer.Ordinal).Select(Entry).ToArray(),coldBudget.Unpaid.Where(OnNewLine).OrderBy(x=>x.Receipt?.Id,StringComparer.Ordinal).Select(Entry).ToArray(),context+" accepted production invoices");
+                var hotView=EconomyView(a,c);var coldView=EconomyView(restored,c);
+                var hot=hotView.Buildings.Single(b=>b.Id==extra.Id);var cold=coldView.Buildings.Single(b=>b.Id==extra.Id);
+                Assert.AreEqual((hot.Id,hot.Owner,hot.Kind,hot.SiteId,hot.SlotId,hot.ParentId,hot.Phase,hot.Health,hot.ExactHealth,hot.Progress,hot.BlockedReason),
+                    (cold.Id,cold.Owner,cold.Kind,cold.SiteId,cold.SlotId,cold.ParentId,cold.Phase,cold.Health,cold.ExactHealth,cold.Progress,cold.BlockedReason),context+" factory lifecycle");
+                Assert.AreEqual((hot.PrivateState.QueueCount,hot.PrivateState.ProductionProgress,hot.PrivateState.Repeat,hot.PrivateState.RepeatKind,hot.PrivateState.Lifecycle?.Selling),
+                    (cold.PrivateState.QueueCount,cold.PrivateState.ProductionProgress,cold.PrivateState.Repeat,cold.PrivateState.RepeatKind,cold.PrivateState.Lifecycle?.Selling),context+" producer state");
+                CollectionAssert.AreEqual(hot.PrivateState.Orders.Select(Order).ToArray(),cold.PrivateState.Orders.Select(Order).ToArray(),context+" exact paid order queue");
+                CollectionAssert.AreEqual(hotView.Entities.Where(e=>e.Owner==hotView.Owner&&e.Kind==PlayableEntityKind.Tank).OrderBy(e=>e.Id).Select(e=>new{e.Id,e.Health}).ToArray(),
+                    coldView.Entities.Where(e=>e.Owner==coldView.Owner&&e.Kind==PlayableEntityKind.Tank).OrderBy(e=>e.Id).Select(e=>new{e.Id,e.Health}).ToArray(),context+" living production units");
+            }
+            TestContext.WriteLine("PENDING_BOUNDARY initial restore tick="+a.Tick);
+            CollectionAssert.AreEqual(a.CaptureBytes(),restored.CaptureBytes(),"full world after initial restore");
+            long reviews=0,previousDecision=-1;
+            for(int i=0;i<90;i++)
+            {
+                Step(a);Step(restored);AssertStartupProductionMatches();
+                var ledger=Budget(EconomyOwner(a,c));var current=EconomyView(a,c).Buildings.Single(b=>b.Id==extra.Id);
+                var held=ledger.Capture().Reserved.Single(x=>x.Id==hold.Id);
+                Assert.AreEqual(hold.CreatedTick,held.CreatedTick);Assert.AreEqual(hold.ExpiresTick,held.ExpiresTick);
+                Assert.AreEqual(hold.Amount,held.Amount,"reviews must preserve the accepted fund");
+                if(current.Health==0){Assert.AreEqual(ConstructionPhase.Pending,current.Phase);Assert.AreEqual(PlayableCommandKind.BuildAt,held.Action.Kind);Assert.IsEmpty(current.PrivateState.Orders);}
+                long decision=a.CaptureDiagnosticCheckpoints().Single(x=>x.OwnerId==c.Roster[0].Id).DecisionTick;
+                if(decision!=previousDecision){reviews++;previousDecision=decision;}
+            }
+            Assert.GreaterOrEqual(reviews,2,"exercise multiple actual reviews, not only delivery");
+            TestContext.WriteLine("PENDING_BOUNDARY after90 reviews tick="+a.Tick);
+            CollectionAssert.AreEqual(a.CaptureBytes(),restored.CaptureBytes(),"full world after all90 review ticks");
+            int paidCycles=0;bool liveProduction=false,coldLiveProduction=false;int living=EconomyView(a,c).Entities.Count(e=>e.Owner==PlayableOwner.Player&&e.Kind==PlayableEntityKind.Tank);
+            for(int i=0;i<3000;i++)
+            {
+                Step(a);Step(restored);AssertStartupProductionMatches();
+                var view=EconomyView(a,c);var current=view.Buildings.Single(b=>b.Id==extra.Id);
+                var ledger=Budget(EconomyOwner(a,c));var held=ledger.Capture().Reserved.FirstOrDefault(x=>x.Id==hold.Id);
+                if(current.Health==0&&held!=null)Assert.AreEqual(PlayableCommandKind.BuildAt,held.Action.Kind);
+                if(held?.Action.Kind==PlayableCommandKind.QueueTank){Assert.Greater(current.Health,0);CollectionAssert.AreEqual(new[]{extra.Id},held.Action.EntityIds);}
+                paidCycles=ledger.Capture().Paid.Count(x=>x.Action.Kind==PlayableCommandKind.QueueTank&&x.Action.EntityIds.Contains(extra.Id));
+                liveProduction|=current.Phase==ConstructionPhase.Ready&&view.Entities.Count(e=>e.Owner==view.Owner&&e.Kind==PlayableEntityKind.Tank)>living;
+                var coldView=EconomyView(restored,c);var coldFactory=coldView.Buildings.Single(b=>b.Id==extra.Id);
+                coldLiveProduction|=coldFactory.Phase==ConstructionPhase.Ready&&coldView.Entities.Count(e=>e.Owner==coldView.Owner&&e.Kind==PlayableEntityKind.Tank)>living;
+                Assert.AreEqual(liveProduction,coldLiveProduction,"living unit release at tick "+a.Tick);
+                if(paidCycles>=(int)AiProfile.Initial.Value("economy.factoryLaunchCycles")&&liveProduction&&ledger.ReservationAmount(hold.Id)==0)break;
+            }
+            Assert.GreaterOrEqual(paidCycles,(int)AiProfile.Initial.Value("economy.factoryLaunchCycles"));
+            Assert.True(liveProduction,"unblocked ordinary factory must produce a living unit");
+            TestContext.WriteLine("PENDING_BOUNDARY completed production tick="+a.Tick+" paidCycles="+paidCycles);
+            CollectionAssert.AreEqual(a.CaptureBytes(),restored.CaptureBytes(),"full world after completed production");
         }
         [Test] public void ScaleAndUseStartupSurvivesCompetingOldProductionResearchRestoreAndProfile()
         {
@@ -288,7 +362,9 @@ namespace Spacewars.Tests.EditMode
             Call("AdvanceProduction",Math.Max(0,oldOrder.Remaining-2));
             Assert.AreNotEqual(ConstructionPhase.Ready,EconomyView(a,c).Buildings.Single(b=>b.Id==extra.Id).Phase);
             Assert.False(EconomyView(a,c).OwnerResearch.Any(r=>r.Kind==PlayableResearchKind.TankChassis));
-            double bank=(double)Call("Balance",PlayableOwner.Player);Call("AddCredits",PlayableOwner.Player,launch+c.Profile.TankCreditCost-bank);
+            // Compete with the actual research invoice, not the cheaper Tank quote.
+            int researchQuote=(int)Math.Ceiling(AiResearchCatalog.For(PlayableResearchKind.TankChassis).Cost(c.Profile));
+            double bank=(double)Call("Balance",PlayableOwner.Player);Call("AddCredits",PlayableOwner.Player,launch+researchQuote-bank);
             long oldPaid=ledger.PaidTotal;bool oldLinePaid=false,researchBlocked=false;
             int elapsed=0;
             for(;elapsed<150;elapsed++)
@@ -303,15 +379,52 @@ namespace Spacewars.Tests.EditMode
             O5DecisionDiagnostics.Emit("held-research-boundary",a,owner,PlayableAiObservation.From(EconomyView(a,c)),c.Profile,new{OldLinePaid=oldLinePaid,ResearchBlocked=researchBlocked});
             Assert.True(oldLinePaid,"useful old-line orders may spend outside the held startup amount");Assert.True(researchBlocked,"ordinary eligible research must encounter the real held-fund budget blocker");
             Journal(a);var before=a.CaptureBytes();var restored=PlayableAuthorityTick.RestoreBytes(before,c);
+            Assert.True(before.AsSpan().SequenceEqual(restored.CaptureBytes()),"full world at initial research restore boundary");
+            byte[] LedgerBytes(PlayableAuthorityTick authority)
+            {
+                using(var stream=new System.IO.MemoryStream())
+                {
+                    using(var writer=new System.IO.BinaryWriter(stream,System.Text.Encoding.UTF8,true))
+                        AiBudgetStateWire.Write(writer,Budget(EconomyOwner(authority,c)));
+                    return stream.ToArray();
+                }
+            }
+            object OrderState(PlayableProductionOrderSnapshot x)=>new{x.Id,x.Kind,x.PaidCost,x.PopulationCost,x.Duration,x.Remaining,x.Active,x.Progress};
+            object ResearchState(PlayableResearchOrderSnapshot x)=>new{x.Id,x.Kind,x.CenterId,x.PaidCost,x.Elapsed,x.Duration,x.Active,x.Complete,x.Progress};
+            void AssertSubjectTick()
+            {
+                string message="startup/research/production at tick "+a.Tick;
+                Assert.True(LedgerBytes(a).AsSpan().SequenceEqual(LedgerBytes(restored)),message+" exact AI ledger (holds/receipts/terms/deadlines/paid-unpaid)");
+                var hot=EconomyView(a,c);var cold=EconomyView(restored,c);
+                Assert.AreEqual((hot.Tick,hot.Credits,hot.SettledIncome,hot.IncomePerSecond,hot.Population.Living,hot.Population.Reserved,hot.Population.Capacity),
+                    (cold.Tick,cold.Credits,cold.SettledIncome,cold.IncomePerSecond,cold.Population.Living,cold.Population.Reserved,cold.Population.Capacity),message);
+                foreach(int id in new[]{original,extra.Id,science.Id})
+                {
+                    var h=hot.Buildings.SingleOrDefault(x=>x.Id==id);var k=cold.Buildings.SingleOrDefault(x=>x.Id==id);
+                    Assert.AreEqual(h!=null,k!=null,message+" building presence "+id);if(h==null)continue;
+                    Assert.AreEqual((h.Id,h.Owner,h.Kind,h.SiteId,h.SlotId,h.ParentId,h.Phase,h.Health,h.ExactHealth,h.Progress,h.BlockedReason),
+                        (k.Id,k.Owner,k.Kind,k.SiteId,k.SlotId,k.ParentId,k.Phase,k.Health,k.ExactHealth,k.Progress,k.BlockedReason),message+" building lifecycle "+id);
+                    Assert.AreEqual((h.PrivateState.QueueCount,h.PrivateState.ProductionProgress,h.PrivateState.Repeat,h.PrivateState.RepeatKind,h.PrivateState.Lifecycle?.Selling),
+                        (k.PrivateState.QueueCount,k.PrivateState.ProductionProgress,k.PrivateState.Repeat,k.PrivateState.RepeatKind,k.PrivateState.Lifecycle?.Selling),message+" producer state "+id);
+                    CollectionAssert.AreEqual(h.PrivateState.Orders.Select(OrderState).ToArray(),k.PrivateState.Orders.Select(OrderState).ToArray(),message+" FIFO production queue "+id);
+                    CollectionAssert.AreEqual(h.PrivateState.Research.Select(ResearchState).ToArray(),k.PrivateState.Research.Select(ResearchState).ToArray(),message+" research queue "+id);
+                }
+                CollectionAssert.AreEqual(hot.OwnerResearch.OrderBy(x=>x.Kind).ThenBy(x=>x.Id).Select(ResearchState).ToArray(),cold.OwnerResearch.OrderBy(x=>x.Kind).ThenBy(x=>x.Id).Select(ResearchState).ToArray(),message+" owner research progress");
+                CollectionAssert.AreEqual(hot.ResearchAvailability.OrderBy(x=>x.Kind).Select(x=>new{x.Kind,x.Cost,x.Available}).ToArray(),cold.ResearchAvailability.OrderBy(x=>x.Kind).Select(x=>new{x.Kind,x.Cost,x.Available}).ToArray(),message+" legal research");
+                CollectionAssert.AreEqual(hot.Entities.Where(x=>x.Owner==hot.Owner&&x.Kind==PlayableEntityKind.Tank).OrderBy(x=>x.Id).Select(x=>new{x.Id,x.Health}).ToArray(),
+                    cold.Entities.Where(x=>x.Owner==cold.Owner&&x.Kind==PlayableEntityKind.Tank).OrderBy(x=>x.Id).Select(x=>new{x.Id,x.Health}).ToArray(),message+" living units");
+            }
             for(int i=0;i<20;i++){Step(a);Step(restored);Assert.True(a.CaptureBytes().AsSpan().SequenceEqual(restored.CaptureBytes()),"exact startup C9 bytes at tick "+a.Tick);}
             var profileData=c.Profile.CopyData();profileData.revision++;var next=PlayableProfile.Create(profileData);var aiData=AiProfile.Initial.CopyData();aiData.revision++;var ai=new AiProfile(aiData);
             Assert.IsNull(a.ApplyProfile(next,ai));c=WithEconomyProfile(c,next);ledger=Budget(EconomyOwner(a,c));
             var rebound=ledger.Capture().Reserved.Single(x=>x.Id==hold.Id);Assert.AreEqual(launch,rebound.Amount);Assert.AreEqual(next.ProfileId+"@"+next.Revision,rebound.Terms);
             Assert.True(ledger.Capture().Paid.Any(x=>x.Action.Kind==PlayableCommandKind.BuildAt&&x.Action.SiteId==9&&x.Action.SlotId==extra.SlotId&&x.Terms==hold.Terms),"paid factory terms remain from the accepted catalog revision");
-            restored=PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c,ai);long firstOrder=0;bool produced=false;int living=0;long previousHold=ledger.ReservationAmount(hold.Id);
+            var afterProfile=a.CaptureBytes();restored=PlayableAuthorityTick.RestoreBytes(afterProfile,c,ai);
+            Assert.True(afterProfile.AsSpan().SequenceEqual(restored.CaptureBytes()),"full world after profile rebind/re-restore");
+            long firstOrder=0;bool produced=false;int living=0;long previousHold=ledger.ReservationAmount(hold.Id);
             for(int i=0;i<1800;i++)
             {
-                Step(a);Step(restored);Assert.True(a.CaptureBytes().AsSpan().SequenceEqual(restored.CaptureBytes()),"exact startup C9 bytes at tick "+a.Tick);var v=EconomyView(a,c);var b=v.Buildings.Single(x=>x.Id==extra.Id);
+                Step(a);Step(restored);AssertSubjectTick();var v=EconomyView(a,c);var b=v.Buildings.Single(x=>x.Id==extra.Id);
                 long nowHeld=ledger.ReservationAmount(hold.Id);if(nowHeld!=previousHold){TestContext.WriteLine("E3_STARTUP_TRANSITION "+Newtonsoft.Json.JsonConvert.SerializeObject(new{Tick=a.Tick,PreviousHeld=previousHold,Held=nowHeld,Budget=ledger.Capture(),NewLine=b.PrivateState}));previousHold=nowHeld;}
                 if(firstOrder==0&&b.PrivateState.Orders.Count>0){firstOrder=b.PrivateState.Orders[0].Id;living=v.Entities.Count(x=>x.Owner==v.Owner&&x.Kind==PlayableEntityKind.Tank);}
                 var progress=ledger.Capture();int terminalCycles=progress.Paid.Count(x=>x.Action.EntityIds.Contains(extra.Id)&&x.Action.Kind==PlayableCommandKind.QueueTank);
@@ -321,6 +434,7 @@ namespace Spacewars.Tests.EditMode
             Journal(a);TestContext.WriteLine("E3_STARTUP_FINAL "+Newtonsoft.Json.JsonConvert.SerializeObject(new{Tick=a.Tick,Budget=ledger.Capture(),World=EconomyView(a,c).Population}));
             Assert.True(produced,"accepted startup survives competition and pays its planned cycles on the new line through ordinary receipts");
             Assert.GreaterOrEqual(ledger.Capture().Paid.Count(x=>x.Action.EntityIds.Contains(extra.Id)&&x.Action.Kind==PlayableCommandKind.QueueTank),(int)AiProfile.Initial.Value("economy.factoryLaunchCycles"));
+            Assert.True(a.CaptureBytes().AsSpan().SequenceEqual(restored.CaptureBytes()),"full world at completed production boundary");
         }
         [TestCase(false)][TestCase(true)] public void ScaleAndUseStartupReleasesOnDestroyedFactoryOrBoundedExpiry(bool expire)
         {
@@ -331,8 +445,44 @@ namespace Spacewars.Tests.EditMode
             if(expire)
             {
                 var data=AiProfile.Initial.CopyData();data.revision++;data.fields.Single(x=>x.path=="economy.reservationExpirySeconds").value=AiProfileMetadata.Field("economy.reservationExpirySeconds").Minimum;var ai=new AiProfile(data);
-                Assert.IsNull(a.ApplyProfile(c.Profile,ai));var restored=PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c,ai);
-                for(int i=0;i<180;i++){Step(a);Step(restored);CollectionAssert.AreEqual(a.CaptureBytes(),restored.CaptureBytes());}
+                Assert.IsNull(a.ApplyProfile(c.Profile,ai));var expirySource=a.CaptureBytes();var restored=PlayableAuthorityTick.RestoreBytes(expirySource,c,ai);
+                Assert.True(expirySource.AsSpan().SequenceEqual(restored.CaptureBytes()),"full world at expiry restore boundary");
+                byte[] LedgerBytes(PlayableAuthorityTick authority)
+                {
+                    using(var stream=new System.IO.MemoryStream())
+                    {
+                        using(var writer=new System.IO.BinaryWriter(stream,System.Text.Encoding.UTF8,true))
+                            AiBudgetStateWire.Write(writer,Budget(EconomyOwner(authority,c)));
+                        return stream.ToArray();
+                    }
+                }
+                object OrderState(PlayableProductionOrderSnapshot x)=>new{x.Id,x.Kind,x.PaidCost,x.PopulationCost,x.Duration,x.Remaining,x.Active,x.Progress};
+                object ResearchState(PlayableResearchOrderSnapshot x)=>new{x.Id,x.Kind,x.CenterId,x.PaidCost,x.Elapsed,x.Duration,x.Active,x.Complete,x.Progress};
+                void AssertSubjectTick()
+                {
+                    string message="startup/research/production at tick "+a.Tick;
+                    Assert.True(LedgerBytes(a).AsSpan().SequenceEqual(LedgerBytes(restored)),message+" exact AI ledger (holds/receipts/terms/deadlines/paid-unpaid)");
+                    var hot=EconomyView(a,c);var cold=EconomyView(restored,c);
+                    Assert.AreEqual((hot.Tick,hot.Credits,hot.SettledIncome,hot.IncomePerSecond,hot.Population.Living,hot.Population.Reserved,hot.Population.Capacity),
+                        (cold.Tick,cold.Credits,cold.SettledIncome,cold.IncomePerSecond,cold.Population.Living,cold.Population.Reserved,cold.Population.Capacity),message);
+                    foreach(int id in new[]{original,extra.Id})
+                    {
+                        var h=hot.Buildings.SingleOrDefault(x=>x.Id==id);var k=cold.Buildings.SingleOrDefault(x=>x.Id==id);
+                        Assert.AreEqual(h!=null,k!=null,message+" building presence "+id);if(h==null)continue;
+                        Assert.AreEqual((h.Id,h.Owner,h.Kind,h.SiteId,h.SlotId,h.ParentId,h.Phase,h.Health,h.ExactHealth,h.Progress,h.BlockedReason),
+                            (k.Id,k.Owner,k.Kind,k.SiteId,k.SlotId,k.ParentId,k.Phase,k.Health,k.ExactHealth,k.Progress,k.BlockedReason),message+" building lifecycle "+id);
+                        Assert.AreEqual((h.PrivateState.QueueCount,h.PrivateState.ProductionProgress,h.PrivateState.Repeat,h.PrivateState.RepeatKind,h.PrivateState.Lifecycle?.Selling),
+                            (k.PrivateState.QueueCount,k.PrivateState.ProductionProgress,k.PrivateState.Repeat,k.PrivateState.RepeatKind,k.PrivateState.Lifecycle?.Selling),message+" producer state "+id);
+                        CollectionAssert.AreEqual(h.PrivateState.Orders.Select(OrderState).ToArray(),k.PrivateState.Orders.Select(OrderState).ToArray(),message+" FIFO production queue "+id);
+                        CollectionAssert.AreEqual(h.PrivateState.Research.Select(ResearchState).ToArray(),k.PrivateState.Research.Select(ResearchState).ToArray(),message+" research queue "+id);
+                    }
+                    CollectionAssert.AreEqual(hot.OwnerResearch.OrderBy(x=>x.Kind).ThenBy(x=>x.Id).Select(ResearchState).ToArray(),cold.OwnerResearch.OrderBy(x=>x.Kind).ThenBy(x=>x.Id).Select(ResearchState).ToArray(),message+" owner research progress");
+                    CollectionAssert.AreEqual(hot.ResearchAvailability.OrderBy(x=>x.Kind).Select(x=>new{x.Kind,x.Cost,x.Available}).ToArray(),cold.ResearchAvailability.OrderBy(x=>x.Kind).Select(x=>new{x.Kind,x.Cost,x.Available}).ToArray(),message+" legal research");
+                    CollectionAssert.AreEqual(hot.Entities.Where(x=>x.Owner==hot.Owner&&x.Kind==PlayableEntityKind.Tank).OrderBy(x=>x.Id).Select(x=>new{x.Id,x.Health}).ToArray(),
+                        cold.Entities.Where(x=>x.Owner==cold.Owner&&x.Kind==PlayableEntityKind.Tank).OrderBy(x=>x.Id).Select(x=>new{x.Id,x.Health}).ToArray(),message+" living units");
+                }
+                for(int i=0;i<180;i++){Step(a);Step(restored);AssertSubjectTick();}
+                Assert.True(a.CaptureBytes().AsSpan().SequenceEqual(restored.CaptureBytes()),"full world after all180 expiry ticks");
                 Assert.AreNotEqual(ConstructionPhase.Ready,EconomyView(a,c).Buildings.Single(x=>x.Id==extra.Id).Phase,"expiry occurs during real construction, without changing build duration");
             }
             else
@@ -515,8 +665,14 @@ namespace Spacewars.Tests.EditMode
             new System.Collections.Generic.Dictionary<PlayableAuthorityTick,UnityHostRouteService>();
         [TearDown] public void DisposeRouteHosts()
         {
-            foreach(var pair in routeHosts){try{pair.Key.Stop();}finally{pair.Value.Dispose();}}
+            var errors = new System.Collections.Generic.List<Exception>();
+            foreach(var pair in routeHosts)
+            {
+                try { pair.Key.Stop(); } catch(Exception error) { errors.Add(error); }
+                try { pair.Value.Dispose(); } catch(Exception error) { errors.Add(error); }
+            }
             routeHosts.Clear();
+            if(errors.Count>0) throw new AggregateException("Route host teardown failures",errors);
         }
         private void Step(PlayableAuthorityTick t)
         {

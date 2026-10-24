@@ -9,12 +9,14 @@ namespace Spacewars.Runtime
     // accepted work; the quote only withholds new discretionary purchases this review.
     public sealed class AiEconomicInvestment
     {
-        internal AiEconomicInvestment(AiEconomyCandidate candidate,int credits,string reason)
-        {Candidate=candidate;Credits=credits;Reason=reason;}
+        internal AiEconomicInvestment(AiEconomyCandidate candidate,int credits,string reason,int additionalProductionProtection)
+        {Candidate=candidate;Credits=credits;Reason=reason;AdditionalProductionProtection=additionalProductionProtection;}
         public AiEconomyCandidate Candidate{get;}
         public int Credits{get;}
         public string Reason{get;}
-        public bool AllowsProduction(long available,int cost,bool acceptedStartup=false)=>acceptedStartup||cost<=Math.Max(0,available-Credits);
+        public int AdditionalProductionProtection{get;}
+        public bool AllowsProduction(long available,int cost,bool acceptedStartup=false,bool maySpendProtectedProductionQuote=false)
+            =>acceptedStartup||cost<=Math.Max(0,available-Credits-(maySpendProtectedProductionQuote?0:AdditionalProductionProtection));
     }
     public static class AiEconomicInvestmentPlanner
     {
@@ -45,9 +47,18 @@ namespace Spacewars.Runtime
         }
         internal static bool HasPendingConstruction(PlayableAiObservation o,PlayableProfile p)=>o.Buildings.Any(b=>b.Owner==o.Owner&&b.Phase!=ConstructionPhase.Ready&&
             (b.Kind==PlayableBuildingKind.Factory||TerritoryRules.Income(p,b.Kind)>0));
-        public static AiEconomicInvestment Plan(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiProductionCapacity capacity,bool homeReady,bool emergency,AiBudgetEntry demand=null)
+        internal static bool HasIncomeSlot(PlayableAiObservation o,AiProfile ai)
         {
-            if(!homeReady||emergency||capacity==null||
+            var sites=o.Sites.Where(s=>s.Owner==o.Owner&&s.Ready&&!s.Contested).ToArray();
+            int free=sites.Sum(s=>s.Site.Slots.Count(slot=>!o.Buildings.Any(b=>b.SiteId==s.Site.Id&&b.SlotId==slot.Id)));
+            // Placement protection is tunable independently of money and demand.
+            int science=o.Buildings.Any(b=>b.Owner==o.Owner&&b.Health>0&&b.Kind==PlayableBuildingKind.ScientificCenter)?0:(int)ai.Value("economy.reservedScienceSlots");
+            return free>science+(int)ai.Value("economy.reservedProductionSlots");
+        }
+        public static AiEconomicInvestment Plan(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiProductionCapacity capacity,bool homeReady,bool emergency,AiBudgetEntry demand=null,bool initialOpeningCommitmentPending=false,int additionalProductionProtection=0,long availableCredits=-1)
+        {
+            if(additionalProductionProtection<0||availableCredits< -1)throw new ArgumentOutOfRangeException();
+            if(!homeReady||emergency||initialOpeningCommitmentPending||capacity==null||
                 capacity.SustainedSpendPerSecond<=0||capacity.BlockedExits>0||capacity.PopulationWaitingLines>0||o.Population==null||o.Population.Capacity-o.Population.Living-o.Population.Reserved<PlayableUnitRules.Population(p,PlayableEntityKind.Tank))return null;
             // Let each already paid investment finish before quoting its successor. Paid
             // unit queues also finish normally; pausing means withholding NEW orders.
@@ -62,7 +73,7 @@ namespace Spacewars.Runtime
             bool income=o.IncomePerSecond<=spend;
             if(!income&&capacity.MeasuredTicks<AiProfile.SecondsToTicks(ai.Value("economy.incomeWindowSeconds"),30))return null;
             var kind=income?PlayableBuildingKind.Refinery:PlayableBuildingKind.Factory;
-            if(income&&TerritoryRules.Income(p,kind)<=0)return null;
+            if(income&&(TerritoryRules.Income(p,kind)<=0||!HasIncomeSlot(o,ai)))return null;
             foreach(var site in o.Sites.Where(s=>s.Owner==o.Owner&&s.Ready&&!s.Contested).OrderBy(s=>s.Site.Id==o.HomeSiteId?0:1).ThenBy(s=>s.Site.Id))
             foreach(var slot in site.Site.Slots.OrderBy(s=>s.Id))
             {
@@ -71,13 +82,16 @@ namespace Spacewars.Runtime
                 string rejection=AiEconomyAdmission.Reject(o,p,action);
                 if(rejection!=null&&rejection!="insufficient credits")continue;
                 int quote=TerritoryRules.Cost(p,kind)+(income?0:checked((int)ai.Value("economy.factoryLaunchCycles")*PlayableUnitRules.Cost(p,PlayableEntityKind.Tank)));
+                long spendable=availableCredits<0?o.Credits:availableCredits;
+                bool canKeepProtectedProductionQuote=additionalProductionProtection==0||spendable>=(long)quote+additionalProductionProtection;
                 // Funding can precede utilization: spare money still loads old lines.
                 // Actual factory construction retains every existing scaling guard.
                 bool witnessed=demand!=null&&IsDemand(demand)&&demand.Amount==0&&demand.CreatedTick<=o.Tick&&demand.ExpiresTick>=o.Tick&&demand.Terms==p.ProfileId+"@"+p.Revision&&
                     demand.Action.PlayerId==o.OwnerId&&demand.Action.Generation==o.Generation&&demand.Action.SiteId==action.SiteId&&demand.Action.SlotId==action.SlotId;
                 bool qualified=income||witnessed||capacity.CanScale||capacity.ScalingReason=="factory startup fund unavailable";
-                var candidate=new AiEconomyCandidate("economy",action,rejection??(qualified?null:capacity.ScalingReason),1);
-                return new AiEconomicInvestment(candidate,qualified?quote:0,income?"fund income for existing productive capacity":qualified?"fund factory from previously qualified sustained demand":"load existing lines to qualify sustained factory demand");
+                string reason=!canKeepProtectedProductionQuote?"useful scout replacement takes priority over discretionary investment":rejection??(qualified?null:capacity.ScalingReason);
+                var candidate=new AiEconomyCandidate("economy",action,reason,1);
+                return new AiEconomicInvestment(candidate,qualified&&canKeepProtectedProductionQuote?quote:0,income?"fund income for existing productive capacity":qualified?"fund factory from previously qualified sustained demand":"load existing lines to qualify sustained factory demand",additionalProductionProtection);
             }
             return null;
         }

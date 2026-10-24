@@ -15,6 +15,7 @@
   "movementGroups": 3,
   "freshTicks": 6,
   "shotGain": 0.28,
+  "explorerImpactGain": 0.045,
   "impactGain": 0.14,
   "explosionGain": 0.3,
   "movementGain": 0.08,

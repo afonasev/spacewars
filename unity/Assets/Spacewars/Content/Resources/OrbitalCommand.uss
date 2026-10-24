@@ -63,11 +63,16 @@
 /* Shared quiet signature, with reserved space on every menu page. */
 .orbital-screen { padding-bottom: 58px; }
 .orbital-copyright { position: absolute; left: 24px; right: 24px; bottom: 16px; color: rgb(227,240,247); background-color: rgba(4,10,15,0.9); padding: 6px 12px; border-radius: 2px; font-size: 13px; white-space: normal; -unity-text-align: middle-center; flex-shrink: 0; margin: 0; }
-.orbital-loading-shade { position: absolute; left: 0; right: 0; top: 0; bottom: 0; background-color: rgba(4,10,15,0.62); }
-.orbital-loading-stack { width: 520px; max-width: 90%; align-items: center; }
-.orbital-loading-stack .orbital-logo { font-size: 44px; margin-bottom: 18px; -unity-text-align: middle-center; }
-.orbital-loading-status { color: rgb(245,250,253); font-size: 18px; -unity-font-style: bold; background-color: rgba(4,10,15,0.82); padding: 7px 14px; border-radius: 2px; margin: 0 0 24px 0; -unity-text-align: middle-center; white-space: normal; }
-.orbital-loading-line { width: 180px; height: 2px; }
+.orbital-loading-shade { position: absolute; left: 0; right: 0; top: 0; bottom: 0; }
+.orbital-loading-stack { position: absolute; top: 17%; left: 0; right: 0; align-items: center; }
+.orbital-loading-wordmark { flex-direction: row; justify-content: center; flex-shrink: 0; }
+.orbital-loading-title { -unity-font-style: bold; color: rgb(236,246,250); margin: 0; padding: 0; white-space: nowrap; }
+.orbital-loading-caption { margin-top: 16px; font-size: 11px; letter-spacing: 5px; color: rgb(165,197,208); -unity-text-align: middle-center; }
+.orbital-loading-activity { position: absolute; bottom: 17%; align-items: center; }
+.orbital-loading-status { color: rgb(195,214,223); font-size: 15px; margin: 0 0 22px 0; padding: 0; -unity-text-align: middle-center; white-space: normal; }
+.orbital-loading-line { width: 100%; height: 2px; }
+.orbital-loading .orbital-copyright { bottom: 4.5%; font-size: 11px; color: rgb(127,155,168); background-color: transparent; }
+
 
 /* The settings scrollbar is isolated from label and control columns. */
 .orbital-root .settings-scroll .unity-scroller { visibility: visible; }
@@ -150,3 +155,16 @@
 
 #lab-profiles > .unity-base-field__label, #lab-revisions > .unity-base-field__label, #lab-search > .unity-base-field__label { width: 76px; min-width: 76px; max-width: 76px; flex-shrink: 0; margin-left: 0; margin-right: 6px; padding-left: 0; padding-right: 0; }
 #lab-profiles > .unity-base-field__input, #lab-revisions > .unity-base-field__input, #lab-search > .unity-base-field__input { margin-left: 0; margin-right: 0; }
+
+/* Selected-building Soft Dock: one surface, quiet circular queue wells. */
+.soft-building-dock {
+    background-color: rgba(13, 23, 29, 0.94);
+    border-width: 1px; border-color: rgba(150, 189, 205, 0.30);
+    border-radius: 32px;
+}
+.soft-building-dock #production-slots, .soft-building-dock #research-slots { align-items: center; min-width: 0; }
+.soft-building-dock .dock-order:hover { background-color: rgba(73, 133, 155, 0.20); border-color: rgba(150, 218, 230, 0.70); }
+.soft-building-dock .dock-order:focus { border-width: 2px; border-color: rgb(110, 224, 240); }
+.soft-building-dock .dock-order:disabled { opacity: 0.65; }
+.soft-building-dock .dock-spare:disabled { opacity: 0.28; }
+.high-contrast .soft-building-dock { background-color: rgb(4, 10, 14); border-color: white; }

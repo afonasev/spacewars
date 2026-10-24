@@ -21,7 +21,7 @@ public sealed class PlayableBattleHudTests
     void Call(string name,params object[] args)=>typeof(PlayableBootstrap).GetMethods(Flags).Single(m=>m.Name==name&&m.GetParameters().Length==args.Length).Invoke(hud,args);
     [SetUp] public void Setup(){host=new GameObject("battle HUD test");hud=host.AddComponent<PlayableBootstrap>();hud.enabled=false;Set("profile",PlayableProfile.Default);Call("CreateHud");}
     [TearDown] public void Cleanup(){Get<PlayableRuntime>("runtime")?.RequestStop();UnityEngine.Object.DestroyImmediate(host);}
-    PlayableSnapshot Snapshot(PlayableEntitySnapshot[] units=null,PlayableBuildingSnapshot[] buildings=null,int credits=1000)=>new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,credits,null,units??Array.Empty<PlayableEntitySnapshot>(),buildings??Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(4,3,100));
+    PlayableSnapshot Snapshot(PlayableEntitySnapshot[] units=null,PlayableBuildingSnapshot[] buildings=null,int credits=1000)=>new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,credits,null,units??Array.Empty<PlayableEntitySnapshot>(),buildings??Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(4,3,100),activeProfile:PlayableProfile.Default);
     [Test] public void RoutineStatusesStayQuietButErrorsAndDisconnectStayVisible()
     {
         foreach(var status in new[]{PlayableCommandStatus.Accepted,PlayableCommandStatus.Applied,PlayableCommandStatus.Cancelled})
@@ -59,10 +59,10 @@ public sealed class PlayableBattleHudTests
         Call("CloseMap");CollectionAssert.AreEqual(layerOrder,Get<VisualElement>("root").Children().ToArray(),"Closing restores the ordinary HUD/modal layer order.");Assert.AreEqual(DisplayStyle.None,Get<VisualElement>("armyComposition").style.display.value);Assert.AreEqual(DisplayStyle.None,counts[0].style.display.value);
         Get<Button>("hudFocusButton").Focus();Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>("armyComposition").style.display.value);Get<VisualElement>("root").Focus();Assert.AreEqual(DisplayStyle.None,Get<VisualElement>("armyComposition").style.display.value);
     }
-    [Test] public void RingKeepsRepeatWhenPurchaseUnavailableAndBlocksStaleAction()
+    [TestCase(false)][TestCase(true)] public void RingKeepsRepeatWhenPurchaseUnavailableAndBlocksStaleAction(bool hangar)
     {
         var lifecycle=new PlayableBuildingLifecycleSnapshot(false,0,false,false,0,0,null,null,1,300,false);
-        var b=new PlayableBuildingSnapshot(7,PlayableOwner.Player,PlayableBuildingKind.Factory,default,250,1,0,0,default,lifecycle:lifecycle);
+        var b=new PlayableBuildingSnapshot(7,PlayableOwner.Player,hangar?PlayableBuildingKind.Hangar:PlayableBuildingKind.Factory,default,250,1,0,0,default,lifecycle:lifecycle);
         Set("view",Snapshot(buildings:new[]{b},credits:0));Get<HashSet<int>>("selection").Add(7);Call("UpdateHud");
         var actions=Get<OfflinePadAction[]>("battleActions");var production=actions.First(a=>a.Sector.Hold=="repeat");Assert.IsNull(production.Command);Assert.NotNull(production.HoldCommand);
         var settings=JsonUtility.FromJson<NativeLocalInputProfile>(Resources.Load<TextAsset>("NativeLocalInputProfile").text);var gestures=new OfflinePadGestures();gestures.SetMode("buildingWheel");
@@ -116,6 +116,11 @@ public sealed class PlayableBattleHudTests
             var building=new PlayableBuildingSnapshot(7,PlayableOwner.Player,kind,default,250,1,0,0,default);
             Set("view",Snapshot(buildings:new[]{building}));Get<HashSet<int>>("selection").Add(7);Call("UpdateHud");
             Assert.AreEqual(glyph,Get<OrbitalGlyph>("contextIcon").Kind);
+            var portrait=Get<VisualElement>("root").Q<Image>("building-dock-portrait");
+            Assert.NotNull(portrait.image,kind+" must have its actual model portrait");
+            Assert.AreSame(DockArtwork.TextureFor(glyph),portrait.image);
+            Assert.That(Get<Label>("contextHealthText").text,Does.StartWith("250 / "));
+            Assert.False(string.IsNullOrEmpty(Get<Label>("selectionLabel").text));
             var ring=Get<OrbitalBattleRing>("battleRing");
             ring.Set(Array.Empty<OfflinePadAction>(),"localized title",contextGlyph:glyph);
             Assert.AreEqual(glyph,ring.Children().OfType<OrbitalGlyph>().Single().Kind);
@@ -130,6 +135,66 @@ public sealed class PlayableBattleHudTests
         OrbitalPrecision.QueueCard(card,"science",-1,false);Assert.AreEqual(DisplayStyle.None,icon.style.display.value);
         icon.Set("sale",OrbitalTheme.Cyan);Assert.AreEqual(OrbitalTheme.Cyan,icon.Tint);Assert.AreEqual(ScaleMode.ScaleToFit,icon.Q<Image>().scaleMode);Assert.AreEqual("glyph-progress",icon.Children().Last().name);
         icon.Set("repair",OrbitalTheme.Muted);Assert.Less(icon.Q<Image>().tintColor.r,1);Assert.AreEqual(PickingMode.Ignore,icon.pickingMode);Assert.AreEqual(PickingMode.Ignore,icon.Q<Image>().pickingMode);
+    }
+    [UnityTest] public IEnumerator RadialHoldFillRendersIndependentlyOfProductionAndClearsOnCancel()
+    {
+        var root=Get<VisualElement>("root");root.Clear();root.style.width=1280;root.style.height=760;root.style.backgroundColor=OrbitalTheme.Background;
+        var panel=host.GetComponent<UIDocument>().panelSettings;panel.scale=1;
+        var texture=new RenderTexture(1280,760,24);texture.Create();panel.targetTexture=texture;
+        OfflinePadAction[] Actions(bool repeat=false)=>new[]{
+            new OfflinePadAction("7:explorer","Исслед.",true){Price=100},
+            new OfflinePadAction("7:tank","Танк",true,hold:"repeat"){Price=150,Progress=.4,Repeat=repeat,Command=new OfflinePadActionCommand()},
+            new OfflinePadAction("7:shkval","Шквал",true){Price=200},
+            new OfflinePadAction("7:repair","Ремонт",true),new OfflinePadAction("7:sale","Продать",true,hold:"sell"){Price=300},
+            new OfflinePadAction("rally","Сбор",true)};
+        var titles=new[]{"Обычный выбор","Удержание 25%","Удержание 75%","Автозаказ включён","Продажа 60%","Добавить в группу 60%","Отмена удержания","Выключение повтора 60%"};
+        for(int i=0;i<8;i++)
+        {
+            int left=20+i%4*315,top=50+i/4*365;
+            var label=new Label(titles[i]);label.style.position=Position.Absolute;label.style.left=left;label.style.top=top;label.style.color=OrbitalTheme.Ink;label.style.fontSize=16;root.Add(label);
+            var ring=new OrbitalBattleRing();ring.Resize(280);ring.style.left=left;ring.style.top=top+28;ring.style.display=DisplayStyle.Flex;root.Add(ring);
+            var actions=i==5?Enumerable.Range(1,6).Select(n=>new OfflinePadAction(n.ToString(),n.ToString(),true)).ToArray():Actions(i==3||i==7);
+            string selected=i==4?"7:sale":i==5?"2":"7:tank";double hold=i==1?.25:i==2?.75:i==4||i==5||i==7?.6:0;
+            if(i==6)ring.Set(actions,"Фабрика",selected,.8);
+            ring.Set(actions,i==5?"Группы":"Фабрика",selected,hold,i==5?"army":"factory");
+        }
+        try
+        {
+            yield return null;yield return null;yield return null;
+            var previous=RenderTexture.active;RenderTexture.active=texture;
+            var pixels=new Texture2D(1280,760,TextureFormat.RGBA32,false);
+            try
+            {
+                pixels.ReadPixels(new Rect(0,0,1280,760),0,0);pixels.Apply();
+                Color Sample(int index,float radius)
+                {
+                    // Sample off the text/icon at the lower edge of the tank sector.
+                    float angle=-.15f;
+                    int x=Mathf.RoundToInt(20+index%4*315+140+Mathf.Cos(angle)*radius);
+                    int y=Mathf.RoundToInt(50+index/4*365+28+140+Mathf.Sin(angle)*radius);
+                    return pixels.GetPixel(x,759-y);
+                }
+                Assert.Greater(Sample(2,100).r,Sample(1,100).r+.08f,"Hold fill must grow outward even while production already has progress.");
+                Assert.Less(Mathf.Abs(Sample(0,100).r-Sample(6,100).r),.02f,"Cancellation clears the old fill on the same petal.");
+                Assert.Greater(Sample(3,100).r,Sample(0,100).r+.08f,"Auto-order retains amber without a hold.");
+                var folder=System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath,"../../.local/radial-hold"));System.IO.Directory.CreateDirectory(folder);
+                System.IO.File.WriteAllBytes(System.IO.Path.Combine(folder,"native-hold-states.png"),pixels.EncodeToPNG());
+            }
+            finally{RenderTexture.active=previous;UnityEngine.Object.DestroyImmediate(pixels);}
+            root.Clear();
+            var localRing=new OfflinePadRing();root.Add(localRing);
+            localRing.Set(Actions(true),"7:tank","buildingWheel",0,1,false,.6,200);localRing.style.left=0;
+            yield return null;yield return null;yield return null;
+            previous=RenderTexture.active;RenderTexture.active=texture;pixels=new Texture2D(1280,760,TextureFormat.RGBA32,false);
+            try
+            {
+                pixels.ReadPixels(new Rect(0,0,1280,760),0,0);pixels.Apply();
+                var folder=System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath,"../../.local/radial-hold"));
+                System.IO.File.WriteAllBytes(System.IO.Path.Combine(folder,"native-local-ring.png"),pixels.EncodeToPNG());
+            }
+            finally{RenderTexture.active=previous;UnityEngine.Object.DestroyImmediate(pixels);}
+        }
+        finally{panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);}
     }
     [UnityTest] public IEnumerator ApprovedIconsRenderAtHudSizes()
     {
@@ -227,6 +292,62 @@ public sealed class PlayableBattleHudTests
             foreach(var light in UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None).Where(x=>!priorLights.Contains(x.GetInstanceID())))UnityEngine.Object.DestroyImmediate(light.gameObject);
         }
     }
+    [UnityTest] public IEnumerator SoftDockKeepsSixFullOrdersInsideNarrowLocalViewport()
+    {
+        var root=Get<VisualElement>("root");var panel=host.GetComponent<UIDocument>().panelSettings;
+        root.style.width=400;root.style.height=400;root.style.backgroundColor=new Color(.055f,.08f,.10f);
+        Set("localHumanCount",4);Set("localViewportIndex",0);Set("notice","");
+        // Local coordinator supplies the shared map outside this seat's HUD.
+        root.Q("tactical-minimap-frame").style.display=DisplayStyle.None;
+        var orders=Enumerable.Range(0,6).Select(i=>new PlayableProductionOrderSnapshot(i+1,(PlayableEntityKind)(i%3),150,3,20,i==0?12:20,i==0)).ToArray();
+        var building=new PlayableBuildingSnapshot(7,PlayableOwner.Player,PlayableBuildingKind.Factory,default,125,1,6,.4,default,orders:orders);
+        Set("view",Snapshot(buildings:new[]{building}));Get<HashSet<int>>("selection").Add(7);Set("battleDismissed",true);
+        var texture=new RenderTexture(400,400,24);texture.Create();panel.targetTexture=texture;
+        try
+        {
+            Call("ApplyResponsiveHud",400f);Call("UpdateHud");yield return null;yield return null;Call("UpdateHud");yield return null;yield return null;
+            var context=Get<VisualElement>("armyRegion");Assert.GreaterOrEqual(context.worldBound.xMin,0);Assert.LessOrEqual(context.worldBound.xMax,400);Assert.LessOrEqual(context.worldBound.yMax,400);
+            Assert.AreEqual("125 / 250",Get<Label>("contextHealthText").text);
+            Assert.LessOrEqual(Get<OrbitalBattleRing>("battleRing").worldBound.yMax,context.worldBound.yMin+1,"Wrapped queue and radial actions must remain separate in a short local viewport.");
+            foreach(var button in root.Q("production-slots").Children().OfType<Button>())
+            {Assert.GreaterOrEqual(button.worldBound.xMin,context.worldBound.xMin);Assert.LessOrEqual(button.worldBound.xMax,context.worldBound.xMax);Assert.LessOrEqual(button.worldBound.yMax,context.worldBound.yMax);Assert.True(button.enabledSelf);
+                if(button.name!="production-slot-0"){Assert.That(button.worldBound.width,Is.EqualTo(button.worldBound.height).Within(.1f));Assert.AreEqual(DisplayStyle.None,button.Q<Label>("order-status").style.display.value);Assert.GreaterOrEqual(button.Q<Image>("order-portrait").worldBound.width,64);}}
+            Assert.Greater(root.Q<Button>("production-slot-5").worldBound.yMin,root.Q<Button>("production-slot-0").worldBound.yMin,"Full narrow queues wrap readable circles instead of squeezing them.");
+            var previous=RenderTexture.active;RenderTexture.active=texture;var pixels=new Texture2D(400,400,TextureFormat.RGBA32,false);pixels.ReadPixels(new Rect(0,0,400,400),0,0);pixels.Apply();RenderTexture.active=previous;
+            var folder=System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath,"../../.local/precision-hud"));System.IO.Directory.CreateDirectory(folder);System.IO.File.WriteAllBytes(System.IO.Path.Combine(folder,"full-queue-local400.png"),pixels.EncodeToPNG());UnityEngine.Object.DestroyImmediate(pixels);
+        }
+        finally{panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);}
+    }
+
+    [UnityTest] public IEnumerator HangarUsesFactoryQueueCardsAndPreservesLaunchProgress()
+    {
+        var root=Get<VisualElement>("root");var panel=host.GetComponent<UIDocument>().panelSettings;
+        root.style.width=1200;root.style.height=700;root.style.backgroundColor=OrbitalTheme.Background;
+        var texture=new RenderTexture(1200,700,24);texture.Create();panel.targetTexture=texture;
+        Set("notice","");Set("battleDismissed",true);Get<PlayableMapSurface>("compactMap").SetPublic(Array.Empty<PlayableMapMark>(),64);
+        var folder=System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath,"../../.local/hawk-queue"));System.IO.Directory.CreateDirectory(folder);
+        try
+        {
+            foreach(int phase in new[]{-1,0,2})
+            {
+                bool hangar=phase>=0;var kind=hangar?PlayableEntityKind.Hawk:PlayableEntityKind.Tank;
+                var orders=Enumerable.Range(1,3).Select(i=>new PlayableProductionOrderSnapshot(i,kind,225,3,20,i==1?12:20,i==1)).ToArray();
+                var b=new PlayableBuildingSnapshot(7,PlayableOwner.Player,hangar?PlayableBuildingKind.Hangar:PlayableBuildingKind.Factory,default,250,1,3,.4,default,orders:orders,repeat:true,repeatKind:kind,launchPhase:Math.Max(0,phase),launchTime:.3);
+                Set("view",Snapshot(buildings:new[]{b}));Get<HashSet<int>>("selection").Clear();Get<HashSet<int>>("selection").Add(7);Call("UpdateHud");
+                for(int frame=0;frame<8;frame++)yield return null;
+                Assert.AreEqual(phase==2?DisplayStyle.Flex:DisplayStyle.None,Get<ProgressBar>("progress").style.display.value);
+                Assert.AreEqual(6,root.Q("production-slots").childCount);
+                Assert.True(root.Q<Button>("production-slot-0").enabledSelf);Assert.True(root.Q<Button>("production-slot-1").enabledSelf);
+                Assert.AreEqual(hangar?"hawk":"tank",root.Q<Button>("production-slot-0").Q<OrbitalGlyph>().Kind);
+                Assert.NotNull(root.Q<Button>("production-slot-0").Q<Image>("order-portrait").image);
+                Assert.AreEqual(DisplayStyle.Flex,root.Q<Button>("production-slot-1").Q<Image>("order-portrait").style.display.value);
+                if(phase==2)Assert.AreEqual("Подъём платформы",Get<ProgressBar>("progress").title);
+                var previous=RenderTexture.active;RenderTexture.active=texture;var pixels=new Texture2D(1200,700,TextureFormat.RGBA32,false);pixels.ReadPixels(new Rect(0,0,1200,700),0,0);pixels.Apply();RenderTexture.active=previous;
+                System.IO.File.WriteAllBytes(System.IO.Path.Combine(folder,phase<0?"factory-queue.png":phase==0?"hangar-queue.png":"hangar-launch.png"),pixels.EncodeToPNG());UnityEngine.Object.DestroyImmediate(pixels);
+            }
+        }
+        finally{panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);}
+    }
     [UnityTest] public IEnumerator PrecisionPanelsRenderPopulatedQueuesAtBothViewports()
     {
         var root=Get<VisualElement>("root");var panel=host.GetComponent<UIDocument>().panelSettings;
@@ -262,7 +383,29 @@ public sealed class PlayableBattleHudTests
                     Assert.LessOrEqual(ring.worldBound.width,science?212:282);Assert.LessOrEqual(ring.worldBound.yMax,context.worldBound.yMin+1);
                     Assert.GreaterOrEqual(context.worldBound.xMin,root.Q("tactical-minimap-frame").worldBound.xMax);
                     Assert.LessOrEqual(context.worldBound.xMax,size.x);Assert.LessOrEqual(context.worldBound.yMax,size.y);
-                    Assert.That(root.Q<Button>(science?"research-slot-0":"production-slot-0").worldBound.height,Is.InRange(42f,46f));
+                    Assert.That(root.Q<Button>(science?"research-slot-0":"production-slot-0").worldBound.height,Is.InRange(74f,78f));
+                    Assert.GreaterOrEqual(root.Q<Image>("building-dock-portrait").worldBound.width,80);
+                    Assert.True(context.worldBound.Contains(Get<Label>("contextHealthText").worldBound.center));
+                    var slots=root.Q(science?"research-slots":"production-slots");
+                    Assert.LessOrEqual(slots.worldBound.xMax,context.worldBound.xMax);
+                    Assert.GreaterOrEqual(slots.worldBound.xMin,context.worldBound.xMin);
+                    var queueHeading=root.Q<Label>("building-dock-queue-count");
+                    if(science)Assert.That(queueHeading.text,Does.Contain("3"));
+                    else{Assert.AreEqual("",queueHeading.text);Assert.AreEqual(DisplayStyle.None,queueHeading.style.display.value,"Production has no caption or reserved heading row.");}
+                    var activeCard=root.Q<Button>(science?"research-slot-0":"production-slot-0");
+                    var capsule=activeCard.worldBound;float radius=capsule.height/2;var railBounds=activeCard.Q("order-progress-rail").worldBound;
+                    foreach(var corner in new[]{railBounds.min,railBounds.max,new Vector2(railBounds.xMin,railBounds.yMax),new Vector2(railBounds.xMax,railBounds.yMin)})
+                    {
+                        var spine=new Vector2(Mathf.Clamp(corner.x,capsule.xMin+radius,capsule.xMax-radius),capsule.center.y);
+                        Assert.LessOrEqual(Vector2.Distance(corner,spine),radius-1,"The entire rail must remain inside the capsule, including its rounded corners.");
+                    }
+                    if(!science)
+                    {
+                        var name=activeCard.Q<Label>("order-name");var repeat=activeCard.Q<Label>("repeat-badge");
+                        Assert.AreSame(name.parent,repeat.parent);Assert.AreEqual(DisplayStyle.Flex,repeat.style.display.value);
+                        Assert.That(repeat.worldBound.xMin-name.worldBound.xMax,Is.EqualTo(3).Within(1));
+                        Assert.That(repeat.worldBound.center.y,Is.EqualTo(name.worldBound.center.y).Within(1));
+                    }
                     var old=RenderTexture.active;RenderTexture.active=texture;var pixels=new Texture2D(size.x,size.y,TextureFormat.RGBA32,false);pixels.ReadPixels(new Rect(0,0,size.x,size.y),0,0);pixels.Apply();RenderTexture.active=old;
                     System.IO.File.WriteAllBytes(System.IO.Path.Combine(folder,(science?"research-":"production-")+size.x+".png"),pixels.EncodeToPNG());UnityEngine.Object.DestroyImmediate(pixels);
                 }

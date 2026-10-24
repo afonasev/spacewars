@@ -115,7 +115,7 @@ namespace Spacewars.Simulation
     // pop, arc relaxation and reconstructed leg. Zero heuristic is admissible A*.
     public sealed partial class NavIncrementalSingletonRoute : NavOwnedStorage
     {
-        private enum Phase { Direct, Origins, Endpoints, Search, Trace, Reconstruct, Done }
+        private enum Phase { Direct, Origins, Endpoints, Search, Trace, Reconstruct, Done, QueryCandidates, QueryValidate }
         private readonly LayeredNavigationGraph graph; private readonly NavRouteSubscription subscription;
         private NavOwnedStorage ownedSubscription;
         private NavCowDictionary<int,double> starts,ends,distance;
@@ -126,36 +126,49 @@ namespace Spacewars.Simulation
         private Phase phase; private int cursor, arcCursor, current = -1, chosen = -1, reconstructCursor, reconstructLeg, traceNode;
         private double best = double.PositiveInfinity, routeCost; private bool startSeeded;
         private readonly int maxStates;
-        public NavIncrementalSingletonRoute(LayeredNavigationGraph graph,NavRouteSubscription subscription,int maxStates=int.MaxValue):this(graph,subscription,maxStates,null,true){}
-        private NavIncrementalSingletonRoute(LayeredNavigationGraph graph,NavRouteSubscription subscription,int maxStates,Func<long,bool> reserve,bool initialize,bool alreadyReserved=false,bool birthOnly=false):base(2048)
+        private readonly NavTerminalRegion queryRegion;private NavOwnedStorage queryRegionOwner;
+        private int queryCandidate,queryChosenCandidate=-1;
+        public NavIncrementalSingletonRoute(LayeredNavigationGraph graph,NavRouteSubscription subscription,int maxStates=int.MaxValue,NavTerminalRegion queryRegion=null):this(graph,subscription,maxStates,null,true,queryRegion:queryRegion){}
+        private NavIncrementalSingletonRoute(LayeredNavigationGraph graph,NavRouteSubscription subscription,int maxStates,Func<long,bool> reserve,bool initialize,bool alreadyReserved=false,bool birthOnly=false,NavTerminalRegion queryRegion=null):base(2048)
         {
-            if(maxStates<1)throw new ArgumentOutOfRangeException(nameof(maxStates));this.maxStates=maxStates;this.graph=graph??throw new ArgumentNullException(nameof(graph));this.subscription=subscription??throw new ArgumentNullException(nameof(subscription));reservation=reserve;
-            if(reserve?.Target is INavStorageReservation owner){NavStorageAdmission.RequireOwned(owner,graph);NavMetadataOwnership.Require(subscription,owner);}
+            if(maxStates<1)throw new ArgumentOutOfRangeException(nameof(maxStates));this.maxStates=maxStates;this.queryRegion=queryRegion;this.graph=graph??throw new ArgumentNullException(nameof(graph));this.subscription=subscription??throw new ArgumentNullException(nameof(subscription));reservation=reserve;
+            if(reserve?.Target is INavStorageReservation owner){NavStorageAdmission.RequireOwned(owner,graph);NavMetadataOwnership.Require(subscription,owner);if(queryRegion!=null)NavStorageAdmission.RequireOwned(owner,queryRegion.StorageRoot);}
+            if(queryRegion!=null&&(!(graph.PhysicalProvider is PartitionNavigationProvider)||checked((long)graph.Nodes.Count*queryRegion.Candidates.Count)>maxStates))throw new ArgumentException("Query requires certified full-label capacity.");
             using(var allocation=new NavStorageAllocation(reserve)){if(!alreadyReserved)allocation.Reserve(2048);allocation.Register(this);if(!birthOnly)Retain();}graph.Retain();if(subscription.MetadataOwner!=null){RequireEdge(subscription.MetadataOwner);subscription.MetadataOwner.Retain();ownedSubscription=subscription.MetadataOwner;}
+            if(queryRegion?.StorageRoot!=null){RequireEdge(queryRegion.StorageRoot);queryRegion.StorageRoot.Retain();queryRegionOwner=queryRegion.StorageRoot;}
             if(!initialize)return;
             try{starts=NavCowDictionary<int,double>.Create(reserve:reserve);ends=NavCowDictionary<int,double>.Create(reserve:reserve);distance=NavCowDictionary<int,double>.Create(reserve:reserve);previous=NavCowDictionary<int,NavGraphArc>.Create(reserve:reserve);frontier=NavCowOrderedSet<NavQueueEntry>.Create(reserve:reserve);legs=NavPagedList<NavTypedLeg>.Create(reserve);chain=NavPagedList<NavGraphArc>.Create(reserve);
                 Status=graph.IsValid(subscription.Origin)&&graph.IsValid(subscription.AssignedEndpoint)?NavSolveStatus.Pending:NavSolveStatus.InvalidEndpoint;phase=Status==NavSolveStatus.Pending?Phase.Direct:Phase.Done;
             }catch{ReleaseStorage();throw;}
         }
-        internal static NavIncrementalSingletonRoute CreateOwned(LayeredNavigationGraph graph,NavRouteSubscription subscription,int maxStates,INavStorageReservation reservation)
-        {NavStorageAdmission.RequireOwned(reservation,graph);NavMetadataOwnership.Require(subscription,reservation);return new NavIncrementalSingletonRoute(graph,subscription,maxStates,NavStorageLayout.Before(reservation.TryReserve,2048),true,true);}
-        internal static NavIncrementalSingletonRoute CopySubscriptionAndCreateOwned(LayeredNavigationGraph graph,NavRouteSubscription subscription,int maxStates,INavStorageReservation reservation)
-        {NavStorageAdmission.RequireOwned(reservation,graph);if(subscription==null)throw new ArgumentNullException(nameof(subscription));if(subscription.MetadataOwner!=null)return CreateOwned(graph,subscription,maxStates,reservation);var copy=NavRouteSubscription.CopyOwned(subscription,reservation);try{return CreateOwned(graph,copy,maxStates,reservation);}finally{copy.MetadataOwner.Release();}}
+        internal static NavIncrementalSingletonRoute CreateOwned(LayeredNavigationGraph graph,NavRouteSubscription subscription,int maxStates,INavStorageReservation reservation,NavTerminalRegion region=null)
+        {NavStorageAdmission.RequireOwned(reservation,graph);NavMetadataOwnership.Require(subscription,reservation);return new NavIncrementalSingletonRoute(graph,subscription,maxStates,NavStorageLayout.Before(reservation.TryReserve,2048),true,true,queryRegion:region);}
+        internal static NavIncrementalSingletonRoute CopySubscriptionAndCreateOwned(LayeredNavigationGraph graph,NavRouteSubscription subscription,int maxStates,INavStorageReservation reservation,NavTerminalRegion region=null)
+        {
+            NavStorageAdmission.RequireOwned(reservation,graph);if(subscription==null)throw new ArgumentNullException(nameof(subscription));
+            NavRouteSubscription copy=null;NavTerminalRegion regionCopy=null;
+            try{
+                if(region!=null&&region.StorageRoot==null)region=regionCopy=NavTerminalRegion.CopyOwned(region,reservation);
+                if(subscription.MetadataOwner==null)subscription=copy=NavRouteSubscription.CopyOwned(subscription,reservation);
+                return CreateOwned(graph,subscription,maxStates,reservation,region);
+            }finally{copy?.MetadataOwner.Release();regionCopy?.StorageRoot.ReleaseOwner();}
+        }
         internal NavIncrementalSingletonRoute ForkOwned(INavStorageReservation reservation)
         {NavStorageAdmission.RequireOwned(reservation,this);NavStorageAdmission.RequireOwned(reservation,graph);return ForkPrepared(reservation.TryReserve);}
         public NavSolveStatus Status {get;private set;}public NavTypedRoute Route {get;private set;}
         internal NavIncrementalSingletonRoute ForkPrepared(Func<long,bool> reserve)
         {
             if(!frozen)throw new InvalidOperationException("Seal committed singleton before preparing a fork.");if(reserve==null)throw new ArgumentException("Missing singleton admission.");
-            var fork=new NavIncrementalSingletonRoute(graph,subscription,maxStates,NavStorageLayout.Before(reserve,2048),false,true){phase=phase,cursor=cursor,arcCursor=arcCursor,current=current,chosen=chosen,reconstructCursor=reconstructCursor,reconstructLeg=reconstructLeg,traceNode=traceNode,best=best,routeCost=routeCost,startSeeded=startSeeded,Status=Status};
+            var fork=new NavIncrementalSingletonRoute(graph,subscription,maxStates,NavStorageLayout.Before(reserve,2048),false,true,queryRegion:queryRegion){queryCandidate=queryCandidate,queryChosenCandidate=queryChosenCandidate,phase=phase,cursor=cursor,arcCursor=arcCursor,current=current,chosen=chosen,reconstructCursor=reconstructCursor,reconstructLeg=reconstructLeg,traceNode=traceNode,best=best,routeCost=routeCost,startSeeded=startSeeded,Status=Status};
             try{fork.starts=starts.ForkPrepared(reserve);fork.ends=ends.ForkPrepared(reserve);fork.distance=distance.ForkPrepared(reserve);fork.previous=previous.ForkPrepared(reserve);fork.frontier=frontier.ForkPrepared(reserve);fork.legs=legs.Fork(reserve);fork.chain=chain.Fork(reserve);if(Route!=null){Route.Retain();fork.Route=Route;fork.borrowedRoute=true;}return fork;}catch{fork.ReleaseStorage();throw;}
         }
         internal void ReleaseStorage(){if(released)return;released=true;Release();}
         internal override void ReleaseOwner()=>ReleaseStorage();
-        protected override void ReleaseEdges(){starts?.Release();ends?.Release();distance?.Release();previous?.Release();frontier?.Release();legs?.Release();chain?.Release();Route?.Release();ownedSubscription?.Release();graph.Release();}
+        protected override void ReleaseEdges(){starts?.Release();ends?.Release();distance?.Release();previous?.Release();frontier?.Release();legs?.Release();chain?.Release();Route?.Release();ownedSubscription?.Release();queryRegionOwner?.Release();graph.Release();}
         internal void SealPrepared(){frozen=true;starts.Seal();ends.Seal();distance.Seal();previous.Seal();frontier.Seal();legs.Seal();chain.Seal();reservation=null;}
         public int FrontierCount => frontier.Count;
         public int LegCount => legs.Count;
+        internal string DiagnosticProgress=>"phase="+phase+" cursor="+cursor+" arcCursor="+arcCursor+" current="+current+" queryCandidate="+queryCandidate+" chosen="+chosen;
         public int StateCount => starts.Count + ends.Count + distance.Count + previous.Count + chain.Count;
         internal long EstimatedRetainedBytes=>StorageBytes+starts.CommittedStorageBytes(4)+ends.CommittedStorageBytes(4)+distance.CommittedStorageBytes(4)+previous.CommittedStorageBytes(4)+frontier.CommittedStorageBytes+legs.CommittedStorageBytes(8)+NavStorageLayout.Charge(128)*legs.Count+chain.CommittedStorageBytes(128)+(Route==null?0:512L);
         internal static long InitialStorageBytes=>NavStorageLayout.Charge(2048)+12*NavStorageLayout.Charge(128)+NavStorageLayout.Charge(64)+NavStorageLayout.Charge(128)+2*NavPagedList<NavTypedLeg>.InitialStorageBytes;
@@ -166,6 +179,7 @@ namespace Spacewars.Simulation
                     case Phase.Direct:return 512;
                     case Phase.Origins:return starts.MutationGrowthBytes(4);
                     case Phase.Endpoints:return ends.MutationGrowthBytes(4);
+                    case Phase.QueryCandidates:return 0;
                     case Phase.Search:return distance.MutationGrowthBytes(4)+previous.MutationGrowthBytes(4)+2L*frontier.MutationGrowthBytes;
                     case Phase.Trace:return chain.AppendGrowthBytes(128);
                     case Phase.Reconstruct:return legs.AppendGrowthBytes(8)+640L;
@@ -183,6 +197,7 @@ namespace Spacewars.Simulation
             internal int Phase, Cursor, ArcCursor, Current, Chosen, ReconstructCursor, ReconstructLeg, TraceNode;
             internal double Best, RouteCost;
             internal bool StartSeeded;
+            internal string QueryRegionKey;internal int QueryCandidate,QueryChosenCandidate;
             internal KeyValuePair<int, double>[] Starts, Ends, Distance;
             internal KeyValuePair<int, NavGraphArc>[] Previous;
             internal NavQueueEntry[] Frontier;internal NavTreeShape<NavQueueEntry> FrontierShape;
@@ -190,7 +205,7 @@ namespace Spacewars.Simulation
             internal NavGraphArc[] Chain;
         }
         public Checkpoint Save() => new Checkpoint {
-            Version = 2, GraphKey = graph.Binding.StableKey, SubscriptionKey = subscription.StableKey,
+            Version = queryRegion==null?2:3,QueryRegionKey=queryRegion?.StableKey,QueryCandidate=queryCandidate,QueryChosenCandidate=queryChosenCandidate, GraphKey = graph.Binding.StableKey, SubscriptionKey = subscription.StableKey,
             Status = Status, Phase = (int)phase, Cursor = cursor, ArcCursor = arcCursor,
             Current = current, Chosen = chosen, ReconstructCursor = reconstructCursor, ReconstructLeg = reconstructLeg, TraceNode = traceNode,
             Best = best, RouteCost = routeCost, StartSeeded = startSeeded,
@@ -198,23 +213,25 @@ namespace Spacewars.Simulation
             Previous = previous.Select(pair=>new KeyValuePair<int,NavGraphArc>(pair.Key,pair.Value.Detached())).ToArray(), Frontier = frontier.ToArray(),FrontierShape=frontier.SaveShape(), Legs = legs.Select(leg=>leg.Detached()).ToArray(), Chain = chain.Select(arc=>arc.Detached()).ToArray()
         };
         public static NavIncrementalSingletonRoute Restore(LayeredNavigationGraph graph, NavRouteSubscription subscription,
-            Checkpoint state, int maxStates = int.MaxValue)
+            Checkpoint state, int maxStates = int.MaxValue,NavTerminalRegion queryRegion=null)
         {
-            var work = new NavIncrementalSingletonRoute(graph, subscription, maxStates);
-            if (state == null || (state.Version != 1&&state.Version!=2) || state.GraphKey != graph.Binding.StableKey ||
+            var work = new NavIncrementalSingletonRoute(graph, subscription, maxStates,queryRegion);
+            if (state == null || (state.Version != 1&&state.Version!=2&&state.Version!=3) || (state.Version==3)!=(queryRegion!=null) || state.QueryRegionKey!=queryRegion?.StableKey || state.GraphKey != graph.Binding.StableKey ||
                 state.SubscriptionKey != subscription.StableKey || state.Distance.Length > maxStates ||
-                state.Frontier.Length > maxStates || state.Phase < 0 || state.Phase > (int)Phase.Done)
+                state.Frontier.Length > maxStates || state.Phase < 0 || state.Phase > (int)(queryRegion==null?Phase.Done:Phase.QueryValidate))
                 throw new ArgumentException("Invalid or stale singleton checkpoint.");
+            work.queryCandidate=state.QueryCandidate;work.queryChosenCandidate=state.QueryChosenCandidate;
             work.Status = state.Status; work.phase = (Phase)state.Phase; work.cursor = state.Cursor;
             work.arcCursor = state.ArcCursor; work.current = state.Current; work.chosen = state.Chosen;
             work.reconstructCursor = state.ReconstructCursor; work.reconstructLeg = state.ReconstructLeg; work.traceNode = state.TraceNode;
             work.best = state.Best; work.routeCost = state.RouteCost; work.startSeeded = state.StartSeeded;
+            if(queryRegion!=null)try{work.ValidateQueryCursors();}catch{work.ReleaseOwner();throw;}
             foreach (var pair in state.Starts) work.starts.Add(pair.Key, pair.Value);
             foreach (var pair in state.Ends) work.ends.Add(pair.Key, pair.Value);
             foreach (var pair in state.Distance) work.distance.Add(pair.Key, pair.Value);
             foreach (var pair in state.Previous) work.previous.Add(pair.Key, pair.Value);
-            if(state.Version==2){work.frontier.RestoreShape(state.FrontierShape,maxStates);if(!work.frontier.SequenceEqual(state.Frontier))throw new ArgumentException("Singleton tree/frontier mismatch.");}else foreach (var entry in state.Frontier) work.frontier.Add(entry);
-            foreach(var entry in work.frontier)if(entry.Node<0||entry.Node>=graph.Nodes.Count||entry.Candidate!=0||double.IsNaN(entry.Cost)||double.IsInfinity(entry.Cost)||entry.Cost<0||!work.distance.TryGetValue(entry.Node,out var cost)||cost!=entry.Cost)
+            if(state.Version>=2){work.frontier.RestoreShape(state.FrontierShape,maxStates);if(!work.frontier.SequenceEqual(state.Frontier))throw new ArgumentException("Singleton tree/frontier mismatch.");}else foreach (var entry in state.Frontier) work.frontier.Add(entry);
+            foreach(var entry in work.frontier)if(entry.Node<0||entry.Node>=graph.Nodes.Count||entry.Candidate!=0||double.IsNaN(entry.Cost)||double.IsInfinity(entry.Cost)||entry.Cost<0||!work.distance.TryGetValue(entry.Node,out var cost)||work.QueueCost(entry.Node,cost)!=entry.Cost)
                 throw new ArgumentException("Invalid singleton frontier label/cost.");
             work.legs.AddRange(state.Legs); work.chain.AddRange(state.Chain);
             if (work.Status == NavSolveStatus.Ready) work.Route = new NavTypedRoute(subscription, work.legs, work.routeCost);
@@ -228,6 +245,7 @@ namespace Spacewars.Simulation
         }
         private void Step()
         {
+            if(queryRegion!=null){StepQuery();return;}
             if (phase == Phase.Direct) {
                 if (graph.CanSweep(subscription.Origin, subscription.AssignedEndpoint)) {
                     var direct=NavSolverLegs.Surface(graph,subscription.Origin,subscription.AssignedEndpoint,reservation?.Target as INavStorageReservation);

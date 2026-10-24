@@ -39,11 +39,20 @@ namespace Spacewars.Runtime
             }
             return true;
         }
+        internal static bool NeedsBuildingTerritory(PlayableAiObservation o)
+        {
+            var sites=o.Sites.Where(s=>s.Owner==o.Owner&&s.Ready&&!s.Contested&&s.Site.Slots.Count>0).ToArray();
+            return sites.Length>0&&sites.All(s=>s.Site.Slots.All(slot=>o.Buildings.Any(b=>b.SiteId==s.Site.Id&&b.SlotId==slot.Id)));
+        }
         internal static TerritorySiteSnapshot Select(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiKnowledgeState knowledge,
             IEnumerable<TerritorySiteSnapshot> candidates,bool remote,int localSite=0)
         {
             var home=Home(o);var ordered=candidates.GroupBy(s=>s.Site.Id).Select(g=>g.First())
                 .OrderBy(s=>Distance(s.Site.Position,home)).ThenBy(s=>s.Site.Id).ToArray();
+            // An Outpost adds real building capacity; a sole already-funded goal
+            // is retained because this filter only applies when an Outpost is offered.
+            if(NeedsBuildingTerritory(o)&&ordered.Any(s=>s.Site.Kind==PlayableBuildingKind.Outpost&&s.Site.Slots.Count>0))
+            {ordered=ordered.Where(s=>s.Site.Kind==PlayableBuildingKind.Outpost&&s.Site.Slots.Count>0).ToArray();localSite=0;}
             var local=localSite==0?ordered.FirstOrDefault():ordered.FirstOrDefault(s=>s.Site.Id==localSite);if(!remote)return local;
             var mains=Mains(o,knowledge);
             return ordered.Where(s=>s.Site.Id!=(localSite!=0?localSite:local?.Site.Id??0)&&RemoteAllowed(o,p,ai,knowledge,s))
@@ -53,7 +62,7 @@ namespace Spacewars.Runtime
         // Recheck unaccepted goals when a main becomes known, without penalizing the local fallback.
         internal static bool TerritoryAllowed(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiKnowledgeState knowledge,TerritorySiteSnapshot site)
         {
-            var nearest=o.Sites.Where(s=>Free(s,o,p)&&SiteSafe(o,p,knowledge,s)).OrderBy(s=>Distance(s.Site.Position,Home(o))).ThenBy(s=>s.Site.Id).FirstOrDefault();
+            var nearest=Select(o,p,ai,knowledge,o.Sites.Where(s=>Free(s,o,p)&&SiteSafe(o,p,knowledge,s)),false);
             return nearest?.Site.Id==site.Site.Id||RemoteAllowed(o,p,ai,knowledge,site);
         }
         internal static bool SiteSafe(PlayableAiObservation o,PlayableProfile p,AiKnowledgeState knowledge,TerritorySiteSnapshot s)=>

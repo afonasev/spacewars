@@ -15,6 +15,7 @@ namespace Spacewars.Presentation
         private readonly NativeBalanceStore store;
         private readonly NativeMenuNavigation navigation;
         private readonly Action closed;
+        private readonly Action<PlayableProfile,GameplayAudioProfile> openProvingGround;
         private PlayableProfile selected;
         private PlayableProfileData draft,original;
         private GameplayAudioProfile audioDraft,audioOriginal;
@@ -29,10 +30,10 @@ namespace Spacewars.Presentation
         private readonly VisualElement groups,grid;
         private readonly DropdownField profiles,revisions;
         private readonly Button save,rename,delete,mark;
-        public NativeBalanceView(VisualElement root,NativeMenuNavigation navigation,NativeBalanceStore store,Action closed,PlayableProfile currentMatch=null)
+        public NativeBalanceView(VisualElement root,NativeMenuNavigation navigation,NativeBalanceStore store,Action closed,PlayableProfile currentMatch=null,Action<PlayableProfile,GameplayAudioProfile> openProvingGround=null)
         {
             if(currentMatch!=null)throw new InvalidOperationException("Лаборатория недоступна в активном матче.");
-            this.navigation=navigation;this.store=store;this.closed=closed;
+            this.navigation=navigation;this.store=store;this.closed=closed;this.openProvingGround=openProvingGround;
             Page=OrbitalTheme.Screen(root,"laboratory-screen");var card=OrbitalTheme.Card(Page);card.AddToClassList("orbital-lab-card");
             var title=OrbitalTheme.Text("ЛАБОРАТОРИЯ ГЕЙМДИЗАЙНА","orbital-title");card.Add(title);
             status=OrbitalTheme.Text("","orbital-muted");status.name="lab-status";card.Add(status);
@@ -58,10 +59,20 @@ namespace Spacewars.Presentation
             Page.RegisterCallback<GeometryChangedEvent>(_=>{bool compact=Page.resolvedStyle.width<900;LayoutColumns();sidebar.style.width=compact?190:238;title.style.fontSize=compact?18:22;title.style.marginBottom=4;card.style.paddingLeft=card.style.paddingRight=card.style.paddingTop=card.style.paddingBottom=10;});
             var actions=new VisualElement(){name="lab-actions"};actions.style.flexDirection=FlexDirection.Row;actions.style.flexShrink=0;actions.style.marginTop=8;card.Add(actions);
             actions.Add(OrbitalTheme.Action("Назад",Back,"lab-back"));
+            if(openProvingGround!=null)actions.Add(OrbitalTheme.Action("Открыть полигон",()=>Try(OpenProvingGround),"lab-proving-ground",true));
             Load();
             profiles.RegisterValueChangedCallback(e=>{var id=(string)store.Profiles[profiles.choices.IndexOf(e.newValue)]["id"];Refresh();Guard(()=>{try{store.SelectProfile(id);}finally{Load();}});});
             revisions.RegisterValueChangedCallback(e=>{int index=revisions.choices.IndexOf(e.newValue);int version=(int)store.Versions.OrderBy(v=>(int)v["revision"]).ElementAt(index)["revision"];Refresh();Guard(()=>{try{store.Select(version);}finally{Load();}});});
             navigation.SetScope(Page,Back,profiles);
+        }
+        public void RestoreFromProvingGround()
+        {Page.style.display=DisplayStyle.Flex;navigation.SetScope(Page,Back,Page.Q<Button>("lab-proving-ground"));}
+        private void OpenProvingGround()
+        {
+            if(draft==null||invalid.Count>0)throw new ArgumentException("Исправьте ошибки параметров перед запуском полигона.");
+            var snapshot=PlayableProfile.Create(NativeBalanceFields.Copy(draft),new ProvingGroundMap(),selected.DisplayName+" · полигон");
+            var audio=JsonUtility.FromJson<GameplayAudioProfile>(JsonUtility.ToJson(audioDraft));
+            audio.Validate();openProvingGround(snapshot,audio);
         }
         private void Refresh()
         {

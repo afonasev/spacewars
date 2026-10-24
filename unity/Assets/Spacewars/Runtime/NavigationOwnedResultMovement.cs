@@ -8,10 +8,11 @@ namespace Spacewars.Runtime
         {
             internal readonly NavigationLiveGroupObservation[] MarchSources;
             internal readonly bool[] MarchWrites;internal readonly NavigationAuthorityGroup[] PreMarchGroups;
+            internal NavigationTrafficAuthority SourceTraffic,Traffic,RetiredTraffic;
             internal NavPreparedCrowdStep Frame;internal NavigationAdmissionStorage MovementAdmission;
             internal bool SuspendPending,MarchObserved,MarchConfigured,ComposedMovement,FrameObserved,MovementAdmissionChanged;
             internal double MarchStretch;internal int MarchRevision;internal CertifiedRouteKernel MovementWorker;internal long MovementAttachment;
-            internal void ReleaseResultMovementEdges(){Frame?.Release();MovementAdmission?.Release();foreach(var version in PreMarchGroups)version?.ReleaseStorage();foreach(var source in MarchSources)source.ReleasePins();}
+            internal void ReleaseResultMovementEdges(){SourceTraffic?.Release();Traffic?.Release();RetiredTraffic?.Release();Frame?.Release();MovementAdmission?.Release();foreach(var version in PreMarchGroups)version?.ReleaseStorage();foreach(var source in MarchSources)source.ReleasePins();}
         }
         private static bool MarchRecordMatches(GroupOrderState record,NavigationAuthorityGroup version)
         {
@@ -26,20 +27,22 @@ namespace Spacewars.Runtime
             }
             if(at!=c.MarchSources.Length)return false;
             for(int i=1;i<at;i++){var value=c.MarchSources[i];int j=i;while(j>0&&c.MarchSources[j-1].Version.Data.GroupId>value.Version.Data.GroupId){c.MarchSources[j]=c.MarchSources[j-1];j--;}c.MarchSources[j]=value;}
-            c.SuspendPending=SuspendPendingMovement;c.MovementWorker=certifiedHost;c.MovementAttachment=certifiedHostAttachmentIdentity;c.MarchConfigured=marchConfigured;c.MarchStretch=marchStretch;c.MarchRevision=marchProfileRevision;c.MarchObserved=true;return true;
+            c.SourceTraffic=NavPhysicalMacro.Acquire(c,trafficAuthority);c.SuspendPending=SuspendPendingMovement;c.MovementWorker=certifiedHost;c.MovementAttachment=certifiedHostAttachmentIdentity;c.MarchConfigured=marchConfigured;c.MarchStretch=marchStretch;c.MarchRevision=marchProfileRevision;c.MarchObserved=true;return true;
         }
         private bool ResultMovementSourcesCurrent(PreparedResultBatch c)
         {
             if(!c.MarchObserved)return true;
-            if(c.SuspendPending!=SuspendPendingMovement||!ReferenceEquals(c.MovementWorker,certifiedHost)||c.MovementAttachment!=certifiedHostAttachmentIdentity||c.MarchConfigured!=marchConfigured||c.MarchStretch!=marchStretch||c.MarchRevision!=marchProfileRevision)return false;
+            if(!ReferenceEquals(c.SourceTraffic,trafficAuthority)||c.SuspendPending!=SuspendPendingMovement||!ReferenceEquals(c.MovementWorker,certifiedHost)||c.MovementAttachment!=certifiedHostAttachmentIdentity||c.MarchConfigured!=marchConfigured||c.MarchStretch!=marchStretch||c.MarchRevision!=marchProfileRevision)return false;
             foreach(var observation in c.MarchSources)if(!observation.Owner.MatchesObservation(observation))return false;
-            return !c.FrameObserved||RebindHostBoundaryQuiescent()&&ReferenceEquals(Crowd,c.Frame.SourceCrowd)&&c.Frame.SourceCurrent();
+            return !c.FrameObserved||(c.PhysicalCommutation?ResultBatchPhysicalHostCurrent(c):RebindHostBoundaryQuiescent())&&ReferenceEquals(Crowd,c.Frame.SourceCrowd)&&c.Frame.SourceCurrent();
         }
         private bool PrepareResultMovement(PreparedResultBatch c,double dt,NavigationRetentionBudget.Scope scope)
         {
-            if(c.ReadyCount==0&&c.FailureCount==0&&c.ReissueCount==0&&c.Operations.Length!=0&&!c.HasHeldPrefix||c.Allocating.Count!=0||Crowd.HasPreferredMotion)return true;
+            bool discardOnly=c.PhysicalCommutation&&c.Operations.Length>0;
+            if(discardOnly)foreach(var operation in c.Operations)if(operation.Kind!=ResultOperationKind.Discard){discardOnly=false;break;}
+            if(c.ReadyCount==0&&c.FailureCount==0&&c.ReissueCount==0&&c.Operations.Length!=0&&!c.HasHeldPrefix&&!discardOnly||Crowd.HasPreferredMotion)return true;
             using(EnterTransport()){
-                if(!ResultBatchSourceCurrent(c))return false;if(!RebindHostBoundaryQuiescent())return true;
+                if(!ResultBatchSourceCurrent(c))return false;if(!c.PhysicalCommutation&&!RebindHostBoundaryQuiescent())return true;
                 foreach(var f in c.Attempts){var a=f.Owner.Record;if(!a.Retiring&&!a.Working&&!a.Reconstructing&&!a.Published&&a.SnapshotStatus!=NavArrivalStatus.Pending&&a.SnapshotStatus!=NavArrivalStatus.BudgetExhausted)return true;}
                 foreach(var observation in c.MarchSources)if(!MarchRecordMatches(c.SourceGroups[observation.Version.Data.GroupId],observation.Version))return true;
             }
@@ -52,7 +55,7 @@ namespace Spacewars.Runtime
                 if(row.Eligible)ClearReissueFailureNoThrow(actor);
             }
             for(int i=0;i<c.Operations.Length;i++)if(c.Operations[i].Kind==ResultOperationKind.Ready){
-                var op=c.Operations[i];var request=c.Names.Answers[i].Request;var actor=c.Frame.After[op.Actor];c.Names.Routes[i].ProjectInto(actor);
+                var op=c.Operations[i];var request=c.Names.Answers[i].Request;var actor=c.Frame.After[op.Actor];c.Names.Routes[i].ProjectInto(actor);c.Frame.ReplacedRoute(actor);
                 actor.FailedRequest=actor.FailedOrder=actor.FailedGroupId=actor.FailedRevision=0;actor.FailedGoal=null;actor.LastFailure=NavigationOutcome.Idle;actor.InstalledGroupId=request.MemberIdentity?.GroupId??0;actor.InstalledRevision=request.MemberIdentity?.OrderRevision??0;actor.InstalledRequest=request.Request;actor.InstalledOrder=request.Order;
             }
             for(int i=0;i<c.Operations.Length;i++)if(c.Operations[i].Kind==ResultOperationKind.Failure){
@@ -62,14 +65,19 @@ namespace Spacewars.Runtime
             }
             for(int i=0;i<c.Operations.Length;i++)if(c.Operations[i].Kind==ResultOperationKind.Reissue)ClearReissueFailureNoThrow(c.Frame.After[c.Frame.Find(c.Names.Answers[i].Request.Entity)]);
             var pending=c.NextPending??c.Pending;
-            if(c.SuspendPending)foreach(var actor in c.Frame.After)if(pending.ContainsKey(actor.Id))actor.Moving=false;
-            if(c.MarchConfigured)foreach(var observation in c.MarchSources){
+            if(c.SuspendPending)foreach(var actor in c.Frame.After)if(pending.ContainsKey(actor.Id)||c.Allocating.ContainsKey(actor.Id))actor.Moving=false;
+            if(dt>0&&c.MarchConfigured)foreach(var observation in c.MarchSources){
                 int group=-1;for(int i=0;i<c.GroupCount;i++)if(ReferenceEquals(c.GroupSources[i].Owner,observation.Owner)){group=i;break;}
                 var previous=group<0?observation.Version:c.Groups[group];
                 var next=GroupMarch.PrepareOwned(c.Frame,previous,c.ProjectedInstalled,c.ProjectedDetached,c.SourceMembers,c.MarchStretch,c.MarchRevision,dt,scope.OwnedReservation());
                 if(next==null)continue;if(group<0){group=c.GroupCount++;c.GroupSources[group]=observation;}else c.PreMarchGroups[group]=c.Groups[group];c.Groups[group]=next;c.MarchWrites[group]=true;
             }
-            using(NavStorageScratch.Reserve(scope.OwnedReservation(),RebindStagingScratchBound(c.Actors.Length,c.Operations.Length,navigationGeometry.Obstacles.Count)))c.Frame.Compute(dt);
+            c.Traffic=NavigationTrafficAuthority.Prepare(c.SourceTraffic,c.Frame,c.ProjectedInstalled,c.ProjectedDetached,c.SourceMembers,terrain,scope.OwnedReservation());
+            if(dt>0)using(NavStorageScratch.Reserve(scope.OwnedReservation(),RebindStagingScratchBound(c.Actors.Length,c.Operations.Length,navigationGeometry.Obstacles.Count))){MarkTerminalContactComponents(c.Frame,c.MarchSources,c.MarchSources.Length,c.ProjectedInstalled,c.ProjectedDetached,c.NextPending??c.Pending,c.Allocating);c.Frame.Compute(dt);CaptureMovementDelay(2,c.Frame.Motion,c.Frame.Proposals,c.Frame.Preferred);}
+            // Destination roles only; the source Detached snapshot remains
+            // untouched for final SourceCurrent validation. Ready reset Cleared.
+            for(int i=0;i<c.Frame.Cleared.Length;i++)if(c.Frame.Cleared[i])c.ProjectedDetached[i]=c.ProjectedInstalled[i]!=null;
+            if(MovementDiagnosticObserver!=null){var trace=new System.Text.StringBuilder("composed:");for(int i=0;i<c.Frame.Motion.Length;i++){var body=c.Frame.Motion[i];var proposal=c.Frame.Proposals[i];trace.Append(body.Id).Append(":active=").Append(body.Active).Append(":pos=").Append(body.Position.X).Append(',').Append(body.Position.Z).Append(":target=").Append(body.Target.X).Append(',').Append(body.Target.Z).Append(":speed=").Append(body.Speed).Append(":cap=").Append(c.Frame.Preferred[i]).Append(":heading=").Append(body.Heading).Append(":proposal=").Append(proposal.Position.X).Append(',').Append(proposal.Position.Z).Append(":velocity=").Append(proposal.Velocity.X).Append(',').Append(proposal.Velocity.Z).Append(":yield=").Append(body.Yielding).Append(":refuse=").Append(proposal.Refuse).Append(":blocked=").Append(proposal.Blocked).Append(":overflow=").Append(proposal.Overflow).Append(';');}LastOwnedMovementComputation=trace.ToString();}
             // Prove the complete member shape before changing private cleanup maps.
             // From this point a preparation refusal aborts the whole carrier.
             foreach(var observation in c.MarchSources)for(int i=0;i<observation.Version.Members.Count;i++){
@@ -91,10 +99,10 @@ namespace Spacewars.Runtime
                 var previous=group<0?observation.Version:c.Groups[group];
                 for(int i=0;i<previous.Members.Count;i++){
                     var original=(NavigationAuthorityMember)previous.Members[i];var d=original.Data;var actor=c.Frame.After[c.Frame.Find(d.Entity)];
-                    var phase=d.FormationReleased?GroupMemberPhase.Combat:actor.Held?GroupMemberPhase.Held:pending.ContainsKey(actor.Id)?GroupMemberPhase.PendingRoute:actor.Moving?GroupMemberPhase.March:actor.Outcome==NavigationOutcome.Arrived?GroupMemberPhase.Arrived:actor.Outcome==NavigationOutcome.Unreachable?GroupMemberPhase.Unreachable:actor.Outcome==NavigationOutcome.Blocked||actor.Outcome==NavigationOutcome.Rejected?GroupMemberPhase.Blocked:GroupMemberPhase.Stopped;
+                    var phase=c.Allocating.ContainsKey(actor.Id)?GroupMemberPhase.Allocating:d.FormationReleased?GroupMemberPhase.Combat:actor.Held?GroupMemberPhase.Held:pending.ContainsKey(actor.Id)?GroupMemberPhase.PendingRoute:actor.Moving?GroupMemberPhase.March:actor.Outcome==NavigationOutcome.Arrived?GroupMemberPhase.Arrived:actor.Outcome==NavigationOutcome.Unreachable?GroupMemberPhase.Unreachable:actor.Outcome==NavigationOutcome.Blocked||actor.Outcome==NavigationOutcome.Rejected?GroupMemberPhase.Blocked:GroupMemberPhase.Stopped;
                     int reservation=reservations.ContainsKey(actor.Id)?actor.Id:0;
                     if(d.MobilityRevision==actor.MobilityRevision&&d.Phase==phase&&d.Reservation==reservation)continue;
-                    var values=new NavigationAuthorityMember.Values(d.Entity,d.Slot,d.Incarnation,d.OrderRevision,actor.MobilityRevision,phase,d.Goal,d.Location,d.HasLocation,d.HasGoal,d.FormationReleased,d.Branch,reservation,d.ContactTick,d.ProgressRequest,d.Progress);
+                    var values=new NavigationAuthorityMember.Values(d.Entity,d.Slot,d.Incarnation,d.OrderRevision,actor.MobilityRevision,phase,d.Goal,d.Location,d.HasLocation,d.HasGoal,d.FormationReleased,d.Branch,reservation,d.ContactTick,d.ProgressRequest,d.Progress,d.ProgressVersion,d.ProgressOffset);
                     var member=NavigationAuthorityMember.CopyWithValuesOwned(original,values,scope.OwnedReservation());NavigationAuthorityGroup next=null;
                     try{next=NavigationAuthorityGroup.CopyWithMemberAndMarchOwned(previous,i,member,previous.Data,scope.OwnedReservation());}finally{member.ReleaseStorage();}
                     if(group<0){group=c.GroupCount++;c.GroupSources[group]=observation;}else if(!c.MarchWrites[group])c.PreMarchGroups[group]=c.Groups[group];else c.Groups[group].ReleaseStorage();
@@ -112,7 +120,7 @@ namespace Spacewars.Runtime
             for(int i=0;i<c.GroupCount;i++)if(c.MarchWrites[i]){
                 c.Groups[i].ReleaseStorage();c.Groups[i]=c.PreMarchGroups[i];c.PreMarchGroups[i]=null;c.MarchWrites[i]=false;if(i>=originalGroups)c.GroupSources[i]=default;
             }
-            c.GroupCount=originalGroups;c.Frame.Release();c.Frame=null;c.FrameObserved=false;return true;
+            c.Traffic?.Release();c.Traffic=null;c.GroupCount=originalGroups;c.Frame.Release();c.Frame=null;c.FrameObserved=false;return true;
         }
         private void ValidateResultMovementInstall(PreparedResultBatch c,NavigationRetentionBudget.Scope scope,NavigationLiveWriteToken token)
         {
@@ -123,7 +131,7 @@ namespace Spacewars.Runtime
         {
             if(!c.ComposedMovement)return;
             for(int i=0;i<c.GroupCount;i++)if(c.MarchWrites[i]){if(c.RetiredGroups[i]==null)c.RetiredGroups[i]=c.GroupSources[i].Version;c.GroupSources[i].Owner.ApplyMovementMembersNoThrow(c.Groups[i]);}
-            c.Frame.ApplyNoThrow();c.MovementAdmissionChanged=PublishAdmissionOwnerNoThrow(c.MovementAdmission);if(c.MovementAdmissionChanged)c.MovementAdmission=null;authorityOperationIdentity=c.Names.Operation+(c.Operations.Length==0?3:4)+c.ExtraOperations;OwnedMovementPublications++;
+            c.RetiredTraffic=trafficAuthority;trafficAuthority=c.Traffic;c.Traffic=null;c.Frame.ApplyNoThrow();c.MovementAdmissionChanged=PublishAdmissionOwnerNoThrow(c.MovementAdmission);if(c.MovementAdmissionChanged)c.MovementAdmission=null;authorityOperationIdentity=c.Names.Operation+(c.Operations.Length==0?3:4)+c.ExtraOperations;OwnedMovementPublications++;
         }
     }
 }

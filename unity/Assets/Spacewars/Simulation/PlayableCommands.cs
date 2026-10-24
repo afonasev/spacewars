@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Spacewars.Simulation
 {
-    public enum PlayableCommandKind { BuildFactory, BuildRefinery, QueueTank, SetRally, Move, Attack, AttackMove, Stop, Restart, BuildAt, CancelBuilding, CancelProductionOrder, ToggleRepeatProduction, SellBuilding, StartBuildingRepair, CancelBuildingRepair, UpgradeRefinery, CancelRefineryUpgrade, QueueExplorer, QueueShkval, QueueResearch, CancelResearch, Hold, Follow }
+    public enum PlayableCommandKind { BuildFactory, BuildRefinery, QueueTank, SetRally, Move, Attack, AttackMove, Stop, Restart, BuildAt, CancelBuilding, CancelProductionOrder, ToggleRepeatProduction, SellBuilding, StartBuildingRepair, CancelBuildingRepair, UpgradeRefinery, CancelRefineryUpgrade, QueueExplorer, QueueShkval, QueueResearch, CancelResearch, Hold, Follow, QueueHawk }
     public enum PlayableCommandStatus { Accepted, Applied, Rejected, Overflow, StaleGeneration, InvalidSequence, InvalidOwner, InvalidEntity, InvalidTarget, InsufficientCredits, OccupiedPad, Stopped, Cancelled }
     public enum PlayableOrderMode { Replace, Append }
     public enum PlayableOrderOrigin { Unknown,Human,Ai }

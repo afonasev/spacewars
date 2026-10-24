@@ -85,11 +85,12 @@ namespace Spacewars.Presentation
         private bool SeatReady=>localBinding==null?devicesReady:localHumanCount==1?(Keyboard.current?.added==true&&Mouse.current?.added==true||SeatPad?.added==true):localBinding.DeviceId>0?SeatPad?.added==true:Keyboard.current?.added==true&&Mouse.current?.added==true;
         private bool LocalMenuVisible=>localCoordinator==null?localPauseOwner==null||localPauseOwner==this:localCoordinator.localPauseOwner==this;
         private static Rect LocalRect(int index,int count)=>count<=1?new Rect(0,0,1,1):count==2?new Rect(index*.5f,0,.5f,1):new Rect(index%2*.5f,1-(index/2+1)*.5f,.5f,.5f);
-        private void ConfigureLocalPresentations()
+        private void ConfigureLocalPresentations()=>LoadingPreparation.Drain(PrepareLocalPresentations());
+        private System.Collections.IEnumerator PrepareLocalPresentations()
         {
             DisposeLocalChildren();localPresentations.Add(this);
             var humans=matchSetup?.Participants?.Select((p,i)=>new{Participant=p,Index=i}).Where(p=>p.Participant.Human).ToArray();
-            if(humans==null||humans.Length==0){localBinding=null;localHumanCount=1;ResetLocalViewport();return;}
+            if(humans==null||humans.Length==0){localBinding=null;localHumanCount=1;ResetLocalViewport();yield break;}
             localHumanCount=humans.Length;
             for(int index=0;index<humans.Length;index++)
             {
@@ -102,7 +103,9 @@ namespace Spacewars.Presentation
                 }
                 seat.localBinding=humans[index].Participant;seat.localRosterIndex=humans[index].Index;seat.localViewportIndex=index;
                 seat.view=runtime.ParticipantView(seat.LocalOwnerId);
-                if(index>0){seat.CreateWorld();seat.CreateHud();seat.input=seat.gameObject.AddComponent<PlayableInput>();seat.BindLocalKeyboardInput();}
+                if(index>0){seat.CreateWorldCore(true);yield return seat.world.Preparation;
+                    seat.mapTerrain=new PlayableMapTerrain(profile,staged:true);yield return seat.mapTerrain.Preparation;
+                    seat.CreateHud();loadingScreen?.BringToFront();seat.input=seat.gameObject.AddComponent<PlayableInput>();seat.BindLocalKeyboardInput();}
                 seat.input.AssignedKeyboard=seat.SeatUsesKeyboard?Keyboard.current:null;seat.input.AssignedMouse=seat.SeatUsesKeyboard?Mouse.current:null;seat.input.enabled=seat.SeatUsesKeyboard;
                 seat.inLobby=false;seat.root.Q("tactical-minimap-frame").style.display=DisplayStyle.Flex;seat.SetMatchUi(true);seat.ConfigureLocalViewport(index,humans.Length);
                 var own=seat.view.Buildings.FirstOrDefault(b=>b.Owner==seat.LocalOwner&&b.Kind==PlayableBuildingKind.Headquarters);
@@ -116,7 +119,7 @@ namespace Spacewars.Presentation
         private void BindLocalKeyboardInput()
         {
             input.Select=Select;input.Order=Order;input.Stop=()=>Submit(PlayableCommandKind.Stop);input.Hold=()=>Submit(PlayableCommandKind.Hold);
-            input.CancelContext=()=>{if(mapOpen){CloseMap();return true;}return CloseBattleContext();};input.TogglePause=()=>Pause(!paused);input.Restart=Restart;input.FocusLost=()=>Pause(true);
+            input.CancelContext=()=>{if(mapOpen){CloseMap();return true;}return CloseBattleContext();};input.TogglePause=()=>Pause(!paused);input.Restart=Restart;input.FocusLost=()=>{var coordinator=localCoordinator??this;if(!coordinator.battleHudUnattended&&!coordinator.routePerformanceEvidence)Pause(true);};
             input.IsPointerOverUi=OverUi;input.IsKeyboardInUi=()=>MenuOwnsInput||root?.focusController?.focusedElement is VisualElement focused&&root.Contains(focused)&&(focused is Button||focused is TextField);
             input.MapAt=MapAt;input.MapSelect=MapSelect;input.MapPan=PanMap;input.MapOrder=MapOrder;input.ToggleMap=ToggleMap;input.CloseMap=CloseMap;input.Pan=Pan;input.Zoom=Zoom;input.Drag=DrawDrag;BindKeyboardCommands();
             input.AttackModeChanged=active=>{commandCursor?.Set(false);notice="";};
@@ -144,7 +147,7 @@ namespace Spacewars.Presentation
             if(frame==null)return;
             foreach(var seat in localPresentations.Where(s=>s!=this))
             {
-                seat.RefreshLocalKeyboardBinding();seat.view=frame.Views[seat.LocalOwnerId];seat.paused=paused;seat.restarting=restarting;seat.quitting=quitting;
+                seat.RefreshLocalKeyboardBinding();seat.ownerFrame=frame;seat.view=frame.Views[seat.LocalOwnerId];seat.paused=paused;seat.restarting=restarting;seat.quitting=quitting;
                 seat.input.WorldInputEnabled=seat.SeatReady&&!paused&&!preparing&&!returningToLobby&&!restarting&&!quitting&&seat.view.Outcome==PlayableMatchOutcome.Playing&&!ResultsVisible;
                 seat.RebindPresentation();seat.Render();seat.UpdateHud();seat.UpdateMaps();seat.UpdateLifecycleMarkers();seat.UpdateIncomeMarkers();seat.PollBattleController();seat.UpdateKeyboardPresentation();seat.UpdateOrderMarkers(receipts.Where(r=>r.OwnerId==seat.LocalOwnerId).ToArray());
             }

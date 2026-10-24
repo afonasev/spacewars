@@ -103,6 +103,7 @@ namespace Spacewars.Presentation
         public void Activate()
         {
             var element=Current(Controls());if(!Visible(element))return;
+            if(element is LobbyColorField color){ActivateElement(color.Trigger);return;}
             if(element is TextField text){OpenKeyboard(text);return;}
             if(element is Toggle toggle){toggle.value=!toggle.value;return;}
             if(element is DropdownField dropdown){Adjust(dropdown,1);return;}
@@ -129,7 +130,7 @@ namespace Spacewars.Presentation
             var focused=root.focusController?.focusedElement as VisualElement;
             return controls.FirstOrDefault(x=>x==focused||x.Contains(focused))??controls.FirstOrDefault();
         }
-        private List<VisualElement> Controls()=>scope==null?new List<VisualElement>():scope.Query<VisualElement>().ToList().Where(x=>(x is Button||x is Toggle||x is Slider||x is SliderInt||x is DropdownField||x is TextField||x is ScrollView&&x.name=="controls-scroll")&&Visible(x)).ToList();
+        private List<VisualElement> Controls()=>scope==null?new List<VisualElement>():scope.Query<VisualElement>().ToList().Where(x=>(x is LobbyColorField||x is Button&&x.GetFirstAncestorOfType<LobbyColorField>()==null||x is Toggle||x is Slider||x is SliderInt||x is DropdownField||x is TextField||x is ScrollView&&x.name=="controls-scroll")&&Visible(x)).ToList();
         public static bool Visible(VisualElement element)
         {
             if(element==null||!element.enabledInHierarchy||!element.focusable)return false;
@@ -174,7 +175,8 @@ namespace Spacewars.Presentation
                 {
                     if(!Visible(button))continue;bool isBack=back!=null&&(button.name?.EndsWith("-back")==true||button.name?.EndsWith("-cancel")==true);
                     bool isReset=scope.name=="settings-screen"&&button.name=="settings-reset-all";
-                    if(!isReset&&!isBack&&root.focusController?.focusedElement!=button)continue;
+                    var focused=root.focusController?.focusedElement;var color=button.GetFirstAncestorOfType<LobbyColorField>();
+                    if(!isReset&&!isBack&&focused!=button&&(color==null||focused!=color))continue;
                     var glyph=new Label(isReset?NativeControllerGlyph.TopSymbol(pad):NativeControllerGlyph.Symbol(isBack?"B":"A",pad)){name="menu-pad-glyph",pickingMode=PickingMode.Ignore};glyph.style.position=Position.Absolute;glyph.style.right=5;glyph.style.top=5;glyph.style.fontSize=11;button.Add(glyph);
                 }
             }

@@ -1,0 +1,11 @@
+{
+  "id": "white-meridian-astra-v1",
+  "revision": 4,
+  "scale": 1,
+  "terraceHeight": 5,
+  "ridgeHeight": 7,
+  "secondaryRampWidth": 8,
+  "wreckSpread": 10.5,
+  "middleWreckExtension": 5.5,
+  "middleWreckWidth": 1.6
+}

@@ -31,7 +31,7 @@ namespace Spacewars.Tests.EditMode
         private static List<NavOwnedStorage> SessionRoots(NavigationSession session,NavOwnedStorage[] roots)
         {
             var all=new List<NavOwnedStorage>(roots);var flags=BindingFlags.Instance|BindingFlags.NonPublic;
-            foreach(var name in new[]{"authorityOwners","groupCommandBacking","transportOwner","barrierPayloads","legacyProbePayloads","retiredLegacyProbePayloads","terrainNameOwners","committedHostRoot","admissionOwner","retiredAdmissions","retiredArrivalProviders","retiredArrivalAttempts","retiredArrivalLeases","liveArrivalLeaseTable","liveRegistrations","retiredRegistrations","ownedAnswerTracking","ownedProbes","liveProbeAnswers","retiredProbeQueues","retiredProbeReceipts","installedExecutions"})all.Add((NavOwnedStorage)typeof(NavigationSession).GetField(name,flags).GetValue(session));
+            foreach(var name in new[]{"authorityOwners","groupCommandBacking","transportOwner","barrierPayloads","legacyProbePayloads","retiredLegacyProbePayloads","terrainNameOwners","committedHostRoot","creditBank","admissionOwner","retiredAdmissions","retiredArrivalProviders","retiredArrivalAttempts","retiredArrivalLeases","liveArrivalLeaseTable","liveRegistrations","retiredRegistrations","ownedAnswerTracking","ownedProbes","liveProbeAnswers","retiredProbeQueues","retiredProbeReceipts","installedExecutions"})all.Add((NavOwnedStorage)typeof(NavigationSession).GetField(name,flags).GetValue(session));
             all.Add((NavOwnedStorage)typeof(NavigationSession).GetField("liveArrivalTables",flags).GetValue(session));
             all.Add((NavOwnedStorage)session.Answers.GetType().GetField("retention",flags).GetValue(session.Answers));
             if(session.Crowd!=null){all.Add(session.Crowd.SpatialStorage);foreach(var unit in session.Crowd.Units)all.Add(unit.StorageOwner);}
@@ -729,6 +729,23 @@ namespace Spacewars.Tests.EditMode
                 Assert.AreEqual(nth,allocator.Calls);scope.Discard();Assert.AreEqual(0,budget.PhysicalBytes);Assert.AreEqual(NavigationRetentionBudget.RootBytes,budget.RetainedBytes);
             }
         }
+        [Test] public void ZeroPartitionTraceOwnsEveryLegAndReturnsScratchBeforeCommitOrEveryNthRefusal()
+        {
+            var map=ThreeCrossingsMap.Default;var provider=new PartitionNavigationProvider(map,new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision),null);
+            var clearance=new NavClearanceProfile("explorer",1,"ground",1,.58);Assert.True(provider.TryLocate(new NavPoint(-18,0),clearance,out var start));
+            Assert.True(provider.TryTrace(start,start.Position,clearance,out var legacyEnd,out var legacy));
+            var budget=new NavigationRetentionBudget();Assert.True(budget.TryOpenScope(NavigationPreparationKind.Solve,1,1,out var initial));var allocator=new RefusingAllocator(initial,int.MaxValue);
+            Assert.True(provider.TryTraceOwned(start,start.Position,clearance,out var endpoint,out var trace,new NavStorageReservation(allocator.Reserve,allocator)));int total=allocator.Calls;
+            Assert.AreEqual(legacyEnd,endpoint);Assert.AreEqual(legacy.Count,trace.Count);
+            for(int n=0;n<trace.Count;n++){Assert.AreEqual(legacy[n].From,trace[n].From);Assert.AreEqual(legacy[n].To,trace[n].To);Assert.AreEqual(legacy[n].Cost,trace[n].Cost);Assert.AreEqual(legacy[n].Kind,trace[n].Kind);Assert.AreEqual(legacy[n].PortalId,trace[n].PortalId);}
+            Assert.AreEqual(1,trace.Count);Assert.AreEqual(NavTypedLegKind.Surface,trace[0].Kind);Assert.AreEqual(0,trace[0].Cost);Assert.IsNull(trace[0].PortalId);Assert.AreEqual(NavigationRetentionBudget.ScopeBytes,budget.HeldBytes);
+            var root=(NavOwnedStorage)trace;initial.Attach(root);initial.Commit(root,_=>{});Assert.AreEqual(Unique(root),budget.PhysicalBytes);root.ReleaseOwner();Assert.AreEqual(0,budget.PhysicalBytes);
+            for(int nth=1;nth<=total;nth++){
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Solve,1,1,out var scope));allocator=new RefusingAllocator(scope,nth);
+                Assert.Throws<InvalidOperationException>(()=>provider.TryTraceOwned(start,start.Position,clearance,out _,out _,new NavStorageReservation(allocator.Reserve,allocator)));
+                Assert.AreEqual(nth,allocator.Calls);scope.Discard();Assert.AreEqual(0,budget.PhysicalBytes);Assert.AreEqual(NavigationRetentionBudget.RootBytes,budget.RetainedBytes);
+            }
+        }
         [TestCase(false)][TestCase(true)] public void PortalQualificationAndInlineEndpointEveryNthRefusalKeepCommittedPrefix(bool open)
         {
             var provider=new StackedNavigationFixture(open).Provider;var budget=new NavigationRetentionBudget();
@@ -876,14 +893,26 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void EveryNthPartitionProviderCopyRefusalResolvesSupportSeamMetadataAndSharedInputPins()
         {
+            void RejectCopy(PartitionNavigationProvider input,RefusingAllocator allocator)
+            {
+                Type expected=null;
+                bool Reserve(long bytes){
+                    bool accepted=allocator.Reserve(bytes);
+                    if(!accepted)expected=new System.Diagnostics.StackTrace().GetFrames().Any(f=>f.GetMethod().DeclaringType==typeof(PartitionNavigationProvider)&&f.GetMethod().Name=="ReserveCopyScratch")?
+                        typeof(PartitionNavigationProvider.CopyScratchRefused):typeof(InvalidOperationException);
+                    return accepted;
+                }
+                var error=Assert.Catch<InvalidOperationException>(()=>PartitionNavigationProvider.CopyOwned(input,new NavStorageReservation(Reserve,allocator)));
+                Assert.NotNull(expected,"the selected allocation must refuse");Assert.AreEqual(expected,error.GetType(),"exact refusal type at the selected reservation site");
+            }
             var map=ThreeCrossingsMap.Default;var source=new PartitionNavigationProvider(map,new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision),null);var budget=new NavigationRetentionBudget();
             Assert.True(budget.TryOpenScope(NavigationPreparationKind.Reconstruction,1,1,out var initial));var probe=new RefusingAllocator(initial,int.MaxValue);var owned=PartitionNavigationProvider.CopyOwned(source,new NavStorageReservation(probe.Reserve,probe));initial.Attach(owned.StorageRoot);int total=probe.Calls;initial.Commit(owned.StorageRoot,_=>{});Assert.Greater(total,10);long baseline=budget.RetainedBytes;
             for(int nth=1;nth<=total;nth++){
-                var empty=new NavigationRetentionBudget();Assert.True(empty.TryOpenScope(NavigationPreparationKind.Reconstruction,1,1,out var scope));var allocator=new RefusingAllocator(scope,nth);Assert.Throws<InvalidOperationException>(()=>PartitionNavigationProvider.CopyOwned(source,new NavStorageReservation(allocator.Reserve,allocator)));Assert.AreEqual(nth,allocator.Calls);scope.Discard();Assert.AreEqual(0,empty.PhysicalBytes);Assert.AreEqual(0,empty.HeldBytes);Assert.AreEqual(NavigationRetentionBudget.RootBytes,empty.RetainedBytes);Assert.AreEqual(baseline,budget.RetainedBytes);
+                var empty=new NavigationRetentionBudget();Assert.True(empty.TryOpenScope(NavigationPreparationKind.Reconstruction,1,1,out var scope));var allocator=new RefusingAllocator(scope,nth);RejectCopy(source,allocator);Assert.AreEqual(nth,allocator.Calls);scope.Discard();Assert.AreEqual(0,empty.PhysicalBytes);Assert.AreEqual(0,empty.HeldBytes);Assert.AreEqual(NavigationRetentionBudget.RootBytes,empty.RetainedBytes);Assert.AreEqual(baseline,budget.RetainedBytes);
             }
             Assert.True(budget.TryOpenScope(NavigationPreparationKind.Reconstruction,1,2,out var countScope));var count=new RefusingAllocator(countScope,int.MaxValue);var copy=PartitionNavigationProvider.CopyOwned(owned,new NavStorageReservation(count.Reserve,count));countScope.Attach(copy.StorageRoot);int sharedTotal=count.Calls;countScope.Discard();Assert.AreEqual(baseline,budget.RetainedBytes);
             for(int nth=1;nth<=sharedTotal;nth++){
-                int references=owned.StorageRoot.References;Assert.True(budget.TryOpenScope(NavigationPreparationKind.Reconstruction,1,3,out var scope));var allocator=new RefusingAllocator(scope,nth);Assert.Throws<InvalidOperationException>(()=>PartitionNavigationProvider.CopyOwned(owned,new NavStorageReservation(allocator.Reserve,allocator)));Assert.AreEqual(nth,allocator.Calls);scope.Discard();Assert.AreEqual(references,owned.StorageRoot.References);Assert.AreEqual(baseline,budget.RetainedBytes);Assert.AreEqual(Unique(owned.StorageRoot),budget.PhysicalBytes);
+                int references=owned.StorageRoot.References;Assert.True(budget.TryOpenScope(NavigationPreparationKind.Reconstruction,1,3,out var scope));var allocator=new RefusingAllocator(scope,nth);RejectCopy(owned,allocator);Assert.AreEqual(nth,allocator.Calls);scope.Discard();Assert.AreEqual(references,owned.StorageRoot.References);Assert.AreEqual(baseline,budget.RetainedBytes);Assert.AreEqual(Unique(owned.StorageRoot),budget.PhysicalBytes);
             }
             owned.StorageRoot.Release();Assert.AreEqual(0,budget.PhysicalBytes);
         }

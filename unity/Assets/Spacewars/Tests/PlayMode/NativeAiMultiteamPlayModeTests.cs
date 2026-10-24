@@ -23,7 +23,7 @@ public sealed class NativeAiMultiteamPlayModeTests
         try
         {
             Set("profile",PlayableProfile.ThreeCrossingsDefault);Call("CreateWorld");Call("CreateHud");Call("CreateSpectatorHud");Set("input",host.AddComponent<Spacewars.Input.PlayableInput>());Call("CreateLobby");Call("BindLobbyDevices");Call("ShowLobby");
-            var lobby=Get<VisualElement>("lobbyScreen");lobby.Q<DropdownField>("lobby-map-choice").value="ИИ-полигон · 8";
+            var lobby=Get<VisualElement>("lobbyScreen");lobby.Q<DropdownField>("lobby-map-choice").value="Полигон (8)";
             var setup=Get<NativeLobbyConfiguration>("lobbySetup");setup.HasExplicitSeed=true;setup.ExplicitSeed=7108;
             setup.Participants.RemoveRange(6,2);for(int i=0;i<6;i++)setup.Participants[i].Team=i/2+1;
             setup.Participants[0].Human=true;setup.Participants[0].DeviceId=0;setup.Participants[0].Name="Игрок S5";

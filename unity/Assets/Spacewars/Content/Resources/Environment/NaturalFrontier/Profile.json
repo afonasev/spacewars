@@ -1,6 +1,6 @@
 {
   "id": "natural-frontier-v1",
-  "revision": 11,
+  "revision": 12,
   "earthTile": 7,
   "rockTile": 6,
   "concreteTile": 5,
@@ -50,6 +50,7 @@
   "apronMarkWidth": 0.07,
   "apronConcreteValue": 0.43,
   "apronHeight": 0.04,
+  "captureFillOpacity": 0.72,
   "outpostApronMargin": 0.75,
   "orderMarkerRadius": 8,
   "orderMarkerWidth": 1.25,

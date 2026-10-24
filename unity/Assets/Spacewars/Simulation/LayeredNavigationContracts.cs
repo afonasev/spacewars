@@ -26,6 +26,18 @@ namespace Spacewars.Simulation
                 using (var hash = SHA256.Create()) return BitConverter.ToString(hash.ComputeHash(stream.ToArray())).Replace("-", "").ToLowerInvariant();
             }
         }
+        // A buffered SHA stream preserves BinaryWriter bytes without retaining a growing transcript.
+        internal const long StreamingDigestScratchBytes=16384;
+        internal static string StreamingDigest(Action<BinaryWriter> write)
+        {
+            using(var hash=SHA256.Create())
+            using(var crypto=new CryptoStream(Stream.Null,hash,CryptoStreamMode.Write))
+            using(var buffered=new BufferedStream(crypto,4096))
+            using(var writer=new BinaryWriter(buffered,Encoding.UTF8,true)){
+                write(writer);writer.Flush();crypto.FlushFinalBlock();
+                return BitConverter.ToString(hash.Hash).Replace("-", "").ToLowerInvariant();
+            }
+        }
         internal static string DigestAdmitted(Action<BinaryWriter> write,long wireBytes,Func<long,bool> reserve)
         {using(var scratch=reserve?.Target is INavStorageAllocator?NavStorageScratch.Reserve(reserve,DigestScratchBytes(wireBytes)):null)return Digest(write);}
         internal static long StringWireBytes(string value)

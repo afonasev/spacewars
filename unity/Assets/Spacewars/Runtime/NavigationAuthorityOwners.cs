@@ -218,7 +218,7 @@ namespace Spacewars.Runtime
                 allocation.Reserve(Layout(source.Members.Count));var owner=allocation.Register(new NavigationLiveGroup(scope,source.Members.Count));
                 try{owner.version=NavPhysicalMacro.Acquire(owner,source);var v=source.Data;
                     owner.record=new GroupOrderState{WorldGeneration=v.WorldGeneration,GroupId=v.GroupId,OrderRevision=v.OrderRevision,CommandSequence=v.CommandSequence,IssuedTick=v.IssuedTick,MembershipRevision=v.MembershipRevision,JobId=v.JobId,ActionId=v.ActionId,MarchVersion=v.MarchVersion,MarchProfileRevision=v.MarchProfileRevision,TeamId=v.TeamId,TargetId=v.TargetId,MarchStretch=v.MarchStretch,MarchAnchor=v.MarchAnchor,MarchInitialized=v.MarchInitialized,Origin=v.Origin,Kind=v.Kind,OriginalGoal=v.OriginalGoal,OriginalLocation=source.OriginalLocation,OwnerId=source.OwnerId,Source=source.Source,Members=new GroupMemberState[source.Members.Count]};
-                    for(int i=0;i<owner.record.Members.Length;i++){var member=(NavigationAuthorityMember)source.Members[i];var m=member.Data;owner.record.Members[i]=new GroupMemberState{Entity=m.Entity,Slot=m.Slot,Incarnation=m.Incarnation,OrderRevision=m.OrderRevision,MobilityRevision=m.MobilityRevision,Phase=m.Phase,Goal=m.Goal,GoalLocation=member.GoalLocation,HasGoal=m.HasGoal,FormationReleased=m.FormationReleased,Branch=m.Branch,Reservation=m.Reservation,ContactTick=m.ContactTick,ProgressRequest=m.ProgressRequest,Progress=m.Progress,ContactPhase=member.ContactPhase};}
+                    for(int i=0;i<owner.record.Members.Length;i++){var member=(NavigationAuthorityMember)source.Members[i];var m=member.Data;owner.record.Members[i]=new GroupMemberState{Entity=m.Entity,Slot=m.Slot,Incarnation=m.Incarnation,OrderRevision=m.OrderRevision,MobilityRevision=m.MobilityRevision,Phase=m.Phase,Goal=m.Goal,GoalLocation=member.GoalLocation,HasGoal=m.HasGoal,FormationReleased=m.FormationReleased,Branch=m.Branch,Reservation=m.Reservation,ContactTick=m.ContactTick,ProgressRequest=m.ProgressRequest,Progress=m.Progress,ProgressVersion=m.ProgressVersion,ProgressOffset=m.ProgressOffset,ContactPhase=member.ContactPhase};}
                     return owner;
                 }catch{owner.ReleaseStorage();throw;}
             }
@@ -242,7 +242,7 @@ namespace Spacewars.Runtime
         {ValidateLiveTransaction(token);if(!MatchesObservation(observation)||generation==long.MaxValue||memberIndex<0||memberIndex>=record.Members.Length)throw new InvalidOperationException("Live group write lost its observed identity/slot.");}
         internal void ApplyMemberNoThrow(NavigationAuthorityGroup next,int index,NavigationAuthorityMember.Values data,string contact,NavLocation? location)
         {
-            var member=record.Members[index];member.Entity=data.Entity;member.Slot=data.Slot;member.Incarnation=data.Incarnation;member.OrderRevision=data.OrderRevision;member.MobilityRevision=data.MobilityRevision;member.Phase=data.Phase;member.Goal=data.Goal;member.GoalLocation=location;member.HasGoal=data.HasGoal;member.FormationReleased=data.FormationReleased;member.Branch=data.Branch;member.Reservation=data.Reservation;member.ContactTick=data.ContactTick;member.ProgressRequest=data.ProgressRequest;member.Progress=data.Progress;member.ContactPhase=contact;var group=next.Data;record.MarchVersion=group.MarchVersion;record.MarchProfileRevision=group.MarchProfileRevision;record.MarchStretch=group.MarchStretch;record.MarchAnchor=group.MarchAnchor;record.MarchInitialized=group.MarchInitialized;version=next;generation++;
+            var member=record.Members[index];member.Entity=data.Entity;member.Slot=data.Slot;member.Incarnation=data.Incarnation;member.OrderRevision=data.OrderRevision;member.MobilityRevision=data.MobilityRevision;member.Phase=data.Phase;member.Goal=data.Goal;member.GoalLocation=location;member.HasGoal=data.HasGoal;member.FormationReleased=data.FormationReleased;member.Branch=data.Branch;member.Reservation=data.Reservation;member.ContactTick=data.ContactTick;member.ProgressRequest=data.ProgressRequest;member.Progress=data.Progress;member.ProgressVersion=data.ProgressVersion;member.ProgressOffset=data.ProgressOffset;member.ContactPhase=contact;var group=next.Data;record.MarchVersion=group.MarchVersion;record.MarchProfileRevision=group.MarchProfileRevision;record.MarchStretch=group.MarchStretch;record.MarchAnchor=group.MarchAnchor;record.MarchInitialized=group.MarchInitialized;version=next;generation++;
         }
         internal void ValidateMarchWrite(NavigationLiveGroupObservation observation,NavigationLiveWriteToken token)
         {ValidateLiveTransaction(token);if(!MatchesObservation(observation)||generation==long.MaxValue)throw new InvalidOperationException("March write lost observed group.");}
@@ -250,13 +250,13 @@ namespace Spacewars.Runtime
         {
             for(int i=0;i<record.Members.Length;i++){
                 var value=((NavigationAuthorityMember)next.Members[i]).Data;var member=record.Members[i];
-                member.MobilityRevision=value.MobilityRevision;member.Phase=value.Phase;member.Reservation=value.Reservation;member.Progress=value.Progress;member.ProgressRequest=value.ProgressRequest;
+                member.MobilityRevision=value.MobilityRevision;member.Phase=value.Phase;member.Reservation=value.Reservation;member.Progress=value.Progress;member.ProgressVersion=value.ProgressVersion;member.ProgressOffset=value.ProgressOffset;member.ProgressRequest=value.ProgressRequest;
             }
             var data=next.Data;record.MarchVersion=data.MarchVersion;record.MarchProfileRevision=data.MarchProfileRevision;record.MarchStretch=data.MarchStretch;record.MarchAnchor=data.MarchAnchor;record.MarchInitialized=data.MarchInitialized;version=next;generation++;
         }
         internal void ApplyMarchNoThrow(NavigationAuthorityGroup next)
         {
-            for(int i=0;i<record.Members.Length;i++){var value=((NavigationAuthorityMember)next.Members[i]).Data;record.Members[i].Progress=value.Progress;record.Members[i].ProgressRequest=value.ProgressRequest;}
+            for(int i=0;i<record.Members.Length;i++){var value=((NavigationAuthorityMember)next.Members[i]).Data;record.Members[i].Progress=value.Progress;record.Members[i].ProgressVersion=value.ProgressVersion;record.Members[i].ProgressOffset=value.ProgressOffset;record.Members[i].ProgressRequest=value.ProgressRequest;}
             var data=next.Data;record.MarchVersion=data.MarchVersion;record.MarchProfileRevision=data.MarchProfileRevision;record.MarchStretch=data.MarchStretch;record.MarchAnchor=data.MarchAnchor;record.MarchInitialized=data.MarchInitialized;version=next;generation++;
         }
         internal void AbortPrivate(){if(Phase!=NavigationLiveStoragePhase.Preparing&&Phase!=NavigationLiveStoragePhase.SealedForInstall)throw new InvalidOperationException("Cannot abort authoritative live storage.");builderScope=null;Phase=NavigationLiveStoragePhase.Aborted;}
@@ -459,22 +459,23 @@ namespace Spacewars.Runtime
         private const long LayoutBytes=192;
         internal NavigationHostRoot Host {get;private set;}
         internal NavigationAuthorityOwners Authority {get;private set;}
+        internal NavigationTrafficAuthority Traffic {get;private set;}
         internal long PublicationIdentity {get;private set;}
         private bool released;
         internal override bool IsImmutableCaptureRoot=>Host?.IsImmutableCaptureRoot==true&&Authority?.IsImmutableCaptureRoot==true;
-        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(PublicationIdentity>0?NavPhysicalStorageKind.HostEnvelopePublication:NavPhysicalStorageKind.HostEnvelope);
+        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(Traffic!=null?NavPhysicalStorageKind.HostEnvelopeTraffic:PublicationIdentity>0?NavPhysicalStorageKind.HostEnvelopePublication:NavPhysicalStorageKind.HostEnvelope);
         private NavigationHostEnvelope(bool owner):base(LayoutBytes){if(owner)Retain();}
         private static NavigationHostEnvelope Allocate(INavStorageReservation reservation,bool owner)
         {using(var allocation=new NavStorageAllocation(reservation.TryReserve)){allocation.Reserve(LayoutBytes);return allocation.Register(new NavigationHostEnvelope(owner));}}
-        internal static NavigationHostEnvelope CreateOwned(NavigationHostRoot host,NavigationAuthorityOwners authority,INavStorageReservation reservation,long publication=0)
-        {if(publication<0||host==null||authority==null||!host.IsImmutableCaptureRoot||!authority.IsImmutableCaptureRoot)throw new ArgumentException("Missing immutable host/authority roots.");NavStorageAdmission.RequireOwned(reservation,host);NavStorageAdmission.RequireOwned(reservation,authority);var root=Allocate(reservation,true);try{root.PublicationIdentity=publication;root.Host=NavPhysicalMacro.Acquire(root,host);root.Authority=NavPhysicalMacro.Acquire(root,authority);return root;}catch{root.ReleaseStorage();throw;}}
+        internal static NavigationHostEnvelope CreateOwned(NavigationHostRoot host,NavigationAuthorityOwners authority,INavStorageReservation reservation,long publication=0,NavigationTrafficAuthority traffic=null)
+        {if(publication<0||host==null||authority==null||!host.IsImmutableCaptureRoot||!authority.IsImmutableCaptureRoot)throw new ArgumentException("Missing immutable host/authority roots.");NavStorageAdmission.RequireOwned(reservation,host);NavStorageAdmission.RequireOwned(reservation,authority);var root=Allocate(reservation,true);try{if(traffic!=null)NavStorageAdmission.RequireOwned(reservation,traffic);root.Traffic=NavPhysicalMacro.Acquire(root,traffic);root.PublicationIdentity=publication;root.Host=NavPhysicalMacro.Acquire(root,host);root.Authority=NavPhysicalMacro.Acquire(root,authority);return root;}catch{root.ReleaseStorage();throw;}}
         public void WritePhysicalBody(NavPhysicalBodyWriter writer)
-        {if(!IsImmutableCaptureRoot||StorageBytes!=NavStorageLayout.Charge(LayoutBytes))throw new ArgumentException("Invalid host envelope.");if(PublicationIdentity>0)writer.Output.Write(PublicationIdentity);NavPhysicalMacro.WriteEdge(writer,this,Host);NavPhysicalMacro.WriteEdge(writer,this,Authority);}
-        internal static NavigationHostEnvelope ReadPhysicalBody(NavPhysicalBodyReader reader,bool publication=false)
-        {long identity=publication?reader.Input.ReadInt64():0;if(publication&&identity<1)throw new ArgumentException("Invalid durable admission publication identity.");var host=NavPhysicalMacro.ReadEdge<NavigationHostRoot>(reader);var authority=NavPhysicalMacro.ReadEdge<NavigationAuthorityOwners>(reader);var root=Allocate(reader.Reservation,false);root.PublicationIdentity=identity;root.Host=NavPhysicalMacro.Acquire(root,host);root.Authority=NavPhysicalMacro.Acquire(root,authority);if(!root.IsImmutableCaptureRoot)throw new ArgumentException("Mutable host envelope.");return root;}
+        {if(!IsImmutableCaptureRoot||StorageBytes!=NavStorageLayout.Charge(LayoutBytes))throw new ArgumentException("Invalid host envelope.");if(Traffic!=null||PublicationIdentity>0)writer.Output.Write(PublicationIdentity);NavPhysicalMacro.WriteEdge(writer,this,Host);NavPhysicalMacro.WriteEdge(writer,this,Authority);if(Traffic!=null)NavPhysicalMacro.WriteEdge(writer,this,Traffic);}
+        internal static NavigationHostEnvelope ReadPhysicalBody(NavPhysicalBodyReader reader,bool publication=false,bool traffic=false)
+        {long identity=publication||traffic?reader.Input.ReadInt64():0;if(identity<0||publication&&identity<1)throw new ArgumentException("Invalid durable admission publication identity.");var host=NavPhysicalMacro.ReadEdge<NavigationHostRoot>(reader);var authority=NavPhysicalMacro.ReadEdge<NavigationAuthorityOwners>(reader);var queue=traffic?NavPhysicalMacro.ReadEdge<NavigationTrafficAuthority>(reader):null;var root=Allocate(reader.Reservation,false);root.Traffic=NavPhysicalMacro.Acquire(root,queue);root.PublicationIdentity=identity;root.Host=NavPhysicalMacro.Acquire(root,host);root.Authority=NavPhysicalMacro.Acquire(root,authority);if(!root.IsImmutableCaptureRoot)throw new ArgumentException("Mutable host envelope.");return root;}
         internal void ReleaseStorage(){if(released)return;released=true;Release();}
         internal override void ReleaseOwner()=>ReleaseStorage();
-        protected override void ReleaseEdges(){Host?.Release();Authority?.Release();Host=null;Authority=null;}
+        protected override void ReleaseEdges(){Traffic?.Release();Traffic=null;Host?.Release();Authority?.Release();Host=null;Authority=null;}
     }
     public sealed partial class NavigationSession
     {
@@ -572,17 +573,17 @@ namespace Spacewars.Runtime
         // requires the worker's detach/ACK before dropping all Session facades.
         internal void DestroyNavigationAuthority()
         {
-            NavigationHostRoot host;NavigationAuthorityOwners authority;NavigationRetentionBudget.Scope staged;NavCrowd retiredCrowd;NavigationInstalledExecutions retiredExecutions;
+            NavPagedList<long> bank;NavigationHostRoot host;NavigationAuthorityOwners authority;NavigationRetentionBudget.Scope staged;NavCrowd retiredCrowd;NavigationInstalledExecutions retiredExecutions;
             using(EnterTransport()){
                 if(certifiedHost!=null||hostAllocationThread!=0)throw new InvalidOperationException("Navigation destruction requires detached worker ACK.");
-                authorityOperationIdentity=checked(authorityOperationIdentity+1);staged=DetachPreparedCommandNoThrow();host=committedHostRoot;committedHostRoot=null;authority=authorityOwners;authorityOwners=null;
+                authorityOperationIdentity=checked(authorityOperationIdentity+1);staged=DetachPreparedCommandNoThrow();bank=creditBank;creditBank=null;host=committedHostRoot;committedHostRoot=null;authority=authorityOwners;authorityOwners=null;
                 while(Requests.TryDiscard(out _)){}while(Answers.TryDequeue(out _)){}
                 pending.Clear();if(ownedProbes==null)probes.Clear();probeAnswers.Clear();ClearLegacyProbePayloads();ClearBarrierAnswers();registeredRoutes?.Clear();registeredGraphKeys?.Clear();
                 groups.Clear();memberGroups.Clear();commandGroup=null;retiredExecutions=installedExecutions;installedExecutions=null;movementIdentities.Clear();
                 allocating.Clear();liveArrivalLeaseTable?.ClearRetirementLinksNoThrow();if(liveArrivalLeaseTable==null)arrivalProjectionLeases.Clear();arrivalLedger.Clear();reservations.Clear();retainedGoals.Clear();
                 PublishLegacyAdmissionNoThrow(null);retiredCrowd=Crowd;Crowd=null;geometry=navigationGeometry=null;profile=null;Requests.CloseNoThrow();Answers.CloseNoThrow();
             }
-            staged?.Discard();ownedAnswerTracking?.Release();ownedAnswerTracking=null;ownedProbes?.Release();ownedProbes=null;liveProbeAnswers?.Release();liveProbeAnswers=null;liveRegistrations?.Release();liveRegistrations=null;liveArrivalLeaseTable?.Release();liveArrivalLeaseTable=null;if(liveArrivalTables!=null){liveArrivalTables.Release();liveArrivalTables=null;}else{foreach(var attempt in arrivalAttempts.Values)ReleasePhysicalAttemptEdges(attempt);arrivalAttempts.Clear();}retiredCrowd?.ReleaseCrowdStorage();retiredExecutions?.Release();terrainNameOwners?.Release();terrainNameOwners=null;Answers.ReleaseRetention();transportOwner?.Release();transportOwner=null;host?.Release();authority?.Release();groupCommandBacking?.ReleaseStorage();groupCommandBacking=null;
+            staged?.Discard();ownedAnswerTracking?.Release();ownedAnswerTracking=null;ownedProbes?.Release();ownedProbes=null;liveProbeAnswers?.Release();liveProbeAnswers=null;liveRegistrations?.Release();liveRegistrations=null;liveArrivalLeaseTable?.Release();liveArrivalLeaseTable=null;if(liveArrivalTables!=null){liveArrivalTables.Release();liveArrivalTables=null;}else{foreach(var attempt in arrivalAttempts.Values)ReleasePhysicalAttemptEdges(attempt);arrivalAttempts.Clear();}trafficAuthority?.Release();trafficAuthority=null;retiredCrowd?.ReleaseCrowdStorage();retiredExecutions?.Release();terrainNameOwners?.Release();terrainNameOwners=null;Answers.ReleaseRetention();transportOwner?.Release();transportOwner=null;bank?.Release();host?.Release();authority?.Release();groupCommandBacking?.ReleaseStorage();groupCommandBacking=null;
         }
     }
 }

@@ -10,7 +10,7 @@ namespace Spacewars.Simulation
         private static readonly long HeaderBytes=NavStorageLayout.ObjectBytesBound(typeof(NavCrowdSpatialStorage));
         private static int Buckets(int actors){int n=1;while(n<checked(4*actors))n=checked(n*2);return n;}
         private static long ArrayBytes(int count,int width)=>checked(32L+((count*(long)width+7)/8)*8);
-        private static long Layout(int actors)=>checked(HeaderBytes+ArrayBytes(Buckets(actors),8)+3*ArrayBytes(Buckets(actors),4)+3*ArrayBytes(actors,4));
+        internal static long Layout(int actors)=>checked(HeaderBytes+ArrayBytes(Buckets(actors),8)+3*ArrayBytes(Buckets(actors),4)+3*ArrayBytes(actors,4));
         internal readonly int ActorCount;
         private readonly long[] keys;
         private readonly int[] occupied,heads,tails,next,previous,actorBuckets;

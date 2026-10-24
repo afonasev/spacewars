@@ -136,11 +136,14 @@ namespace Spacewars.Presentation
             }
             return Fail("route");
         }
-        public void PaintHangarAccesses(ThreeCrossingsMap map,Material material)
+        public void PaintHangarAccesses(ThreeCrossingsMap map,Material material)=>LoadingPreparation.Drain(PrepareHangarAccesses(map,material));
+        public System.Collections.IEnumerator PrepareHangarAccesses(ThreeCrossingsMap map,Material material)
         {
+            var budget=new LoadingFrameBudget();
             var roads=RoadMask.GetPixels();var construction=ConstructionMask.GetPixels();float extent=(float)map.HalfExtent*2;
             for(int y=0;y<MaskSize;y++)for(int x=0;x<MaskSize;x++)
             {
+                if(x==0&&budget.Expired){yield return null;budget.Restart();}
                 var p=new Vector2(((x+.5f)/MaskSize-.5f)*extent,((y+.5f)/MaskSize-.5f)*extent);int index=y*MaskSize+x;
                 foreach(var access in HangarAccesses)
                 {
@@ -163,6 +166,7 @@ namespace Spacewars.Presentation
             }
             RoadMask.SetPixels(roads);RoadMask.Apply(false,false);ConstructionMask.SetPixels(construction);ConstructionMask.Apply(false,false);
             material.SetTexture("_RoadMask",RoadMask);material.SetTexture("_ConstructionMask",ConstructionMask);
+            yield break;
         }
     }
 }

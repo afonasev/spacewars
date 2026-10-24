@@ -7,8 +7,8 @@ namespace Spacewars.Simulation
     // Presentation-safe owner policy input, never a view of PlayableDomain.
     public sealed class PlayableAiObservation
     {
-        public const int CurrentSchemaVersion=16;
-        public const int ParticipantSchemaVersion=17;
+        public const int CurrentSchemaVersion=18;
+        public const int ParticipantSchemaVersion=19;
         public int SchemaVersion{get;}
         private readonly PlayableEntitySnapshot[] entities;
         private readonly PlayableBuildingSnapshot[] buildings;
@@ -27,7 +27,7 @@ namespace Spacewars.Simulation
             SnapshotSequence=snapshot.Sequence; Tick=snapshot.Tick; Credits=snapshot.Credits; SettledIncome=snapshot.SettledIncome; IncomePerSecond=snapshot.IncomePerSecond;
             Population=snapshot.Population;ownerResearch=snapshot.OwnerResearch.ToArray(); entities=snapshot.Entities.Select(x=>new PlayableEntitySnapshot(x.Id,x.Owner,x.Kind,x.Position,x.Health,x.Moving,x.TargetId,x.HullHeading,x.TurretHeading,
                 x.Owner==owner&&x.CurrentOrder?.Owner==owner&&x.CurrentOrder.UnitId==x.Id&&x.CurrentOrder.Generation==snapshot.Generation&&x.CurrentOrder.IssuedTick<=snapshot.Tick?x.CurrentOrder:null,
-                completion:x.Owner==owner&&x.Completion?.Order.Owner==owner&&x.Completion.Order.Generation==snapshot.Generation?x.Completion:null,location:x.Owner==owner?x.Location:null,upgraded:x.Upgraded,held:x.Owner==owner&&x.Held,navigationOutcome:x.Owner==owner?x.NavigationOutcome:NavigationOutcome.Idle,orderStamp:x.Owner==owner?x.OrderStamp:null,queue:x.Owner==owner?x.Queue:null)).ToArray(); buildings=snapshot.Buildings.ToArray();
+                completion:x.Owner==owner&&x.Completion?.Order.Owner==owner&&x.Completion.Order.Generation==snapshot.Generation?x.Completion:null,location:x.Owner==owner?x.Location:null,upgraded:x.Upgraded,held:x.Owner==owner&&x.Held,navigationOutcome:x.Owner==owner?x.NavigationOutcome:NavigationOutcome.Idle,orderStamp:x.Owner==owner?x.OrderStamp:null,queue:x.Owner==owner?x.Queue:null,maxHealth:x.MaxHealth,exactHealth:x.ExactHealth,weaponSystemsLevel:x.WeaponSystemsLevel,defensiveSystemsLevel:x.DefensiveSystemsLevel)).ToArray(); buildings=snapshot.Buildings.ToArray();
             ownCenterDamage=snapshot.OwnCenterDamage.Where(x=>x.Owner==owner&&x.Generation==snapshot.Generation&&x.Tick<=snapshot.Tick&&x.Damage>0&&snapshot.Buildings.Any(b=>b.Id==x.CenterId&&b.Owner==owner&&b.Health>0&&b.Phase!=ConstructionPhase.Pending&&(b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost))&&entities.Any(e=>e.Id==x.AttackerId&&snapshot.IsHostile(e.Owner)&&e.Health>0)).Select(x=>x.Copy()).ToArray();
             routeProofs=snapshot.RouteProofs.Where(p=>p.Owner==owner&&p.Generation==snapshot.Generation&&p.Tick==snapshot.Tick&&p.GeometryRevision>0&&p.Radius>0&&p.Path.Count>0&&
                 entities.Any(e=>e.Id==p.UnitId&&e.Owner==owner&&e.Position.X==p.Origin.X&&e.Position.Z==p.Origin.Z)&&
@@ -43,6 +43,7 @@ namespace Spacewars.Simulation
         }
         public static PlayableAiObservation From(PlayableSnapshot snapshot)
         {
+            using var measured=PerformanceProfile.Measure(ProfileStage.Observation);
             if(snapshot==null)throw new ArgumentNullException(nameof(snapshot));
             return new PlayableAiObservation(snapshot);
         }

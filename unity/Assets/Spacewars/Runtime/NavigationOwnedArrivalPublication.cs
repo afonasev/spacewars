@@ -82,7 +82,7 @@ namespace Spacewars.Runtime
                             nextPending=CopyCommandMap(pending,proposals.Length,scope,operation,r=>r.StorageOwner);nextAllocating=CopyCommandMap(allocating,0,scope,operation,r=>r.StorageOwner);nextReservations=CopyCommandMap(reservations,proposals.Length,scope,operation);nextGoals=CopyCommandMap(retainedGoals,0,scope,operation);nextIdentities=CopyCommandMap(movementIdentities,0,scope,operation);nextFailures=CopyCommandMap(technicalFailures,0,scope,operation);nextLedger=CopyCommandMap(arrivalLedger,proposals.Length,scope,operation);
                             candidate=NavigationGroupCommand.CreateOwned(Requests.InstanceCapacity,proposals.Length,scope.OwnedReservation());
                             candidate.Groups=nextGroups;candidate.MemberGroups=nextMembers;candidate.Orders=nextOrders;candidate.Pending=nextPending;candidate.Allocating=nextAllocating;candidate.Reservations=nextReservations;candidate.Goals=nextGoals;candidate.Identities=nextIdentities;candidate.Failures=nextFailures;candidate.Ledger=nextLedger;candidate.OwnMaps();
-                            using(NavStorageScratch.Reserve(scope.OwnedReservation(),32L+8L*mailboxCount))foreach(var queued in Requests.CopyItemsAtRevision(mailboxRevision))candidate.AppendMailbox(queued);
+                            PrepareCommandMailbox(candidate,mailboxRevision,mailboxCount,scope,CommandMailboxKind.Arrival);
                             commit=arrivalCommitSequence;int issued=0;
                             foreach(var proposal in proposals){
                                 var intent=attempt.Intents.Single(r=>r.Request==proposal.Member.RequestSequence);
@@ -103,7 +103,7 @@ namespace Spacewars.Runtime
                                         int index=Enumerable.Range(0,version.Members.Count).Single(i=>((NavigationAuthorityMember)version.Members[i]).Data.Entity==request.Entity);
                                         var original=(NavigationAuthorityMember)version.Members[index];var data=original.Data;
                                         Crowd.TryGet(request.Entity,out var actor);
-                                        var value=new NavigationAuthorityMember.Values(data.Entity,data.Slot,data.Incarnation,data.OrderRevision,data.MobilityRevision,actor.Held?GroupMemberPhase.Held:data.FormationReleased?GroupMemberPhase.Combat:GroupMemberPhase.PendingRoute,request.Goal,request.GoalLocation.Value.Position,true,true,data.FormationReleased,data.Branch,request.Entity,data.ContactTick,data.ProgressRequest,data.Progress);
+                                        var value=new NavigationAuthorityMember.Values(data.Entity,data.Slot,data.Incarnation,data.OrderRevision,data.MobilityRevision,actor.Held?GroupMemberPhase.Held:data.FormationReleased?GroupMemberPhase.Combat:GroupMemberPhase.PendingRoute,request.Goal,request.GoalLocation.Value.Position,true,true,data.FormationReleased,data.Branch,request.Entity,data.ContactTick,data.ProgressRequest,data.Progress,data.ProgressVersion,data.ProgressOffset);
                                         var member=NavigationAuthorityMember.CreateOwned(value,original.ContactOwner,request.GoalLocation.Value.NameReference,scope.OwnedReservation());
                                         try{var next=NavigationAuthorityGroup.CopyWithMemberOwned(version,index,member,scope.OwnedReservation());version.Release();version=next;}finally{member.ReleaseStorage();}
                                     }
@@ -126,14 +126,15 @@ namespace Spacewars.Runtime
                                     work==null||history==null||intents==null||!ReferenceEquals(attempt.Work,work)||!ReferenceEquals(attempt.History,history)||!ReferenceEquals(attempt.OwnedIntents,intents)||committedHostRoot==null||
                                     !committedHostRoot.ArrivalWork.TryGetValue(attempt.Id,out var currentWork)||!ReferenceEquals(currentWork,work)||
                                     !committedHostRoot.ArrivalHistory.TryGetValue(attempt.Id,out var currentHistory)||!ReferenceEquals(currentHistory,history)||
-                                    !committedHostRoot.ArrivalIntentSets.TryGetValue(attempt.Id,out var currentIntents)||!ReferenceEquals(currentIntents,intents)||scope.IsCancelled)throw new InvalidOperationException("Arrival publication lost observed authority.");
+                                    !committedHostRoot.ArrivalIntentSets.TryGetValue(attempt.Id,out var currentIntents)||!ReferenceEquals(currentIntents,intents)||scope.IsCancelled)throw new NavigationCommandRefused("Arrival publication lost observed authority.");
+                                if(Requests.Revision!=mailboxRevision||mailboxRevision==long.MaxValue)throw new NavigationCommandRefused("Arrival mailbox source changed.");
                                 mailbox.Validate(mailboxRevision,candidate.Mailbox,candidate.MailboxCount);for(int i=0;i<candidate.BirthCount;i++)candidate.Births[i].ValidateInstall(scope);
                                 for(int i=0;i<candidate.BirthCount;i++)candidate.Births[i].ActivateNoThrow(this);
                                 retired=groupCommandBacking;groupCommandBacking=candidate.Committed;groups=nextGroups;memberGroups=nextMembers;orders=nextOrders;pending=nextPending;allocating=nextAllocating;reservations=nextReservations;retainedGoals=nextGoals;movementIdentities=nextIdentities;technicalFailures=nextFailures;arrivalLedger=nextLedger;
                                 arrivalCommitSequence=commit;attempt.Published=true;attempt.StorageOwner?.ChangedNoThrow();if(PublishAdmissionOwnerNoThrow(candidate.AdmissionOwner))candidate.AdmissionOwner=null;authorityOperationIdentity=operation+1;mailbox.InstallNoThrow(candidate.Mailbox,candidate.MailboxCount,candidate.Committed.MailboxOwners);candidate.Published=true;for(int i=0;i<candidate.BirthCount;i++)candidate.Births[i]=null;candidate.BirthCount=0;
                             }});
                         scope.ResolveCommitted();candidate.ReleaseObservationPins();retired?.ReleaseStorage();ReleaseArrivalDerivatives(attempt);PruneArrivalAttempts();SignalHost();foreach(var request in candidate.Issued){EndpointAssigned?.Invoke(request);RouteRequested?.Invoke(request);}return true;
-                    }catch(InvalidOperationException){if(candidate?.Published==true)throw;return false;}
+                    }catch(Exception error)when(NavigationCommandRefused.IsExpected(error,scope)){if(candidate?.Published==true)throw;return false;}
                     finally{candidate?.ReleaseStorage();nextGroups?.ReleaseStorage();nextMembers?.ReleaseStorage();nextOrders?.ReleaseStorage();nextPending?.ReleaseStorage();nextAllocating?.ReleaseStorage();nextReservations?.ReleaseStorage();nextGoals?.ReleaseStorage();nextIdentities?.ReleaseStorage();nextFailures?.ReleaseStorage();nextLedger?.ReleaseStorage();}
                 }
             }

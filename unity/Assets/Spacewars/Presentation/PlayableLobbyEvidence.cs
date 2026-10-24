@@ -23,7 +23,7 @@ namespace Spacewars.Presentation
             ScreenCapture.CaptureScreenshot(Path.Combine(lobbyEvidence,"02-lobby.png"));
             yield return new WaitForSecondsRealtime(.5f);
             lobbyScreen.Q<TextField>("lobby-human-name").value="Командир";
-            lobbyScreen.Q<TextField>("lobby-ai-name").value="ИИ";
+            if(lobbyScreen.Q<TextField>("lobby-ai-name")!=null)throw new InvalidOperationException("Bot name must not be editable.");
             lobbySetup.HumanColor=4;lobbySetup.AiColor=4;RefreshLobbyValidation();
             if(launchButton.enabledSelf)throw new InvalidOperationException("Duplicate color accepted.");
             ScreenCapture.CaptureScreenshot(Path.Combine(lobbyEvidence,"03-invalid.png"));

@@ -122,10 +122,22 @@ namespace Spacewars.Simulation
             foreach(var seam in Seams)Require(seam.StorageRoot);
         }
         internal long CopyScratchBytes=>checked(4096+256L*(regions.Length+edges.Length+seams.Count+exterior.Count+Transitions.Count+Seams.Count)+256L*geometry.Obstacles.Count);
-        internal static TerrainLocations CopyOwned(TerrainLocations source,NavPartitionCopy copy)
+        internal static TerrainLocations CopyOwned(TerrainLocations source,NavPartitionCopy copy,TerrainLocations shared=null)
         {
             source.RequireCopyInputs(copy.Reservation);
             if(copy.SameLedger(source.owned)){source.owned.Retain();return source;}
+            if(shared!=null){
+                if(!copy.SameLedger(shared.owned)||!source.SameArrangement(shared))throw new ArgumentException("Shared partition arrangement differs or belongs to another ledger.");
+                using(var allocation=new NavStorageAllocation(copy.Reservation.TryReserve)){
+                    allocation.Reserve(512);var storage=allocation.Register(new NavDeclarationStorage(512));
+                    var geometryCopy=copy.Declarations.Geometry(source.geometry);var value=new TerrainLocations(geometryCopy){owned=storage};storage.Facade=value;
+                    geometryCopy.StorageRoot.Retain();storage.First=geometryCopy.StorageRoot;
+                    NavOwnedStorage Share(NavOwnedStorage edge){edge.Retain();return edge;}
+                    storage.Second=Share(shared.owned.Second);storage.Third=Share(shared.owned.Third);storage.Fourth=Share(shared.owned.Fourth);storage.Fifth=Share(shared.owned.Fifth);storage.Sixth=Share(shared.owned.Sixth);storage.Seventh=Share(shared.owned.Seventh);storage.Eighth=Share(shared.owned.Eighth);
+                    value.regions=shared.regions;value.edges=shared.edges;value.byId=shared.byId;value.seams=shared.seams;value.exterior=shared.exterior;value.Transitions=shared.Transitions;value.Seams=shared.Seams;
+                    storage.Retain();return value;
+                }
+            }
             var geometry=copy.Declarations.Geometry(source.geometry);
             using(var allocation=new NavStorageAllocation(copy.Reservation.TryReserve)){
                 allocation.Reserve(512);var storage=allocation.Register(new NavDeclarationStorage(512));var value=new TerrainLocations(geometry){owned=storage};storage.Facade=value;geometry.StorageRoot.Retain();storage.First=geometry.StorageRoot;
@@ -142,11 +154,20 @@ namespace Spacewars.Simulation
     }
     public sealed partial class PartitionNavigationProvider
     {
+        // Only a refused scratch credit is recoverable admission pressure.
+        // Ownership, layout and allocation invariants still propagate normally.
+        internal sealed class CopyScratchRefused : InvalidOperationException
+        {internal CopyScratchRefused():base("Scratch exceeds prepared reservation.") {}}
+        private static IDisposable ReserveCopyScratch(INavStorageReservation reservation,long bytes)
+        {
+            if(!NavStorageScratch.TryReserve(reservation,bytes,out var lease))throw new CopyScratchRefused();
+            return lease;
+        }
         private NavDeclarationStorage owned;NavOwnedStorage INavStorageFacade.StorageRoot=>owned;internal NavOwnedStorage StorageRoot=>owned;
         internal static readonly long LayoutBase=Math.Max(512,NavStorageLayout.ObjectBytesBound(typeof(NavDeclarationStorage))+NavStorageLayout.ObjectBytesBound(typeof(PartitionNavigationProvider)));
         private PartitionNavigationProvider(PartitionNavigationProvider source,TerrainLocations locations)
         {this.locations=locations;HalfExtent=source.HalfExtent;terrainId=NavProviderCopy.Text(source.terrainId);terrainRevision=source.terrainRevision;surfaceSemanticsVersion=source.surfaceSemanticsVersion;holdBinding=NavProviderCopy.Text(source.holdBinding);Binding=NavProviderCopy.Text(source.Binding);long supportVertices=0,polygonVertices=0;foreach(var support in locations.Supports)supportVertices=checked(supportVertices+(support.Bounds.Polygon?.Vertices.Count??4));foreach(var obstacle in locations.Geometry.Obstacles)polygonVertices=checked(polygonVertices+(obstacle.Polygon?.Vertices.Count??0));EstimatedRetainedBytes=RetainedPayloadEstimate(source.Surfaces.Count,supportVertices,locations.Seams.Count,locations.Transitions.Count,locations.Geometry.Obstacles.Count,polygonVertices);}
-        internal static PartitionNavigationProvider CopyOwned(PartitionNavigationProvider source,INavStorageReservation reservation)
+        internal static PartitionNavigationProvider CopyOwned(PartitionNavigationProvider source,INavStorageReservation reservation,PartitionNavigationProvider shared=null)
         {
             if(source==null||reservation==null)throw new ArgumentNullException();
             if(source.owned!=null)NavStorageAdmission.RequireOwned(reservation,source.owned);
@@ -157,15 +178,22 @@ namespace Spacewars.Simulation
                 if(surface.Area.Boundary.StorageRoot!=null)NavStorageAdmission.RequireOwned(reservation,surface.Area.Boundary.StorageRoot);
                 foreach(var blocker in surface.Area.Blockers)if(blocker.Polygon?.StorageRoot!=null)NavStorageAdmission.RequireOwned(reservation,blocker.Polygon.StorageRoot);
             }
+            if(shared!=null){NavStorageAdmission.RequireOwned(reservation,shared.owned);if(!source.SameArrangement(shared))throw new ArgumentException("Partition sharing requires the same full arrangement.");}
             long scratch=checked(source.locations.CopyScratchBytes+4096+256L*source.Surfaces.Count);
             foreach(var surface in source.Surfaces)scratch=checked(scratch+4096+256L*surface.Area.Blockers.Count);
-            using(NavStorageScratch.Reserve(reservation,scratch))
+            using(ReserveCopyScratch(reservation,scratch))
             using(var allocation=new NavStorageAllocation(reservation.TryReserve)){
                 long bytes=checked(LayoutBase+NavProviderCopy.TextBytes(source.Binding)+NavProviderCopy.TextBytes(source.terrainId)+NavProviderCopy.TextBytes(source.holdBinding));allocation.Reserve(bytes);var storage=allocation.Register(new NavDeclarationStorage(bytes));var copy=new NavPartitionCopy(reservation);
-                var locations=TerrainLocations.CopyOwned(source.locations,copy);storage.First=locations.StorageRoot;var value=new PartitionNavigationProvider(source,locations){owned=storage};storage.Facade=value;
+                var locations=TerrainLocations.CopyOwned(source.locations,copy,shared?.locations);storage.First=locations.StorageRoot;var value=new PartitionNavigationProvider(source,locations){owned=storage};storage.Facade=value;
+                if(shared!=null){
+                    shared.owned.Second.Retain();storage.Second=shared.owned.Second;value.Surfaces=shared.Surfaces;
+                    shared.owned.Third.Retain();storage.Third=shared.owned.Third;value.bySurface=shared.bySurface;
+                    shared.owned.Fourth.Retain();storage.Fourth=shared.owned.Fourth;value.Portals=shared.Portals;
+                    value.Seams=locations.Seams;using(ReserveCopyScratch(reservation,8192))NavPhysicalDigestStream.Require(value.WriteBindingTranscript,source.Binding);storage.Retain();return value;
+                }
                 var surfaces=NavRetainedArray<NavLayerSurface>.Copy(new NavMappedCopy<NavLayerSurface>(source.Surfaces,copy.Declarations.Surface),reservation.TryReserve);storage.Second=surfaces;value.Surfaces=surfaces;
                 var index=NavCowDictionary<string,NavLayerSurface>.CreateOwned(reservation,StringComparer.Ordinal,false);storage.Third=index;foreach(var surface in surfaces)index.Add(surface.Id,surface);index.Seal();value.bySurface=index;
-                var portals=NavRetainedArray<NavLayerPortal>.Copy(source.Portals,reservation.TryReserve);storage.Fourth=portals;value.Portals=portals;value.Seams=locations.Seams;using(NavStorageScratch.Reserve(reservation,8192))NavPhysicalDigestStream.Require(value.WriteBindingTranscript,source.Binding);storage.Retain();return value;
+                var portals=NavRetainedArray<NavLayerPortal>.Copy(source.Portals,reservation.TryReserve);storage.Fourth=portals;value.Portals=portals;value.Seams=locations.Seams;using(ReserveCopyScratch(reservation,8192))NavPhysicalDigestStream.Require(value.WriteBindingTranscript,source.Binding);storage.Retain();return value;
             }
         }
     }

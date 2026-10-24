@@ -3,11 +3,11 @@ namespace Spacewars.Simulation
 {
     public sealed partial class LayeredNavigationScheduler : INavPhysicalBody
     {
-        NavPhysicalTag INavPhysicalBody.PhysicalTag=>new NavPhysicalTag(NavPhysicalStorageKind.Scheduler);
+        NavPhysicalTag INavPhysicalBody.PhysicalTag=>new NavPhysicalTag(demandV3?NavPhysicalStorageKind.DemandSchedulerV3:demandV2?NavPhysicalStorageKind.DemandSchedulerV2:NavPhysicalStorageKind.Scheduler,value:boundedMode?NavPhysicalValueKind.CertifiedGroupCorridor115V1:demandTerminalCost?NavPhysicalValueKind.TerminalCostPolicyV13:demandOriginShadow?NavPhysicalValueKind.OriginShadowPolicyV12:demandTerminalCorner?NavPhysicalValueKind.TerminalCornerPolicyV11:demandTerminalRectangle?NavPhysicalValueKind.TerminalRectanglePolicyV10:demandRectangle?NavPhysicalValueKind.RectangleOriginsPolicyV9:demandCertified?NavPhysicalValueKind.CertifiedLazyPartitionPolicyV8:demandLazy?NavPhysicalValueKind.LazyPartitionPolicyV7:demandV6?NavPhysicalValueKind.ExactAstarPolicyV6:demandV5?NavPhysicalValueKind.ExactCostPolicyV5:demandV4?NavPhysicalValueKind.SeamBoundPolicyV4:NavPhysicalValueKind.None);
         void INavPhysicalBody.WritePhysicalBody(NavPhysicalBodyWriter writer)
         {
             if(!IsImmutableCaptureRoot||rootReservation!=null||preparingJob!=null||StorageBytes!=NavStorageLayout.Charge(1024)||NavStorageLayout.ObjectBytesBound(GetType())>1024)throw new ArgumentException("Physical scheduler callback/layout contradiction.");
-            writer.Output.Write(lastEpoch);
+            if(boundedMode)writer.Output.Write(corridorBookkeeping);if(demandV5)writer.Output.Write(demandV4);writer.Output.Write(lastEpoch);
             writer.Output.Write(logicalGraph);
             writer.Output.Write(physicalGraph);
             writer.Output.Write(logicalField);
@@ -51,14 +51,18 @@ namespace Spacewars.Simulation
             NavPhysicalMacro.WriteEdge(writer,this,cacheCompilerRoot,true);
             NavPhysicalMacro.WriteEdge(writer,this,graphRecipeStorage,true);
             NavPhysicalMacro.WriteEdge(writer,this,attemptRecipeStorage,true);
-            NavPhysicalMacro.WriteEdge(writer,this,attemptBindingStorage,true);
+            NavPhysicalMacro.WriteEdge(writer,this,attemptBindingStorage,true);if(demandV2)NavPhysicalMacro.WriteEdge(writer,this,demandCatalog,true);if(demandLazy)NavPhysicalMacro.WriteEdge(writer,this,lazyCatalog,true);if(boundedMode)NavPhysicalMacro.WriteEdge(writer,this,corridorDonor,true);
             cachedGraphKeyReference.Validate(cachedGraphKey,this);cachedGraphKeyReference.Write(writer);
             if(!ReferenceEquals(attemptKey,attemptBindingStorage?.Value))throw new ArgumentException("Physical scheduler attempt binding alias contradiction.");
         }
         private LayeredNavigationScheduler(bool physicalBirth):base(1024){rootFrozen=true;}
-        internal static LayeredNavigationScheduler ReadPhysicalBody(NavPhysicalBodyReader reader)
+        internal static LayeredNavigationScheduler ReadPhysicalBody(NavPhysicalBodyReader reader,bool v2=false,bool v3=false,bool v4=false,bool v5=false,bool v6=false,bool lazy=false,bool certified=false,bool rectangular=false,bool terminalRectangle=false,bool terminalCorner=false,bool originShadow=false,bool terminalCost=false,bool bounded=false)
         {
-            long lastEpoch=reader.Input.ReadInt64();
+            if(terminalCost&&!originShadow)throw new ArgumentException("Terminal cost scheduler policy flags are incomplete.");
+            if(originShadow&&!terminalCorner)throw new ArgumentException("Origin shadow scheduler policy flags are incomplete.");
+            if(terminalCorner&&!terminalRectangle)throw new ArgumentException("Corner scheduler policy flags are incomplete.");
+            if(terminalRectangle&&!(rectangular&&certified&&lazy&&v6&&v5&&v3&&v2))throw new ArgumentException("Terminal rectangle scheduler policy flags are incomplete.");
+            long paidBookkeeping=bounded?reader.Input.ReadInt64():0;if(paidBookkeeping<0)throw new ArgumentException("Invalid corridor paid bookkeeping.");if(v5)v4=NavPhysicalMacro.ReadBoolean(reader);long lastEpoch=reader.Input.ReadInt64();
             long logicalGraph=reader.Input.ReadInt64();
             long physicalGraph=reader.Input.ReadInt64();
             long logicalField=reader.Input.ReadInt64();
@@ -103,11 +107,12 @@ namespace Spacewars.Simulation
             var graphRecipeStorage=NavPhysicalMacro.ReadEdge<NavDeclarationStorage>(reader,true);
             var attemptRecipeStorage=NavPhysicalMacro.ReadEdge<NavDeclarationStorage>(reader,true);
             var attemptBindingStorage=NavPhysicalMacro.ReadEdge<NavOwnedText>(reader,true);
-            var key=NavNameReference.Read(reader);
+            var catalog=v2?NavPhysicalMacro.ReadEdge<NavDemandQueryCatalog>(reader,true):null;var partial=lazy?NavPhysicalMacro.ReadEdge<NavLazyPartitionStore>(reader,true):null;var donor=bounded?NavPhysicalMacro.ReadEdge<NavDemandQueryWork>(reader,true):null;var key=NavNameReference.Read(reader);
             if(lastEpoch<-1||logicalGraph<0||physicalGraph<0||logicalField<0||physicalField<0||connectorWork<0||cacheHits<0||graphBuilds<0||fieldBuilds<0||cancelled<0||evictions<0||maintenanceWork<0||queuedBytes<0||readyBytes<0||providerBytes<0||peakRetainedBytes<0||peakQueueAge<0||externalReservationBytes<0||cachedGraphBytes<0||cacheBytes<0||peakCacheBytes<0||cachedGraphWork<0||graphQuota<0||fieldQuota<0||connectorQuota<0||bookkeepingQuota<0||maintenanceQuota<0||peakQueue<0||peakLabels<0||peakFrontier<0||externalReservationBytes>MaxRetainedBytes||graphRecipeStorage!=null&&!(graphRecipeStorage.Facade is NavScheduledRequest)||attemptRecipeStorage!=null&&!(attemptRecipeStorage.Facade is NavScheduledRequest)||key.Owner!=null&&key.Role!=NavNameRole.RecipeCompileKey||NavStorageLayout.ObjectBytesBound(typeof(LayeredNavigationScheduler))>1024)throw new ArgumentException("Physical scheduler dimensions/key/layout contradiction.");
             using(var allocation=new NavStorageAllocation(reader.Reservation.TryReserve)){
                 allocation.Reserve(1024);var value=allocation.Register(new LayeredNavigationScheduler(true){
 lastEpoch=lastEpoch,logicalGraph=logicalGraph,physicalGraph=physicalGraph,logicalField=logicalField,physicalField=physicalField,connectorWork=connectorWork,cacheHits=cacheHits,graphBuilds=graphBuilds,fieldBuilds=fieldBuilds,cancelled=cancelled,evictions=evictions,maintenanceWork=maintenanceWork,queuedBytes=queuedBytes,readyBytes=readyBytes,providerBytes=providerBytes,peakRetainedBytes=peakRetainedBytes,peakQueueAge=peakQueueAge,externalReservationBytes=externalReservationBytes,cachedGraphBytes=cachedGraphBytes,cacheBytes=cacheBytes,peakCacheBytes=peakCacheBytes,cachedGraphWork=cachedGraphWork,graphQuota=graphQuota,fieldQuota=fieldQuota,connectorQuota=connectorQuota,bookkeepingQuota=bookkeepingQuota,maintenanceQuota=maintenanceQuota,peakQueue=peakQueue,peakLabels=peakLabels,peakFrontier=peakFrontier,sessionOwnsProviders=sessionOwnsProviders,RetentionBlocked=RetentionBlocked});
+                value.corridorBookkeeping=paidBookkeeping;value.corridorDonor=NavPhysicalMacro.Acquire(value,donor);value.boundedMode=bounded;value.demandV2=v2;value.demandV3=v3;value.demandV4=v4;value.demandV5=v5;value.demandV6=v6;value.demandLazy=lazy;value.demandCertified=certified;value.demandRectangle=rectangular;value.demandTerminalRectangle=terminalRectangle;value.demandTerminalCorner=terminalCorner;value.demandOriginShadow=originShadow;value.demandTerminalCost=terminalCost;value.lazyCatalog=NavPhysicalMacro.Acquire(value,partial);value.demandCatalog=NavPhysicalMacro.Acquire(value,catalog);
                 value.jobs=NavPhysicalMacro.Acquire(value,jobs);
                 value.jobsByKey=NavPhysicalMacro.Acquire(value,jobsByKey);
                 value.subscribers=NavPhysicalMacro.Acquire(value,subscribers);
@@ -131,12 +136,16 @@ lastEpoch=lastEpoch,logicalGraph=logicalGraph,physicalGraph=physicalGraph,logica
             long queued=0,resultBytes=0;int active=0;
             foreach(var row in jobs.Entries){var job=row.Value;if(job==null||job.QueueNode!=row.Key||job.Subscribers.Count==0||!jobsByKey.TryGetValue(job.Request.ArtifactKey,out long id)||id!=row.Key)throw new ArgumentException("Physical scheduler job queue/key contradiction.");
                 foreach(var entry in job.Subscribers.Entries){var request=entry.Value;if(request==null||request.ArtifactKey!=job.Request.ArtifactKey||!subscribers.TryGetValue(request.Subscription.StableKey,out var link)||link.Item1!=row.Key||link.Item2!=entry.Key||!submittedEpoch.TryGetValue(request.Subscription.StableKey,out long epoch)||epoch<0||epoch>Math.Max(0,lastEpoch)||!providerRefs.Contains(request.Provider))throw new ArgumentException("Physical scheduler subscription link/epoch/provider contradiction.");queued=checked(queued+EstimateRequest(request));active++;}
+                if(job.Phase==JobPhase.PartialFieldProbePaid&&(!ValidPartialProbeJob(job)||connectorWork==0||lastEpoch<0))throw new ArgumentException("Physical paid probe has no exact accounted job.");
                 if(job.GraphProviderOwner!=null&&!providerRefs.Contains(job.GraphProviderOwner.Provider))throw new ArgumentException("Missing physical job provider reference.");
             }
             foreach(var pair in jobsByKey){if(!jobs.TryGetValue(pair.Value,out var job)||!ExactPhysicalName(pair.Key,NavNameKey.Artifact(job.Request)))throw new ArgumentException("Physical scheduler reverse job key selector contradiction.");}
             foreach(var pair in subscribers){if(!jobs.TryGetValue(pair.Value.Item1,out var job)||!job.Subscribers.TryGetValue(pair.Value.Item2,out var request)||!ExactPhysicalName(pair.Key,NavNameKey.Subscription(request.Subscription)))throw new ArgumentException("Physical scheduler reverse subscriber selector contradiction.");}
             foreach(var pair in submittedEpoch){if(!subscribers.TryGetValue(pair.Key,out var link)||!ExactPhysicalName(pair.Key,NavNameKey.Subscription(jobs[link.Item1].Subscribers[link.Item2].Subscription)))throw new ArgumentException("Physical scheduler epoch selector contradiction.");}
             foreach(var result in ready)resultBytes=checked(resultBytes+EstimateCompletion(result));if(active!=subscribers.Count||queued!=queuedBytes||resultBytes!=readyBytes)throw new ArgumentException("Physical scheduler diagnostic queue bytes contradiction.");
+            if(corridorDonor!=null&&(!boundedMode||!corridorDonor.CanDonateCorridor||attemptKey==null||!providerRefs.Contains(corridorDonor.BoundedRecipe.Provider)))throw new ArgumentException("Corridor cache owner/provider mismatch.");
+            if(lazyCatalog!=null&&(!demandLazy||attemptKey==null||!providerRefs.Contains(lazyCatalog.Recipe.Provider)))throw new ArgumentException("Partial store cache owner/provider mismatch.");
+            if(demandCatalog!=null&&(!demandV2||attemptKey==null||!providerRefs.Contains(demandCatalog.Recipe.Provider)))throw new ArgumentException("Demand catalog cache owner/provider mismatch.");
             long cache=cachedGraphBytes+(artifactOwner==null?0:OwnerMetadataBytes);
             foreach(var row in lru.Entries){var field=row.Value;if(field==null||!cachedFields.TryGetValue(field.Key,out long id)||id!=row.Key)throw new ArgumentException("Physical scheduler LRU link contradiction.");cache=checked(cache+field.Bytes);}
             foreach(var pair in cachedFields){if(!lru.TryGetValue(pair.Value,out var field)||!ExactPhysicalName(pair.Key,NavNameKey.Artifact(field.Recipe)))throw new ArgumentException("Physical scheduler cache selector contradiction.");}
@@ -144,7 +153,7 @@ lastEpoch=lastEpoch,logicalGraph=logicalGraph,physicalGraph=physicalGraph,logica
             if(cacheGraphRoot==null){if(cacheCompilerRoot!=null||cachedGraphKey!=null||graphRecipeStorage!=null||cachedGraphWork!=0||cachedGraphBytes!=0||lru.Count!=0)throw new ArgumentException("Physical scheduler missing graph cache root.");}
             else {var recipe=graphRecipe??artifactOwner;if(recipe==null||recipe.CompileKey!=cachedGraphKey||cacheCompilerRoot!=null&&!ReferenceEquals(cacheCompilerRoot.Graph,cacheGraphRoot)||RetainedGraphBytes(cacheGraphRoot,recipe)!=cachedGraphBytes)throw new ArgumentException("Physical scheduler cache graph/recipe/charge contradiction.");}
             if(attemptKey==null&&artifactOwner!=null||artifactOwner!=null&&!providerRefs.Contains(artifactOwner.Provider))throw new ArgumentException("Physical scheduler attempt ownership contradiction.");
-            foreach(var entry in providerRefs.PhysicalEntries){int references=ReferenceEquals(artifactOwner?.Provider,entry.Provider)?1:0;foreach(var job in jobs){if(ReferenceEquals(job.GraphProviderOwner?.Provider,entry.Provider))references++;foreach(var request in job.Subscribers)if(ReferenceEquals(request.Provider,entry.Provider))references++;}if(references!=entry.Count)throw new ArgumentException("Physical scheduler provider logical multiplicity contradiction.");}
+            foreach(var entry in providerRefs.PhysicalEntries){int references=ReferenceEquals(artifactOwner?.Provider,entry.Provider)?1:0;if(ReferenceEquals(demandCatalog?.Recipe.Provider,entry.Provider))references++;if(ReferenceEquals(lazyCatalog?.Recipe.Provider,entry.Provider))references++;if(ReferenceEquals(corridorDonor?.BoundedRecipe.Provider,entry.Provider))references++;foreach(var job in jobs){if(ReferenceEquals(job.GraphProviderOwner?.Provider,entry.Provider))references++;foreach(var request in job.Subscribers)if(ReferenceEquals(request.Provider,entry.Provider))references++;}if(references!=entry.Count)throw new ArgumentException("Physical scheduler provider logical multiplicity contradiction.");}
         }
         private static bool ExactPhysicalName(NavNameKey a,NavNameKey b)=>ReferenceEquals(a.Value,b.Value)&&ReferenceEquals(a.Reference.Owner,b.Reference.Owner)&&a.Reference.Role==b.Reference.Role&&a.Reference.Index==b.Reference.Index;
     }

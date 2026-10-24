@@ -42,10 +42,13 @@ namespace Spacewars.Runtime
         {
             foreach(var x in launches.ToArray())
             {
-                var producer=o.Buildings.FirstOrDefault(b=>b.Owner==o.Owner&&b.SiteId==x.Build.SiteId&&b.SlotId==x.Build.SlotId&&b.Kind==PlayableBuildingKind.Factory&&b.Health>0&&b.PrivateState?.Lifecycle?.Selling!=true);
+                var producer=o.Buildings.FirstOrDefault(b=>b.Owner==o.Owner&&b.SiteId==x.Build.SiteId&&b.SlotId==x.Build.SlotId&&b.Kind==PlayableBuildingKind.Factory&&(b.Health>0||b.Phase==ConstructionPhase.Pending)&&b.PrivateState?.Lifecycle?.Selling!=true);
                 if(o.Tick>x.Expires||x.Applied&&producer==null||!o.Sites.Any(s=>s.Site.Id==x.Build.SiteId&&s.Owner==o.Owner))
                 {Drop(x,budget);continue;}
-                if(x.Applied&&producer!=null)
+                // Paid Pending foundations have no health yet. Keep their BuildAt
+                // target until construction starts; production target validation
+                // correctly requires a live producer and must not be weakened.
+                if(x.Applied&&producer!=null&&producer.Health>0)
                 {
                     if(x.Producer!=0&&x.Producer!=producer.Id){Drop(x,budget);continue;}
                     if(x.Producer==0)

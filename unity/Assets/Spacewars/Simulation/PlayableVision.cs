@@ -27,16 +27,17 @@ namespace Spacewars.Simulation
 
     public sealed class TeamVisionSnapshot
     {
+        private readonly VisionSource[] sourceValues;
         internal TeamVisionSnapshot(int team,long revision,long fogRevision,double halfWidth,double halfDepth,double cellSize,VisionSource[] sources,long[] cells,byte[] coverage,KnownBuilding[] memory)
         {
             Team=team;Revision=revision;FogRevision=fogRevision;HalfWidth=halfWidth;HalfDepth=halfDepth;CellSize=cellSize;
-            Sources=Array.AsReadOnly((VisionSource[])sources.Clone());DiscoveredCells=Array.AsReadOnly((long[])cells.Clone());
+            sourceValues=(VisionSource[])sources.Clone();Sources=Array.AsReadOnly(sourceValues);DiscoveredCells=Array.AsReadOnly((long[])cells.Clone());
             Coverage=Array.AsReadOnly((byte[])coverage.Clone());KnownBuildings=Array.AsReadOnly((KnownBuilding[])memory.Clone());
         }
         public int Team{get;} public long Revision{get;} public long FogRevision{get;} public double HalfWidth{get;} public double HalfDepth{get;} public double CellSize{get;}
         public IReadOnlyList<VisionSource> Sources{get;} public IReadOnlyList<long> DiscoveredCells{get;}
         public IReadOnlyList<byte> Coverage{get;} public IReadOnlyList<KnownBuilding> KnownBuildings{get;}
-        public bool IsVisible(NavPoint p)=>PlayableVision.Visible(Sources,p);
+        public bool IsVisible(NavPoint p)=>PlayableVision.VisibleArray(sourceValues,p);
     }
 
     // One owner-thread instance per team. No renderer, terrain or camera dependency.
@@ -53,6 +54,11 @@ namespace Spacewars.Simulation
         private readonly byte[] coverage=new byte[RasterResolution*RasterResolution];
         private long revision;
         private TeamVisionSnapshot cached;
+        // Derived owner-thread inputs only. Their storage is bounded by this vision's
+        // largest source/building input sets; it is never serialized or exposed to callers.
+        private readonly List<VisionSource> refreshInput=new List<VisionSource>();
+        private VisionSource[] lastRefreshSources;
+        private KnownBuilding[] lastRefreshBuildings;
         public PlayableVision(int team,double halfWidth,double halfDepth,double cellSize,double feather)
         {
             if(!Positive(halfWidth)||!Positive(halfDepth)||!Positive(cellSize)||!Positive(feather))throw new ArgumentException("Invalid vision bounds.");
@@ -60,16 +66,29 @@ namespace Spacewars.Simulation
         }
         private static bool Positive(double n)=>VisionSource.Finite(n)&&n>0;
         public long CoverageUpdates{get;private set;}
-        public bool IsVisible(NavPoint point)=>Visible(sources,point);
+        public bool IsVisible(NavPoint point)=>VisibleArray(sources,point);
         public bool IsDiscovered(NavPoint point)=>VisionSource.Finite(point.X)&&VisionSource.Finite(point.Z)&&Math.Abs(point.X)<=halfWidth&&Math.Abs(point.Z)<=halfDepth&&discovered.Contains(CellKey((int)Math.Floor(point.X/cellSize),(int)Math.Floor(point.Z/cellSize)));
         public static long CellKey(int x,int z)=>((long)x<<32)|(uint)z;
         public static bool Visible(IReadOnlyList<VisionSource> current,NavPoint point)
         {
+            if(current is VisionSource[] array)return VisibleArray(array,point);
             if(!VisionSource.Finite(point.X)||!VisionSource.Finite(point.Z))return false;
             foreach(var s in current)
             {
                 double x=point.X-s.Position.X,z=point.Z-s.Position.Z;
                 // Numerical tolerance mirrors the reference point test, not a tunable radius.
+                if(x*x+z*z<=(s.Radius+0.0001)*(s.Radius+0.0001))return true;
+            }
+            return false;
+        }
+        // Live vision and detached snapshots own these arrays. Avoid interface
+        // enumeration per query without exposing storage or changing generic callers.
+        internal static bool VisibleArray(VisionSource[] current,NavPoint point)
+        {
+            if(!VisionSource.Finite(point.X)||!VisionSource.Finite(point.Z))return false;
+            foreach(var s in current)
+            {
+                double x=point.X-s.Position.X,z=point.Z-s.Position.Z;
                 if(x*x+z*z<=(s.Radius+0.0001)*(s.Radius+0.0001))return true;
             }
             return false;
@@ -95,7 +114,13 @@ namespace Spacewars.Simulation
         }
         public void Refresh(IEnumerable<VisionSource> nextSources,IReadOnlyList<KnownBuilding> actualBuildings)
         {
-            var next=nextSources.OrderBy(s=>s.Position.X).ThenBy(s=>s.Position.Z).ThenBy(s=>s.Radius).ToArray();
+            refreshInput.Clear();foreach(var source in nextSources)refreshInput.Add(source);
+            if(SameRefreshInputs(actualBuildings)){
+                using var reused=PerformanceProfile.Measure(ProfileStage.VisionReuse);return;
+            }
+            using var measured=PerformanceProfile.Measure(ProfileStage.VisionRefresh);
+            var input=refreshInput.ToArray();
+            var next=input.OrderBy(s=>s.Position.X).ThenBy(s=>s.Position.Z).ThenBy(s=>s.Radius).ToArray();
             bool changed=next.Length!=sources.Length;
             for(int i=0;!changed&&i<next.Length;i++)changed=next[i].Position.X!=sources[i].Position.X||next[i].Position.Z!=sources[i].Position.Z||next[i].Radius!=sources[i].Radius;
             if(changed){var previous=sources;sources=next;Explore(previous);}
@@ -110,6 +135,20 @@ namespace Spacewars.Simulation
             foreach(var prior in known.Values.ToArray())
                 if(IsVisible(prior.Position)&&!confirmed.Contains(prior.Id)){known.Remove(prior.Id);memoryChanged=true;}
             if(changed||memoryChanged){revision++;cached=null;}
+            lastRefreshSources=input;lastRefreshBuildings=actualBuildings.ToArray();
+        }
+        private bool SameRefreshInputs(IReadOnlyList<KnownBuilding> buildings)
+        {
+            if(lastRefreshSources==null||lastRefreshBuildings==null||refreshInput.Count!=lastRefreshSources.Length||buildings.Count!=lastRefreshBuildings.Length)return false;
+            for(int i=0;i<refreshInput.Count;i++){
+                var a=refreshInput[i];var b=lastRefreshSources[i];
+                if(a.Position.X!=b.Position.X||a.Position.Z!=b.Position.Z||a.Radius!=b.Radius)return false;
+            }
+            for(int i=0;i<buildings.Count;i++){
+                var a=buildings[i];var b=lastRefreshBuildings[i];
+                if(a==null||b==null||!Same(a,b))return false;
+            }
+            return true;
         }
         private static bool Same(KnownBuilding a,KnownBuilding b)=>a.Id==b.Id&&a.Team==b.Team&&a.Owner==b.Owner&&a.Kind==b.Kind&&a.Position.X==b.Position.X&&a.Position.Z==b.Position.Z&&a.Heading==b.Heading&&a.RefineryUpgraded==b.RefineryUpgraded;
         private void Explore(VisionSource[] previous)
@@ -158,7 +197,7 @@ namespace Spacewars.Simulation
         {
             if(phase==ConstructionPhase.Pending)return 0;
             double radius;
-            switch(kind){case PlayableBuildingKind.ScientificCenter:radius=p.ScienceVisionRange;break;case PlayableBuildingKind.Headquarters:radius=p.HeadquartersVisionRange;break;case PlayableBuildingKind.Outpost:radius=p.OutpostVisionRange;break;case PlayableBuildingKind.Factory:radius=p.FactoryVisionRange;break;case PlayableBuildingKind.Refinery:radius=p.RefineryVisionRange;break;case PlayableBuildingKind.Mine:radius=p.MineVisionRange;break;default:throw new ArgumentOutOfRangeException(nameof(kind));}
+            switch(kind){case PlayableBuildingKind.Hangar:radius=p.HangarVisionRange;break;case PlayableBuildingKind.ScientificCenter:radius=p.ScienceVisionRange;break;case PlayableBuildingKind.Headquarters:radius=p.HeadquartersVisionRange;break;case PlayableBuildingKind.Outpost:radius=p.OutpostVisionRange;break;case PlayableBuildingKind.Factory:radius=p.FactoryVisionRange;break;case PlayableBuildingKind.Refinery:radius=p.RefineryVisionRange;break;case PlayableBuildingKind.Mine:radius=p.MineVisionRange;break;default:throw new ArgumentOutOfRangeException(nameof(kind));}
             return phase==ConstructionPhase.Ready?radius:radius*p.ConstructionVisionMultiplier;
         }
     }

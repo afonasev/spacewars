@@ -6,12 +6,14 @@ namespace Spacewars.Presentation
     {
         public static readonly Color FoundryGround=new Color(.49f,.43f,.36f),FoundryRoad=new Color(.46f,.36f,.28f),FoundryRock=new Color(.15f,.14f,.14f),FoundryLava=new Color(1,.25f,.035f);
         private Texture2D foundryRoadMask,foundryLavaHeat,foundryRouteMask;
-        private void CreateFoundry(FoundryMap map)
+        private System.Collections.IEnumerator CreateFoundry(FoundryMap map)
         {
+            var budget=new LoadingFrameBudget();
             var settings=FoundrySurfaceProfile.Load();settings.Apply(material);
             foreach(var support in map.Supports)MapPrism(support.Id,support.Bounds,-2,support.Height,FoundryGround,support.HeightAt,support.Height>=map.UpperHeight?7:6);
             foreach(var rock in FoundryTerrainMesh.Ridges(map))
             {
+                if(budget.Expired){yield return null;budget.Restart();}
                 var obj=new GameObject("Connected layered basalt / bank");obj.transform.SetParent(root,false);
                 var mesh=FoundryTerrainMesh.Rock(rock,settings,map.Lava,map.SurfaceHeight);terrainMeshes.Add(mesh);obj.AddComponent<MeshFilter>().sharedMesh=mesh;
                 var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=material;
@@ -29,6 +31,7 @@ namespace Spacewars.Presentation
             }
             foreach(var lava in map.Lava)
             {
+                if(budget.Expired){yield return null;budget.Restart();}
                 float level=FoundryFissureMesh.Level(map,lava,settings);
                 MapPrism("Lava river / fissure",lava,level-.04f,level,FoundryLava,null,11); // Thin presentation fluid below the exposed rim.
             }
@@ -43,6 +46,7 @@ namespace Spacewars.Presentation
             var connections=FoundryRouteFinish.Connections(map);
             for(int z=0;z<resolution;z++)for(int x=0;x<resolution;x++)
             {
+                if(x==0&&budget.Expired){yield return null;budget.Restart();}
                 var q=new NavPoint(((x+.5)/resolution*2-1)*map.HalfExtent,((z+.5)/resolution*2-1)*map.HalfExtent);
                 float irregular=.75f+.5f*Mathf.PerlinNoise((float)q.X/settings.depositScale,(float)q.Z/settings.depositScale);
                 float approach=FoundryTerrainMesh.RoadCoverage(map,q,settings),amount=approach;
@@ -68,6 +72,7 @@ namespace Spacewars.Presentation
             foundryLavaHeat=new Texture2D(resolution,resolution,TextureFormat.RGBA32,false,true){name="Foundry molten center / cooled rim",wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};foundryLavaHeat.SetPixels(lavaPixels);foundryLavaHeat.Apply();material.SetTexture("_FoundryLavaHeat",foundryLavaHeat);
             foreach(var site in sites)
             {
+                if(budget.Expired){yield return null;budget.Restart();}
                 double extent=FoundryTerrainMesh.SiteEnvelope(site,profile);var p=site.Position;
                 var pad=FoundryTerrainMesh.SitePad(site,profile,settings);
                 // Fixed mesh-layer offset stays below the existing live build/capture pad surfaces.

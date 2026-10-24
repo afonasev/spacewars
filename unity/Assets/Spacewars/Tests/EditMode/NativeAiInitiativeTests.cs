@@ -28,7 +28,18 @@ namespace Spacewars.Tests.EditMode
         }
         private static AiArmyRegistry Registry()=>new AiArmyRegistry("player-1",71,AiProfile.Initial,AiDifficulty.Fighter);
         private static PlayableAiAction Plan(AiArmyPlanner p,AiArmyRegistry r,PlayableAiObservation o)=>p.Propose(o,Opening(),P,AiProfile.Initial,r);
-        private static PlayableAiTraceRecord Receipt(PlayableAiAction a,PlayableAiDeliveryStatus status,long tick)=>new PlayableAiTraceRecord("fixture",a.ActionId,tick,1,tick,status,PlayableCommandStatus.Applied,"fixture",ownerId:a.PlayerId,sourceIdentity:a.SourceIdentity,receiptIdentity:new AiReceiptIdentity(71,a.PlayerId,1,1));
+        private static PlayableAiTraceRecord Receipt(PlayableAiAction a,PlayableAiDeliveryStatus status,long tick)=>new PlayableAiTraceRecord("fixture",a.ActionId,tick,1,tick,status,PlayableCommandStatus.Applied,"fixture",ownerId:a.PlayerId,sourceIdentity:a.SourceIdentity,receiptIdentity:new AiReceiptIdentity(71,a.PlayerId,1,1),policy:AiArmyPlanner.Policy,kind:a.Kind);
+        private static PlayableAiObservation ObjectiveObservation(long tick,int pendingSite=0,PlayableCommandKind pendingKind=PlayableCommandKind.AttackMove,NavPoint? pendingTarget=null,bool pendingViable=false,long pendingAction=0)
+        {
+            var point=new NavPoint(8,0);var seed=Opening().MatchSeed;
+            var units=Enumerable.Range(1,3).Select(id=>new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(0,id*.1),100,false,0,0,0,
+                queue:pendingSite==0?null:new PlayableUnitQueueSnapshot(null,new PlayableQueuedOrderSnapshot(100,10,1,1,pendingKind,new NavLocation(pendingTarget??point,NavLocation.FlatSurface),0,pendingSite,pendingAction),Array.Empty<PlayableQueuedOrderSnapshot>(),null,pendingViable))).ToArray();
+            var buildings=new[]{new PlayableBuildingSnapshot(50,PlayableOwner.Player,PlayableBuildingKind.Factory,new NavPoint(-10,0),100,1,0,0,default),new PlayableBuildingSnapshot(51,PlayableOwner.Player,PlayableBuildingKind.Refinery,new NavPoint(-15,0),100,1,0,0,default)};
+            var objective=new PlayablePublicScoutObjective(77,point,PlayablePublicScoutObjectiveRole.PossibleEnemyStart,true);
+            var routes=units.Select(u=>new PlayableRouteProof(u.Id,u.Owner,71,tick,1,u.Position,P.TankCollisionRadius,PlayableRouteTargetKind.PublicObjective,77,point,point,new[]{point})).ToArray();
+            return PlayableAiObservation.From(new PlayableSnapshot(P.ProfileId,P.Revision,71,seed,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,
+                publicScoutObjectives:new[]{objective},routeProofs:routes));
+        }
         [Test] public void SafePressure_RequiresCommitmentsViableForceAndActualPermittedRoutes()
         {
             var p=new AiArmyPlanner("player-1",71);var r=Registry();
@@ -54,6 +65,35 @@ namespace Spacewars.Tests.EditMode
             p.Observe(Observation(15,x:1,health:90,order:PlayableTacticalOrderKind.Attack),r,AiProfile.Initial);Assert.AreEqual(15,p.Capture().ProgressTick);
             p.Observe(Observation(916,x:1,health:90,order:PlayableTacticalOrderKind.Attack),r,AiProfile.Initial);Assert.False(p.Active);Assert.Zero(r.ArmyFor(1));
             Assert.IsNull(Plan(p,r,Observation(917)));Assert.NotNull(Plan(p,r,Observation(917,target:102)));
+        }
+        [Test] public void PendingArmyAttackMoveIsNotReplacedAfterCooldownOrCountedAsInstalledProgress()
+        {
+            var planner=new AiArmyPlanner("player-1",71);var registry=Registry();var initial=ObjectiveObservation(10);var action=Plan(planner,registry,initial);
+            Assert.NotNull(action);Assert.AreEqual(PlayableCommandKind.AttackMove,action.Kind);Assert.AreEqual(77,action.SiteId);planner.Commit(initial,action,registry);
+            planner.ObserveReceipt(Receipt(action,PlayableAiDeliveryStatus.Applied,11));
+            long repeat=AiProfile.SecondsToTicks(AiProfile.Initial.Value("decision.repeatOrderSeconds"),30);var tick=10+repeat+1;
+            var pending=ObjectiveObservation(tick,pendingSite:77,pendingViable:true,pendingAction:action.ActionId);planner.Observe(pending,registry,AiProfile.Initial);
+            Assert.AreEqual(AiArmyPhase.Staging,planner.Capture().Phase,"A live route request is not an installed route or mission progress.");
+            Assert.IsNull(planner.Propose(pending,Opening(),P,AiProfile.Initial,registry),"The same owner-bound target remains pending after the repeat cooldown, even when trace history is absent.");
+        }
+        [Test] public void SamePointPendingFromUnappliedMissionDoesNotBlockArmyBinding()
+        {
+            var planner=new AiArmyPlanner("player-1",71);var registry=Registry();var initial=ObjectiveObservation(10);var action=Plan(planner,registry,initial);
+            Assert.NotNull(action);planner.Commit(initial,action,registry);planner.ObserveReceipt(Receipt(action,PlayableAiDeliveryStatus.Cancelled,11));
+            long repeat=AiProfile.SecondsToTicks(AiProfile.Initial.Value("decision.repeatOrderSeconds"),30);var tick=10+repeat+1;
+            var pending=ObjectiveObservation(tick,pendingSite:77,pendingViable:true,pendingAction:action.ActionId);planner.Observe(pending,registry,AiProfile.Initial);
+            Assert.False(planner.HasAppliedOrder);Assert.NotNull(planner.Propose(pending,Opening(),P,AiProfile.Initial,registry),"Without this mission's applied receipt, a matching point is not enough to deduplicate.");
+        }
+        [TestCase("failed")][TestCase("changed-target")][TestCase("changed-kind")]
+        public void FailedOrDifferentPendingArmyOrderAllowsAUsefulRetry(string pendingState)
+        {
+            var planner=new AiArmyPlanner("player-1",71);var registry=Registry();var initial=ObjectiveObservation(10);var action=Plan(planner,registry,initial);
+            Assert.NotNull(action);planner.Commit(initial,action,registry);planner.ObserveReceipt(Receipt(action,PlayableAiDeliveryStatus.Applied,11));
+            long repeat=AiProfile.SecondsToTicks(AiProfile.Initial.Value("decision.repeatOrderSeconds"),30);var tick=10+repeat+1;
+            int pendingSite=pendingState=="changed-target"?78:77;var pendingKind=pendingState=="changed-kind"?PlayableCommandKind.Move:PlayableCommandKind.AttackMove;
+            var observation=ObjectiveObservation(tick,pendingSite,pendingKind,pendingViable:pendingState!="failed",pendingAction:action.ActionId);planner.Observe(observation,registry,AiProfile.Initial);
+            var retry=planner.Propose(observation,Opening(),P,AiProfile.Initial,registry);Assert.NotNull(retry,pendingState+" pending request must not suppress retry");
+            Assert.AreEqual(PlayableCommandKind.AttackMove,retry.Kind);Assert.AreEqual(77,retry.SiteId);CollectionAssert.AreEqual(new[]{1,2,3},retry.EntityIds);
         }
         [Test] public void Retask_PhasesAndClockSupportDoesNotImplyFutureRetreatPolicy()
         {

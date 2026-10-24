@@ -7,6 +7,26 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class TerrainFootprintCacheTests
     {
+        [Test] public void ReportFoundryGeometryQueryCostWithoutThreshold()
+        {
+            var map=new FoundryMap(new FoundryProfileData());
+            var geometry=new NavGeometry(map.HalfExtent,System.Linq.Enumerable.ToArray(map.MovementBlockers),1);
+            var provider=new PartitionNavigationProvider(map,geometry,null);
+            var clearance=new NavClearanceProfile("geometry-cost",1,"ground",0,.58);
+            var pairs=new System.Collections.Generic.List<Tuple<NavLocation,NavLocation>>();var random=new Random(7108);
+            for(int i=0;i<2000&&pairs.Count<256;i++){
+                var a=new NavPoint(random.NextDouble()*map.HalfExtent*2-map.HalfExtent,random.NextDouble()*map.HalfExtent*2-map.HalfExtent);
+                var b=i%2==0?new NavPoint(a.X+.8,a.Z-.8):new NavPoint(random.NextDouble()*map.HalfExtent*2-map.HalfExtent,random.NextDouble()*map.HalfExtent*2-map.HalfExtent);
+                if(provider.TryLocate(a,clearance,out var from)&&provider.TryLocate(b,clearance,out var to))pairs.Add(Tuple.Create(from,to));
+            }
+            Assert.AreEqual(256,pairs.Count);int sweep=0,trace=0;
+            void Sweep(){foreach(var pair in pairs)if(provider.CanSweep(pair.Item1,pair.Item2,clearance))sweep++;}
+            void Trace(){foreach(var pair in pairs)if(provider.TryGraphTraceValidated(pair.Item1,pair.Item2.Position,clearance,out _,out _))trace++;}
+            Sweep();Trace();var watch=System.Diagnostics.Stopwatch.StartNew();for(int i=0;i<100;i++)Sweep();watch.Stop();double sweepMs=watch.Elapsed.TotalMilliseconds;
+            watch.Restart();for(int i=0;i<100;i++)Trace();watch.Stop();
+            Assert.Greater(sweep,0);Assert.Greater(trace,0);
+            TestContext.WriteLine("FOUNDRY_GEOMETRY_25600 sweep_ms="+sweepMs+" trace_ms="+watch.Elapsed.TotalMilliseconds+" sweep_ready="+sweep+" trace_ready="+trace);
+        }
         private static System.Collections.Generic.List<double> OriginalCuts(NavPoint a,NavPoint b,Tuple<NavPoint,NavPoint>[] edges)
         {
             double Cross(double x,double z,double xx,double zz)=>x*zz-z*xx;

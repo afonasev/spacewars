@@ -16,21 +16,27 @@ namespace Spacewars.Tests.EditMode
             internal readonly NavArrivalMember Member;
             private readonly NavArrivalInput source;
 
-            internal OwnedArrivalFixture(bool independent, bool samePoint = false, bool multipleCandidates = false)
+            internal OwnedArrivalFixture(bool independent, bool samePoint = false, bool multipleCandidates = false,
+                bool certifiedFlat = false, int memberCount = 1, int flatCandidateCount = 0, bool unreachableFirst = false)
             {
-                var provider = NavigationArrivalTestFactory.Layered("physical-arrival-work", 1,
-                    new[] { new NavObstacle(-.35, -3, .35, 3) });
-                var origin = NavigationArrivalTestFactory.At(samePoint ? 2 : -5, 0);
-                var endpoint = NavigationArrivalTestFactory.At(samePoint ? 2 : 5, 0);
+                var blockers = new[] { new NavObstacle(-.35, unreachableFirst ? -12 : -3, .35, unreachableFirst ? 12 : 3) };
+                var provider = certifiedFlat ? NavigationAdmission.CertifiedFlatProvider(new NavGeometry(12, blockers, 1)) :
+                    NavigationArrivalTestFactory.Layered("physical-arrival-work", 1, blockers);
+                string surface = certifiedFlat ? NavLocation.FlatSurface : "ground";
+                var origin = NavigationArrivalTestFactory.At(samePoint ? 2 : -5, 0, surface);
+                var endpoint = NavigationArrivalTestFactory.At(samePoint ? 2 : 5, 0, surface);
                 Member = NavigationArrivalTestFactory.Member(31, 0, origin, .2);
                 var candidates = multipleCandidates
-                    ? new[] { endpoint, NavigationArrivalTestFactory.At(samePoint ? 3 : 6, 1) }
+                    ? new[] { endpoint, NavigationArrivalTestFactory.At(samePoint ? 3 : 6, 1, surface) }
                     : new[] { endpoint };
+                if(flatCandidateCount>0)candidates=Enumerable.Range(0,flatCandidateCount).Select(i=>NavigationArrivalTestFactory.At(5+.2*(i%8),.2*(i/8),surface)).ToArray();
+                if(unreachableFirst)candidates[1]=NavigationArrivalTestFactory.At(-5,5,surface);
+                var originals=Enumerable.Range(0,memberCount).Select(i=>i==0?Member:NavigationArrivalTestFactory.Member(31+i,0,NavigationArrivalTestFactory.At(-5,-i,surface),.2)).ToArray();
                 var candidateSource = new NavArrivalCandidateSource("physical-arrival-work", 1, endpoint, candidates);
                 source = new NavArrivalInput("topology:" + provider.Binding, "profile:" + provider.Binding, provider,
                     new NavGraphProfile(NavigationArrivalTestFactory.Sha("physical-arrival-work-profile"), "distance", 1, 1),
                     new NavigationProfile(), new NavGraphCompileLimits(2000, 2000, 10000), candidateSource,
-                    new[] { Member }, NavigationArrivalTestFactory.Occupancy(), 4096, null, independent);
+                    originals, NavigationArrivalTestFactory.Occupancy(), 4096, null, independent);
                 Assert.True(Budget.TryOpenScope(NavigationPreparationKind.Admission, 1, 1, out var birth));
                 var reservation = birth.OwnedReservation();
                 var ownedProvider = LayeredNavigationProvider.CopyOwned((LayeredNavigationProvider)source.Provider, reservation);
@@ -38,18 +44,19 @@ namespace Spacewars.Tests.EditMode
                 var arrival = NavigationProfile.CopyOwned(source.ArrivalProfile, reservation);
                 var ownedSource = NavArrivalCandidateSource.CopyOwned(source.Source, reservation);
                 var occupancy = NavArrivalOccupancySnapshot.CopyOwned(source.Occupancy, Array.Empty<NavArrivalOccupant>(), reservation);
-                var member = NavArrivalMember.CopyOwned(Member, metadata.Clearance, reservation);
-                var binding = NavArrivalWorkingBinding.CreateOwned(member.EntityId, ownedProvider, metadata.Profile, reservation);
+                var ownedMembers = originals.Select(m=>NavArrivalMember.CopyOwned(m,metadata.Clearance,reservation)).ToArray();
+                var bindings = ownedMembers.Select(m=>NavArrivalWorkingBinding.CreateOwned(m.EntityId,ownedProvider,metadata.Profile,reservation)).ToArray();
                 Input = NavArrivalInput.CopyOwned(source, ownedProvider, metadata.Profile, arrival, metadata.Limits,
-                    ownedSource, new[] { member }, occupancy, new[] { binding }, reservation);
+                    ownedSource, ownedMembers, occupancy, bindings, reservation);
                 ownedProvider.StorageRoot.ReleaseOwner(); metadata.Release(); arrival.StorageRoot.ReleaseOwner();
                 ownedSource.StorageRoot.ReleaseOwner(); occupancy.StorageRoot.ReleaseOwner();
-                member.StorageRoot.ReleaseOwner(); binding.StorageRoot.ReleaseOwner();
+                foreach(var member in ownedMembers)member.StorageRoot.ReleaseOwner();foreach(var binding in bindings)binding.StorageRoot.ReleaseOwner();
                 birth.Attach(Input.StorageRoot); birth.Commit(Input.StorageRoot, _ => { });
                 IsIndependent = independent;
             }
 
             internal bool IsIndependent { get; }
+            internal NavArrivalInput UnownedInput => source;
 
             internal NavigationArrivalWork NewWork(Action<NavigationArrivalWork> prepare = null, NavigationRetentionBudget budget = null)
             {
@@ -107,6 +114,75 @@ namespace Spacewars.Tests.EditMode
                 return fork;
             }
             catch { fork.ReleaseOwner(); scope.Discard(); throw; }
+        }
+
+        private static object ArrivalModeField(object value,string name)
+            =>value.GetType().GetField(name,BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public)?.GetValue(value)??
+                value.GetType().GetProperty(name,BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public)?.GetValue(value);
+        private static NavScheduledRequest[] ArrivalModeRequests(NavigationArrivalWork work)
+            =>((System.Collections.IEnumerable)ArrivalModeField(work,"pageRequests")).Cast<object>().Select(row=>(NavScheduledRequest)ArrivalModeField(row,"Request")).ToArray();
+        private static void PrepareArrivalModeRows(NavigationArrivalWork work)
+        {
+            for(int i=0;i<16&&CurrentArrivalPhase(work)!="SolvePage";i++)work.Advance(i+1,10000,new NavEpochQuota(0,0,0,0,0));
+            Assert.AreEqual("SolvePage",CurrentArrivalPhase(work));
+        }
+        [TestCase(true,true,1,true)][TestCase(true,true,1,false)]
+        [TestCase(false,true,1,true)][TestCase(false,true,1,false)]
+        [TestCase(true,false,1,true)][TestCase(true,false,1,false)]
+        [TestCase(false,false,1,true)][TestCase(false,false,1,false)]
+        [TestCase(true,true,2,true)][TestCase(true,true,2,false)]
+        public void CertifiedFlatArrivalSingletonModeIsLimitedInOwnedAndUnownedRequests(bool flat,bool independent,int members,bool owned)
+        {
+            using(var fixture=new OwnedArrivalFixture(independent,multipleCandidates:true,certifiedFlat:flat,memberCount:members)){
+                NavigationArrivalWork work=null;
+                try{
+                    work=owned?fixture.NewWork(PrepareArrivalModeRows):new NavigationArrivalWork(fixture.UnownedInput);
+                    if(!owned)PrepareArrivalModeRows(work);
+                    var rows=ArrivalModeRequests(work);Assert.AreEqual(2,rows.Length);
+                    for(int n=0;n<rows.Length;n++){
+                        Assert.AreEqual(flat&&independent&&members==1,rows[n].Singleton);Assert.False(rows[n].Query);
+                        Assert.AreEqual(fixture.Input.Source.Candidates[n],rows[n].Subscription.AssignedEndpoint);
+                        Assert.AreEqual(fixture.Member.Origin,rows[n].Subscription.Origin);
+                    }
+                }finally{work?.ReleaseOwner();}
+            }
+        }
+        [TestCase(false)][TestCase(true)]
+        public void CertifiedFlatN1ManyCandidatesUseExactSingletonWithColdCowAndRefusal(bool unreachableFirst)
+        {
+            using(var fixture=new OwnedArrivalFixture(true,certifiedFlat:true,flatCandidateCount:64,unreachableFirst:unreachableFirst)){
+                NavigationArrivalWork work=null,next=null,restored=null,resumed=null;var cold=new NavigationRetentionBudget();
+                try{
+                    work=fixture.NewWork(w=>w.Advance(1,10000,new NavEpochQuota(20000,0,2,20000,256)));
+                    var requests=ArrivalModeRequests(work);Assert.AreEqual(64,requests.Length);Assert.True(requests.All(r=>r.Singleton&&!r.Query));
+                    for(int i=0;i<requests.Length;i++)Assert.AreEqual(fixture.Input.Source.Candidates[i],requests[i].Subscription.AssignedEndpoint);
+                    var scheduler=(LayeredNavigationScheduler)ArrivalModeField(work,"scheduler");
+                    var job=((System.Collections.IEnumerable)ArrivalModeField(scheduler,"jobs")).Cast<object>().First();
+                    var singleton=(NavIncrementalSingletonRoute)ArrivalModeField(job,"Singleton");
+                    Assert.NotNull(singleton,"reach real singleton continuation, not only a mode flag");Assert.AreEqual(NavSolveStatus.Pending,singleton.Status);
+                    Assert.Null(ArrivalModeField(job,"Field"));Assert.Zero(scheduler.Counters.PhysicalFieldWork);
+                    byte[] body=CaptureGraph(fixture.Budget,work);long charge=Unique(work);long before=fixture.Budget.PhysicalBytes;
+                    Assert.True(fixture.Budget.TryOpenScope(NavigationPreparationKind.Reconstruction,1,19,out var rejected));NavigationArrivalWork denied=null;int refusals=0;
+                    try{
+                        denied=work.ForkOwned(rejected.OwnedReservation());
+                        fixture.Budget.AllocationAdmission=_=>{if(new System.Diagnostics.StackTrace().GetFrames().Any(f=>f.GetMethod().DeclaringType==typeof(NavIncrementalSingletonRoute)&&f.GetMethod().Name=="ForkPrepared")){refusals++;return false;}return true;};
+                        Assert.Throws<InvalidOperationException>(()=>denied.Advance(40,10000,ArrivalWorkQuota));Assert.Greater(refusals,0);
+                    }finally{fixture.Budget.AllocationAdmission=null;denied?.ReleaseOwner();rejected.Discard();}
+                    Assert.AreEqual(before,fixture.Budget.PhysicalBytes);Assert.Zero(fixture.Budget.HeldBytes);CollectionAssert.AreEqual(body,CaptureGraph(fixture.Budget,work));
+                    next=Fork(work,fixture.Budget,20,w=>{w.Advance(40,10000,ArrivalWorkQuota);FinishOwnedArrival(w);});
+                    Assert.AreEqual(NavArrivalStatus.Ready,next.Status);Assert.AreEqual(1,next.Proposals.Count);
+                    var proposal=next.Proposals.Single();Assert.AreEqual(fixture.Input.Source.Candidates[unreachableFirst?1:0],proposal.Endpoint);
+                    Assert.True(proposal.Proof.ValidateAgainst(fixture.Input,proposal.Member,proposal.Endpoint));
+                    byte[] expected=CaptureGraph(fixture.Budget,next);long expectedCharge=Unique(next);
+                    Assert.Zero(((LayeredNavigationScheduler)ArrivalModeField(next,"scheduler")).Counters.PhysicalFieldWork);
+                    next.ReleaseOwner();next=null;work.ReleaseOwner();work=null;fixture.ReleaseInput();Assert.Zero(fixture.Budget.PhysicalBytes);
+                    Assert.True(cold.TryOpenScope(NavigationPreparationKind.Decode,1,1,out var decode));restored=(NavigationArrivalWork)Decode(body,decode.OwnedReservation());decode.Attach(restored);decode.Commit(restored,_=>{});
+                    Assert.AreEqual(charge,cold.PhysicalBytes);CollectionAssert.AreEqual(body,CaptureGraph(cold,restored));
+                    resumed=Fork(restored,cold,30,w=>{w.Advance(40,10000,ArrivalWorkQuota);FinishOwnedArrival(w);});
+                    CollectionAssert.AreEqual(expected,CaptureGraph(cold,resumed));Assert.AreEqual(expectedCharge,Unique(resumed));
+                }finally{next?.ReleaseOwner();work?.ReleaseOwner();resumed?.ReleaseOwner();restored?.ReleaseOwner();}
+                Assert.Zero(cold.PhysicalBytes);Assert.Zero(cold.HeldBytes);Assert.Zero(cold.ActiveScopes);
+            }
         }
 
         [TestCase("prepare")]

@@ -67,7 +67,7 @@ namespace Spacewars.Runtime
                 bool present=false;foreach(var request in record.Intents)if(ReadyContainsRequest(c.NextLedger??c.SourceLedger,c.Allocating??c.SourceAllocating,request.Request)){present=true;break;}if(present)continue;
                 if(!attempt.Retiring&&!attempt.PlannedRetiring){if(attempt.Revision==int.MaxValue)return false;attempt.PlannedRetiring=true;c.ArrivalRetirements[c.RetirementCount++]=new RebindRetirement{Index=a,Sequence=checked(++c.NextRetirement)};}
                 if(!hasLease&&!attempt.Working&&!attempt.Restored){
-                    var r=scope.OwnedReservation();if(c.NextArrival==null){var source=c.SourceArrival;c.NextArrival=NavigationLiveArrivalTables.AllocatePrepared(source.Attempts.Capacity,source.References.Capacity,r,source,source.Ids.Capacity);using(EnterTransport()){if(!(c.OrdinaryFailure?OrdinaryFailureSourceCurrent(c):c.ArrivalRetry?ArrivalRetrySourceCurrent(c):OrdinaryRebindSourceCurrent(c)))throw new InvalidOperationException("Rebind arrival copy lost source.");c.NextArrival.CopySourceObserved(source);}}
+                    var r=scope.OwnedReservation();if(c.NextArrival==null){var source=c.SourceArrival;c.NextArrival=NavigationLiveArrivalTables.AllocatePrepared(source.Attempts.Capacity,source.References.Capacity,r,source,source.Ids.Capacity);using(EnterTransport()){if(!(c.OrdinaryFailure?OrdinaryFailureSourceCurrent(c):c.ArrivalRetry?ArrivalRetrySourceCurrent(c):OrdinaryRebindSourceCurrent(c)))throw new NavigationCommandRefused("Rebind arrival copy lost source.");c.NextArrival.CopySourceObserved(source);}}
                     foreach(var provider in record.OwnedProviders)c.NextArrival.DecrementProviderPreparing(provider,r);
                     c.NextArrival.RemoveAttemptPreparing(record);if(c.NextArrival.Ids.Count==0)c.NextArrival.ResetEmptyProvidersPreparing();attempt.Removed=true;
                 }
@@ -76,9 +76,9 @@ namespace Spacewars.Runtime
         }
         private void ValidateRebindRetirements(PreparedRebind c)
         {
-            if(!RebindArrivalsCurrent(c))throw new InvalidOperationException("Rebind arrival source changed.");int leases=0;
-            for(int i=0;i<c.RetirementCount;i++){var row=c.ArrivalRetirements[i];if(row.Lease){leases++;var lease=c.ArrivalLeases[row.Index];if(lease.Owner.Revision==int.MaxValue||!c.SourceLeases.CanMarkRetiring(lease.Owner.Record))throw new InvalidOperationException("Rebind lease retirement changed.");}else if(c.ArrivalAttempts[row.Index].Owner.Revision==int.MaxValue)throw new InvalidOperationException("Rebind attempt revision exhausted.");}
-            if(c.LeaseRevision>int.MaxValue-leases)throw new InvalidOperationException("Rebind retirement table exhausted.");
+            if(!RebindArrivalsCurrent(c))throw new NavigationCommandRefused("Rebind arrival source changed.");int leases=0;
+            for(int i=0;i<c.RetirementCount;i++){var row=c.ArrivalRetirements[i];if(row.Lease){leases++;var lease=c.ArrivalLeases[row.Index];if(lease.Owner.Revision==int.MaxValue||!c.SourceLeases.CanMarkRetiring(lease.Owner.Record))throw new NavigationCommandRefused("Rebind lease retirement changed.");}else if(c.ArrivalAttempts[row.Index].Owner.Revision==int.MaxValue)throw new NavigationCommandRefused("Rebind attempt revision exhausted.");}
+            if(c.LeaseRevision>int.MaxValue-leases)throw new NavigationCommandRefused("Rebind retirement table exhausted.");
         }
         private void ApplyRebindRetirementsNoThrow(PreparedRebind c)
         {

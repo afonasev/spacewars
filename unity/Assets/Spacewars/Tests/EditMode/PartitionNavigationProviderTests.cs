@@ -15,6 +15,16 @@ namespace Spacewars.Tests.EditMode
             return new PartitionNavigationProvider(map, new NavGeometry(map.HalfExtent, blockers, map.Revision + (extra == null ? 0 : 1)), hold);
         }
 
+        [TestCase(.58)][TestCase(.72)] public void ExactSamePointTraceHasOneValidatedZeroSurfaceLeg(double radius)
+        {
+            var provider=Adapter(ThreeCrossingsMap.Default);var clearance=new NavClearanceProfile("same-point",1,"ground",1,radius);
+            Assert.True(provider.TryLocate(new NavPoint(-20,0),clearance,out var start));Assert.True(provider.IsValid(start,clearance));
+            Assert.True(provider.TryTrace(start,start.Position,clearance,out var end,out var trace));Assert.AreEqual(start,end);Assert.AreEqual(1,trace.Count);
+            var leg=trace[0];Assert.AreEqual(start,leg.From);Assert.AreEqual(end,leg.To);Assert.AreEqual(0,leg.Cost);Assert.AreEqual(NavTypedLegKind.Surface,leg.Kind);Assert.IsNull(leg.PortalId);
+            var wrongLayer=new NavLocation(start.Position,"wrong-layer");Assert.False(provider.IsValid(wrongLayer,clearance));Assert.False(provider.TryTrace(wrongLayer,start.Position,clearance,out _,out _));
+            Assert.False(provider.TryTrace(start,new NavPoint(0,20),clearance,out _,out _),"a zero leg cannot bypass footprint validation");
+        }
+
         [Test] public void ThreeCrossingsUsesAuthoredFootprintAndAllowedPhysicalSeams()
         {
             var map = ThreeCrossingsMap.Default; var provider = Adapter(map);

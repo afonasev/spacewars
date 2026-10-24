@@ -37,7 +37,7 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void MetadataControlsAllNumericRanges()
         {
-            Assert.AreEqual(90,NativeBalanceFields.AiFields.Count);
+            Assert.AreEqual(92,NativeBalanceFields.AiFields.Count);
             Assert.AreEqual(12,NativeBalanceFields.AiRosterFields.Count);
             foreach(var f in NativeBalanceFields.AiFields.Concat(NativeBalanceFields.AiRosterFields))
             {

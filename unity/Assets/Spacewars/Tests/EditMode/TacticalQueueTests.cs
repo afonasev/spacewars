@@ -16,7 +16,7 @@ namespace Spacewars.Tests.EditMode
         UnityHostRouteService actualHost;bool actualRoutes;int actualRestores;
         object Call(string name,params object[] args)=>D.GetMethod(name,F).Invoke(domain,args);
         object InternalExecution(int id,string slot){var queues=(System.Collections.IDictionary)D.GetField("tacticalQueues",F).GetValue(domain);return queues[id].GetType().GetField(slot,F).GetValue(queues[id]);}
-        [SetUp]public void Setup(){domain=Activator.CreateInstance(D,F,null,new object[]{PlayableProfile.Default,1L,false},null);nav=(NavigationSession)D.GetProperty("Navigation",F).GetValue(domain);sequence=0;actualRoutes=false;actualHost=null;actualRestores=0;}
+        [SetUp]public void Setup(){domain=Activator.CreateInstance(D,F,null,new object[]{PlayableProfile.Default,1L,false},null);nav=(NavigationSession)D.GetProperty("Navigation",F).GetValue(domain);sequence=0;actualRoutes=false;actualHost=null;actualRestores=0;failureFixtureWorlds=null;failureFixtureHosts=null;}
         // Only the three migrated queue scenarios opt into the real owned route
         // host. Other legacy/manual-answer fixtures keep their original lane.
         void UseActualRoutes(){actualRoutes=true;actualHost=new UnityHostRouteService();}
@@ -26,8 +26,34 @@ namespace Spacewars.Tests.EditMode
             Assert.Zero(nav.PhysicalHostBudget.PhysicalBytes);Assert.Zero(nav.PhysicalHostBudget.HeldBytes);Assert.Zero(nav.PhysicalHostBudget.ActiveScopes);
         }
         [TearDown]public void CleanupActualRoutes(){if(actualRoutes){ReleaseActualWorld();TestContext.WriteLine("A6 actual-host cleanup; restores="+actualRestores);}}
-        int Spawn(double x,double z,PlayableOwner owner=PlayableOwner.Player)=>(int)Call("SpawnUnit",new NavPoint(x,z),owner,PlayableEntityKind.Tank);
+        List<object> failureFixtureWorlds;Dictionary<object,CertifiedRouteKernel> failureFixtureHosts;
+        void UseArrivalFailureFixture(){failureFixtureWorlds=new List<object>();failureFixtureHosts=new Dictionary<object,CertifiedRouteKernel>();RememberFailureWorld();}
+        void RememberFailureWorld(){if(failureFixtureWorlds!=null&&!failureFixtureWorlds.Contains(domain))failureFixtureWorlds.Add(domain);}
+        void MaterializeReplacementRequest(int id)
+        {
+            RememberFailureWorld();Assert.NotNull(failureFixtureHosts,"explicit fixture opt-in");
+            if(!failureFixtureHosts.TryGetValue(domain,out var kernel)){kernel=new CertifiedRouteKernel();failureFixtureHosts.Add(domain,kernel);}
+            kernel.PauseAtPhysicalBoundary=()=>nav.Requests.Count>0;
+            var binding=new PlayableRouteBinding((NavGeometry)D.GetProperty("Geometry",F).GetValue(domain),PlayableProfile.Default,nav.Admission,nav.RoutePort);
+            for(int pump=0;pump<20000&&nav.Requests.Count==0;pump++){kernel.Pump(binding,4);nav.ApplyResults();binding=new PlayableRouteBinding((NavGeometry)D.GetProperty("Geometry",F).GetValue(domain),PlayableProfile.Default,nav.Admission,nav.RoutePort);}
+            Assert.Greater(nav.Requests.Count,0,"real arrival publication must expose the replacement before manual failure injection");Assert.Zero(nav.AllocationCount);Assert.True(nav.IsPending(id));Assert.NotNull(nav.PendingRequestFor(id));
+        }
+        [TearDown]public void CleanupArrivalFailureFixture()
+        {
+            if(failureFixtureWorlds==null)return;RememberFailureWorld();Exception cleanup=null;TestContext.WriteLine("Primary before arrival cleanup: "+TestContext.CurrentContext.Result.Outcome+" "+TestContext.CurrentContext.Result.Message);
+            foreach(var world in failureFixtureWorlds){try{
+                if(failureFixtureHosts.TryGetValue(world,out var kernel)){kernel.PauseAtPhysicalBoundary=null;kernel.Clear();}
+                var n=(NavigationSession)D.GetProperty("Navigation",F).GetValue(world);n.ReleaseCommittedHostRoot();D.GetMethod("DestroyOwnedNavigation",F).Invoke(world,null);
+                TestContext.WriteLine("Arrival fixture census: Physical="+n.PhysicalHostBudget.PhysicalBytes+" Held="+n.PhysicalHostBudget.HeldBytes+" Scopes="+n.PhysicalHostBudget.ActiveScopes);Assert.Zero(n.PhysicalHostBudget.PhysicalBytes);Assert.Zero(n.PhysicalHostBudget.HeldBytes);Assert.Zero(n.PhysicalHostBudget.ActiveScopes);
+            }catch(Exception error){if(cleanup==null)cleanup=error;else PlayableDomain.PreserveTacticalSecondary(cleanup,error);TestContext.Error.WriteLine("Arrival fixture cleanup: "+error);}}
+            failureFixtureWorlds=null;failureFixtureHosts=null;if(cleanup!=null)System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(cleanup).Throw();
+        }
+        int Spawn(double x,double z,PlayableOwner owner=PlayableOwner.Player,PlayableEntityKind kind=PlayableEntityKind.Tank)=>(int)Call("SpawnUnit",new NavPoint(x,z),owner,kind);
         PlayableCommandStatus Send(int[] ids,NavPoint goal,PlayableCommandKind kind=PlayableCommandKind.Move,bool append=false,int target=0)=>(PlayableCommandStatus)Call("Apply",new PlayableCommand(1,++sequence,"player-1",kind,ids,goal,targetId:target,origin:PlayableOrderOrigin.Human,mode:append?PlayableOrderMode.Append:PlayableOrderMode.Replace),null);
+        PlayableCommandStatus SendAiAttackMove(int id,NavPoint goal,int site=77)
+        {long action=(long)Call("AllocateAiSequence");return (PlayableCommandStatus)Call("Apply",new PlayableCommand(1,action,"player-1",PlayableCommandKind.AttackMove,new[]{id},goal,siteId:site,origin:PlayableOrderOrigin.Ai,source:PlayableAiOpeningComposition.SourceIdentity,jobId:action,actionId:action),null);}
+        PlayableCommandStatus SendAiMove(int id,NavPoint goal)
+        {long action=(long)Call("AllocateAiSequence");return (PlayableCommandStatus)Call("Apply",new PlayableCommand(1,action,"player-1",PlayableCommandKind.Move,new[]{id},goal,origin:PlayableOrderOrigin.Ai,source:PlayableAiOpeningComposition.SourceIdentity,jobId:action,actionId:action),null);}
         PlayableUnitQueueSnapshot Queue(int id,PlayableOwner owner=PlayableOwner.Player)=>(PlayableUnitQueueSnapshot)Call("TacticalQueueProjection",id,owner);
         void Deliver()
         {
@@ -44,7 +70,7 @@ namespace Spacewars.Tests.EditMode
         }
         void Step(int n=1){for(int k=0;k<n;k++)Call("Step",1d/30);}
         void Advance(int n=200){for(int k=0;k<n;k++){Deliver();Step();}}
-        void Restore(){var bytes=(byte[])Call("CaptureWorldBytes",7,"queue-test");if(actualRoutes)ReleaseActualWorld();domain=D.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{bytes,PlayableProfile.Default,7,"queue-test"});nav=(NavigationSession)D.GetProperty("Navigation",F).GetValue(domain);if(actualRoutes){actualHost=new UnityHostRouteService();actualRestores++;}}
+        void Restore(){RememberFailureWorld();var bytes=(byte[])Call("CaptureWorldBytes",7,"queue-test");if(actualRoutes)ReleaseActualWorld();domain=D.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{bytes,PlayableProfile.Default,7,"queue-test"});nav=(NavigationSession)D.GetProperty("Navigation",F).GetValue(domain);if(actualRoutes){actualHost=new UnityHostRouteService();actualRestores++;}}
         [Test]public void DeferredTailDoesNotRouteAndLimitIsPerMember()
         {
             int a=Spawn(-14,-14),b=Spawn(-18,-14);Send(new[]{a,b},new NavPoint(-12,-14));Deliver();
@@ -53,6 +79,60 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(64,Queue(a).Deferred.Count);Assert.AreEqual(count,nav.CaptureState().RequestSequence);
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(new[]{a,b},new NavPoint(-10,-12),append:true));Assert.AreEqual(64,Queue(a).Deferred.Count);Assert.AreEqual(1,Queue(b).Deferred.Count);Assert.Null(Queue(a,PlayableOwner.Enemy));
             Restore();Assert.AreEqual(64,Queue(a).Deferred.Count);Assert.AreEqual(1,Queue(b).Deferred.Count);
+        }
+        [Test]public void PendingAiRouteProjectionRequiresExactLiveBindingAndSurvivesColdRestore()
+        {
+            int id=Spawn(-14,-14);var target=new NavPoint(-12,-14);Assert.AreEqual(PlayableCommandStatus.Applied,SendAiAttackMove(id,target));
+            var before=Queue(id);Assert.NotNull(before.Pending);Assert.True(before.PendingAiRouteViable);Assert.Greater(before.Pending.AiActionId,0);Assert.AreEqual(77,before.Pending.PublicObjectiveId);Assert.Null(Queue(id,PlayableOwner.Enemy));
+            var request=nav.PendingRequestFor(id);Assert.NotNull(request);var requestId=request.Request;var order=request.Order;var group=before.Pending.GroupId;
+            var bytes=(byte[])Call("CaptureWorldBytes",7,"queue-test");Restore();
+            var after=Queue(id);var restored=nav.PendingRequestFor(id);Assert.True(after.PendingAiRouteViable);Assert.AreEqual(group,after.Pending.GroupId);Assert.AreEqual(requestId,restored.Request);Assert.AreEqual(order,restored.Order);
+            CollectionAssert.AreEqual(bytes,(byte[])Call("CaptureWorldBytes",7,"queue-test"));
+        }
+        [TestCase("failed")][TestCase("interrupted")]public void FailedOrInterruptedPendingAiRouteProjectionAllowsRetry(string mode)
+        {
+            int id=Spawn(-14,-14);Assert.AreEqual(PlayableCommandStatus.Applied,SendAiAttackMove(id,new NavPoint(-12,-14)));
+            if(mode=="failed")
+            {
+                // The owned arrival allocator may retain the exact request before
+                // publishing it to a route mailbox. Exercise the same domain
+                // failure callback used by NavigationSession with that live binding.
+                var request=nav.PendingRequestFor(id);Assert.NotNull(request);
+                D.GetMethod("RecordTacticalRouteFailure",F).Invoke(domain,new object[]{request,NavigationOutcome.Unreachable});
+            }
+            else Assert.True(nav.Move(id,new NavPoint(-10,-10)));
+            Assert.NotNull(Queue(id).Pending,mode+" route keeps the original issuance for controlled retry");
+            Assert.False(Queue(id).PendingAiRouteViable,mode+" route must not suppress a new owner proposal");
+            if(mode=="interrupted"){Restore();Assert.False(Queue(id).PendingAiRouteViable,"interrupted binding remains non-viable after restore");}
+        }
+        [Test]public void PendingAiMoveDeduplicatesOnlyExactLiveMissionRouteAndReleasesOnTerminalOrHumanChange()
+        {
+            int id=Spawn(-14,-14,PlayableOwner.Player,PlayableEntityKind.Shkval);var goal=new NavPoint(-10,-14);
+            Assert.AreEqual(PlayableCommandStatus.Applied,SendAiMove(id,goal));var queue=Queue(id);Assert.NotNull(queue.Pending);Assert.True(queue.PendingAiRouteViable);
+            var request=nav.PendingRequestFor(id);Assert.NotNull(request);
+            bool SameOrder(PlayableAiAction action,PlayableUnitQueueSnapshot q,string policy=AiArmyPlanner.Policy)
+            {
+                var actor=new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Shkval,new NavPoint(-14,-14),100,false,0,0,0,queue:q);
+                var method=typeof(PlayableAiOwnerLoop).GetMethod("SameOrder",BindingFlags.Static|BindingFlags.NonPublic);Assert.NotNull(method,"SameOrder helper");
+                return (bool)method.Invoke(null,new object[]{action,actor,policy,true,"player-1",1L});
+            }
+            var profile=PlayableProfile.Default;
+            PlayableAiAction Action(NavPoint target,PlayableCommandKind kind=PlayableCommandKind.Move)=>new PlayableAiAction(900,"player-1",profile.ProfileId,profile.Revision,1,1,kind,new[]{id},target,seed:19092026,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            var hasLiveMove=typeof(AiTacticalExecutor).GetMethod("HasLivePendingMove",BindingFlags.Static|BindingFlags.NonPublic);Assert.NotNull(hasLiveMove);
+            var actor=new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Shkval,new NavPoint(-14,-14),100,false,0,0,0,queue:queue);
+            Assert.True((bool)hasLiveMove.Invoke(null,new object[]{actor,goal}),"The tactical helper must skip its exact viable owner-bound pending Move.");
+            Assert.False((bool)hasLiveMove.Invoke(null,new object[]{actor,new NavPoint(goal.X,goal.Z+1)}),"A changed artillery position remains eligible.");
+            Assert.True(SameOrder(Action(goal),queue),"An exact owner-bound live Move route is already the selected mission order.");
+            Assert.False(SameOrder(Action(new NavPoint(goal.X,goal.Z+1)),queue),"A changed target must remain eligible for a new command.");
+            Assert.False(SameOrder(Action(goal),queue,"scout"),"The mission deduplication must not consume another policy's command.");
+            Assert.False(SameOrder(Action(goal,PlayableCommandKind.AttackMove),queue),"A changed command kind must not be hidden by the pending Move.");
+            Call("RecordTacticalRouteFailure",request,NavigationOutcome.Unreachable);queue=Queue(id);
+            actor=new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Shkval,new NavPoint(-14,-14),100,false,0,0,0,queue:queue);
+            Assert.False(queue.PendingAiRouteViable);Assert.False((bool)hasLiveMove.Invoke(null,new object[]{actor,goal}),"A terminal route remains retryable.");Assert.False(SameOrder(Action(goal),queue),"A terminal route must leave the normal retry path available.");
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(new[]{id},goal),"A human replacement still preempts the AI route.");queue=Queue(id);
+            actor=new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Shkval,new NavPoint(-14,-14),100,false,0,0,0,queue:queue);
+            Assert.False((bool)hasLiveMove.Invoke(null,new object[]{actor,goal}),"A human-owned route is never treated as the native AI Move.");
+            Assert.False(queue.PendingAiRouteViable);Assert.False(SameOrder(Action(goal),queue),"A human-owned pending order is never mistaken for the AI mission route.");
         }
         [Test]public void PresentGroupAllocationMetadataRejectsPartialUnknownAndMalformedTails()
         {
@@ -73,7 +153,7 @@ namespace Spacewars.Tests.EditMode
             Call("BindMatchSeed",7);int a=Spawn(-14,-14),b=Spawn(-18,-14),c=Spawn(-22,-14);
             Send(new[]{b},new NavPoint(-18,-14));Deliver();Step();Send(new[]{a},new NavPoint(-14,-14));Deliver();Step();Send(new[]{c},new NavPoint(-20,-14));Deliver();Step();
             Send(new[]{b},default,PlayableCommandKind.Stop);Send(new[]{a},default,PlayableCommandKind.Stop);
-            void CompareAndReuse(int id){var original=domain;Restore();Assert.AreEqual(PlayableWorldRestoreTests.Facts(original,true),PlayableWorldRestoreTests.Facts(domain,true),"slot restore "+typeof(OfflineParticipantRestoreTests).GetMethod("AuthorityDiff",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{original,domain,"domain",0}));var command=new PlayableCommand(1,++sequence,"player-1",PlayableCommandKind.Move,new[]{id},new NavPoint(-12,-14),origin:PlayableOrderOrigin.Human);Assert.AreEqual(Call("Apply",command,null),D.GetMethod("Apply",F).Invoke(original,new object[]{command,null}));Assert.AreEqual(PlayableWorldRestoreTests.Facts(original,true),PlayableWorldRestoreTests.Facts(domain,true),"identical live order and LIFO reuse after restore");}
+            void CompareAndReuse(int id){var original=domain;Restore();var expected=PlayableWorldRestoreTests.Facts(original,true);var actual=PlayableWorldRestoreTests.Facts(domain,true);string diagnostic="slot restore";if(expected!=actual)diagnostic+=" "+typeof(OfflineParticipantRestoreTests).GetMethod("AuthorityDiff",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{original,domain,"domain",0});Assert.AreEqual(expected,actual,diagnostic);CollectionAssert.AreEqual(PlayableWorldRestoreTests.FactBytes(original,true,false),PlayableWorldRestoreTests.FactBytes(original,true,true),"uncached original authority");CollectionAssert.AreEqual(PlayableWorldRestoreTests.FactBytes(domain,true,false),PlayableWorldRestoreTests.FactBytes(domain,true,true),"uncached restored authority");var command=new PlayableCommand(1,++sequence,"player-1",PlayableCommandKind.Move,new[]{id},new NavPoint(-12,-14),origin:PlayableOrderOrigin.Human);Assert.AreEqual(Call("Apply",command,null),D.GetMethod("Apply",F).Invoke(original,new object[]{command,null}));Assert.AreEqual(PlayableWorldRestoreTests.Facts(original,true),PlayableWorldRestoreTests.Facts(domain,true),"identical live order and LIFO reuse after restore");}
             CompareAndReuse(b);Send(new[]{a,b,c},default,PlayableCommandKind.Stop);CompareAndReuse(a);
         }
         [TestCase(3)][TestCase(4)]public void PriorQueueWireWithoutLayoutTailRemainsExplicitlyReadable(int version)
@@ -276,10 +356,11 @@ namespace Spacewars.Tests.EditMode
         }
         [Test]public void FailedReplacementKeepsAttackChaseOnOriginalIdentityAcrossRestore()
         {
-            int id=Spawn(-14,-26),enemy=Spawn(-6,-26,PlayableOwner.Enemy);Send(new[]{id},default,PlayableCommandKind.Attack,target:enemy);Send(new[]{id},new NavPoint(-14,-10));
+            UseArrivalFailureFixture();
+            int id=Spawn(-14,-26),enemy=Spawn(-6,-26,PlayableOwner.Enemy);Send(new[]{id},default,PlayableCommandKind.Attack,target:enemy);Send(new[]{id},new NavPoint(-14,-10));MaterializeReplacementRequest(id);
             while(nav.Requests.TryDequeue(out var rejected))nav.Answers.TryEnqueue(new NavigationAnswer(rejected,Array.Empty<NavPoint>()));nav.ApplyResults();
-            var failed=Queue(id);Assert.NotNull(failed.Pending);Assert.AreEqual(2,failed.Pending.CommandSequence);Assert.AreEqual(1,failed.Active.CommandSequence);Assert.Null(failed.Completion);Restore();failed=Queue(id);Assert.AreEqual(2,failed.Pending.CommandSequence);Assert.AreEqual(1,failed.Active.CommandSequence);Send(new[]{id},new NavPoint(-12,-10),append:true);
-            Relocate(enemy,new NavPoint(-3,-26));Step();Assert.True(nav.Requests.TryDequeue(out var chase));Assert.AreEqual(failed.Active.GroupId,chase.MemberIdentity.GroupId);Assert.AreEqual(failed.Active.ActivationRevision,chase.MemberIdentity.OrderRevision);Assert.True(nav.Requests.TryEnqueue(chase));
+            Assert.True((bool)D.GetMethod("TerminalProofMatches",F).Invoke(domain,new object[]{InternalExecution(id,"Pending"),nav.Crowd.Units.Single(u=>u.Id==id)}));var failed=Queue(id);Assert.NotNull(failed.Pending);Assert.AreEqual(2,failed.Pending.CommandSequence);Assert.AreEqual(1,failed.Active.CommandSequence);Assert.Null(failed.Completion);Restore();failed=Queue(id);Assert.AreEqual(2,failed.Pending.CommandSequence);Assert.AreEqual(1,failed.Active.CommandSequence);Send(new[]{id},new NavPoint(-12,-10),append:true);
+            Relocate(enemy,new NavPoint(-3,-26));Step();Assert.True(nav.Requests.TryDequeue(out var chase));Assert.AreEqual(failed.Active.GroupId,chase.MemberIdentity.GroupId);Assert.AreEqual(failed.Active.ActivationRevision,chase.MemberIdentity.OrderRevision);Assert.False((bool)InternalExecution(id,"Active").GetType().GetField("Interrupted",F).GetValue(InternalExecution(id,"Active")));Assert.True(nav.Requests.TryEnqueue(chase));
             var qs=(System.Collections.IDictionary)D.GetField("tacticalQueues",F).GetValue(domain);var pendingExecution=qs[id].GetType().GetField("Pending",F).GetValue(qs[id]);Assert.True((bool)D.GetMethod("TerminalProofMatches",F).Invoke(domain,new object[]{pendingExecution,nav.Crowd.Units.Single(u=>u.Id==id)}));
             Restore();Assert.AreEqual(2,Queue(id).Pending.CommandSequence);Assert.AreEqual(1,Queue(id).Active.CommandSequence);Assert.AreEqual(1,Queue(id).Deferred.Count);Assert.Null(Queue(id).Completion);Assert.True(nav.IsPending(id));Assert.True(nav.Requests.TryDequeue(out var restoredChase));Assert.AreEqual(chase.Request,restoredChase.Request);
             nav.Answers.TryEnqueue(new NavigationAnswer(restoredChase,new SharedFlowRouter(restoredChase.Geometry,restoredChase.Profile).FindPath(restoredChase.Start,restoredChase.Goal)));nav.ApplyResults();Assert.True(nav.Crowd.Units.Single(u=>u.Id==id).Moving);Restore();Assert.True(nav.Crowd.Units.Single(u=>u.Id==id).Moving);Assert.True((bool)Call("TargetAlive",enemy));
@@ -287,16 +368,139 @@ namespace Spacewars.Tests.EditMode
         }
         [TestCase(false)][TestCase(true)]public void FailedReplacementRejectsForgedTerminalOrChaseRequest(bool corruptChase)
         {
-            int id=Spawn(-14,-26),enemy=Spawn(-6,-26,PlayableOwner.Enemy);Send(new[]{id},default,PlayableCommandKind.Attack,target:enemy);Send(new[]{id},new NavPoint(-14,-10));while(nav.Requests.TryDequeue(out var rejected))nav.Answers.TryEnqueue(new NavigationAnswer(rejected,Array.Empty<NavPoint>()));nav.ApplyResults();
+            UseArrivalFailureFixture();
+            int id=Spawn(-14,-26),enemy=Spawn(-6,-26,PlayableOwner.Enemy);Send(new[]{id},default,PlayableCommandKind.Attack,target:enemy);Send(new[]{id},new NavPoint(-14,-10));MaterializeReplacementRequest(id);while(nav.Requests.TryDequeue(out var rejected))nav.Answers.TryEnqueue(new NavigationAnswer(rejected,Array.Empty<NavPoint>()));nav.ApplyResults();
             Relocate(enemy,new NavPoint(-3,-26));Step();Assert.True(nav.Requests.TryDequeue(out var chase));Assert.True(nav.Requests.TryEnqueue(chase));
             var queues=(System.Collections.IDictionary)D.GetField("tacticalQueues",F).GetValue(domain);var q=queues[id];var execution=q.GetType().GetField(corruptChase?"Active":"Pending",F).GetValue(q);
             if(corruptChase)execution.GetType().GetField("AttemptRequest",F).SetValue(execution,chase.Request+1);else{var proof=execution.GetType().GetField("TerminalFailure",F).GetValue(execution);proof.GetType().GetField("Request",F).SetValue(proof,chase.Request+1);}
             var bytes=(byte[])Call("CaptureWorldBytes",7,"queue-test");Assert.Throws<TargetInvocationException>(()=>D.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{bytes,PlayableProfile.Default,7,"queue-test"}));
         }
+        [Test,Timeout(60000)]public void FailedAttackChaseCooldownSurvivesRestoreAndRetriesWithoutTimerOverride()
+        {
+            // Synthetic component fault injection, not an ordinary threaded route-failure witness.
+            const double dt=1d/30;const int maximumSteps=128;
+            var profile=PlayableProfile.Default;var origin=new NavPoint(-14,-26);var target=new NavPoint(-3,-26);
+            string output=System.IO.Path.GetFullPath(Environment.GetEnvironmentVariable("SPACEWARS_C23_COOLDOWN_OUTPUT")??
+                System.IO.Path.Combine(TestContext.CurrentContext.WorkDirectory,".local/qa/c23-failed-chase-cooldown"));
+            if(System.IO.Directory.Exists(output)&&System.IO.Directory.EnumerateFileSystemEntries(output).Any())throw new InvalidOperationException("Cooldown evidence output must be empty.");
+            System.IO.Directory.CreateDirectory(output);
+            void Save(string name,object value)=>System.IO.File.WriteAllText(System.IO.Path.Combine(output,name),Newtonsoft.Json.JsonConvert.SerializeObject(value,Newtonsoft.Json.Formatting.Indented));
+            object Read(object value,string field){Assert.NotNull(value);var info=value.GetType().GetField(field,F|BindingFlags.Public);Assert.NotNull(info,value.GetType().Name+"."+field);return info.GetValue(value);}
+            object Point(NavPoint p)=>new {p.X,p.Z};
+            object[] Facts(object[] values)=>values.Select(v=>v is NavLocation location?(object)new {position=Point(location.Position),surface=location.SurfaceId}:v).ToArray();
+            long Bits(double value)=>BitConverter.DoubleToInt64Bits(value);
+            int id=-1,enemy=-1,steps=0;string phase="preflight";Exception primary=null;var observations=new List<object>();
+            double Timer(){var units=(System.Collections.IDictionary)D.GetField("units",F).GetValue(domain);return (double)Read(units[id],"Repath");}
+            long Requests()=>nav.CaptureState().RequestSequence;
+            object[] RootIdentity()
+            {
+                var queue=Queue(id);Assert.NotNull(queue.Active);Assert.Null(queue.Pending);Assert.Null(queue.Completion);Assert.Zero(queue.Deferred.Count);
+                Assert.AreEqual(PlayableCommandKind.Attack,queue.Active.Kind);Assert.AreEqual(1,queue.Active.CommandSequence);
+                var active=InternalExecution(id,"Active");var issuance=Read(active,"Issuance");var command=(PlayableCommand)Read(issuance,"Command");
+                Assert.AreEqual(enemy,command.TargetId);Assert.False((bool)Read(active,"Interrupted"));
+                var group=nav.GroupFor(id);var member=group.Members.Single(m=>m.Entity==id);var body=nav.Crowd.Units.Single(u=>u.Id==id);
+                Assert.AreEqual(queue.Active.GroupId,group.GroupId);Assert.AreEqual(queue.Active.ActivationRevision,member.OrderRevision);Assert.AreEqual(body.Incarnation,member.Incarnation);
+                return new object[]{queue.Active.IssuanceId,queue.Active.GroupId,queue.Active.ActivationRevision,Read(issuance,"Revision"),Read(issuance,"Tick"),
+                    Read(active,"Incarnation"),Read(active,"ActivationTick"),Read(active,"Assigned"),group.WorldGeneration,group.CommandSequence,group.IssuedTick,
+                    group.OriginalLocation,group.MembershipRevision,member.Entity,member.Incarnation,member.MobilityRevision,member.OrderRevision,body.Incarnation,body.MobilityRevision};
+            }
+            object[] FailureProof()
+            {
+                var proof=Read(InternalExecution(id,"Active"),"TerminalFailure");Assert.NotNull(proof);
+                return new[]{Read(proof,"Request"),Read(proof,"Order"),Read(proof,"GroupId"),Read(proof,"Revision"),Read(proof,"Incarnation"),Read(proof,"Tick"),Read(proof,"Location"),Read(proof,"Outcome")};
+            }
+            object[] AttemptProof(){var active=InternalExecution(id,"Active");return new[]{Read(active,"AttemptRequest"),Read(active,"AttemptOrder"),Read(active,"AttemptLocation"),Read(active,"RouteRequest"),Read(active,"RouteOrder")};}
+            void NormalStep()
+            {
+                Assert.Less(steps,maximumSteps,"Frozen logical-step horizon.");Step();steps++;
+                observations.Add(new {steps,timer=Timer(),timerBits=Bits(Timer()),requests=Requests(),nav.PendingCount,mailbox=nav.Requests.Count});
+            }
+            byte[] Checkpoint(string name)
+            {
+                var bytes=(byte[])Call("CaptureWorldBytes",7,"queue-test");System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,name+"-current-v10.bin"),bytes);
+                using(var state=PlayableWorldState.Decode(bytes)){
+                    Assert.AreEqual(PlayableWorldState.CurrentVersion,state.Version);Assert.AreEqual(11,state.Version);Assert.AreEqual(7,state.Seed);Assert.AreEqual(1,state.Generation);Assert.AreEqual("queue-test",state.SourceIdentity);
+                    CollectionAssert.AreEqual(WorldWire.Binding(profile),state.Binding);Assert.Zero(state.Participants.Length,"This is the established standalone component map, without an offline roster.");
+                }
+                return bytes;
+            }
+            void ColdRestore(string name)
+            {
+                var bytes=Checkpoint(name);long timerBits=Bits(Timer()),requests=Requests();var root=RootIdentity();var attempt=AttemptProof();
+                var terminal=Read(InternalExecution(id,"Active"),"TerminalFailure");var failure=terminal==null?null:FailureProof();
+                var restored=D.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{bytes,profile,7,"queue-test"});
+                Call("DestroyOwnedNavigation");Assert.Zero(nav.PhysicalHostBudget.PhysicalBytes);Assert.Zero(nav.PhysicalHostBudget.HeldBytes);Assert.Zero(nav.PhysicalHostBudget.ActiveScopes);
+                domain=restored;nav=(NavigationSession)D.GetProperty("Navigation",F).GetValue(domain);
+                Assert.AreEqual(timerBits,Bits(Timer()),"Literal serialized floating cooldown must survive cold restore.");Assert.AreEqual(requests,Requests());
+                CollectionAssert.AreEqual(root,RootIdentity());CollectionAssert.AreEqual(attempt,AttemptProof());
+                if(failure==null)Assert.Null(Read(InternalExecution(id,"Active"),"TerminalFailure"));else CollectionAssert.AreEqual(failure,FailureProof());
+                var roundTrip=Checkpoint(name+"-restored");CollectionAssert.AreEqual(bytes,roundTrip,"Complete current component envelope must round trip without exclusions.");
+            }
+            try
+            {
+                Assert.AreEqual(.5d,profile.AttackRepathSeconds);Assert.Greater(11d,profile.TankRange);Assert.LessOrEqual(11d,profile.TankVisionRange);
+                Assert.True(((NavGeometry)D.GetProperty("Geometry",F).GetValue(domain)).IsFree(origin,PlayableUnitRules.Radius(profile,PlayableEntityKind.Tank)));
+                Assert.True(((NavGeometry)D.GetProperty("Geometry",F).GetValue(domain)).IsFree(target,PlayableUnitRules.Radius(profile,PlayableEntityKind.Tank)));
+                Save("preflight.json",new {componentOnly=true,syntheticFault="typed NavigationAnswer(empty route)",dt,maximumSteps,profile.AttackRepathSeconds,profile.ProfileId,profile.Revision,profile.SourceCommit,profile.SourceManifestSha256,
+                    seed=7,generation=1,source="queue-test",map="standalone default profile geometry; no offline configuration",origin=Point(origin),target=Point(target)});
+                id=Spawn(origin.X,origin.Z);enemy=Spawn(target.X,target.Z,PlayableOwner.Enemy);
+                Assert.AreEqual(PlayableCommandStatus.Applied,Send(new[]{id},default,PlayableCommandKind.Attack,target:enemy));
+                phase="initial-natural-chase-request";Save("target-branch-entered.json",new {id,enemy});NormalStep();
+                long failedSequence=Requests();
+                Assert.True(nav.Requests.TryDequeue(out var failed));Assert.AreEqual(id,failed.Entity);Assert.AreEqual(profile.AttackRepathSeconds,Timer());
+                var root=RootIdentity();Assert.AreEqual(Queue(id).Active.GroupId,failed.MemberIdentity.GroupId);Assert.AreEqual(Queue(id).Active.ActivationRevision,failed.MemberIdentity.OrderRevision);
+                Assert.True(nav.Answers.TryEnqueue(new NavigationAnswer(failed,Array.Empty<NavPoint>())));nav.ApplyResults();
+                Assert.False(nav.IsPending(id));Assert.Zero(nav.PendingCount);Assert.Zero(nav.Requests.Count);
+                var terminal=FailureProof();Assert.AreEqual(failed.Request,terminal[0]);Assert.AreEqual(failed.Order,terminal[1]);Assert.AreEqual(NavigationOutcome.Unreachable,terminal[7]);
+                CollectionAssert.AreEqual(root,RootIdentity());Assert.AreEqual(profile.AttackRepathSeconds,Timer());
+                phase="positive-cooldown-and-restore";double expected=profile.AttackRepathSeconds;
+                for(int k=0;k<3;k++){
+                    expected=Math.Max(0,expected-dt);NormalStep();Assert.AreEqual(Bits(expected),Bits(Timer()));Assert.Greater(Timer(),0);
+                    Assert.AreEqual(failedSequence,Requests());Assert.Zero(nav.PendingCount);Assert.Zero(nav.Requests.Count);CollectionAssert.AreEqual(terminal,FailureProof());
+                }
+                double capturedTimer=Timer();Save("positive-failure-facts.json",new {steps,timer=capturedTimer,timerBits=Bits(capturedTimer),requests=Requests(),root=Facts(root),failure=Facts(terminal),attempt=Facts(AttemptProof())});
+                ColdRestore("positive-failure");CollectionAssert.AreEqual(root,RootIdentity());CollectionAssert.AreEqual(terminal,FailureProof());
+                phase="first-naturally-eligible-retry";int firstEligibleStep=-1;
+                while(expected>0){
+                    expected=Math.Max(0,expected-dt);NormalStep();CollectionAssert.AreEqual(root,RootIdentity());
+                    if(expected>0){Assert.AreEqual(Bits(expected),Bits(Timer()));Assert.AreEqual(failedSequence,Requests());Assert.Zero(nav.PendingCount);Assert.Zero(nav.Requests.Count);CollectionAssert.AreEqual(terminal,FailureProof());}
+                    else{
+                        firstEligibleStep=steps;Assert.AreEqual(Bits(profile.AttackRepathSeconds),Bits(Timer()),"The first eligible normal Step emits the retry and starts only the authored cooldown.");
+                        Assert.AreEqual(failedSequence+1,Requests());Assert.AreEqual(1,nav.PendingCount);Assert.AreEqual(1,nav.Requests.Count);Assert.Null(Read(InternalExecution(id,"Active"),"TerminalFailure"));
+                    }
+                }
+                Assert.Greater(firstEligibleStep,0);var retry=nav.PendingRequestFor(id);Assert.NotNull(retry);Assert.Greater(retry.Request,failed.Request);
+                Assert.AreEqual(failedSequence+1,retry.Request);Assert.AreNotEqual(failed.Order,retry.Order);
+                Assert.AreEqual(failed.MemberIdentity.GroupId,retry.MemberIdentity.GroupId);Assert.AreEqual(failed.MemberIdentity.OrderRevision,retry.MemberIdentity.OrderRevision);
+                Assert.AreEqual(failed.MemberIdentity.Incarnation,retry.MemberIdentity.Incarnation);Assert.AreEqual(failed.MemberIdentity.MobilityRevision,retry.MemberIdentity.MobilityRevision);Assert.AreEqual(failed.MemberIdentity.MembershipRevision,retry.MemberIdentity.MembershipRevision);
+                var retryAttempt=AttemptProof();Assert.AreEqual(retry.Request,retryAttempt[0]);Assert.AreEqual(retry.Order,retryAttempt[1]);Assert.AreEqual(retry.GoalLocation,retryAttempt[2]);
+                phase="pending-duplicate-suppression";expected=profile.AttackRepathSeconds;int pendingSteps=0;
+                do{
+                    expected=Math.Max(0,expected-dt);NormalStep();pendingSteps++;Assert.AreEqual(Bits(expected),Bits(Timer()));
+                    Assert.AreSame(retry,nav.PendingRequestFor(id));Assert.AreEqual(failedSequence+1,Requests());Assert.AreEqual(1,nav.PendingCount);Assert.AreEqual(1,nav.Requests.Count);
+                    CollectionAssert.AreEqual(root,RootIdentity());CollectionAssert.AreEqual(retryAttempt,AttemptProof());Assert.Null(Read(InternalExecution(id,"Active"),"TerminalFailure"));
+                }while(expected>0);
+                NormalStep();pendingSteps++;Assert.Zero(Timer());Assert.AreSame(retry,nav.PendingRequestFor(id));Assert.AreEqual(failedSequence+1,Requests());Assert.AreEqual(1,nav.PendingCount);Assert.AreEqual(1,nav.Requests.Count);
+                Save("pending-retry-facts.json",new {steps,firstEligibleStep,pendingSteps,timer=Timer(),requests=Requests(),root=Facts(root),attempt=Facts(retryAttempt),retry.Request,retry.Order});
+                ColdRestore("pending-retry");CollectionAssert.AreEqual(root,RootIdentity());CollectionAssert.AreEqual(retryAttempt,AttemptProof());Assert.Null(Read(InternalExecution(id,"Active"),"TerminalFailure"));
+                var restoredRetry=nav.PendingRequestFor(id);Assert.NotNull(restoredRetry);Assert.AreEqual(retry.Request,restoredRetry.Request);Assert.AreEqual(retry.Order,restoredRetry.Order);Assert.AreEqual(retry.GoalLocation,restoredRetry.GoalLocation);
+                Assert.AreEqual(1,nav.PendingCount);Assert.AreEqual(1,nav.Requests.Count);
+                Save("result.json",new {result="PASS",componentOnly=true,ordinaryQualification=false,steps,capturedTimer,firstEligibleStep,pendingSteps,failedRequest=failed.Request,retryRequest=retry.Request,root=Facts(root),attempt=Facts(retryAttempt),observations});
+                TestContext.WriteLine($"C2.3 synthetic component cooldown: positive capture={capturedTimer:R}; first eligible step={firstEligibleStep}; pending steps={pendingSteps}; total={steps}; failed={failed.Request}; retry={retry.Request}; no timer override.");
+            }
+            catch(Exception error){primary=error;try{Save("failure.json",new {phase,steps,id,enemy,error=error.ToString(),observations});}catch(Exception preservation){TestContext.WriteLine(preservation);}throw;}
+            finally{
+                try{Call("DestroyOwnedNavigation");Assert.Zero(nav.PhysicalHostBudget.PhysicalBytes);Assert.Zero(nav.PhysicalHostBudget.HeldBytes);Assert.Zero(nav.PhysicalHostBudget.ActiveScopes);Save("cleanup.json",new {released=true,physical=nav.PhysicalHostBudget.PhysicalBytes,held=nav.PhysicalHostBudget.HeldBytes,scopes=nav.PhysicalHostBudget.ActiveScopes});}
+                catch(Exception cleanup){if(primary==null)throw;TestContext.WriteLine("Cleanup failure after primary: "+cleanup);}
+            }
+        }
+
         [Test]public void FailedAttackChaseRestoresThenRetriesSuccessfullyWithoutStaleProof()
         {
-            int id=Spawn(-14,-26),enemy=Spawn(-6,-26,PlayableOwner.Enemy);Send(new[]{id},default,PlayableCommandKind.Attack,target:enemy);Send(new[]{id},new NavPoint(-14,-10));while(nav.Requests.TryDequeue(out var rejected))nav.Answers.TryEnqueue(new NavigationAnswer(rejected,Array.Empty<NavPoint>()));nav.ApplyResults();
-            Relocate(enemy,new NavPoint(-3,-26));Step();Assert.True(nav.Requests.TryDequeue(out var failedChase));nav.Answers.TryEnqueue(new NavigationAnswer(failedChase,Array.Empty<NavPoint>()));nav.ApplyResults();
+            UseArrivalFailureFixture();
+            int id=Spawn(-14,-26),enemy=Spawn(-6,-26,PlayableOwner.Enemy);Send(new[]{id},default,PlayableCommandKind.Attack,target:enemy);Send(new[]{id},new NavPoint(-14,-10));MaterializeReplacementRequest(id);while(nav.Requests.TryDequeue(out var rejected))nav.Answers.TryEnqueue(new NavigationAnswer(rejected,Array.Empty<NavPoint>()));nav.ApplyResults();
+            int observedRequests=0;nav.RouteRequested+=request=>{if(request.Entity!=id)return;observedRequests++;Assert.AreEqual(Queue(id).Active.GroupId,request.MemberIdentity.GroupId);Assert.AreEqual(Queue(id).Active.ActivationRevision,request.MemberIdentity.OrderRevision);Assert.False((bool)InternalExecution(id,"Active").GetType().GetField("Interrupted",F).GetValue(InternalExecution(id,"Active")));Assert.True((bool)D.GetMethod("TerminalProofMatches",F).Invoke(domain,new object[]{InternalExecution(id,"Pending"),nav.Crowd.Units.Single(u=>u.Id==id)}));};
+            Assert.True((bool)D.GetMethod("TerminalProofMatches",F).Invoke(domain,new object[]{InternalExecution(id,"Pending"),nav.Crowd.Units.Single(u=>u.Id==id)}));Relocate(enemy,new NavPoint(-3,-26));Step();Assert.True(nav.Requests.TryDequeue(out var failedChase));Assert.AreEqual(1,observedRequests,"one external notification after required Combat acceptance");Assert.AreEqual(Queue(id).Active.GroupId,failedChase.MemberIdentity.GroupId);Assert.AreEqual(Queue(id).Active.ActivationRevision,failedChase.MemberIdentity.OrderRevision);Assert.False((bool)InternalExecution(id,"Active").GetType().GetField("Interrupted",F).GetValue(InternalExecution(id,"Active")));nav.Answers.TryEnqueue(new NavigationAnswer(failedChase,Array.Empty<NavPoint>()));nav.ApplyResults();
             Assert.NotNull(InternalExecution(id,"Active").GetType().GetField("TerminalFailure",F).GetValue(InternalExecution(id,"Active")));Restore();
             var units=(System.Collections.IDictionary)D.GetField("units",F).GetValue(domain);units[id].GetType().GetField("Repath",F|BindingFlags.Public).SetValue(units[id],0d);Step();Assert.True(nav.Requests.TryDequeue(out var retry));Assert.AreEqual(Queue(id).Active.GroupId,retry.MemberIdentity.GroupId);Assert.Null(InternalExecution(id,"Active").GetType().GetField("TerminalFailure",F).GetValue(InternalExecution(id,"Active")));
             Assert.True(nav.Requests.TryEnqueue(retry));Restore();Assert.True(nav.Requests.TryDequeue(out var restoredRetry));nav.Answers.TryEnqueue(new NavigationAnswer(restoredRetry,new SharedFlowRouter(restoredRetry.Geometry,restoredRetry.Profile).FindPath(restoredRetry.Start,restoredRetry.Goal)));nav.ApplyResults();Assert.True(nav.Crowd.Units.Single(u=>u.Id==id).Moving);Assert.Null(InternalExecution(id,"Active").GetType().GetField("TerminalFailure",F).GetValue(InternalExecution(id,"Active")));Restore();Assert.True(nav.Crowd.Units.Single(u=>u.Id==id).Moving);Assert.AreEqual(2,Queue(id).Pending.CommandSequence);
@@ -335,9 +539,10 @@ namespace Spacewars.Tests.EditMode
         }
         [Test]public void FailedReplacementAndLaterFailedChaseKeepPriorInstalledAttackRoute()
         {
+            UseArrivalFailureFixture();
             int id=Spawn(-14,-26),enemy=Spawn(-3,-26,PlayableOwner.Enemy);Send(new[]{id},default,PlayableCommandKind.Attack,target:enemy);Step();Assert.True(nav.Requests.TryDequeue(out var originalChase));nav.Answers.TryEnqueue(new NavigationAnswer(originalChase,new SharedFlowRouter(originalChase.Geometry,originalChase.Profile).FindPath(originalChase.Start,originalChase.Goal)));nav.ApplyResults();
-            var actor=nav.Crowd.Units.Single(u=>u.Id==id);Assert.True(actor.Moving);long installed=actor.InstalledRequest;Send(new[]{id},new NavPoint(-14,-10));Assert.True(nav.Requests.TryDequeue(out var replacement));nav.Answers.TryEnqueue(new NavigationAnswer(replacement,Array.Empty<NavPoint>()));nav.ApplyResults();Assert.True(actor.Moving);Assert.AreEqual(installed,actor.InstalledRequest);Assert.AreEqual(PlayableCommandKind.Attack,Queue(id).Active.Kind);Assert.NotNull(Queue(id).Pending);
-            Assert.True((bool)Call("CombatMove",id,new NavPoint(-14,-24)));Assert.True(nav.Requests.TryDequeue(out var retry));nav.Answers.TryEnqueue(new NavigationAnswer(retry,Array.Empty<NavPoint>()));nav.ApplyResults();Assert.True(actor.Moving);Assert.AreEqual(installed,actor.InstalledRequest);Assert.AreEqual(PlayableCommandKind.Attack,Queue(id).Active.Kind);Assert.NotNull(InternalExecution(id,"Active").GetType().GetField("TerminalFailure",F).GetValue(InternalExecution(id,"Active")));
+            var actor=nav.Crowd.Units.Single(u=>u.Id==id);Assert.True(actor.Moving);long installed=actor.InstalledRequest;Send(new[]{id},new NavPoint(-14,-10));MaterializeReplacementRequest(id);Assert.True(nav.Requests.TryDequeue(out var replacement));nav.Answers.TryEnqueue(new NavigationAnswer(replacement,Array.Empty<NavPoint>()));nav.ApplyResults();Assert.True(actor.Moving);Assert.AreEqual(installed,actor.InstalledRequest);Assert.AreEqual(PlayableCommandKind.Attack,Queue(id).Active.Kind);Assert.NotNull(Queue(id).Pending);
+            Assert.True((bool)D.GetMethod("TerminalProofMatches",F).Invoke(domain,new object[]{InternalExecution(id,"Pending"),actor}));Assert.True((bool)Call("CombatMove",id,new NavPoint(-14,-24)));Assert.True(nav.Requests.TryDequeue(out var retry));Assert.AreEqual(Queue(id).Active.GroupId,retry.MemberIdentity.GroupId);Assert.AreEqual(Queue(id).Active.ActivationRevision,retry.MemberIdentity.OrderRevision);Assert.False((bool)InternalExecution(id,"Active").GetType().GetField("Interrupted",F).GetValue(InternalExecution(id,"Active")));nav.Answers.TryEnqueue(new NavigationAnswer(retry,Array.Empty<NavPoint>()));nav.ApplyResults();Assert.True(actor.Moving);Assert.AreEqual(installed,actor.InstalledRequest);Assert.AreEqual(PlayableCommandKind.Attack,Queue(id).Active.Kind);Assert.NotNull(InternalExecution(id,"Active").GetType().GetField("TerminalFailure",F).GetValue(InternalExecution(id,"Active")));
             Restore();Assert.True(nav.Crowd.Units.Single(u=>u.Id==id).Moving);Assert.AreEqual(installed,nav.Crowd.Units.Single(u=>u.Id==id).InstalledRequest);Assert.AreEqual(PlayableCommandKind.Attack,Queue(id).Active.Kind);Assert.NotNull(Queue(id).Pending);
         }
         [Test]public void NonAnchorAttackMoveMemberResumesInstalledRouteAfterContactLossAndRestore()
@@ -377,11 +582,11 @@ namespace Spacewars.Tests.EditMode
         {
             int id=Spawn(-14,-14);Send(new[]{id},new NavPoint(-10,-14));Send(new[]{id},new NavPoint(-12,-10),append:true);Send(new[]{id},new NavPoint(-14,-10),append:true);var data=PlayableProfile.Default.CopyData();data.revision=2;data.unitOrderQueueLimit=1;Assert.NotNull(Call("ValidateBalance",PlayableProfile.Create(data)));Assert.AreEqual(2,Queue(id).Deferred.Count);
         }
-        [TestCase(0)][TestCase(1)][TestCase(2)]public void PendingAttemptAndAssignedLocationCorruptionRejects(int mode)
+        [TestCase(0)][TestCase(1)][TestCase(2)][TestCase(3)][TestCase(4)]public void PendingAttemptAndAssignedLocationCorruptionRejects(int mode)
         {
             int id=Spawn(-14,-14);Send(new[]{id},new NavPoint(-12,-14));Deliver();Send(new[]{id},new NavPoint(-14,-10));
             var queues=(System.Collections.IDictionary)D.GetField("tacticalQueues",F).GetValue(domain);var q=queues[id];var e=q.GetType().GetField("Pending",F).GetValue(q);
-            if(mode==0)e.GetType().GetField("AttemptRequest",F).SetValue(e,0L);if(mode==1)e.GetType().GetField("Assigned",F).SetValue(e,(NavLocation?)new NavLocation(new NavPoint(-10,-10),NavLocation.FlatSurface));if(mode==2)e.GetType().GetField("Failed",F).SetValue(e,true);
+            if(mode==0)e.GetType().GetField("AttemptRequest",F).SetValue(e,0L);if(mode==1)e.GetType().GetField("Assigned",F).SetValue(e,(NavLocation?)new NavLocation(new NavPoint(-10,-10),NavLocation.FlatSurface));if(mode==2)e.GetType().GetField("Failed",F).SetValue(e,true);if(mode==3)e.GetType().GetField("Assigned",F).SetValue(e,null);if(mode==4){var original=(NavLocation?)e.GetType().GetField("Assigned",F).GetValue(e);e.GetType().GetField("Assigned",F).SetValue(e,(NavLocation?)new NavLocation(original.Value.Position,"wrong-layer"));}
             var bytes=(byte[])Call("CaptureWorldBytes",7,"queue-test");Assert.Throws<TargetInvocationException>(()=>D.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{bytes,PlayableProfile.Default,7,"queue-test"}));
         }
         [TestCase(false)][TestCase(true)]public void DeferredRootAndFifoPermutationCorruptionRejects(bool root)

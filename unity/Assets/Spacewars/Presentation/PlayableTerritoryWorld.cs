@@ -13,7 +13,7 @@ namespace Spacewars.Presentation
         private readonly HashSet<int> readyPadSites=new HashSet<int>();
         private readonly Dictionary<string,Vector2> apronModelBounds=new Dictionary<string,Vector2>();
         private EnvironmentArtProfile apronArt;
-        private Material apronMaterial;
+        private Material apronMaterial,capturePadMaterial;
         private long padTick=-1;
         private EnvironmentArtProfile ApronArt=>apronArt??(apronArt=EnvironmentArtProfile.Load());
         private static void DestroyPad(PadView p){foreach(var filter in p.Root.GetComponentsInChildren<MeshFilter>())UnityEngine.Object.Destroy(filter.sharedMesh);UnityEngine.Object.Destroy(p.Root);}
@@ -27,6 +27,18 @@ namespace Spacewars.Presentation
                 apronMaterial=new Material(shader);apronMaterial.SetTexture("_ConcreteTex",Resources.Load<Texture2D>("Environment/NaturalFrontier/Concrete"));
                 apronMaterial.SetTexture("_FogMask",Fog.Texture);apronMaterial.SetColor("_FogColor",material.GetColor("_FogColor"));apronMaterial.SetVector("_FogBounds",material.GetVector("_FogBounds"));
                 return apronMaterial;
+            }
+        }
+        private Material CapturePadMaterial
+        {
+            get
+            {
+                if(capturePadMaterial)return capturePadMaterial;
+                capturePadMaterial=new Material(ApronMaterial){name="Translucent capture pad",renderQueue=3000};
+                capturePadMaterial.SetInt("_SrcBlend",(int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                capturePadMaterial.SetInt("_DstBlend",(int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                capturePadMaterial.SetInt("_ZWrite",0);
+                return capturePadMaterial;
             }
         }
         // The lower platform is the support datum; balconies/equipment may overhang it.
@@ -68,52 +80,52 @@ namespace Spacewars.Presentation
             foreach(var state in view.Sites)
             {
                 var center=view.Buildings.FirstOrDefault(b=>b.Id==state.CenterId&&b.Phase!=ConstructionPhase.Pending);
-                UpdatePad(state.Site.Id+":0",state.Site.Position,ObservedSupportHalf(state.Site.Id+":0",state.Site.Position,state.Site.Kind,center,view),state.Owner??state.Claimant,center==null?state.Progress:0,state.Contested,view.Tick,facing,live);
+                UpdatePad(state.Site.Id+":0",state.Site.Position,ObservedSupportHalf(state.Site.Id+":0",state.Site.Position,state.Site.Kind,center,view),state.Owner??state.Claimant,center==null?state.Progress:0,state.Contested,view.Tick,facing,live,profile.AuthoredMap is WhiteMeridianMap&&state.Site.Kind!=PlayableBuildingKind.Mine);
                 if(state.Ready)readyPadSites.Add(state.Site.Id);else readyPadSites.Remove(state.Site.Id);
                 if(!state.Ready)continue;
                 foreach(var slot in state.Site.Slots)
                 {
                     var observed=view.Buildings.FirstOrDefault(b=>b.SiteId==state.Site.Id&&b.SlotId==slot.Id&&b.Phase!=ConstructionPhase.Pending);
                     string key=state.Site.Id+":"+slot.Id;
-                    UpdatePad(key,slot.Position,ObservedSupportHalf(key,slot.Position,PlayableBuildingKind.Factory,observed,view),state.Owner,0,false,view.Tick,facing,live);
+                    UpdatePad(key,slot.Position,ObservedSupportHalf(key,slot.Position,PlayableBuildingKind.Factory,observed,view),state.Owner,0,false,view.Tick,facing,live,profile.AuthoredMap is WhiteMeridianMap&&state.Site.Kind!=PlayableBuildingKind.Mine);
                 }
             }
             foreach(var site in view.DiscoveredSites)
             {
                 if(view.Sites.Any(s=>s.Site.Id==site.Id))continue;
                 // Static discovered ground is safe to remember; never inspect hidden live buildings here.
-                UpdatePad(site.Id+":0",site.Position,ObservedSupportHalf(site.Id+":0",site.Position,site.Kind,null,view),null,0,false,view.Tick,facing,live);
+                UpdatePad(site.Id+":0",site.Position,ObservedSupportHalf(site.Id+":0",site.Position,site.Kind,null,view),null,0,false,view.Tick,facing,live,profile.AuthoredMap is WhiteMeridianMap&&site.Kind!=PlayableBuildingKind.Mine);
                 // Last observed readiness only: discovered ground must not disclose hidden construction.
                 if(!readyPadSites.Contains(site.Id))continue;
-                foreach(var slot in site.Slots)UpdatePad(site.Id+":"+slot.Id,slot.Position,ObservedSupportHalf(site.Id+":"+slot.Id,slot.Position,PlayableBuildingKind.Factory,null,view),null,0,false,view.Tick,facing,live);
+                foreach(var slot in site.Slots)UpdatePad(site.Id+":"+slot.Id,slot.Position,ObservedSupportHalf(site.Id+":"+slot.Id,slot.Position,PlayableBuildingKind.Factory,null,view),null,0,false,view.Tick,facing,live,profile.AuthoredMap is WhiteMeridianMap&&site.Kind!=PlayableBuildingKind.Mine);
             }
             foreach(var key in territoryPads.Keys.ToArray())if(!live.Contains(key)){DestroyPad(territoryPads[key]);territoryPads.Remove(key);}
         }
-        private void UpdatePad(string key,NavPoint point,Vector2 half,PlayableOwner? owner,double progress,bool contested,long tick,Quaternion facing,HashSet<string> live)
+        private void UpdatePad(string key,NavPoint point,Vector2 half,PlayableOwner? owner,double progress,bool contested,long tick,Quaternion facing,HashSet<string> live,bool lightPad=false)
         {
             live.Add(key);
             if(!territoryPads.TryGetValue(key,out var pad))
             {
                 var obj=new GameObject("Site pad "+key);obj.transform.SetParent(root,false);obj.transform.localPosition=Point(point);obj.transform.rotation=facing;
-                var surface=new GameObject("Technical apron");surface.transform.SetParent(obj.transform,false);var filter=surface.AddComponent<MeshFilter>();filter.sharedMesh=ConstructionApronMesh.Build(half,ApronArt);surface.AddComponent<MeshRenderer>().sharedMaterial=ApronMaterial;
-                var fill=new GameObject("Capture");fill.transform.SetParent(obj.transform,false);var mesh=new Mesh{name="Capture edge strip"};fill.AddComponent<MeshFilter>().sharedMesh=mesh;fill.AddComponent<MeshRenderer>().sharedMaterial=ApronMaterial;
+                var surface=new GameObject("Technical apron");surface.transform.SetParent(obj.transform,false);var filter=surface.AddComponent<MeshFilter>();filter.sharedMesh=ConstructionApronMesh.Build(half,SiteApronArt(lightPad));surface.AddComponent<MeshRenderer>().sharedMaterial=ApronMaterial;
+                var fill=new GameObject("Capture");fill.transform.SetParent(obj.transform,false);var mesh=new Mesh{name="Capture pad fill"};fill.AddComponent<MeshFilter>().sharedMesh=mesh;fill.AddComponent<MeshRenderer>().sharedMaterial=CapturePadMaterial;
                 Layer(obj);pad=new PadView{Root=obj,Fill=fill,Mesh=mesh,Surface=filter,Half=half};territoryPads.Add(key,pad);
             }
             if(pad.Half!=half)
             {
                 // Resize the same physical support only from an observed model; keep its lifecycle identity.
-                ReleaseWorldObject(pad.Surface.sharedMesh);pad.Surface.sharedMesh=ConstructionApronMesh.Build(half,ApronArt);
+                ReleaseWorldObject(pad.Surface.sharedMesh);pad.Surface.sharedMesh=ConstructionApronMesh.Build(half,SiteApronArt(lightPad));
                 pad.Half=half;pad.Progress=double.NaN;
             }
             if(pad.Progress!=progress)
             {
-                // Capture advances along an exposed service-edge strip, leaving the concrete readable.
-                var polygon=new List<Vector3>();float w=Mathf.Min(ApronArt.apronMarkWidth,Mathf.Min(pad.Half.x,pad.Half.y)*.09f),x=pad.Half.x*.65f,z=pad.Half.y-w*6;
-                if(progress>0)polygon.AddRange(new[]{new Vector3(-x,0,z-w),new Vector3(Mathf.Lerp(-x,x,(float)progress),0,z-w),new Vector3(Mathf.Lerp(-x,x,(float)progress),0,z+w),new Vector3(-x,0,z+w)});
+                // Sweep the entire inset apron continuously, following its chamfered contour.
+                var polygon=ConstructionApronMesh.CapturePolygon(pad.Half,ApronArt,(float)progress);
                 SetMesh(pad.Mesh,polygon);pad.Fill.transform.localPosition=Vector3.up*(ApronArt.apronHeight+.006f);pad.Progress=progress;
             }
             var color=OwnerPaint!=null&&owner.HasValue?OwnerPaint(owner):owner==PlayableOwner.Enemy?Enemy:Ally;
             if(contested)color*=.65f+.35f*(float)(.5+.5*Math.Sin(tick/30d*Math.PI*2*profile.CapturePulseHz));
+            color.a=ApronArt.captureFillOpacity;
             if(color!=pad.Color){var block=new MaterialPropertyBlock();block.SetColor("_BaseColor",color);pad.Fill.GetComponent<Renderer>().SetPropertyBlock(block);pad.Color=color;}
         }
         private static void SetMesh(Mesh mesh,List<Vector3> polygon)

@@ -32,6 +32,7 @@ namespace Spacewars.Presentation
         private NativeLocalInputProfile padProfile;
         private double padRightStickLastActive=double.NegativeInfinity;
         private PlayableRuntime runtime;
+        private UnityHostRouteService routeService;
         private OfflineLocalSession session;
         private readonly Viewport[] views=new Viewport[2];
         private Gamepad assignedPad;private Keyboard assignedKeyboard;private Mouse assignedMouse;
@@ -96,7 +97,7 @@ namespace Spacewars.Presentation
         private void CreateViewport(int index)
         {
             var v=views[index]=new Viewport();v.Root=new GameObject("LocalSeat "+index+" presentation").transform;v.Root.SetParent(transform);
-            v.World=new PlayableWorld(v.Root,profile);v.Terrain=new PlayableMapTerrain(profile);
+            v.World=new PlayableWorld(v.Root,profile){OwnerPaint=Paint};v.Terrain=new PlayableMapTerrain(profile);
             v.Camera=new GameObject("LocalSeat "+index+" camera").AddComponent<Camera>();v.Camera.orthographic=false;OfflineCameraMirrorFeature.Register(v.Camera);
             // Source renderer rects(count=2): full-height equal left/right halves.
             v.Camera.rect=new Rect(index*.5f,0,.5f,1);v.Camera.cullingMask=1<<(8+index);v.Camera.backgroundColor=new Color(.045f,.075f,.1f);v.Camera.clearFlags=CameraClearFlags.SolidColor;
@@ -304,7 +305,8 @@ namespace Spacewars.Presentation
         }
         private void Route()
         {
-            while(runtime.Requests.TryDequeue(out var r)){var path=new SharedFlowRouter(r.Geometry,r.Profile).FindPath(r.Start,r.Goal);if(!runtime.Answers.TryEnqueue(new NavigationAnswer(r,path)))throw new InvalidOperationException("Navigation answer capacity.");}
+            if(routeService==null)routeService=new UnityHostRouteService();
+            routeService.Service(runtime,profile.NavigationRequestsPerFrame);
         }
         private void Render(OfflinePresentationFrame frame)
         {
@@ -313,10 +315,10 @@ namespace Spacewars.Presentation
             {
                 var v=views[i];if(v==null)continue;v.View=frame.Views[i==0?"owner-11":"owner-28"];
                 v.World.Fog.Update(v.View.Vision,Time.unscaledDeltaTime);v.World.RenderMemories(v.View,v.Camera);v.World.RenderSites(v.View,v.Camera);
-                var alive=new HashSet<int>();foreach(var e in v.View.Entities){alive.Add(e.Id);if(!v.World.Actors.TryGetValue(e.Id,out var actor))actor=v.World.Tank(e.Id,e.Owner==v.View.Owner,e.Kind);PlayableWorld.PaintOwner(actor,Paint(e.Owner));actor.Root.position=v.World.Point(e.Position);actor.Hull.localRotation=Quaternion.Euler(0,90-(float)e.HullHeading*Mathf.Rad2Deg,0);actor.Turret.localRotation=Quaternion.Euler(0,(float)(e.HullHeading-e.TurretHeading)*Mathf.Rad2Deg,0);actor.Selection.SetActive(e.Owner==v.View.Owner&&v.Selection.Contains(e.Id));PlayableWorld.UpdateHealth(actor,v.Camera,(float)e.Health/PlayableUnitRules.Health(profile,e.Kind));}
-                foreach(var b in v.View.Buildings){if(b.Phase==ConstructionPhase.Pending)continue;alive.Add(b.Id);if(!v.World.Actors.TryGetValue(b.Id,out var actor))actor=v.World.Building(b.Id,b.Kind.ToString(),b.Owner==v.View.Owner,b.RefineryUpgraded);PlayableWorld.PaintOwner(actor,Paint(b.Owner));actor.Root.position=v.World.Point(b.Position);actor.Root.rotation=Quaternion.Euler(0,-(float)b.Heading*Mathf.Rad2Deg,0);v.World.FaceBuilding(actor,v.Camera);actor.Root.localScale=new Vector3(1,Mathf.Lerp(.2f,1,(float)b.Progress),1);actor.Selection.SetActive(b.Owner==v.View.Owner&&v.Selection.Contains(b.Id));PlayableWorld.UpdateHealth(actor,v.Camera,(float)b.Health/TerritoryRules.Health(profile,b.Kind));}
+                var alive=new HashSet<int>();foreach(var e in v.View.Entities){alive.Add(e.Id);if(!v.World.Actors.TryGetValue(e.Id,out var actor))actor=v.World.Tank(e.Id,e.Owner==v.View.Owner,e.Kind);PlayableWorld.PaintOwner(actor,Paint(e.Owner));actor.Root.position=e.Kind==PlayableEntityKind.Hawk?v.World.AirGroundPoint(e.Position):v.World.Point(e.Position);actor.Hull.localRotation=Quaternion.Euler(0,90-(float)e.HullHeading*Mathf.Rad2Deg,0);actor.Turret.localRotation=Quaternion.Euler(0,(float)(e.HullHeading-e.TurretHeading)*Mathf.Rad2Deg,0);actor.Selection.SetActive(e.Owner==v.View.Owner&&v.Selection.Contains(e.Id));PlayableWorld.UpdateHealth(actor,v.Camera,(float)PlayableUnitRules.HealthRatio(profile,e),v.Selection.Contains(e.Id));v.World.UpdateAircraft(actor,e,v.View,v.Selection.Contains(e.Id));v.World.AimExplorer(actor,e);}
+                foreach(var b in v.View.Buildings){if(b.Phase==ConstructionPhase.Pending)continue;alive.Add(b.Id);if(!v.World.Actors.TryGetValue(b.Id,out var actor))actor=v.World.Building(b.Id,b.Kind.ToString(),b.Owner==v.View.Owner,b.RefineryUpgraded);v.World.UpdateFactoryModel(actor,b,v.View);PlayableWorld.PaintOwner(actor,Paint(b.Owner));actor.Root.position=v.World.Point(b.Position);actor.Root.rotation=Quaternion.Euler(0,-(float)b.Heading*Mathf.Rad2Deg,0);v.World.FaceBuilding(actor,v.Camera);actor.Root.localScale=new Vector3(1,Mathf.Lerp(.2f,1,(float)b.Progress),1);actor.Selection.SetActive(b.Owner==v.View.Owner&&v.Selection.Contains(b.Id));PlayableWorld.UpdateHealth(actor,v.Camera,(float)b.Health/TerritoryRules.Health(profile,b.Kind));}
                 foreach(var id in v.World.Actors.Keys.ToArray())if(!alive.Contains(id)){v.World.Remove(id);v.Selection.Remove(id);}
-                v.World.RenderUnitWrecks(v.View);
+                v.World.RenderUnitWrecks(v.View);v.World.RenderGroundTrails(v.View);
                 // Reserved presentation layers are a technical camera isolation bound.
                 foreach(var t in v.Root.GetComponentsInChildren<Transform>(true))t.gameObject.layer=8+i;
                 v.Terrain.Update(v.World.Fog);var rect=v.Camera.pixelRect;v.Map.Set(v.View,v.Selection,new[]{Ground(i,rect.min),Ground(i,new Vector2(rect.xMax,rect.yMin)),Ground(i,rect.max),Ground(i,new Vector2(rect.xMin,rect.yMax))});
@@ -329,6 +331,6 @@ namespace Spacewars.Presentation
             if(views[0]!=null&&sharedMap!=null){sharedTerrain.UpdateUnion(views.Select(v=>v.World.Fog).ToArray());var markers=OfflineMapProjection.Shared(frame,new[]{"owner-11","owner-28"}).Select(m=>new PlayableMapMark(m.Id,m.Position,Enum.TryParse<PlayableBuildingKind>(m.Kind,out var kind)?kind:default(PlayableBuildingKind),m.State,m.Owner)).ToArray();sharedMap.SetPublic(markers,profile.ArenaHalfExtent);sharedMap.SetOrderMarkers(Array.Empty<PlayableQueueMarker>());}
         }
         private void Capture(){if(string.IsNullOrEmpty(evidence))return;Directory.CreateDirectory(evidence);ScreenCapture.CaptureScreenshot(Path.Combine(evidence,"two-local.png"));File.WriteAllText(Path.Combine(evidence,"frame.json"),$"{{\"generation\":{session?.Frame.Generation??1},\"tick\":{session?.Frame.Tick??0},\"sequence\":{session?.Frame.Sequence??0},\"seed\":19092026,\"route\":\"source-flat-fixture\"}}");}
-        private void OnDestroy(){offlineCommandCursor?.Dispose();resultNavigation?.Dispose();session?.Dispose();runtime?.RequestStop();foreach(var v in views){v?.World?.Dispose();v?.Terrain?.Dispose();if(v?.Camera){OfflineCameraMirrorFeature.Unregister(v.Camera);Destroy(v.Camera.gameObject);}}sharedTerrain?.Dispose();}
+        private void OnDestroy(){offlineCommandCursor?.Dispose();resultNavigation?.Dispose();session?.Dispose();runtime?.RequestStop();routeService?.Dispose();foreach(var v in views){v?.World?.Dispose();v?.Terrain?.Dispose();if(v?.Camera){OfflineCameraMirrorFeature.Unregister(v.Camera);Destroy(v.Camera.gameObject);}}sharedTerrain?.Dispose();}
     }
 }

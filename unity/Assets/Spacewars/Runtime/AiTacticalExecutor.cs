@@ -280,10 +280,17 @@ namespace Spacewars.Runtime
                 var point=fact.Position.Value;
                 if(Distance(gun.Position,point)<=p.FollowArrivalTolerance+PlayableUnitRules.Radius(p,gun.Kind))
                 {if(gun.CurrentOrder!=null)return Action(PlayableCommandKind.Stop,new[]{gun.Id});continue;}
+                if(HasLivePendingMove(gun,point))continue;
                 if(gun.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move&&gun.CurrentOrder.Destination.Equals(point))continue;
                 return Action(PlayableCommandKind.Move,new[]{gun.Id},point);
             }
             return null;
+        }
+        internal static bool HasLivePendingMove(PlayableEntitySnapshot unit,NavPoint target)
+        {
+            var pending=unit?.Queue?.Pending;
+            return unit?.Queue?.PendingAiRouteViable==true&&pending!=null&&pending.AiActionId>0&&pending.Kind==PlayableCommandKind.Move&&
+                pending.Anchor.HasValue&&pending.Anchor.Value.Position.Equals(target);
         }
         private static double RouteLength(PlayableRouteProof route)
         {double length=0;var at=route.Origin;foreach(var point in route.Path){length+=Distance(at,point);at=point;}return length;}

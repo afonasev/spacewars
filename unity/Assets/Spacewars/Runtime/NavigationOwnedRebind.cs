@@ -13,7 +13,7 @@ namespace Spacewars.Runtime
         {
             internal NavUnit Actor;
             internal NavOwnedStorage Owner,Global,Local,LocationOwner;
-            internal NavigationInstalledExecutionOwner Installed;
+            internal NavigationInstalledExecutionOwner Installed,NextInstalled;internal bool InstalledDestination;
             internal NavigationLiveGroup Group;
             internal NavigationAuthorityGroup Version;
             internal NavPoint Position,SourceGoal;internal NavLocation Location;internal NavigationOutcome SourceOutcome,GeometryOutcome;internal NavRetainedArray<NavPoint> RetiredGlobal,RetiredLocal;internal NavOwnedStorage RetiredInstalled;
@@ -25,14 +25,14 @@ namespace Spacewars.Runtime
             internal static bool Bits(double a,double b)=>BitConverter.DoubleToInt64Bits(a)==BitConverter.DoubleToInt64Bits(b);
             internal bool Matches(NavUnit unit)
                 =>ReferenceEquals(unit,Actor)&&ReferenceEquals(unit.StorageOwner,Owner)&&ReferenceEquals(unit.StorageOwner.Global,Global)&&ReferenceEquals(unit.StorageOwner.Local,Local)&&unit.Id==Id&&unit.Team==Team&&unit.Incarnation==Incarnation&&unit.MobilityRevision==Mobility&&unit.Held==Held&&unit.Moving==Moving&&Bits(unit.Position.X,Position.X)&&Bits(unit.Position.Z,Position.Z)&&Bits(unit.Radius,Radius)&&Bits(unit.Speed,Speed)&&Bits(unit.TurnSpeed,TurnSpeed)&&unit.InstalledGroupId==InstalledGroup&&unit.InstalledRevision==InstalledRevision&&unit.InstalledRequest==InstalledRequest&&unit.InstalledOrder==InstalledOrder&&NavigationAdmissionMemberStorage.SameLocation(unit.Location,Location);
-            internal void Release(){RetiredGlobal?.Release();RetiredLocal?.Release();RetiredInstalled?.Release();Owner?.Release();Global?.Release();Local?.Release();LocationOwner?.Release();Installed?.Release();Group?.Release();Version?.Release();}
+            internal void Release(){if(InstalledDestination)NextInstalled?.Release();NextInstalled?.Release();RetiredGlobal?.Release();RetiredLocal?.Release();RetiredInstalled?.Release();Owner?.Release();Global?.Release();Local?.Release();LocationOwner?.Release();Installed?.Release();Group?.Release();Version?.Release();}
         }
         private struct RebindRetry
         {
             internal NavigationHostRequest Source,Next;
             internal NavigationPreparedCrowdNameWrite ArrivalFailureNames;internal NavArrivalStatus ArrivalTerminalStatus;
             internal NavArrivalProposal ArrivalProposal;internal int ArrivalOrder;internal byte ArrivalKind;
-            internal NavPoint Goal;internal int ActorIndex,Entity,GroupIndex,MemberIndex;internal bool Valid,Assigned,WasAllocating,Selected,GeometryRejected;
+            internal NavPoint Goal;internal int ActorIndex,Entity,GroupIndex,MemberIndex;internal bool Valid,Assigned,WasAllocating,Selected,GeometryRejected,GeometryCarried;
             internal long Group,Order,Membership;
         }
         private sealed partial class PreparedRebind : NavOwnedStorage,IDisposable
@@ -48,6 +48,7 @@ namespace Spacewars.Runtime
             internal NavigationCommandSlots<int,string> SourceIdentities,Identities;
             internal NavOwnedStorage RetiredAllocating,RetiredIdentities;
             internal CertifiedRouteKernel Worker;internal long Attachment,Operation,Sequence,NextSequence,Publication,RequestsRevision,AnswersRevision;
+            internal long CarryCorridorBytes,CarryGeometryBytes;
             internal int AllocatingRevision,IdentityRevision,PendingRevision,AllocationThread,InstalledCount;
             internal NavigationGroupCommand Bootstrap;
             internal readonly PlayableDomain.GeometryFoundationSource[] Foundations;internal PlayableDomain GeometryDomain;internal NavGeometry GeometryDomainSource;internal bool GeometryChange;internal bool Published;private bool released,coreDestination,allocatingDestination,identityDestination;

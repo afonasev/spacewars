@@ -9,8 +9,26 @@ namespace Spacewars.Runtime
     {
         internal static OfflineMatchConfiguration Create(PlayableProfile profile, NativeLobbyConfiguration setup)
         {
+            var authored=CreateAuthored(profile,setup);
+            // Only ordinary lobby matches replace authored pins. Campaigns and direct
+            // diagnostic configurations keep their intentional start bindings.
+            var assignment=OfflineStartAssignment.ResolveLobby(authored.Starts,authored.Roster,authored.Seed);
+            var starts=authored.Starts.Select((s,i)=>{
+                int player=Array.IndexOf(assignment,i);
+                return new OfflineStart(s.Id,s.SiteId,s.Position,s.ExplorerAnchor,s.Heading,
+                    player<0?(int?)null:authored.Roster[player].LogicalPlayer);
+            }).ToArray();
+            var costs=new double[starts.Length,starts.Length];
+            for(int a=0;a<starts.Length;a++)for(int b=0;b<starts.Length;b++)costs[a,b]=authored.RouteCost(a,b);
+            return new OfflineMatchConfiguration(profile,authored.SourceIdentity,authored.MapIdentity,authored.RouteProvenance,
+                authored.Seed,authored.Roster.ToArray(),starts,authored.Sites.ToArray(),authored.Obstacles.ToArray(),costs,terrain:profile.AuthoredMap.Id);
+        }
+        private static OfflineMatchConfiguration CreateAuthored(PlayableProfile profile, NativeLobbyConfiguration setup)
+        {
             int seed=setup.ResolveSeed();
             var roster=setup.Participants.Select((p,i)=>new OfflineParticipant(i==0?"player-1":"foundry-"+(i+1),i+1,p.Team,p.Human?OfflineControl.Human:OfflineControl.Ai)).ToArray();
+            if(profile.AuthoredMap is CrimsonGroveMap grove)return grove.Configuration(profile,seed,roster);
+            if(profile.AuthoredMap is WhiteMeridianMap meridian)return meridian.Configuration(profile,seed,roster);
             if(profile.AuthoredMap is MossHighlandMap moss)return moss.Configuration(profile,seed,roster);
             if(profile.AuthoredMap is BasaltCrownMap basalt)return basalt.Configuration(profile,seed,roster);
             if(profile.AuthoredMap is AiTestMap testMap)return testMap.Configuration(profile,seed,roster);

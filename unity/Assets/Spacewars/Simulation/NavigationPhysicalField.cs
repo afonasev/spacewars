@@ -41,8 +41,36 @@ namespace Spacewars.Simulation
                 using(NavStorageScratch.Reserve(reader.Reservation,checked(16384L+4L*graph.Nodes.Count)))field.ValidatePhysicalField(reader.Reservation);return field;
             }
         }
+        private void ValidateNodeSeedState(INavStorageReservation allocation)
+        {
+            if(phase!=Phase.ValidateSeeds&&phase!=Phase.SeedByNode)return;
+            int nodes=graph.Nodes.Count,candidates=region.Candidates.Count;
+            if(!NodeSeedEligible||Status!=NavSolveStatus.Pending||current!=-1||arcCursor!=0||currentCandidate!=0)throw new ArgumentException("Invalid node-first seed mode/provider/capacity.");
+            if(phase==Phase.ValidateSeeds){
+                if(node!=0||candidate<0||candidate>=candidates||LabelCount!=0||frontier.Count!=0)throw new ArgumentException("Candidate validation must retain empty field state.");
+                for(int c=0;c<candidate;c++)if(!graph.IsValid(region.Candidates[c]))throw new ArgumentException("Invalid prior seed candidate.");return;
+            }
+            if(node<0||node>=nodes||candidate<0||candidate>=candidates||candidate>0&&graph.Nodes[node].Location.SurfaceId!=region.Requested.SurfaceId)throw new ArgumentException("Invalid node-first seed prefix cursor.");
+            for(int c=0;c<candidates;c++)if(!graph.IsValid(region.Candidates[c]))throw new ArgumentException("Node seed bypassed invalid candidate.");
+            void Present(int n,int c,bool successor){if(n<0||n>=nodes||c<0||c>=candidates||n>node||n==node&&c>=candidate||successor||graph.Nodes[n].Location.SurfaceId!=region.Requested.SurfaceId)throw new ArgumentException("Node-first seed label outside exact prefix.");}
+            if(packed!=null)packed.VisitPhysicalLabels((index,cell)=>Present(index%nodes,index/nodes,(cell.Flags&2)!=0));
+            else foreach(var pair in distance)Present((int)pair.Key,(int)(pair.Key>>32),next.ContainsKey(pair.Key));
+            for(int n=0;n<=node;n++){
+                int count=n<node?candidates:candidate;
+                for(int c=0;c<count;c++){
+                    double expected=0;bool valid=false;
+                    if(graph.Nodes[n].Location.SurfaceId==region.Requested.SurfaceId){
+                        if(allocation==null){valid=graph.TryAttach(region.Candidates[c],n,out var a);expected=valid?a.Cost:0;}
+                        else valid=NavPhysicalSolveValidation.Attachment(graph,region.Candidates[c],n,allocation,out expected);
+                    }
+                    bool found=TryGet(n,c,out double actual);if(found!=valid||found&&actual!=expected)throw new ArgumentException("Node-first seed prefix missing/changed exact attachment.");
+                }
+            }
+            if(frontier.Count!=LabelCount)throw new ArgumentException("Node-first seed frontier must contain every seed label.");
+        }
         private void ValidatePhysicalField(INavStorageReservation allocation)
         {
+            ValidateNodeSeedState(allocation);
             int nodes=graph.Nodes.Count,candidates=region.Candidates.Count;if(candidate<0||candidate>candidates||node<0||node>nodes||current<-1||current>=nodes||arcCursor<0||current>=0&&arcCursor>graph.Incoming(current).Count||currentCandidate<0||currentCandidate>=candidates||LabelCount>maxLabels||(Status==NavSolveStatus.Pending)==(phase==Phase.Done)||Status==NavSolveStatus.Ready&&(frontier.Count!=0||LabelCount==0)||Status==NavSolveStatus.BlockedConnector&&LabelCount!=0)throw new ArgumentException("Physical field cursor/status contradiction.");
             void Label(int n,int c,double cost,bool hasNext,NavGraphArc successor){
                 if(n<0||n>=nodes||c<0||c>=candidates||!NavPhysicalSolveValidation.Cost(cost))throw new ArgumentException("Physical field label dimensions/cost contradiction.");
@@ -87,6 +115,7 @@ namespace Spacewars.Simulation
         private void ValidatePhysicalShared(INavStorageReservation allocation)
         {
             var graph=field.Graph;int nodes=graph.Nodes.Count,candidates=field.Region.Candidates.Count;
+            ValidatePartialShared(allocation);
             if(cursor<0||cursor>Math.Max(nodes,candidates)||candidate<0||candidate>candidates||chosenNode<-1||chosenNode>=nodes||chosenCandidate<-1||chosenCandidate>=candidates||walkNode<0||walkNode>=Math.Max(1,nodes)||traversed<0||traversed>(long)nodes*candidates||arcLeg<0||(Status==NavSolveStatus.Pending)==(phase==Phase.Done)||(Route!=null)!=(Status==NavSolveStatus.Ready))throw new ArgumentException("Physical shared connector cursor/status contradiction.");
             foreach(var pair in egress){if(pair.Key<0||pair.Key>=candidates||phase==Phase.Egress&&pair.Key>=cursor||!NavPhysicalSolveValidation.Sweep(graph,field.Region.Candidates[pair.Key],subscription.AssignedEndpoint,allocation)||pair.Value!=LayeredNavigationProvider.Distance(field.Region.Candidates[pair.Key].Position,subscription.AssignedEndpoint.Position)*graph.SurfaceCost(subscription.AssignedEndpoint.SurfaceId))throw new ArgumentException("Physical shared egress prefix contradiction.");}
             foreach(var pair in ingress){if(pair.Key<0||pair.Key>=nodes||phase<Phase.Ingress||phase==Phase.Ingress&&pair.Key>=cursor||!NavPhysicalSolveValidation.Attachment(graph,subscription.Origin,pair.Key,allocation,out double cost)||pair.Value!=cost)throw new ArgumentException("Physical shared ingress prefix contradiction.");}
@@ -94,6 +123,34 @@ namespace Spacewars.Simulation
             NavPhysicalSolveValidation.Legs(legs,out double sum);if(sum!=routeCost||phase<=Phase.Select&&legs.Count!=0)throw new ArgumentException("Physical shared emitted prefix cost contradiction.");
             if(phase>=Phase.Origin&&phase<Phase.Done||Status==NavSolveStatus.Ready){if(chosenNode<0||chosenCandidate<0||!ingress.ContainsKey(chosenNode)||!egress.ContainsKey(chosenCandidate)||!field.TryGet(chosenNode,chosenCandidate,out _))throw new ArgumentException("Physical shared chosen pair contradiction.");ValidatePhysicalSharedLegs(allocation);}
             if(Route!=null){if(!ReferenceEquals(Route.Subscription,subscription)||Route.Cost!=routeCost||Route.Legs.Count!=legs.Count)throw new ArgumentException("Physical shared result association contradiction.");for(int n=0;n<legs.Count;n++)if(!ReferenceEquals(Route.Legs[n],legs[n]))throw new ArgumentException("Physical shared result leg alias contradiction.");}
+        }
+        private void ValidatePartialShared(INavStorageReservation allocation)
+        {
+            if(field.Status!=NavSolveStatus.Pending)return;
+            // Historical constructors may retain an untouched connector before a
+            // capped field finishes. That state does not consume a certificate.
+            if(phase==Phase.Egress&&cursor==0&&ingress.Count==0&&egress.Count==0)return;
+            if(!field.PartialCapacitySafe)throw new ArgumentException("Partial connector label capacity is not certified.");
+            if(!field.SeedComplete)throw new ArgumentException("Partial connector preceded complete field seeds.");
+            var graph=field.Graph;int nodes=graph.Nodes.Count,candidates=field.Region.Candidates.Count;
+            int ends=phase==Phase.Egress?cursor:candidates;
+            for(int c=0;c<ends;c++){
+                var at=field.Region.Candidates[c];bool valid=allocation==null?graph.CanSweep(at,subscription.AssignedEndpoint):NavPhysicalSolveValidation.Sweep(graph,at,subscription.AssignedEndpoint,allocation);
+                bool present=egress.TryGetValue(c,out double actual);double expected=LayeredNavigationProvider.Distance(at.Position,subscription.AssignedEndpoint.Position)*graph.SurfaceCost(at.SurfaceId);
+                if(valid!=present||present&&actual!=expected)throw new ArgumentException("Partial connector missing/changed egress row.");
+            }
+            int origins=phase<Phase.Ingress?0:phase==Phase.Ingress?cursor:nodes;
+            for(int n=0;n<origins;n++){
+                double expected;bool valid;if(allocation==null){valid=graph.TryAttach(subscription.Origin,n,out var a);expected=valid?a.Cost:0;}else valid=NavPhysicalSolveValidation.Attachment(graph,subscription.Origin,n,allocation,out expected);
+                bool present=ingress.TryGetValue(n,out double actual);if(valid!=present||present&&actual!=expected)throw new ArgumentException("Partial connector missing/changed ingress row.");
+            }
+            if(phase<Phase.Origin)return;
+            if(cursor!=nodes||candidate!=0||!field.Certifies(best))throw new ArgumentException("Partial connector completion has no strict frontier certificate.");
+            double minimum=double.PositiveInfinity;int selectedNode=-1,selectedCandidate=-1;
+            for(int n=0;n<nodes;n++)for(int c=0;c<candidates;c++)if(ingress.TryGetValue(n,out double start)&&egress.TryGetValue(c,out double end)&&field.TryGet(n,c,out double tail)){
+                double value=start+tail+end;if(value<minimum||value==minimum&&(n<selectedNode||n==selectedNode&&c<selectedCandidate)){minimum=value;selectedNode=n;selectedCandidate=c;}
+            }
+            if(best!=minimum||chosenNode!=selectedNode||chosenCandidate!=selectedCandidate)throw new ArgumentException("Partial connector full chosen minimum changed.");
         }
         private void ValidatePhysicalSharedLegs(INavStorageReservation allocation)
         {

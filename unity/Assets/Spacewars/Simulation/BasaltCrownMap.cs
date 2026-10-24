@@ -16,7 +16,7 @@ namespace Spacewars.Simulation
         public double HalfExtent=>56;
         public double DirectFireHeight=>1;
         public int SurfaceSemanticsVersion=>1;
-        public const string DisplayName="Базальтовый венец · 1×1";
+        public const string DisplayName="Базальтовый венец (2)";
         public string SourceRevision=>BasaltCrownLayout.SourceRevision;
         public string SourceSha256=>BasaltCrownLayout.SourceSha256;
         public IReadOnlyList<MapSupport> Supports{get;}

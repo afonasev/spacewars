@@ -70,6 +70,8 @@ namespace Spacewars.Runtime
                     owner.corridorRoot=NavPhysicalMacro.Acquire(owner,corridor);
                     owner.Answer=new NavigationAnswer(request.Request,points.ReadOnlyBacking,
                         NavSolveStatus.Ready,corridor.Corridor);owner.Answer.BindStorageOwner(owner);
+                    if(reservation is INavStorageLedgerIdentity identity&&identity.Identity is NavigationRetentionBudget budget)
+                        budget.ProtectInstallation(NavigationSession.ReadyInstallationHeadroom(owner.Answer,budget.LiveActorBound,budget.LiveBarrierBound,budget.AuthorityPublicationBound),reservation);
                     return owner;
                 }catch{owner?.ReleaseStorage();throw;}
                 finally{points?.Release();}

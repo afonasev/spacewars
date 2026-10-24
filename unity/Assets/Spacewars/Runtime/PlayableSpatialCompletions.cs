@@ -13,8 +13,8 @@ namespace Spacewars.Runtime
             internal PlayableOrderStamp Order; internal NavPoint OriginalTarget,AssignedGoal; internal NavLocation? OriginalLocation,AssignedLocation;
             internal long GroupId,Incarnation,ActivationTick=-1,RouteRequest,RouteOrder;
         }
-        private readonly AuthoritySlotMap<int,SpatialExecution> spatialExecutions=new AuthoritySlotMap<int,SpatialExecution>();
-        private readonly AuthoritySlotMap<int,PlayableSpatialCompletion> spatialCompletions=new AuthoritySlotMap<int,PlayableSpatialCompletion>();
+        private AuthoritySlotMap<int,SpatialExecution> spatialExecutions=new AuthoritySlotMap<int,SpatialExecution>();
+        private AuthoritySlotMap<int,PlayableSpatialCompletion> spatialCompletions=new AuthoritySlotMap<int,PlayableSpatialCompletion>();
         // Callers must project through the issuing owner. No ally/enemy completion data.
         internal PlayableSpatialCompletion SpatialCompletion(int id,PlayableOwner observer)
             {if(!units.TryGetValue(id,out var unit)||unit.Owner!=observer)return null;
@@ -22,14 +22,15 @@ namespace Spacewars.Runtime
             return spatialCompletions.TryGetValue(id,out var receipt)?receipt:null;}
         private void InvalidateSpatialCompletion(int id)
         {spatialExecutions.Remove(id);spatialCompletions.Remove(id);}
-        private void CancelSpatialExecution(int id){spatialExecutions.Remove(id);QueueMovementCancelled(id);}
-        private void AdmitSpatialExecution(Unit unit)
+        private void CancelSpatialExecution(int id)=>CancelSpatialExecution(id,navigation.IsPending(id));
+        private void CancelSpatialExecution(int id,bool pending){spatialExecutions.Remove(id);QueueMovementCancelled(id,pending);}
+        private void AdmitSpatialExecution(Unit unit,NavigationGroupCommand prepared=null)
         {
             if(unit.CurrentOrder?.Kind!=PlayableTacticalOrderKind.Move||unit.LastOrder?.Kind!=PlayableCommandKind.Move)return;
-            var group=navigation.GroupFor(unit.Id);var member=group?.Members.SingleOrDefault(x=>x.Entity==unit.Id);
+            var group=prepared==null?navigation.GroupFor(unit.Id):prepared.Groups[prepared.MemberGroups[unit.Id]];var member=group?.Members.SingleOrDefault(x=>x.Entity==unit.Id);
             if(member==null||!member.HasGoal||!group.OriginalLocation.HasValue||!member.GoalLocation.HasValue)return;
             spatialExecutions[unit.Id]=new SpatialExecution{Order=unit.LastOrder,OriginalTarget=unit.CurrentOrder.Destination,
-                AssignedGoal=member.Goal,OriginalLocation=group.OriginalLocation,AssignedLocation=member.GoalLocation,GroupId=group.GroupId,Incarnation=member.Incarnation};
+                AssignedGoal=member.Goal,OriginalLocation=DomainLocation(group.OriginalLocation),AssignedLocation=DomainLocation(member.GoalLocation),GroupId=group.GroupId,Incarnation=member.Incarnation};
         }
         private static bool MatchesSpatialRequest(SpatialExecution execution,NavigationRequest request)
             =>request.MemberIdentity!=null&&request.MemberIdentity.GroupId==execution.GroupId&&
@@ -39,16 +40,17 @@ namespace Spacewars.Runtime
         {
             if(tacticalQueues.TryGetValue(request.Entity,out var q)) {
                 var e=Matches(q.Pending,request)?q.Pending:null;
-                if(e!=null){e.Assigned=request.GoalLocation;e.AttemptLocation=request.GoalLocation;e.AttemptRequest=request.Request;e.AttemptOrder=request.Order;}
+                if(e!=null){e.Assigned=DomainLocation(request.GoalLocation);e.AttemptLocation=DomainLocation(request.GoalLocation);e.AttemptRequest=request.Request;e.AttemptOrder=request.Order;}
             }
             if(spatialExecutions.TryGetValue(request.Entity,out var execution)&&request.MemberIdentity!=null&&
                 execution.GroupId==request.MemberIdentity.GroupId&&execution.Order.Revision==request.MemberIdentity.OrderRevision&&execution.Incarnation==request.MemberIdentity.Incarnation){
-                execution.AssignedGoal=request.Goal;execution.AssignedLocation=request.GoalLocation;
+                execution.AssignedGoal=request.Goal;execution.AssignedLocation=DomainLocation(request.GoalLocation);
             }
         }
-        private void ObserveSpatialRequest(NavigationRequest request)
+        private void ObserveSpatialRequest(NavigationRequest request)=>ObserveSpatialRequest(request,false);
+        private void ObserveSpatialRequest(NavigationRequest request,bool combat)
         {
-            ObserveTacticalRequest(request);
+            ObserveTacticalRequest(request,combat);
             // Foundation evacuation/internal movement replacement can change the goal
             // without a tactical command. It revokes the interrupted execution only.
             if(spatialExecutions.TryGetValue(request.Entity,out var execution)&&!MatchesSpatialRequest(execution,request))
@@ -71,7 +73,7 @@ namespace Spacewars.Runtime
             foreach(var row in spatialExecutions.ToArray()){
                 var execution=row.Value;
                 if(!units.TryGetValue(row.Key,out var unit)||unit.LastOrder?.Revision!=execution.Order.Revision||
-                    !navigation.Crowd.TryGet(row.Key,out var actor)||actor.Incarnation!=execution.Incarnation||actor.Held&&!navigation.IsPending(row.Key)){spatialExecutions.Remove(row.Key);continue;}
+                    !TryActor(row.Key,out var actor)||actor.Incarnation!=execution.Incarnation||actor.Held&&!navigation.IsPending(row.Key)){spatialExecutions.Remove(row.Key);continue;}
                 if(navigation.IsPending(row.Key)||actor.Moving)continue;
                 if(execution.ActivationTick>=0&&actor.Goal.Equals(execution.AssignedGoal)&&actor.Outcome==NavigationOutcome.Arrived&&execution.AssignedLocation.HasValue&&navigation.Crowd.CompatibleArrival(actor.Location,execution.AssignedLocation.Value,actor.Radius))
                     spatialCompletions[row.Key]=new PlayableSpatialCompletion(execution.Order,execution.GroupId,execution.Incarnation,
@@ -124,7 +126,7 @@ namespace Spacewars.Runtime
             var orderWatermarks=checkpoint.Orders.ToDictionary(o=>o.Entity,o=>o.Order);
             void Validate(PlayableOrderStamp order,long groupId,long incarnation,NavPoint target,long activationTick,bool pending=false){
                 if(order==null||order.Kind!=PlayableCommandKind.Move||!units.TryGetValue(order.UnitId,out var unit)||
-                    !SameSpatialOrder(unit.LastOrder,order)||!navigation.Crowd.TryGet(unit.Id,out var actor)||actor.Incarnation!=incarnation||actor.Held&&!pending||
+                    !SameSpatialOrder(unit.LastOrder,order)||!TryActor(unit.Id,out var actor)||actor.Incarnation!=incarnation||actor.Held&&!pending||
                     groupId<1||navigation.GroupFor(unit.Id)?.GroupId!=groupId||navigation.GroupFor(unit.Id)?.Members.Single(m=>m.Entity==unit.Id).OrderRevision!=order.Revision||
                     !navigation.GroupFor(unit.Id).OriginalGoal.Equals(target)||(pending?activationTick!=-1:activationTick<order.Tick||activationTick>Tick)||
                     double.IsNaN(target.X)||double.IsInfinity(target.X)||double.IsNaN(target.Z)||double.IsInfinity(target.Z))throw new ArgumentException("Invalid spatial order binding.");
@@ -145,7 +147,7 @@ namespace Spacewars.Runtime
                 }else if(execution.RouteRequest<1||execution.RouteRequest>checkpoint.RequestSequence||execution.RouteOrder<1||
                     !orderWatermarks.TryGetValue(unit.Id,out var watermark)||execution.RouteOrder>watermark||
                     (!pendingRequests.ContainsKey(unit.Id)&&execution.RouteOrder!=watermark)||
-                    !navigation.Crowd.TryGet(unit.Id,out var actor)||!actor.Goal.Equals(execution.AssignedGoal)||!actor.GoalLocation.Equals(execution.AssignedLocation))
+                    !TryActor(unit.Id,out var actor)||!actor.Goal.Equals(execution.AssignedGoal)||!actor.GoalLocation.Equals(execution.AssignedLocation))
                     throw new ArgumentException("Invalid installed spatial route.");
             }
             foreach(var receipt in spatialCompletions.Values){

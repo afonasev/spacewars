@@ -66,12 +66,12 @@ namespace Spacewars.Simulation
             foreach(var site in Sites(p))
             {
                 footprints.Add(Tuple.Create(site.Position,Radius(p,site.Kind)));
-                foreach(var slot in site.Slots)footprints.Add(Tuple.Create(slot.Position,Math.Max(p.ScienceFootprintRadius,Math.Max(p.FactoryFootprintRadius,p.RefineryFootprintRadius))));
+                foreach(var slot in site.Slots)footprints.Add(Tuple.Create(slot.Position,Math.Max(p.HangarFootprintRadius,Math.Max(p.ScienceFootprintRadius,Math.Max(p.FactoryFootprintRadius,p.RefineryFootprintRadius)))));
             }
             for(int i=0;i<footprints.Count;i++)
             {
                 var current=footprints[i];double clearance=current.Item2*(p.AuthoredMap==null?1:Math.Sqrt(2))+p.TankCollisionRadius;
-                if(!walls.IsFree(current.Item1,clearance))throw new ArgumentException("Territory envelope intersects terrain or boundary.");
+                if(!walls.IsFree(current.Item1,clearance))throw new ArgumentException("Territory envelope intersects terrain or boundary at "+current.Item1.X+","+current.Item1.Z+" clearance="+clearance);
                 if(p.AuthoredMap!=null){double y=p.AuthoredMap.SurfaceHeight(current.Item1);foreach(int sx in new[]{-1,1})foreach(int sz in new[]{-1,1}){var corner=new NavPoint(current.Item1.X+sx*current.Item2,current.Item1.Z+sz*current.Item2);var support=p.AuthoredMap.SupportAt(corner);if(support==null||Math.Abs(support.HeightAt(corner)-y)>1e-9||support.Gradient.X!=0||support.Gradient.Z!=0)throw new ArgumentException("Building footprint requires one flat supported elevation.");}}
                 for(int j=0;j<i;j++)
                 {
@@ -90,10 +90,10 @@ namespace Spacewars.Simulation
             }
         }
         public static bool Center(PlayableBuildingKind k)=>k==PlayableBuildingKind.Headquarters||k==PlayableBuildingKind.Outpost;
-        public static double Radius(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.ScientificCenter?p.ScienceFootprintRadius:k==PlayableBuildingKind.Headquarters?p.HeadquartersFootprintRadius:k==PlayableBuildingKind.Factory?p.FactoryFootprintRadius:k==PlayableBuildingKind.Refinery?p.RefineryFootprintRadius:k==PlayableBuildingKind.Outpost?p.OutpostFootprintRadius:p.MineFootprintRadius;
-        public static int Health(PlayableProfile p,PlayableBuildingKind k)=>(int)(k==PlayableBuildingKind.ScientificCenter?p.ScienceHealth:k==PlayableBuildingKind.Headquarters?p.HeadquartersHealth:k==PlayableBuildingKind.Factory?p.FactoryHealth:k==PlayableBuildingKind.Refinery?p.RefineryHealth:k==PlayableBuildingKind.Outpost?p.OutpostHealth:p.MineHealth);
-        public static double Duration(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.ScientificCenter?p.ScienceBuildSeconds:k==PlayableBuildingKind.Headquarters?p.HeadquartersBuildSeconds:k==PlayableBuildingKind.Factory?p.FactoryBuildSeconds:k==PlayableBuildingKind.Refinery?p.RefineryBuildSeconds:k==PlayableBuildingKind.Outpost?p.OutpostBuildSeconds:p.MineBuildSeconds;
-        public static int Cost(PlayableProfile p,PlayableBuildingKind k)=>(int)(k==PlayableBuildingKind.ScientificCenter?p.ScienceCreditCost:k==PlayableBuildingKind.Headquarters?p.HeadquartersCreditCost:k==PlayableBuildingKind.Factory?p.FactoryCreditCost:k==PlayableBuildingKind.Refinery?p.RefineryCreditCost:k==PlayableBuildingKind.Outpost?p.OutpostCreditCost:p.MineCreditCost);
+        public static double Radius(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.Hangar?p.HangarFootprintRadius:k==PlayableBuildingKind.ScientificCenter?p.ScienceFootprintRadius:k==PlayableBuildingKind.Headquarters?p.HeadquartersFootprintRadius:k==PlayableBuildingKind.Factory?p.FactoryFootprintRadius:k==PlayableBuildingKind.Refinery?p.RefineryFootprintRadius:k==PlayableBuildingKind.Outpost?p.OutpostFootprintRadius:p.MineFootprintRadius;
+        public static int Health(PlayableProfile p,PlayableBuildingKind k)=>(int)(k==PlayableBuildingKind.Hangar?p.HangarHealth:k==PlayableBuildingKind.ScientificCenter?p.ScienceHealth:k==PlayableBuildingKind.Headquarters?p.HeadquartersHealth:k==PlayableBuildingKind.Factory?p.FactoryHealth:k==PlayableBuildingKind.Refinery?p.RefineryHealth:k==PlayableBuildingKind.Outpost?p.OutpostHealth:p.MineHealth);
+        public static double Duration(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.Hangar?p.HangarBuildSeconds:k==PlayableBuildingKind.ScientificCenter?p.ScienceBuildSeconds:k==PlayableBuildingKind.Headquarters?p.HeadquartersBuildSeconds:k==PlayableBuildingKind.Factory?p.FactoryBuildSeconds:k==PlayableBuildingKind.Refinery?p.RefineryBuildSeconds:k==PlayableBuildingKind.Outpost?p.OutpostBuildSeconds:p.MineBuildSeconds;
+        public static int Cost(PlayableProfile p,PlayableBuildingKind k)=>(int)(k==PlayableBuildingKind.Hangar?p.HangarCreditCost:k==PlayableBuildingKind.ScientificCenter?p.ScienceCreditCost:k==PlayableBuildingKind.Headquarters?p.HeadquartersCreditCost:k==PlayableBuildingKind.Factory?p.FactoryCreditCost:k==PlayableBuildingKind.Refinery?p.RefineryCreditCost:k==PlayableBuildingKind.Outpost?p.OutpostCreditCost:p.MineCreditCost);
         public static double Income(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.Headquarters?p.HeadquartersIncomePerPeriod:k==PlayableBuildingKind.Refinery?p.RefineryIncomePerPeriod:k==PlayableBuildingKind.Outpost?p.OutpostIncomePerPeriod:k==PlayableBuildingKind.Mine?p.MineIncomePerPeriod:0;
         public static double CaptureRadius(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.Headquarters?p.HeadquartersCaptureRadius:k==PlayableBuildingKind.Outpost?p.OutpostCaptureRadius:p.MineCaptureRadius;
         public static double CaptureSeconds(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.Headquarters?p.HeadquartersCaptureSeconds:k==PlayableBuildingKind.Outpost?p.OutpostCaptureSeconds:p.MineCaptureSeconds;

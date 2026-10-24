@@ -37,6 +37,7 @@ namespace Spacewars.Simulation
         }
         private T[] Writable(int page,bool append=false)
         {RequireMutable();return pages.Writable(page,pageSize,elementBytes,reserveCopy,append).Values;}
+        internal int PageSize=>pageSize;
         internal int Capacity=>checked(pages.Count*pageSize);
         public int Count {get;private set;}
         public T this[int index]

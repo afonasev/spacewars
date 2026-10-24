@@ -180,7 +180,7 @@ namespace Spacewars.Simulation
     // never assigned member slots. Independent subscriptions can reuse every label.
     public sealed partial class NavSharedTerminalField : NavOwnedStorage
     {
-        private enum Phase { Seed, Search, Done }
+        private enum Phase { Seed, Search, Done, ValidateSeeds, SeedByNode }
         private readonly LayeredNavigationGraph graph; private readonly NavTerminalRegion region;private NavOwnedStorage ownedRegion;
         private NavOwnedText ownedKey;
         private NavCowDictionary<long,double> distance;
@@ -195,7 +195,7 @@ namespace Spacewars.Simulation
             this.graph = graph ?? throw new ArgumentNullException(nameof(graph)); this.region = region ?? throw new ArgumentNullException(nameof(region));
             if (maxLabels < 1 || maxLabels > 1048576) throw new ArgumentOutOfRangeException(nameof(maxLabels)); this.maxLabels = maxLabels;
             Status = graph.IsValid(region.Requested) ? NavSolveStatus.Pending : NavSolveStatus.InvalidEndpoint;
-            phase = Status == NavSolveStatus.Pending ? Phase.Seed : Phase.Done;
+            phase=Status==NavSolveStatus.Pending?(NodeSeedEligible?Phase.ValidateSeeds:Phase.Seed):Phase.Done;
             bool compact=graph.SupportsPackedField&&!legacyStorage;
             long capacity=(long)graph.Nodes.Count*region.Candidates.Count;
             if(compact&&capacity>int.MaxValue){Status=NavSolveStatus.CapacityExceeded;phase=Phase.Done;compact=false;}
@@ -243,6 +243,7 @@ namespace Spacewars.Simulation
                 fork.frontier=frontier.ForkPrepared(reserve);return fork;
             }catch{fork.ReleaseStorage();throw;}
         }
+        internal bool IsSealed=>frozen;
         internal void SealPackedPrepared()=>SealPrepared();
         internal void SealPrepared(){frozen=true;packed?.SealPrepared();frontier.SealPrepared();distance?.Seal();next?.Seal();}
         internal void ReleaseStorage(){if(released)return;released=true;Release();}
@@ -293,7 +294,7 @@ namespace Spacewars.Simulation
                 state.Distance==null||state.Next==null||state.Frontier==null||state.PackedPages==null&&state.PackedLabels!=0||state.PackedPages!=null&&(state.Distance.Length!=0||state.Next.Length!=0)||
                 state.Distance.Length > maxLabels || state.Frontier.Length > maxLabels ||
                 (state.PackedPages == null) != (field.packed == null) ||
-                state.Phase < 0 || state.Phase > (int)Phase.Done)
+                state.Phase < 0 || state.Phase > (int)Phase.SeedByNode)
                 throw new ArgumentException("Invalid or stale shared field checkpoint.");
             field.phase = (Phase)state.Phase; field.Status = state.Status;
             field.candidate = state.Candidate; field.node = state.Node; field.current = state.Current;
@@ -328,7 +329,7 @@ namespace Spacewars.Simulation
             }
             if(state.Version>=2&&(field.frontier.AllocatedHeapCapacity!=state.FrontierHeapCapacity||
                 !((field.frontier.AllocatedPositionPages??Array.Empty<int>()).SequenceEqual(state.FrontierPositionPages??Array.Empty<int>()))))throw new ArgumentException("Incomplete frontier allocation checkpoint.");
-            return field;
+            field.ValidateNodeSeedState(null);return field;
             }catch{field.ReleaseStorage();throw;}
         }
         private static long Key(int n, int c) => ((long)c << 32) | (uint)n;
@@ -358,9 +359,11 @@ namespace Spacewars.Simulation
             =>graph.SupportsPackedField&&graph.Nodes.Count>0&&region.Candidates.Count>0?11392L:4096L;
         internal long NextGrowthBytes {
             get {
+                if(phase==Phase.ValidateSeeds)return 0;
+                if(phase==Phase.SeedByNode&&node<graph.Nodes.Count&&candidate==0&&graph.Nodes[node].Location.SurfaceId!=region.Requested.SurfaceId)return 0;
                 if(packed==null)return distance.MutationGrowthBytes(8)+next.MutationGrowthBytes(8)+2L*frontier.LegacyMutationGrowthBytes;
                 int n,c;bool adds=false;
-                if(phase==Phase.Seed){if(candidate>=region.Candidates.Count||node>=graph.Nodes.Count)return 0;
+                if(phase==Phase.Seed||phase==Phase.SeedByNode){if(candidate>=region.Candidates.Count||node>=graph.Nodes.Count)return 0;
                     n=node;c=candidate;adds=!TryGet(n,c,out _);
                 }else if(phase==Phase.Search&&current>=0&&arcCursor<graph.Incoming(current).Count){
                     var arc=graph.Incoming(current)[arcCursor];n=arc.From;c=currentCandidate;TryGet(current,c,out var value);
@@ -377,8 +380,20 @@ namespace Spacewars.Simulation
             while (used < quota && Status == NavSolveStatus.Pending) { Step(); used++; }
             return new NavWorkResult(Status, used);
         }
-        private void Step()
+        private void Step(NavIncrementalSharedRoute observer=null)
         {
+            if(phase==Phase.ValidateSeeds){
+                if(!graph.IsValid(region.Candidates[candidate])){Finish(NavSolveStatus.InvalidEndpoint);return;}
+                if(++candidate==region.Candidates.Count){candidate=0;node=0;phase=Phase.SeedByNode;}return;
+            }
+            if(phase==Phase.SeedByNode){
+                if(candidate==0&&graph.Nodes[node].Location.SurfaceId!=region.Requested.SurfaceId){AdvanceSeedNode();return;}
+                int n=node,c=candidate;
+                if(graph.TryAttach(region.Candidates[c],n,out var attachment)){
+                    Set(n,c,attachment.Cost);frontier.Add(new NavQueueEntry{Cost=attachment.Cost,Node=n,Candidate=c});
+                }
+                if(++candidate==region.Candidates.Count){candidate=0;AdvanceSeedNode();}return;
+            }
             if (phase == Phase.Seed) {
                 if (candidate == region.Candidates.Count) { phase = Phase.Search; return; }
                 if (node == graph.Nodes.Count) { candidate++; node = 0; return; }
@@ -387,7 +402,7 @@ namespace Spacewars.Simulation
                 if (graph.TryAttach(region.Candidates[candidate], n, out attachment)) {
                     if (!TryGet(n, candidate, out _)) {
                         if (LabelCount == maxLabels) { Finish(NavSolveStatus.CapacityExceeded); return; }
-                        Set(n, candidate, attachment.Cost);
+                        Set(n, candidate, attachment.Cost);observer?.ObserveFieldLabel(n,candidate,attachment.Cost);
                         frontier.Add(new NavQueueEntry { Cost = attachment.Cost, Node = n, Candidate = candidate });
                     }
                 }
@@ -407,9 +422,22 @@ namespace Spacewars.Simulation
             if (!TryGet(arc.From, currentCandidate, out double old) || cost < old) {
                 if (!TryGet(arc.From, currentCandidate, out _) && LabelCount == maxLabels) { Finish(NavSolveStatus.CapacityExceeded); return; }
                 if (TryGet(arc.From, currentCandidate, out _)) frontier.Remove(new NavQueueEntry { Cost = old, Node = arc.From, Candidate = currentCandidate });
-                Set(arc.From, currentCandidate, cost, arc);
+                Set(arc.From, currentCandidate, cost, arc);observer?.ObserveFieldLabel(arc.From,currentCandidate,cost);
                 frontier.Add(new NavQueueEntry { Cost = cost, Node = arc.From, Candidate = currentCandidate });
             }
+        }
+        private bool NodeSeedEligible=>graph.PhysicalProvider is PartitionNavigationProvider&&graph.Nodes.Count>0&&PartialCapacitySafe;
+        private void AdvanceSeedNode()
+        {if(++node==graph.Nodes.Count){node=0;candidate=region.Candidates.Count;phase=Phase.Search;}}
+        // Only a current request can consume this certificate. Cache still requires Ready.
+        internal bool PartialCapacitySafe=>checked((long)graph.Nodes.Count*region.Candidates.Count)<=maxLabels;
+        internal bool SeedComplete=>phase==Phase.Search;
+        internal bool Certifies(double best)=>Status==NavSolveStatus.Pending&&PartialCapacitySafe&&phase==Phase.Search&&current<0&&frontier.Count>0&&!double.IsInfinity(best)&&frontier.Min.Cost>best;
+        internal NavWorkResult AdvanceOne(NavIncrementalSharedRoute observer)
+        {
+            if(observer==null||!ReferenceEquals(observer.PreparedField,this)||!PartialCapacitySafe)throw new ArgumentException("Partial field observer identity/capacity changed.");
+            if(frozen||Status!=NavSolveStatus.Pending)throw new InvalidOperationException("Partial field step needs a private pending field.");
+            Step(observer);return new NavWorkResult(Status,1);
         }
         private void Finish(NavSolveStatus status) { Status = status; phase = Phase.Done; }
     }
@@ -495,15 +523,40 @@ namespace Spacewars.Simulation
             foreach (var pair in state.Egress) work.egress.Add(pair.Key, pair.Value);
             foreach (var pair in state.Ingress) work.ingress.Add(pair.Key, pair.Value);
             work.legs.AddRange(state.Legs);
-            if (work.Status == NavSolveStatus.Ready) work.Route = new NavTypedRoute(subscription, work.legs, work.routeCost);
-            return work;
+            if(work.Status==NavSolveStatus.Ready)work.Route=new NavTypedRoute(subscription,work.legs,work.routeCost);
+            try{work.ValidatePartialShared(null);return work;}catch{work.ReleaseStorage();throw;}
         }
-        public NavWorkResult Advance(int quota)
+        internal NavSharedTerminalField PreparedField=>field;
+        internal bool MatchesPreparedJob(NavSharedTerminalField expected,NavRouteSubscription value)=>ReferenceEquals(field,expected)&&ReferenceEquals(subscription,value);
+        internal bool NeedsField=>field.Status==NavSolveStatus.Pending&&
+            (phase==Phase.Select&&cursor==field.Graph.Nodes.Count&&!field.Certifies(best)||
+             phase==Phase.Egress&&cursor==field.Region.Candidates.Count&&egress.Count==0||
+             phase==Phase.Ingress&&cursor==field.Graph.Nodes.Count&&ingress.Count==0);
+        internal void RebindPreparedField(NavSharedTerminalField target)
+        {
+            if(frozen||target==null||target.StableKey!=field.StableKey||!ReferenceEquals(target.Graph,field.Graph))throw new ArgumentException("Mutable connector field rebind changed graph/recipe.");
+            if(IsRegistered)RequireEdge(target);target.Retain();var old=field;field=target;old.Release();
+        }
+        internal void ObserveFieldLabel(int n,int c,double tail)
+        {
+            if(frozen)throw new InvalidOperationException("Committed connector cannot observe field mutation.");
+            if(phase==Phase.Select&&(n<cursor||n==cursor&&c<candidate))Consider(n,c,tail);
+        }
+        private void Consider(int n,int c,double tail)
+        {
+            if(ingress.TryGetValue(n,out double start)&&egress.TryGetValue(c,out double end)){
+                double total=start+tail+end;
+                if(total<best||total==best&&(n<chosenNode||n==chosenNode&&c<chosenCandidate)){best=total;chosenNode=n;chosenCandidate=c;}
+            }
+        }
+        internal NavWorkResult AdvancePartial(int quota)=>AdvanceCore(quota,true);
+        public NavWorkResult Advance(int quota)=>AdvanceCore(quota,false);
+        private NavWorkResult AdvanceCore(int quota,bool partial)
         {
             if (quota < 0) throw new ArgumentOutOfRangeException(nameof(quota));if(frozen&&Status==NavSolveStatus.Pending)throw new InvalidOperationException("Committed connector cannot be advanced."); int used = 0;
             while (used < quota && Status == NavSolveStatus.Pending) {
-                if (field.Status == NavSolveStatus.Pending) break;
-                if (field.Status != NavSolveStatus.Ready) { Finish(field.Status); break; }
+                if(field.Status==NavSolveStatus.Pending){if(!partial||!field.PartialCapacitySafe||!field.SeedComplete||NeedsField)break;}
+                else if(field.Status!=NavSolveStatus.Ready){Finish(field.Status);break;}
                 Step(); used++;
             }
             return new NavWorkResult(Status, used);
@@ -536,13 +589,11 @@ namespace Spacewars.Simulation
                     walkNode = chosenNode; phase = Phase.Origin; return;
                 }
                 if (candidate == field.Region.Candidates.Count) { cursor++; candidate = 0; return; }
+                // One paid row lookup removes only pairs with no possible ingress.
+                // Advancing the prefix over that row cannot change its exact minimum.
+                if(candidate==0&&!ingress.ContainsKey(cursor)){cursor++;return;}
                 int c = candidate++;
-                if (ingress.TryGetValue(cursor, out double start) && egress.TryGetValue(c, out double end) && field.TryGet(cursor, c, out double tail)) {
-                    double total = start + tail + end;
-                    if (total < best || total == best && (cursor < chosenNode || cursor == chosenNode && c < chosenCandidate)) {
-                        best = total; chosenNode = cursor; chosenCandidate = c;
-                    }
-                }
+                if(field.TryGet(cursor,c,out double tail))Consider(cursor,c,tail);
                 return;
             }
             if (phase == Phase.Origin) { AddSurface(subscription.Origin,graph.Nodes[walkNode].Location); phase = Phase.Arcs; return; }

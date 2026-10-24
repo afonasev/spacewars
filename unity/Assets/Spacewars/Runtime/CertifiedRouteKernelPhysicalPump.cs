@@ -34,7 +34,7 @@ namespace Spacewars.Runtime
             try{
                 if(!port.TryOpenPhysicalHostScope(NavigationPreparationKind.Solve,epoch,
                     port.Admission.PublicationIdentity,out scope))return false;
-                next=source==null?NavigationHostRoot.CreateOwned(scope.OwnedReservation()):source.ForkOwned(scope.OwnedReservation());
+                next=source==null?port.CreatePhysicalHostRoot(scope.OwnedReservation()):source.ForkOwned(scope.OwnedReservation());
                 if(source==null)port.StageRetainedPhysicalArrivals(next,scope.OwnedReservation());
                 next.SetFrontier(frame,epoch,ProgressSequence);
                 if(next.QuantumRunnable&&frame.Stage==PumpStage.Idle)next.CompleteQuantum();
@@ -121,7 +121,7 @@ namespace Spacewars.Runtime
             if(budget<0||budget>int.MaxValue/WorkUnitsPerRequestBudget)throw new ArgumentOutOfRangeException(nameof(budget));
             var port=binding.RoutePort??throw new ArgumentException("Missing route authority facade.");
             Attach(port);if(port.UseLegacyHost){PumpLegacy(binding,budget);return;}RefreshPhysicalFrontier(port);
-            if(port.TickQuantaEnabled&&!port.QuantumRunnable)return;
+            if(port.TickQuantaEnabled&&!port.QuantumRunnable){if(port.TryPromoteAccruedCredit()!=NavigationCreditPromotion.Promoted)return;RefreshPhysicalFrontier(port);}
             if(pumpStage==PumpStage.Idle){
                 var quantum=port.PinCommittedHostRoot();try{if(quantum?.TickQuantum==true)budget=quantum.QuantumBudget;}finally{quantum?.Release();}
                 var root=port.PinCommittedHostRoot();int count;try{count=root?.Scan.Count??0;}finally{root?.Release();}
@@ -131,7 +131,7 @@ namespace Spacewars.Runtime
             // A resumed suffix always uses its saved budget. The caller's new
             // budget becomes applicable only after this suffix reaches Idle.
             if(pumpStage>=PumpStage.Scan&&pumpStage<=PumpStage.EndAllocation&&!allocating){
-                reservedCorridorBytes=Math.Max(pumpAllocationFloor,port.BeginHostAllocation());allocating=true;
+                reservedCorridorBytes=Math.Max(pumpAllocationFloor,BeginAllocation(port));allocating=true;
             }
             int operations=PhysicalOperationsPerPump;
             try{while(true){
@@ -148,7 +148,12 @@ namespace Spacewars.Runtime
                         }
                         if(!PublishPhysicalFrame(port,WithCounters(f,PumpStage.ArrivalAdvance,phase:0)))return;break;
                     case PumpStage.ArrivalAdvance:
-                        if(port.AdvanceArrivals(grant)){RefreshPhysicalFrontier(port);f=CapturePumpFrontier();}
+                        var arrivalRoot=port.PinCommittedHostRoot();bool fairArrival;try{fairArrival=arrivalRoot.FairArrivals;}finally{arrivalRoot.Release();}
+                        if(port.AdvanceArrivals(grant)||fairArrival){RefreshPhysicalFrontier(port);f=CapturePumpFrontier();}
+                        // New-policy work/cursor and its spent grant publish
+                        // together. Refused publication leaves the same quantum
+                        // resumable; never overwrite it with a stale close frame.
+                        if(fairArrival){if(f.Stage==PumpStage.ArrivalAdvance)return;break;}
                         if(!PublishPhysicalFrame(port,WithCounters(f,PumpStage.PreFlush,phase:0)))return;break;
                     case PumpStage.PreFlush:
                     case PumpStage.PostFlush:
@@ -158,7 +163,7 @@ namespace Spacewars.Runtime
                     case PumpStage.Allocation:
                         // Publication can refuse while the allocation token remains
                         // ours. Resume that phase without acquiring it a second time.
-                        if(!allocating){reservedCorridorBytes=port.BeginHostAllocation();allocating=true;}
+                        if(!allocating){reservedCorridorBytes=BeginAllocation(port);allocating=true;}
                         if(!PublishPhysicalFrame(port,WithCounters(f,PumpStage.Scan,floor:reservedCorridorBytes)))return;
                         break;
                     case PumpStage.Scan:

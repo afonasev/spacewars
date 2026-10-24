@@ -6,6 +6,7 @@ namespace Spacewars.Runtime
     {
         private void FireTracer(Unit u,NavPoint from,NavPoint target)
         {
+            if(AirTarget(u.Target)){FireAirTracer(u,from,target);return;}
             var velocity=units.TryGetValue(u.Target,out var victim)?victim.Velocity:default(NavPoint);
             Sound(PlayableSoundKind.Shot,from,u.Kind,u.Owner);
             double dx=target.X-from.X,dz=target.Z-from.Z,speed=profile.ExplorerProjectileSpeed;
@@ -23,7 +24,7 @@ namespace Spacewars.Runtime
             var predicted=new NavPoint(target.X+velocity.X*t,target.Z+velocity.Z*t);double slope=(GroundHeight(predicted)-GroundHeight(from))/Math.Max(1e-9,Distance(from,predicted));
             // Web burst projectiles are physical points (radius 0), not tracer-thickness collision capsules.
             projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=u.Id,Faction=u.Owner,Target=u.Target,Kind=u.Kind,
-                Position=new NavPoint(from.X+x*offset,from.Z+z*offset),Height=GroundHeight(from)+DirectFireHeight+slope*offset,VerticalSlope=slope,DirectionX=x,DirectionZ=z,Radius=0,Speed=speed,Damage=profile.ExplorerDamage,
+                Position=new NavPoint(from.X+x*offset,from.Z+z*offset),Height=GroundHeight(from)+DirectFireHeight+slope*offset,VerticalSlope=slope,DirectionX=x,DirectionZ=z,Radius=0,Speed=speed,Damage=profile.ExplorerDamage*WeaponMultiplier(u.Owner),
                 Remaining=Math.Max(0,profile.ExplorerRange*(1+profile.ProjectileExtraRangePercent/100)-offset)});
         }
     }

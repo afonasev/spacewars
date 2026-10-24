@@ -9,6 +9,7 @@ namespace Spacewars.Presentation
     {
         public string id="hybrid-gameplay-v2";
         public double near=8,far=70,mergeDistance=8,repeatSeconds=.08,movementCell=18,fadeSeconds=.15;
+        public float explorerImpactGain=.045f;
         public float effectsBudget=.38f,notificationGain=.12f,shotGain=.28f,impactGain=.14f,explosionGain=.30f,movementGain=.08f;
         public int voices=12,shots=6,impacts=4,explosions=3,movementGroups=3,freshTicks=6;
         public float baseGain=.16f,damageGain=.18f,motionAccentGain=.08f;
@@ -124,9 +125,9 @@ namespace Spacewars.Presentation
         private bool HeavyDamage(PlayableSnapshot view,PlayableSoundEvent e)
         {
             var p=view.ActiveProfile??PlayableProfile.Default;
-            return e.Building?view.Buildings.Any(b=>Distance(b.Position,e.Position)<1&&b.Health>0&&b.Health<=TerritoryRules.Health(p,b.Kind)*profile.heavyDamageRatio):view.Entities.Any(u=>Distance(u.Position,e.Position)<3&&u.Kind==e.Weapon&&u.Health>0&&u.Health<=PlayableUnitRules.Health(p,u.Kind)*profile.heavyDamageRatio);
+            return e.Building?view.Buildings.Any(b=>Distance(b.Position,e.Position)<1&&b.Health>0&&b.Health<=TerritoryRules.Health(p,b.Kind)*profile.heavyDamageRatio):view.Entities.Any(u=>Distance(u.Position,e.Position)<3&&u.Kind==e.Weapon&&u.Health>0&&u.Health<=PlayableUnitRules.MaximumHealth(p,u)*profile.heavyDamageRatio);
         }
-        private float BaseGain(PlayableSoundEvent e)=>e.Kind==PlayableSoundKind.HeavyDamage?profile.damageGain:e.Kind==PlayableSoundKind.MovementStarted||e.Kind==PlayableSoundKind.MovementStopped?profile.motionAccentGain:(int)e.Kind>2?profile.baseGain:e.Kind==PlayableSoundKind.Destroyed||e.Kind==PlayableSoundKind.Impact&&e.Weapon==PlayableEntityKind.Shkval?profile.explosionGain:e.Kind==PlayableSoundKind.Impact?profile.impactGain:profile.shotGain;
+        private float BaseGain(PlayableSoundEvent e)=>e.Kind==PlayableSoundKind.HeavyDamage?profile.damageGain:e.Kind==PlayableSoundKind.MovementStarted||e.Kind==PlayableSoundKind.MovementStopped?profile.motionAccentGain:(int)e.Kind>2?profile.baseGain:e.Kind==PlayableSoundKind.Destroyed||e.Kind==PlayableSoundKind.Impact&&e.Weapon==PlayableEntityKind.Shkval?profile.explosionGain:e.Kind==PlayableSoundKind.Impact?(e.Weapon==PlayableEntityKind.Explorer?profile.explorerImpactGain:profile.impactGain):profile.shotGain;
         private static string Clip(PlayableSoundEvent e)
         {
             switch(e.Kind)

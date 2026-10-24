@@ -61,25 +61,29 @@ namespace Spacewars.Simulation
     public sealed partial class NavIncrementalSingletonRoute : INavPhysicalBody
     {
         internal override bool IsImmutableCaptureRoot=>IsRegistered&&frozen&&reservation==null;
-        NavPhysicalTag INavPhysicalBody.PhysicalTag=>new NavPhysicalTag(NavPhysicalStorageKind.Singleton);
+        NavPhysicalTag INavPhysicalBody.PhysicalTag=>new NavPhysicalTag(queryRegion==null?NavPhysicalStorageKind.Singleton:NavPhysicalStorageKind.QuerySingletonV1);
         void INavPhysicalBody.WritePhysicalBody(NavPhysicalBodyWriter writer)
         {
             if(!IsImmutableCaptureRoot||StorageBytes!=NavStorageLayout.Charge(2048)||NavStorageLayout.ObjectBytesBound(GetType())>2048||!ReferenceEquals(ownedSubscription,subscription.MetadataOwner))throw new ArgumentException("Physical singleton owner/layout/callback contradiction.");
+            if(queryRegion!=null){NavPhysicalMacro.WriteEdge(writer,this,queryRegionOwner);writer.Output.Write(queryCandidate);writer.Output.Write(queryChosenCandidate);}
             var w=writer.Output;w.Write(maxStates);w.Write((int)Status);w.Write((int)phase);w.Write(cursor);w.Write(arcCursor);w.Write(current);w.Write(chosen);w.Write(reconstructCursor);w.Write(reconstructLeg);w.Write(traceNode);w.Write(best);w.Write(routeCost);w.Write(startSeeded);
             NavPhysicalMacro.WriteEdge(writer,this,graph);NavPhysicalMacro.WriteMetadata(writer,this,subscription);NavPhysicalMacro.WriteEdge(writer,this,starts);NavPhysicalMacro.WriteEdge(writer,this,ends);NavPhysicalMacro.WriteEdge(writer,this,distance);NavPhysicalMacro.WriteEdge(writer,this,previous);NavPhysicalMacro.WriteEdge(writer,this,frontier);NavPhysicalMacro.WriteEdge(writer,this,legs);NavPhysicalMacro.WriteEdge(writer,this,chain);NavPhysicalMacro.WriteEdge(writer,this,Route,true);
         }
-        internal static NavIncrementalSingletonRoute ReadPhysicalBody(NavPhysicalBodyReader reader)
+        internal static NavIncrementalSingletonRoute ReadPhysicalBody(NavPhysicalBodyReader reader,bool query=false)
         {
+            NavTerminalRegion region=null;int queryCursor=0,queryChosen=-1;
+            if(query){var root=NavPhysicalMacro.ReadEdge<NavDeclarationStorage>(reader);region=root.Facade as NavTerminalRegion??throw new ArgumentException("Invalid query terminal owner.");queryCursor=reader.Input.ReadInt32();queryChosen=reader.Input.ReadInt32();}
             var r=reader.Input;int maximum=r.ReadInt32();var status=(NavSolveStatus)r.ReadInt32();var phase=(Phase)r.ReadInt32();int cursor=r.ReadInt32(),arcCursor=r.ReadInt32(),current=r.ReadInt32(),chosen=r.ReadInt32(),reconstructCursor=r.ReadInt32(),reconstructLeg=r.ReadInt32(),traceNode=r.ReadInt32();double best=r.ReadDouble(),routeCost=r.ReadDouble();bool seeded=NavPhysicalMacro.ReadBoolean(reader);
-            if(maximum<1||!Enum.IsDefined(typeof(NavSolveStatus),status)||!Enum.IsDefined(typeof(Phase),phase)||double.IsNaN(best)||best<0||!NavPhysicalSolveValidation.Cost(routeCost)||NavStorageLayout.ObjectBytesBound(typeof(NavIncrementalSingletonRoute))>2048)throw new ArgumentException("Invalid physical singleton phase/cost/layout.");
+            if(maximum<1||!Enum.IsDefined(typeof(NavSolveStatus),status)||!Enum.IsDefined(typeof(Phase),phase)||!query&&phase>Phase.Done||double.IsNaN(best)||best<0||!NavPhysicalSolveValidation.Cost(routeCost)||NavStorageLayout.ObjectBytesBound(typeof(NavIncrementalSingletonRoute))>2048)throw new ArgumentException("Invalid physical singleton phase/cost/layout.");
             var graph=NavPhysicalMacro.ReadEdge<LayeredNavigationGraph>(reader);var subscription=NavPhysicalMacro.ReadMetadata<NavRouteSubscription>(reader,NavMetadataRole.Subscription);
             var starts=NavPhysicalMacro.ReadEdge<NavCowDictionary<int,double>>(reader);var ends=NavPhysicalMacro.ReadEdge<NavCowDictionary<int,double>>(reader);var distance=NavPhysicalMacro.ReadEdge<NavCowDictionary<int,double>>(reader);var previous=NavPhysicalMacro.ReadEdge<NavCowDictionary<int,NavGraphArc>>(reader);var frontier=NavPhysicalMacro.ReadEdge<NavCowOrderedSet<NavQueueEntry>>(reader);var legs=NavPhysicalMacro.ReadEdge<NavPagedList<NavTypedLeg>>(reader);var chain=NavPhysicalMacro.ReadEdge<NavPagedList<NavGraphArc>>(reader);var route=NavPhysicalMacro.ReadEdge<NavTypedRoute>(reader,true);
-            var work=new NavIncrementalSingletonRoute(graph,subscription,maximum,reader.Reservation.TryReserve,false,false,true){Status=status,phase=phase,cursor=cursor,arcCursor=arcCursor,current=current,chosen=chosen,reconstructCursor=reconstructCursor,reconstructLeg=reconstructLeg,traceNode=traceNode,best=best,routeCost=routeCost,startSeeded=seeded,frozen=true,reservation=null,borrowedRoute=true};
+            var work=new NavIncrementalSingletonRoute(graph,subscription,maximum,reader.Reservation.TryReserve,false,false,true,region){queryCandidate=queryCursor,queryChosenCandidate=queryChosen,Status=status,phase=phase,cursor=cursor,arcCursor=arcCursor,current=current,chosen=chosen,reconstructCursor=reconstructCursor,reconstructLeg=reconstructLeg,traceNode=traceNode,best=best,routeCost=routeCost,startSeeded=seeded,frozen=true,reservation=null,borrowedRoute=true};
             work.starts=NavPhysicalMacro.Acquire(work,starts);work.ends=NavPhysicalMacro.Acquire(work,ends);work.distance=NavPhysicalMacro.Acquire(work,distance);work.previous=NavPhysicalMacro.Acquire(work,previous);work.frontier=NavPhysicalMacro.Acquire(work,frontier);work.legs=NavPhysicalMacro.Acquire(work,legs);work.chain=NavPhysicalMacro.Acquire(work,chain);work.Route=NavPhysicalMacro.Acquire(work,route);
             using(NavStorageScratch.Reserve(reader.Reservation,checked(16384L+4L*graph.Nodes.Count)))work.ValidatePhysicalSingleton(reader.Reservation);return work;
         }
         private void ValidatePhysicalSingleton(INavStorageReservation allocation)
         {
+            if(queryRegion!=null){ValidateQueryState(allocation);return;}
             int count=graph.Nodes.Count;if(cursor<-1||cursor>count||current<-1||current>=count||chosen<-1||chosen>=count||traceNode<0||traceNode>=Math.Max(1,count)||arcCursor<0||current>=0&&arcCursor>graph.Outgoing(current).Count||reconstructCursor<0||reconstructCursor>chain.Count+2||reconstructLeg<0||starts.Count>count||ends.Count>count||distance.Count>maxStates||previous.Count>distance.Count||frontier.Count>maxStates||(Status==NavSolveStatus.Pending)==(phase==Phase.Done)||(Route!=null)!=(Status==NavSolveStatus.Ready))throw new ArgumentException("Physical singleton dimensions/status contradiction.");
             void Attachments(NavCowDictionary<int,double> map,NavLocation location,int visited){foreach(var pair in map){if(pair.Key<0||pair.Key>=visited||!NavPhysicalSolveValidation.Cost(pair.Value)||!NavPhysicalSolveValidation.Attachment(graph,location,pair.Key,allocation,out double expected)||pair.Value!=expected)throw new ArgumentException("Physical singleton attachment prefix contradiction.");}}
             Attachments(starts,subscription.Origin,phase==Phase.Direct?0:phase==Phase.Origins?cursor:count);Attachments(ends,subscription.AssignedEndpoint,phase<Phase.Endpoints?0:phase==Phase.Endpoints?cursor:count);
@@ -98,11 +102,16 @@ namespace Spacewars.Simulation
         }
         private void ValidatePhysicalReconstruction(INavStorageReservation allocation)
         {
-            if(chosen<0||reconstructCursor>chain.Count+1+(Status==NavSolveStatus.Ready?1:0)||reconstructCursor==0&&reconstructLeg!=0)throw new ArgumentException("Physical singleton reconstruction cursor contradiction.");
+            int extra=queryRegion==null?0:1;
+            if(chosen<0||reconstructCursor>chain.Count+1+extra+(Status==NavSolveStatus.Ready?1:0)||reconstructCursor==0&&reconstructLeg!=0)throw new ArgumentException("Physical singleton reconstruction cursor contradiction.");
             int emitted=reconstructCursor==0?0:1;for(int c=1;c<reconstructCursor&&c<=chain.Count;c++)emitted+=chain[chain.Count-c].Trace?.Count??1;
-            if(reconstructCursor>chain.Count+1)emitted++;emitted+=reconstructLeg;if(legs.Count!=emitted)throw new ArgumentException("Physical singleton reconstruction prefix length contradiction.");
+            if(reconstructCursor>chain.Count+1)emitted++;if(queryRegion!=null&&reconstructCursor>chain.Count+2)emitted++;emitted+=reconstructLeg;if(legs.Count!=emitted)throw new ArgumentException("Physical singleton reconstruction prefix length contradiction.");
             if(emitted>0){int first=chain.Count==0?chosen:chain[chain.Count-1].From;NavPhysicalSolveValidation.SurfaceLeg(graph,legs[0],subscription.Origin,graph.Nodes[first].Location,allocation);}
-            if(Status==NavSolveStatus.Ready)NavPhysicalSolveValidation.SurfaceLeg(graph,legs[legs.Count-1],graph.Nodes[chosen].Location,subscription.AssignedEndpoint,allocation);
+            if(queryRegion!=null&&reconstructCursor>chain.Count+1){
+                int terminal=legs.Count-1-(reconstructCursor>chain.Count+2?1:0);
+                NavPhysicalSolveValidation.SurfaceLeg(graph,legs[terminal],graph.Nodes[chosen].Location,queryRegion.Candidates[queryChosenCandidate],allocation);
+            }
+            if(Status==NavSolveStatus.Ready)NavPhysicalSolveValidation.SurfaceLeg(graph,legs[legs.Count-1],queryRegion==null?graph.Nodes[chosen].Location:queryRegion.Candidates[queryChosenCandidate],subscription.AssignedEndpoint,allocation);
             int at=1;for(int c=1;c<=chain.Count;c++){var arc=chain[chain.Count-c];var trace=arc.Trace;int available=c<reconstructCursor?trace?.Count??1:c==reconstructCursor?reconstructLeg:0;if(trace!=null){if(available>trace.Count)throw new ArgumentException("Physical singleton trace leg cursor contradiction.");for(int n=0;n<available;n++)if(!ReferenceEquals(legs[at++],trace[n]))throw new ArgumentException("Physical singleton stored trace leg alias contradiction.");}else if(available!=0){var leg=legs[at++];if(!leg.From.Equals(graph.Nodes[arc.From].Location)||!leg.To.Equals(graph.Nodes[arc.To].Location)||leg.Cost!=arc.Cost||leg.Kind!=(arc.Kind==NavGraphArcKind.Portal?NavTypedLegKind.Portal:NavTypedLegKind.Surface)||leg.PortalId!=arc.PortalId)throw new ArgumentException("Physical singleton expanded arc leg contradiction.");}}
         }
     }

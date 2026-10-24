@@ -645,10 +645,19 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void ClaimPauseRestoreProfileAndRestartUseRealAuthority()
         {
-            var c=NativeAiPostOpeningFixtures.WithReadyHome(Config(),"claim-pause-restore");var a=new PlayableAuthorityTick(c,71);
+            var ready=NativeAiPostOpeningFixtures.WithReadyHome(Config(),"claim-pause-restore");
+            // This is a post-opening claim lifecycle test. Supply the real bounded
+            // initial force required by the current opening contract, without forging
+            // its latch or changing money, seed, original actors, bounds or assertions.
+            var force=Enumerable.Range(0,(int)AiProfile.Initial.Value("opening.forceUnits")).Select(i=>new OfflineScenarioUnit(1,PlayableEntityKind.Tank,new NavPoint(-24+i*2,-18))).ToArray();
+            var costs=new double[ready.Starts.Count,ready.Starts.Count];for(int i=0;i<ready.Starts.Count;i++)for(int j=0;j<ready.Starts.Count;j++)costs[i,j]=ready.RouteCost(i,j);
+            var c=new OfflineMatchConfiguration(ready.Profile,ready.SourceIdentity+"-initial-force-ready",ready.MapIdentity,ready.RouteProvenance,ready.Seed,ready.Roster.ToArray(),ready.Starts.ToArray(),ready.Sites.ToArray(),ready.Obstacles.ToArray(),costs,
+                ready.Spectators.ToArray(),ready.ScenarioUnits.Concat(force).ToArray(),scenarioBuildings:ready.ScenarioBuildings.ToArray());
+            var a=new PlayableAuthorityTick(c,71);
             using(var host=new UnityHostRouteService())
             {
                 for(int i=0;i<100&&Planner(a).Capture().SiteId==0;i++)Step(a,host);
+                Assert.True(a.CaptureDiagnosticCheckpoints().Single().OpeningExecution.InitialForceFulfilled,"current post-opening fixture must fulfill the ordinary initial-force contract");
                 Assert.AreEqual(3,Planner(a).Capture().SiteId);var bytes=a.CaptureBytes();var b=PlayableAuthorityTick.RestoreBytes(bytes,c);CollectionAssert.AreEqual(bytes,b.CaptureBytes());
                 var state=Planner(a).Capture();long tick=a.Tick;for(int i=0;i<10;i++)Assert.True(a.TryAdvance(true));Assert.AreEqual(tick,a.Tick);Assert.AreEqual(state.ExpiresTick,Planner(a).Capture().ExpiresTick);
                 b=PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c);for(int i=0;i<80;i++){Step(a,host);Step(b,host);CollectionAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes());}

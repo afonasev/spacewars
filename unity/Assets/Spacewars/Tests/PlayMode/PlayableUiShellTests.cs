@@ -40,7 +40,7 @@ public sealed class PlayableUiShellTests
     private void ShowTerminal(PlayableMatchOutcome outcome)
     {
         Set("view",new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,outcome,900,null,
-            Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
+            Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,activeProfile:PlayableProfile.Default));
         Call("UpdateHud");
     }
 
@@ -68,9 +68,9 @@ public sealed class PlayableUiShellTests
     [TestCase(PlayableMatchOutcome.PlayerLost,"ЦЕНТРЫ ПОТЕРЯНЫ",false)]
     public void ModalReflectsExistingSnapshotState(PlayableMatchOutcome outcome,string title,bool canContinue)
     {
-        Set("paused",outcome==PlayableMatchOutcome.Playing);
+        Set("paused",outcome==PlayableMatchOutcome.Playing);Set("menuPaused",outcome==PlayableMatchOutcome.Playing);
         Set("view",new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,outcome,900,null,
-            Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
+            Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,activeProfile:PlayableProfile.Default));
         Call("UpdateHud");
         Assert.AreEqual(title,Get<Label>("modalTitle").text);
         Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>("modal").style.display.value);
@@ -86,7 +86,7 @@ public sealed class PlayableUiShellTests
     {
         var root=Get<VisualElement>("root");
         Set("view",new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,outcome,900,null,
-            Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
+            Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,activeProfile:PlayableProfile.Default));
         Call("UpdateHud");
         var restart=Get<Button>("modalRestartButton");var exit=Get<Button>("modalExitButton");
         var move=typeof(PlayableBootstrap).GetMethod("MoveHudFocus",Flags);
@@ -135,7 +135,7 @@ public sealed class PlayableUiShellTests
     {
         var root=Get<VisualElement>("root");
         Set("runtime",new PlayableRuntime(PlayableProfile.Default,1,7));
-        Set("paused",true);
+        Set("paused",true);Set("menuPaused",true);
         ShowTerminal(PlayableMatchOutcome.Playing);
         SendKey(Get<Button>("resumeButton"),KeyCode.Escape);
         Assert.False(Get<bool>("paused"));
@@ -155,7 +155,7 @@ public sealed class PlayableUiShellTests
         // StartSession resets this flag before the new playing snapshot is rendered.
         Set("modalWasVisible",false);root.Focus();
         Set("view",new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,2,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,900,null,
-            Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
+            Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,activeProfile:PlayableProfile.Default));
         Call("UpdateHud");
         Assert.IsNull(navigation.Scope,"Hidden result scope must not own the restarted match.");
         // The ordinary world Escape pauses first; its UI event must not immediately resume.
@@ -168,12 +168,12 @@ public sealed class PlayableUiShellTests
     {
         var root=Get<VisualElement>("root");
         var snapshot=new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,900,null,
-            Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null);
-        Set("view",snapshot);Set("paused",true);Call("UpdateHud");
+            Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,activeProfile:PlayableProfile.Default);
+        Set("view",snapshot);Set("paused",true);Set("menuPaused",true);Call("UpdateHud");
         Assert.AreSame(Get<Button>("resumeButton"),root.focusController.focusedElement);
         var move=typeof(PlayableBootstrap).GetMethod("MoveHudFocus",Flags);
         move.Invoke(hud,new object[]{true});Assert.AreSame(Get<Button>("finishMatch"),root.focusController.focusedElement);
-        Set("paused",false);Call("UpdateHud");
+        Set("paused",false);Set("menuPaused",false);Call("UpdateHud");
         Assert.AreEqual(DisplayStyle.None,Get<VisualElement>("modal").style.display.value);
         Assert.AreSame(root,root.focusController.focusedElement);
     }
@@ -219,7 +219,7 @@ public sealed class PlayableUiShellTests
     {
         var root=Get<VisualElement>("root");
         Set("view",new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,900,null,
-            Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
+            Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,activeProfile:PlayableProfile.Default));
         Call("UpdateHud");
         root.style.width=1024;root.style.height=768;
         yield return null;
@@ -249,7 +249,7 @@ public sealed class PlayableUiShellTests
         var orders=new[]{new PlayableResearchOrderSnapshot(1,PlayableResearchKind.TankChassis,7,300,15,30,true,false),new PlayableResearchOrderSnapshot(2,PlayableResearchKind.ExplorerAssaultGuns,7,0,0,30,false,false),new PlayableResearchOrderSnapshot(3,PlayableResearchKind.ShkvalGuidance,7,0,0,30,false,false)};
         var lifecycle=new PlayableBuildingLifecycleSnapshot(false,0,false,false,0,0,null,null,1,300,false);
         var building=new PlayableBuildingSnapshot(7,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,default,250,1,0,0,default,lifecycle:lifecycle,research:orders);
-        Set("view",new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,900,null,Array.Empty<PlayableEntitySnapshot>(),new[]{building},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
+        Set("view",new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,900,null,Array.Empty<PlayableEntitySnapshot>(),new[]{building},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,activeProfile:PlayableProfile.Default));
         Get<System.Collections.Generic.HashSet<int>>("selection").Add(7);Call("UpdateHud");
         yield return null;yield return null;Call("UpdateHud");yield return null;
         var map=root.Q("tactical-minimap-frame");var army=Get<VisualElement>("armyRegion");

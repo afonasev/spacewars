@@ -86,7 +86,7 @@ namespace Spacewars.Runtime
         {
             // Called only after navigation admission succeeds in the prepared lane.
             BindTransactionTerms();profile=candidate;termProfiles[profile.Revision]=profile;
-            foreach(var u in units.Values){u.Health=Math.Min(u.Health,PlayableUnitRules.Health(profile,u.Kind));navigation.Crowd.SetMobility(u.Id,PlayableUnitRules.Speed(profile,u.Kind,u.Kind==PlayableEntityKind.Tank&&UnitUpgraded(u)),PlayableUnitRules.Turn(profile,u.Kind));}
+            foreach(var u in units.Values){u.Health=Math.Min(u.Health,UnitMaximumHealth(u.Owner,u.Kind));if(u.Air!=null){u.Air.Actor.Speed=profile.HawkSpeed;u.Air.Actor.TurnSpeed=profile.HawkYawSpeed;}else navigation.Crowd.SetMobility(u.Id,PlayableUnitRules.Speed(profile,u.Kind,u.Kind==PlayableEntityKind.Tank&&UnitUpgraded(u)),PlayableUnitRules.Turn(profile,u.Kind));}
             foreach(var b in buildings.Values)b.Health=Math.Min(b.Health,TerritoryRules.Health(profile,b.Kind));
             foreach(var owner in Owners)RecordArmy(owner);
         }

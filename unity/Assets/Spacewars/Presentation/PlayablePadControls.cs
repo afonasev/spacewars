@@ -74,25 +74,25 @@ namespace Spacewars.Presentation
             return battleGestures.Mode=="buildingWheel"?CurrentBattleActions():Array.Empty<OfflinePadAction>();
         }
         private void SetPadSelection(int[] ids,bool keepGroup=false)
-        {selection.Clear();foreach(int id in ids)selection.Add(id);selectedSite=selectedSlot=primarySelection=0;battleDismissed=false;confirmSaleBuilding=0;if(!keepGroup)keyboardGroups.Observe(selection);SelectionMarkerEvent();}
+        {selection.Clear();foreach(int id in ids)selection.Add(id);selectedSite=selectedSlot=primarySelection=0;battleDismissed=false;confirmSaleBuilding=0;if(!keepGroup)keyboardGroups.Observe(selection);SelectionMarkerEvent();if(selection.Count>0)CompleteCampaignTutorialTopic(0);}
         private bool OrdinaryPadMenuIntent(OfflinePadIntent intent,OfflinePadAction[] actions)
         {
             if(intent.Kind=="assignGroup"||intent.Kind=="addGroup")
             {
                 if(actions.Any(a=>a.Sector.Id==intent.Id&&a.Sector.Enabled)&&int.TryParse(intent.Id,out int index))
-                {if(intent.Kind=="addGroup")keyboardGroups.Add(index,selection,KeyboardEntities());else{var ids=keyboardGroups.Apply(index,true,Time.unscaledTimeAsDouble,selection,KeyboardEntities(),battleInputProfile.doubleTapMs,out _);SetPadSelection(ids,true);}runtime.RecordHumanAction(LocalOwnerId);}return true;
+                {if(intent.Kind=="addGroup")keyboardGroups.Add(index,selection,KeyboardEntities());else{var ids=keyboardGroups.Apply(index,true,Time.unscaledTimeAsDouble,selection,KeyboardEntities(),battleInputProfile.doubleTapMs,out _);SetPadSelection(ids,true);}CompleteCampaignTutorialTopic(5);runtime.RecordHumanAction(LocalOwnerId);}return true;
             }
             if(intent.Kind=="cycleGroup"||intent.Kind=="recallGroup")
             {
                 var entities=KeyboardEntities();var ids=intent.Kind=="cycleGroup"?keyboardGroups.Cycle(selection,entities):int.TryParse(intent.Id,out int index)?keyboardGroups.RecallPad(index,entities):null;
                 if(ids!=null)
                 {
-                    SetPadSelection(ids,true);runtime.RecordHumanAction(LocalOwnerId);
+                    SetPadSelection(ids,true);CompleteCampaignTutorialTopic(2);runtime.RecordHumanAction(LocalOwnerId);
                     if(intent.Kind=="cycleGroup"){var point=KeyboardControlGroups.Focus(ids,entities,padCursorGround.X,padCursorGround.Z,battleInputProfile.controlGroupFocusRadius);if(point.HasValue)FocusPadPoint(new NavPoint(point.Value.X,point.Value.Z));}
                     var building=view.Buildings.FirstOrDefault(b=>ids.Contains(b.Id)&&b.Owner==view.Owner);if(building!=null&&!mapOpen){padRememberedBuilding=building.Id;battleGestures.SetMode("buildingWheel");}
                 }return true;
             }
-            if(intent.Kind=="selectAllArmy"){padRememberedBuilding=0;SetPadSelection(view.Entities.Where(e=>e.Owner==view.Owner&&e.Health>0).Select(e=>e.Id).ToArray());runtime.RecordHumanAction(LocalOwnerId);return true;}
+            if(intent.Kind=="selectAllArmy"){padRememberedBuilding=0;SetPadSelection(view.Entities.Where(e=>e.Owner==view.Owner&&e.Health>0).Select(e=>e.Id).ToArray());CompleteCampaignTutorialTopic(6);runtime.RecordHumanAction(LocalOwnerId);return true;}
             if(intent.Kind=="cycleBase"||intent.Kind=="selectBase")
             {
                 var point=intent.Kind=="cycleBase"?ordinaryPadBases.CycleBase(OrdinaryBases(),padOriginalHq):actions.FirstOrDefault(a=>a.Sector.Id==intent.Id&&a.Sector.Enabled)?.Point is NavPoint p?new OfflinePadBase(0,p.X,p.Z):(OfflinePadBase?)null;

@@ -50,7 +50,7 @@ namespace Spacewars.Input.Tests
             var pads=Enumerable.Range(0,humans).Select(_=>InputSystem.AddDevice<Gamepad>()).ToArray();
             host=new GameObject("Certified routes ordinary native smoke");app=host.AddComponent<PlayableBootstrap>();app.enabled=false;
             Put(app,"profile",PlayableProfile.ThreeCrossingsDefault);Call(app,"CreateWorld");Call(app,"CreateHud");Put(app,"input",host.AddComponent<PlayableInput>());Call(app,"BindLocalKeyboardInput");Call(app,"CreateLobby");Call(app,"ShowLobby");
-            Get<UnityEngine.UIElements.VisualElement>(app,"lobbyScreen").Q<UnityEngine.UIElements.DropdownField>("lobby-map-choice").value="Огненный разлом";
+            Get<UnityEngine.UIElements.VisualElement>(app,"lobbyScreen").Q<UnityEngine.UIElements.DropdownField>("lobby-map-choice").value="Огненный разлом (6)";
             var setup=Get<NativeLobbyConfiguration>(app,"lobbySetup");setup.HasExplicitSeed=true;setup.ExplicitSeed=19092026;
             for(int i=0;i<humans;i++){setup.Participants[i].Human=true;setup.Participants[i].DeviceId=i==0?0:pads[i].deviceId;setup.Participants[i].Team=i+1;}
             Call(app,"RebuildRoster");Call(app,"LaunchLobbyMatch");

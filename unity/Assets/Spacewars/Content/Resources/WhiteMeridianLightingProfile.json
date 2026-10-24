@@ -1,0 +1,19 @@
+{
+  "id": "white-meridian-warm-v1",
+  "revision": 2,
+  "sunHue": 0.09,
+  "sunSaturation": 0.32,
+  "sunIntensity": 1.5,
+  "sunElevation": 32,
+  "sunAzimuth": -48,
+  "ambientHue": 0.6,
+  "ambientSaturation": 0.22,
+  "ambientValue": 0.48,
+  "shadowStrength": 0.72,
+  "steelHighlight": 0.18,
+  "steelExponent": 24,
+  "concreteHighlight": 0.03,
+  "concreteExponent": 12,
+  "shadowDistance": 90,
+  "shadowCoveragePadding": 0.3
+}
