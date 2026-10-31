@@ -40,6 +40,7 @@ namespace Spacewars.Tests.EditMode
         {
             Call("AddCredits",PlayableOwner.Player,10000d);
             Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,1,PlayableBuildingKind.Refinery,1,PlayableOwner.Player,null));
+            Factory(slot:3);
             Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,2,PlayableBuildingKind.ScientificCenter,1,PlayableOwner.Player,null));
             Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
             int refinery=View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.Refinery).Id;
@@ -53,6 +54,71 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(1,Result.Facts.Count(f=>f.Kind==MatchFactKind.RefineryUpgradeOrdered));
             Assert.AreEqual(2,Result.Facts.Count(f=>f.Kind==MatchFactKind.ResearchOrdered));
             Assert.That(Result.Facts.Where(f=>f.Kind==MatchFactKind.ResearchOrdered||f.Kind==MatchFactKind.RefineryUpgradeOrdered).All(f=>f.Seconds==2));
+        }
+        [Test]public void CompletionResearchDescriptionsAndBuildingUpgradesStaySeparateAfterRestore()
+        {
+            Call("AddCredits",PlayableOwner.Player,10000d);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,1,PlayableBuildingKind.Refinery,1,PlayableOwner.Player,null));
+            Factory(slot:3);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,2,PlayableBuildingKind.ScientificCenter,1,PlayableOwner.Player,null));
+            Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
+            int refinery=View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.Refinery).Id,center=View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.ScientificCenter).Id;
+            Call("Step",2d);Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UpgradeRefinery,new[]{refinery}));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",new PlayableCommand(1,++sequence,"player-1",PlayableCommandKind.QueueResearch,new[]{center},researchKind:PlayableResearchKind.ImprovedWeaponSystems),null));
+            Call("Step",3d);Call("AdvanceResearch",100d);Call("AdvanceRefineryUpgrades",100d);
+            Call("AdvanceResearch",100d);Call("AdvanceRefineryUpgrades",100d);
+            var bytes=(byte[])Call("CaptureWorldBytes",7,"completion-stats");
+            domain=Domain.GetMethod("RestoreWorldBytes",BindingFlags.NonPublic|BindingFlags.Static).Invoke(null,new object[]{bytes,profile,7,"completion-stats"});
+            Assert.AreEqual(bytes,Call("CaptureWorldBytes",7,"completion-stats"));
+            Finish();Assert.AreEqual(1,Result.Players[0].ResearchCompleted);Assert.AreEqual(1,Result.Players[0].BuildingsUpgraded);Assert.AreEqual(3,Result.Players[0].BuildingsBuilt);
+            Assert.AreEqual(0,Result.ResearchCount(PlayableOwner.Player,4));Assert.AreEqual(1,Result.ResearchCount(PlayableOwner.Player,5));
+            Assert.AreEqual(PlayableResearchRules.Description(profile,PlayableResearchKind.ImprovedWeaponSystems),Result.Facts.Single(f=>f.Kind==MatchFactKind.ResearchCompleted).Name);
+            Assert.AreEqual(PlayableResearchRules.RefineryDescription(profile),Result.Facts.Single(f=>f.Kind==MatchFactKind.RefineryUpgradeCompleted).Name);
+            Assert.That(Result.Facts.Where(f=>f.Kind==MatchFactKind.ResearchCompleted||f.Kind==MatchFactKind.RefineryUpgradeCompleted).All(f=>f.Seconds==5));
+        }
+        [Test]public void SalesAndVictimLossesNeverDuplicateConstructionOrAttackerCredit()
+        {
+            int factory=Factory();Call("Step",2d);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.SellBuilding,new[]{factory}));
+            Assert.AreEqual(PlayableCommandStatus.Rejected,Send(PlayableCommandKind.SellBuilding,new[]{factory}));
+            Call("AdvanceBuildingLifecycle",(double)profile.BuildingSaleDemolitionSec+1);
+            Call("DamageWithOwner",1,100000,0,(PlayableOwner?)PlayableOwner.Enemy);Finish();
+            Assert.AreEqual(1,Result.Facts.Count(f=>f.Kind==MatchFactKind.BuildingSold&&f.Owner==PlayableOwner.Player&&f.EntityKind==(int)PlayableBuildingKind.Factory));
+            Assert.AreEqual(1,Result.Facts.Count(f=>f.Kind==MatchFactKind.BuildingLost&&f.Owner==PlayableOwner.Player&&f.EntityKind==(int)PlayableBuildingKind.Headquarters));
+            Assert.AreEqual(1,Result.Players[0].BuildingsBuilt);Assert.AreEqual(1,Result.Players[1].BuildingsDestroyed);
+            Assert.AreEqual(profile.HeadquartersCreditCost,Result.Facts.Single(f=>f.Kind==MatchFactKind.BuildingDestroyed).Value);
+        }
+        [Test]public void CancelledResearchAndUpgradeHaveNoCompletionFacts()
+        {
+            Call("AddCredits",PlayableOwner.Player,10000d);Factory(slot:3);Call("BuildAt",1,1,PlayableBuildingKind.Refinery,1,PlayableOwner.Player,null);Call("BuildAt",1,2,PlayableBuildingKind.ScientificCenter,1,PlayableOwner.Player,null);Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
+            int refinery=View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.Refinery).Id,center=View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.ScientificCenter).Id;
+            Send(PlayableCommandKind.UpgradeRefinery,new[]{refinery});Send(PlayableCommandKind.CancelRefineryUpgrade,new[]{refinery});
+            Call("Apply",new PlayableCommand(1,++sequence,"player-1",PlayableCommandKind.QueueResearch,new[]{center},researchKind:PlayableResearchKind.ImprovedWeaponSystems),null);
+            Call("DamageWithOwner",center,100000,0,(PlayableOwner?)PlayableOwner.Enemy);Call("AdvanceResearch",100d);Call("AdvanceRefineryUpgrades",100d);Finish();
+            Assert.AreEqual(0,Result.Players[0].ResearchCompleted);Assert.AreEqual(0,Result.Players[0].BuildingsUpgraded);
+        }
+        [Test]public void DefeatIsRecordedOnceAtOutcomeAndSurvivesCurrentFormatRestore()
+        {
+            Call("Step",2d);Call("DamageWithOwner",2,100000,0,(PlayableOwner?)PlayableOwner.Player);Call("Step",1d);
+            Assert.IsNotNull(Result);var defeat=Result.Facts.Single(f=>f.Kind==MatchFactKind.PlayerDefeated);Assert.AreEqual(PlayableOwner.Enemy,defeat.Owner);Assert.AreEqual(3,defeat.Seconds);
+            Call("RecordPlayerExit",PlayableOwner.Enemy,false);Assert.AreEqual(1,Result.Facts.Count(f=>f.Kind==MatchFactKind.PlayerDefeated));
+            var bytes=(byte[])Call("CaptureWorldBytes",7,"exit-stats");domain=Domain.GetMethod("RestoreWorldBytes",BindingFlags.NonPublic|BindingFlags.Static).Invoke(null,new object[]{bytes,profile,7,"exit-stats"});Assert.AreEqual(bytes,Call("CaptureWorldBytes",7,"exit-stats"));Assert.AreEqual(1,Result.Facts.Count(f=>f.Kind==MatchFactKind.PlayerDefeated));
+        }
+        [Test]public void OfflineDefeatsRecordEachOwnerAndExactTimeThroughTheRealOutcomeBoundary()
+        {
+            var config=OfflineParticipantAuthorityTests.Config(8,false);var authority=new OfflineParticipantAuthority(config,1);var offlineDomain=typeof(OfflineParticipantAuthority).GetField("domain",F).GetValue(authority);
+            for(int slot=0;slot<3;slot++){
+                int center=authority.View(config.Roster[slot].Id).Buildings.Single(b=>b.Owner==(PlayableOwner)slot&&b.Kind==PlayableBuildingKind.Headquarters).Id;
+                Domain.GetMethod("DamageWithOwner",F).Invoke(offlineDomain,new object[]{center,100000,0,(PlayableOwner?)(PlayableOwner)7});authority.Step(5);
+            }
+            Assert.AreEqual(3,authority.EliminatedOwners.Count);Assert.IsNull(authority.Result);var restored=OfflineParticipantAuthority.Restore(authority.CaptureBytes(),config);restored.FinishManually();
+            var defeats=restored.Result.Facts.Where(f=>f.Kind==MatchFactKind.PlayerDefeated).ToArray();Assert.AreEqual(3,defeats.Length);CollectionAssert.AreEqual(new[]{PlayableOwner.Player,PlayableOwner.Enemy,(PlayableOwner)2},defeats.Select(f=>f.Owner));CollectionAssert.AreEqual(new[]{5d,10d,15d},defeats.Select(f=>f.Seconds));Assert.IsFalse(restored.Result.Facts.Any(f=>f.Kind==MatchFactKind.PlayerLeft));
+        }
+        [Test]public void ExplicitDepartureIsDistinctAndManualFinishDoesNotInventDepartures()
+        {
+            Call("Step",2d);Call("RecordPlayerExit",PlayableOwner.Player,true);Call("RecordPlayerExit",PlayableOwner.Player,true);Call("RecordPlayerExit",PlayableOwner.Player,false);Finish();
+            Assert.AreEqual(1,Result.Facts.Count(f=>f.Kind==MatchFactKind.PlayerLeft));Assert.AreEqual(0,Result.Facts.Count(f=>f.Kind==MatchFactKind.PlayerDefeated));Assert.AreEqual(PlayableOwner.Player,Result.Facts.Single(f=>f.Kind==MatchFactKind.PlayerLeft).Owner);
+            Setup();Call("Step",2d);Finish();Assert.IsFalse(Result.Facts.Any(f=>f.Kind==MatchFactKind.PlayerLeft||f.Kind==MatchFactKind.PlayerDefeated));
         }
         [Test]public void InitialAssetsNeverScoreButStartingArmyAppears()
         {Finish();Assert.AreEqual(7,Result.Seed);Assert.IsTrue(Result.Manual);Assert.IsNull(Result.WinnerTeam);Assert.IsFalse(Result.TeamsVisible);Assert.That(Result.Players.All(p=>p.Score==0&&p.UnitsBuilt==0&&p.BuildingsBuilt==0));Assert.That(Result.Players.All(p=>Result.Army(p.Owner,0)==profile.ExplorerPopulationCost));Assert.That(Result.Facts.All(f=>f.Kind==MatchFactKind.Army));Assert.That(Result.Players.All(p=>!Result.IsMaximum(p,5)));}
@@ -88,7 +154,12 @@ namespace Spacewars.Tests.EditMode
             Finish();Assert.AreEqual(3,Result.Facts.Count(f=>f.Kind==MatchFactKind.HumanAction));
         }
         [Test]public void AutomaticProductionAddsCompletionsWithoutHumanActions()
-        {int factory=Factory();Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.ToggleRepeatProduction,new[]{factory}));Call("AdvanceProduction",(double)profile.TankProductionSeconds+1);Call("AdvanceProduction",(double)profile.TankProductionSeconds+1);Finish();Assert.AreEqual(1,Result.Facts.Count(f=>f.Kind==MatchFactKind.HumanAction));Assert.AreEqual(2,Result.Players[0].UnitsBuilt);Assert.AreEqual(2,Result.Facts.Count(f=>f.Kind==MatchFactKind.UnitOrdered));}
+        {int factory=Factory();Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.ToggleRepeatProduction,new[]{factory}));Call("AdvanceProduction",(double)profile.TankProductionSeconds+1);Call("AdvanceProduction",(double)profile.TankProductionSeconds+1);
+            // Complete the current native gate cycle and free its exit before the next automatic order.
+            var first=View().Entities.Single(e=>e.Owner==PlayableOwner.Player&&e.Kind==PlayableEntityKind.Tank);
+            Call("DamageWithOwner",first.Id,100000,0,(PlayableOwner?)null);Call("AdvanceProduction",profile.FactoryGateSeconds);
+            Call("AdvanceProduction",(double)profile.TankProductionSeconds+1);Call("AdvanceProduction",(double)profile.TankProductionSeconds+1);
+            Finish();Assert.AreEqual(1,Result.Facts.Count(f=>f.Kind==MatchFactKind.HumanAction));Assert.AreEqual(2,Result.Players[0].UnitsBuilt);Assert.AreEqual(2,Result.Facts.Count(f=>f.Kind==MatchFactKind.UnitOrdered));}
         [Test]public void AcceptedRallyIsCountedOnceAtIngress()
         {int factory=Factory();Assert.AreEqual(PlayableCommandStatus.Accepted,Send(PlayableCommandKind.SetRally,new[]{factory}));Call("AdvanceRally");Finish();Assert.AreEqual(1,Result.Facts.Count(f=>f.Kind==MatchFactKind.HumanAction));}
         [TestCase(true)][TestCase(false)]public void CorruptHistoryNumbersAreRejected(bool eventTime)

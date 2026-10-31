@@ -56,6 +56,27 @@ namespace Spacewars.Simulation
             }
             Search(0);return best??throw new ArgumentException("No contiguous lobby team placement.");
         }
+        // Four corner seats, exactly two opposing banks. Exhaustive permutations are
+        // bounded by the map's four-seat product contract, independent of route scoring.
+        public static int[] ResolveCrossings(IReadOnlyList<OfflineStart> starts,IReadOnlyList<OfflineParticipant> roster,int seed)
+        {
+            if(starts.Count!=4||roster.Count<2||roster.Count>4||roster.Select(p=>p.Team).Distinct().Count()!=2||
+                roster.GroupBy(p=>p.Team).Any(g=>g.Count()>2)||roster.Select(p=>p.LogicalPlayer).Distinct().Count()!=roster.Count)
+                throw new ArgumentException("Crossings requires 1x1, 1x2 or 2x2.");
+            int[] best=null;uint bestTie=0;var assigned=new int[roster.Count];var used=new bool[4];
+            void Search(int index)
+            {
+                if(index<roster.Count){for(int s=0;s<4;s++)if(!used[s]){used[s]=true;assigned[index]=s;Search(index+1);used[s]=false;}return;}
+                for(int a=0;a<roster.Count;a++)for(int b=a+1;b<roster.Count;b++){
+                    var x=starts[assigned[a]].Position;var y=starts[assigned[b]].Position;
+                    if((Math.Sign(x.X)==Math.Sign(y.X))!=(roster[a].Team==roster[b].Team))return;
+                    if(roster.Count==2&&Math.Sign(x.Z)==Math.Sign(y.Z))return;
+                }
+                uint tie=Tie(seed,string.Join("|",Enumerable.Range(0,roster.Count).OrderBy(i=>roster[i].LogicalPlayer).Select(i=>roster[i].LogicalPlayer+":"+starts[assigned[i]].Id)));
+                if(best==null||tie<bestTie){best=(int[])assigned.Clone();bestTie=tie;}
+            }
+            Search(0);return best??throw new ArgumentException("No Crossings bank placement.");
+        }
         public static int[] Resolve(IReadOnlyList<OfflineStart> starts,IReadOnlyList<OfflineParticipant> roster,int seed,double[,] costs)
         {
             if(roster.Count<2||roster.Count>8||roster.Count>starts.Count||roster.Select(x=>x.Id).Distinct().Count()!=roster.Count||roster.Select(x=>x.LogicalPlayer).Distinct().Count()!=roster.Count)throw new ArgumentException("Invalid authored participants/capacity.");

@@ -12,13 +12,14 @@ namespace Spacewars.Simulation
         public sealed class Checkpoint
         {
             public int Version { get; internal set; }
-            internal bool BoundedCorridor;
+            internal bool BoundedCorridor, Page0Policy;
+            internal SpatialCheckpoint Spatial;
             internal Checkpoint CopyLogical()=>(Checkpoint)MemberwiseClone();
             internal HistoricalCheckpoint Historical;
             internal string InputKey;internal bool QueryMode,GroupQueryMode,DemandQueryMode,DemandContinuationMode;internal bool SessionProviders;internal long AuthorityBase;
             internal long LastEpoch;
             internal int AllocationRemaining, MemberIndex, PageIndex, CandidateCursor, OccupantCursor;
-            internal int PreparationCursor, PreparationPageIndex;
+            internal int PreparationCursor, PreparationPageIndex, PreparationMember;
             internal string PreparingClearanceKey;
             internal int[] PreparationValidCandidateIndices;
             internal int[][] PreparationCandidateIndices;
@@ -45,6 +46,8 @@ namespace Spacewars.Simulation
             internal KeyValuePair<long,NavArrivalStatus>[] Outcomes;
         }
         private bool boundedCorridorMode;
+        private bool paidPagePolicy;
+        private int preparationMember;
         private bool page0OccupancyMode=>historicalState?.Page0Occupancy??false;
         private bool demandV3Mode=>historicalState?.DemandV3??false;
         private bool rectangleOriginsMode=>historicalState?.RectangleOrigins??false;
@@ -157,9 +160,10 @@ namespace Spacewars.Simulation
         private NavigationArrivalWork(NavArrivalInput input, Func<long,bool> reserve, bool birthOnly=false) : base(LayoutBytes)
         {
             this.input = input ?? throw new ArgumentNullException(nameof(input));rootReservation=reserve;physicalLifetime=reserve!=null;
+
             groupQueryMode=input.IndependentMembers&&input.Members.Count>1&&input.Provider is PartitionNavigationProvider;
             queryMode=groupQueryMode||input.IndependentMembers&&input.Members.Count==1&&input.WorkingFor(input.Members[0]).Provider is PartitionNavigationProvider;
-            demandQueryMode=queryMode;boundedCorridorMode=groupQueryMode&&input.ArrivalProfile.GroupCorridorMaximumExcessPercent==15;
+            paidPagePolicy=reserve!=null&&queryMode;spatialPolicy=reserve!=null&&queryMode;demandQueryMode=queryMode;boundedCorridorMode=groupQueryMode&&input.ArrivalProfile.GroupCorridorMaximumExcessPercent==15;
             using(var allocation=new NavStorageAllocation(reserve)){allocation.Reserve(LayoutBytes);allocation.Register(this);if(!birthOnly)Retain();}
             if(birthOnly)return;
             try{
@@ -173,6 +177,7 @@ namespace Spacewars.Simulation
                 preparationValidCandidateIndices=NavPagedList<int>.Create(reserve);
                 pageRequests=NavPagedList<RouteRow>.Create(reserve);pageResults=NavPersistentIndex<int,RouteRow>.Create(reserve:reserve);
                 memberOutcomes=NavPersistentIndex<long,NavArrivalStatus>.Create(reserve:reserve);assignments=NavPagedList<NavArrivalProposal>.Create(reserve);
+                if(spatialPolicy)InitializeSpatial();
                 scheduler=reserve==null?new LayeredNavigationScheduler():LayeredNavigationScheduler.CreateOwned(OwnedReservation);
                 if(input.IndependentMembers)scheduler.BindAttemptArtifacts(input.StableKey);
                 Status=members.Length>LayeredNavigationScheduler.MaxQueue?NavArrivalStatus.CapacityExceeded:NavArrivalStatus.Pending;
@@ -181,8 +186,9 @@ namespace Spacewars.Simulation
         }
         private NavigationArrivalWork(NavArrivalInput input, Checkpoint saved) : this(input)
         {
-            boundedCorridorMode=saved?.BoundedCorridor??false;if(boundedCorridorMode&&input.ArrivalProfile.GroupCorridorMaximumExcessPercent!=15)throw new ArgumentException("Bounded logical profile mismatch.");queryMode=saved?.Version>=3&&saved.QueryMode;groupQueryMode=saved?.Version>=4&&saved.GroupQueryMode;demandQueryMode=saved?.Version>=5&&saved.DemandQueryMode;SetContinuationPolicy(saved?.Version>=6&&saved.DemandContinuationMode,saved?.Version>=7,saved?.Version>=8);if(historicalState!=null){historicalState.Page0Occupancy=saved?.Version>=21;historicalState.RectangleOrigins=saved?.Version>=15;historicalState.TerminalRectangle=saved?.Version>=16;historicalState.TerminalCorner=saved?.Version>=17;historicalState.OriginShadow=saved?.Version>=18;historicalState.OwnedArrivalAnchor=saved?.Version>=19;historicalState.TerminalCost=saved?.Version>=20;historicalState.Certified=saved?.Version>=14;historicalState.Lazy=saved?.Version>=13;historicalState.Astar=saved?.Version>=12;historicalState.Exact=saved?.Version>=11;historicalState.SeamBound=saved?.Version>=9&&saved?.Version<11;historicalState.Removal=saved?.Version>=10;}
-            if (saved == null || (saved.Version != 2&&saved.Version!=3&&saved.Version!=4&&saved.Version!=5&&saved.Version!=6&&saved.Version!=7&&saved.Version!=8&&saved.Version!=9&&saved.Version!=10&&saved.Version!=11&&saved.Version!=12&&saved.Version!=13&&saved.Version!=14&&saved.Version!=15&&saved.Version!=16&&saved.Version!=17&&saved.Version!=18&&saved.Version!=19&&saved.Version!=20&&saved.Version!=21) || saved.Version>=6&&(!saved.DemandContinuationMode||!saved.DemandQueryMode) || saved.Version<6&&saved.DemandContinuationMode || saved.Version>=5&&!saved.DemandQueryMode || saved.Version<5&&saved.DemandQueryMode || saved.Version==4&&(!saved.GroupQueryMode||!saved.QueryMode) || saved.Version<4&&saved.GroupQueryMode || saved.InputKey != input.StableKey ||
+            paidPagePolicy=saved?.Version==23;spatialPolicy=saved?.Version>=22;
+            boundedCorridorMode=saved?.BoundedCorridor??false;if(boundedCorridorMode&&input.ArrivalProfile.GroupCorridorMaximumExcessPercent!=15)throw new ArgumentException("Bounded logical profile mismatch.");queryMode=saved?.Version>=3&&saved.QueryMode;groupQueryMode=saved?.Version>=4&&saved.GroupQueryMode;demandQueryMode=saved?.Version>=5&&saved.DemandQueryMode;SetContinuationPolicy(saved?.Version>=6&&saved.DemandContinuationMode,saved?.Version>=7,saved?.Version>=8);if(historicalState!=null){historicalState.Page0Occupancy=saved?.Version>=22?saved.Page0Policy:saved?.Version>=21;historicalState.RectangleOrigins=saved?.Version>=15;historicalState.TerminalRectangle=saved?.Version>=16;historicalState.TerminalCorner=saved?.Version>=17;historicalState.OriginShadow=saved?.Version>=18;historicalState.OwnedArrivalAnchor=saved?.Version>=19;historicalState.TerminalCost=saved?.Version>=20;historicalState.Certified=saved?.Version>=14;historicalState.Lazy=saved?.Version>=13;historicalState.Astar=saved?.Version>=12;historicalState.Exact=saved?.Version>=11;historicalState.SeamBound=saved?.Version>=9&&saved?.Version<11;historicalState.Removal=saved?.Version>=10;}
+            if (saved == null || (saved.Version != 2&&saved.Version!=3&&saved.Version!=4&&saved.Version!=5&&saved.Version!=6&&saved.Version!=7&&saved.Version!=8&&saved.Version!=9&&saved.Version!=10&&saved.Version!=11&&saved.Version!=12&&saved.Version!=13&&saved.Version!=14&&saved.Version!=15&&saved.Version!=16&&saved.Version!=17&&saved.Version!=18&&saved.Version!=19&&saved.Version!=20&&saved.Version!=21&&saved.Version!=22&&saved.Version!=23) || saved.Version>=6&&(!saved.DemandContinuationMode||!saved.DemandQueryMode) || saved.Version<6&&saved.DemandContinuationMode || saved.Version>=5&&!saved.DemandQueryMode || saved.Version<5&&saved.DemandQueryMode || saved.Version==4&&(!saved.GroupQueryMode||!saved.QueryMode) || saved.Version<4&&saved.GroupQueryMode || saved.InputKey != input.StableKey ||
                 saved.PageStarts == null || saved.PageCounts == null || !saved.PageStarts.SequenceEqual(pageStarts) ||
                 !saved.PageCounts.SequenceEqual(pageCounts) || saved.Phase < 0 || saved.Phase > (int)Phase.Finished ||
                 saved.MemberIndex < 0 || saved.MemberIndex > members.Length || saved.PageIndex < 0 || saved.PageIndex > pageStarts.Length)
@@ -196,7 +202,7 @@ namespace Spacewars.Simulation
             candidateBlocked = saved.CandidateBlocked; memberSawBlocked = saved.MemberSawBlocked;
             memberAllUnreachable = saved.MemberAllUnreachable; memberRouteCount = saved.MemberRouteCount;
             memberFailure = saved.MemberFailure;
-            preparationCursor = saved.PreparationCursor; preparationPageIndex = saved.PreparationPageIndex;
+            preparationMember=saved.PreparationMember;preparationCursor = saved.PreparationCursor; preparationPageIndex = saved.PreparationPageIndex;
             preparingClearanceKey = saved.PreparingClearanceKey;
             foreach(var index in saved.PreparationValidCandidateIndices ?? Array.Empty<int>())preparationValidCandidateIndices.Add(index);
             preparationCandidateIndices = CopyCandidateSlots(saved.PreparationCandidateIndices);
@@ -225,7 +231,7 @@ namespace Spacewars.Simulation
                 AcceptCompletion(row,result.Status,result.Route);
             }
             scheduler.ReleaseOwner();scheduler = LayeredNavigationScheduler.Restore(saved.Scheduler, pageRequests.Select(x => x.Request),input.WorkingBindings.Select(b=>b.Provider).Concat(new[]{input.Provider}));
-            scheduler.SessionOwnsProviders=saved.SessionProviders;authorityReservationBase=saved.AuthorityBase;RestoreHistorical(saved);
+            scheduler.SessionOwnsProviders=saved.SessionProviders;authorityReservationBase=saved.AuthorityBase;RestoreHistorical(saved);RestoreSpatial(saved.Spatial);
             if(scheduler.AttemptBinding!=(input.IndependentMembers?input.StableKey:null))throw new ArgumentException("Stale allocation attempt artifact owner.");
         }
 
@@ -241,9 +247,9 @@ namespace Spacewars.Simulation
         {get{using(var scratch=rootReservation==null?null:NavStorageScratch.Reserve(OwnedReservation,checked(8192+128L*(assignments.Count+pageResults.Count))))return assignments.Select(p=>p.Route).Concat(pageResults.Values.Select(p=>p.Route)).Where(r=>r!=null).Distinct().Sum(r=>1024L+256L*r.Legs.Count);}}
         internal long StructuralRetainedBytes=>(historicalOracle==null?0:historicalOracle.StructuralRetainedBytes+historicalOracle.input.Provider.EstimatedRetainedBytes)+scheduler.RetainedBytes-(scheduler.SessionOwnsProviders?0:scheduler.ProviderRetainedBytes)+OutputRetainedBytes;
         private void KeepAssignment(NavArrivalProposal proposal){if(rootReservation==null)proposal.Route?.Retain();assignments.Add(proposal);}
-        private void ClearAssignments(){if(rootReservation==null)foreach(var proposal in assignments)proposal.Route?.Release();assignments.Clear();}
+        private void ClearAssignments(){if(rootReservation==null)foreach(var proposal in assignments)proposal.Route?.Release();assignments.Clear();ResetSpatialStorage();}
         private void ClearPageRows(){pageRequests.Clear();pageResults.Clear();}
-        internal void DiscardCancelledDerivatives(){MutableRoot();try{ClearHistoricalStorage();scheduler.ClearWorld();ClearAssignments();ClearPageRows();preparedClearances.Clear();ClearPreparation();ownedInput?.Release();ownedInput=null;input=null;derivativesDiscarded=true;}catch{rootFaulted=true;throw;}}
+        internal void DiscardCancelledDerivatives(){MutableRoot();try{ClearHistoricalStorage();ReleaseSpatial();scheduler.ClearWorld();ClearAssignments();ClearPageRows();preparedClearances.Clear();ClearPreparation();ownedInput?.Release();ownedInput=null;input=null;derivativesDiscarded=true;}catch{rootFaulted=true;throw;}}
 
         internal bool TryReserveAuthorityBytes(long bytes){MutableRoot();if(!scheduler.TryReserveExternalBytes(bytes+OutputRetainedBytes))return false;authorityReservationBase=bytes;return true;}
         internal long AuthorityReservationBytes=>authorityReservationBase;
@@ -302,31 +308,42 @@ namespace Spacewars.Simulation
             Status = NavArrivalStatus.Pending;
             if(historicalOracle!=null)return AdvanceHistorical(logicalEpoch,allocationQuota,navQuota);
             long advanceWorkStart = AllocationWorkConsumed;
+            // Invocation-local only: the prepared page is immutable. Rebind on member/page
+            // changes; no new retained state, quota or checkpoint representation.
+            int scanMember=-1,scanPage=-1;NavRetainedArray<int> scanCandidates=null;
             while (phase != Phase.Finished) {
                 if(scheduler.SessionOwnsProviders)scheduler.ReserveExternalBytes(authorityReservationBase+OutputRetainedBytes);
                 if (memberIndex >= members.Length) {
                     if(input.IndependentMembers&&!scheduler.EndAttemptArtifacts(logicalEpoch,navQuota)){Status=NavArrivalStatus.BudgetExhausted;break;}
                     Status = NavArrivalStatus.Ready; phase = Phase.Finished; break;
                 }
+                if(spatialPolicy&&!BuildSpatial()){Status=NavArrivalStatus.BudgetExhausted;break;}
                 if (phase == Phase.PrepareRegions) {
-                    if(!PrepareRegionsFor(memberIndex)){Status=NavArrivalStatus.BudgetExhausted;break;}
-                    BeginCandidateScan();continue;
+                    if(!PrepareRegionsFor(memberIndex,paidPagePolicy?pageIndex:0)){Status=NavArrivalStatus.BudgetExhausted;break;}
+                    if(paidPagePolicy)phase=Phase.ScanCandidates;else BeginCandidateScan();continue;
                 }
                 if (phase == Phase.ScanCandidates) {
                     if (pageIndex >= pageStarts.Length) { FinishMember(); continue; }
-                    var prepared = preparedClearances[WorkingKey(members[memberIndex])];
-                    var validCandidates = prepared.CandidateIndices[pageIndex];
+                    if(scanMember!=memberIndex||scanPage!=pageIndex){
+                        scanCandidates=preparedClearances[WorkingKey(members[memberIndex])].CandidateIndices[pageIndex];
+                        scanMember=memberIndex;scanPage=pageIndex;
+                    }
+                    var validCandidates = scanCandidates;
                     if (validCandidates.Count == 0) { if(page0Only){page0Boundary=true;Status=NavArrivalStatus.BudgetExhausted;break;}NextPage(); continue; }
                     if (candidateCursor >= validCandidates.Count) { phase = Phase.SolvePage; continue; }
                     if (allocationRemaining == 0) { Status = NavArrivalStatus.BudgetExhausted; break; }
                     int candidateIndex = validCandidates[candidateCursor];
                     var candidate = input.Source.Candidates[candidateIndex];
                     if (!candidateValidated) {
-                        SpendCandidate();
-                        candidateValidated = true; candidateBlocked = false; occupantCursor = 0;
+                        SpendCandidate(NavCandidateCharge.PlacementStart);
+                        candidateValidated = true; candidateBlocked = false; occupantCursor = 0;ResetSpatialQuery();
+                    }
+                    if(spatialPolicy){
+                        if(!ScanSpatial(candidate)){Status=NavArrivalStatus.BudgetExhausted;break;}
+                        if(candidateBlocked){memberSawBlocked=true;AdvanceCandidate();continue;}
                     }
                     int totalOccupants = input.Occupancy.Occupants.Count + assignments.Count;
-                    if (occupantCursor < totalOccupants) {
+                    if (!spatialPolicy && occupantCursor < totalOccupants) {
                         if (allocationRemaining == 0) { Status = NavArrivalStatus.BudgetExhausted; break; }
                         SpendOccupancy();
                         if (occupantCursor < input.Occupancy.Occupants.Count) {
@@ -343,7 +360,7 @@ namespace Spacewars.Simulation
                         continue;
                     }
                     if (allocationRemaining == 0) { Status = NavArrivalStatus.BudgetExhausted; break; }
-                    SpendCandidate();
+                    SpendCandidate(NavCandidateCharge.RequestCreate);
                     var request = CreateRequest(memberIndex, pageIndex, candidateIndex);
                     try{
                     if(input.IndependentMembers&&pageRequests.Count==0){
@@ -372,9 +389,13 @@ namespace Spacewars.Simulation
                         LastAdvanceRetentionBlocked=true;return Status;
                     }
                     while (allocationRemaining > 0 && scheduler.TryTake(_ => true, out var result)) {
-                        SpendCandidate();
-                        var row = pageRequests.Single(x => x.Request.Subscription.StableKey == result.Subscription.StableKey);
-                        try{AcceptCompletion(row,result.Status,result.Route);}finally{result.Release();}
+                        SpendCandidate(NavCandidateCharge.Completion);
+                        int rowIndex=-1;
+                        for(int i=0;i<pageRequests.Count;i++)if(pageRequests[i].Request.Subscription.StableKey==result.Subscription.StableKey){
+                            if(rowIndex>=0)throw new InvalidOperationException("Sequence contains more than one matching element");rowIndex=i;
+                        }
+                        if(rowIndex<0)throw new InvalidOperationException("Sequence contains no matching element");
+                        try{AcceptCompletionAt(rowIndex,result.Status,result.Route);}finally{result.Release();}
                         if (result.Status != NavSolveStatus.UnreachableInGraph) memberAllUnreachable = false;
                         ObserveTerminalFailure(result.Status);
                     }
@@ -451,7 +472,7 @@ namespace Spacewars.Simulation
             pageIndex++;
             if (pageIndex >= pageStarts.Length) { FinishMember(); return; }
             candidateCursor = 0; occupantCursor = 0;
-            candidateValidated = false; candidateBlocked = false; phase = Phase.ScanCandidates;
+            candidateValidated = false; candidateBlocked = false; phase = paidPagePolicy?Phase.PrepareRegions:Phase.ScanCandidates;
         }
         private void NextMember()
         {
@@ -462,17 +483,17 @@ namespace Spacewars.Simulation
         }
         private void BeginCandidateScan()
         { pageIndex = 0; candidateCursor = 0; occupantCursor = 0; candidateValidated = false; candidateBlocked = false; phase = Phase.ScanCandidates; }
-        private void BeginPreparation(string clearanceKey)
+        private void BeginPreparation(string clearanceKey,int member=0,int requestedPage=0)
         {
-            preparingClearanceKey = clearanceKey; preparationPageIndex = 0;
-            preparationCursor = pageStarts.Length == 0 ? 0 : pageStarts[0];
+            preparationMember=member;preparingClearanceKey = clearanceKey; preparationPageIndex = paidPagePolicy?requestedPage:0;
+            preparationCursor = pageStarts.Length == 0 ? 0 : pageStarts[preparationPageIndex];
             preparationValidCandidateIndices.Clear();
             ResetPreparationSlots();
         }
         private void AdvanceCandidate()
         { candidateCursor++; occupantCursor = 0; candidateValidated = false; candidateBlocked = false; }
         private void SpendAllocation() { allocationRemaining--; AllocationWorkConsumed++; }
-        private void SpendCandidate() { SpendAllocation(); CandidateWorkConsumed++; }
+        private void SpendCandidate(NavCandidateCharge reason) { SpendAllocation(); CandidateWorkConsumed++;NavArrivalDiagnostic.Charge(reason); }
         private void SpendOccupancy() { SpendAllocation(); OccupancyWorkConsumed++; }
 
         private NavScheduledRequest CreateRequest(int memberIndex, int pageIndex, int candidateIndex)
@@ -500,12 +521,12 @@ namespace Spacewars.Simulation
 
         public Checkpoint Save()
         {
-            var checkpoint = new Checkpoint { BoundedCorridor=boundedCorridorMode,Version = page0OccupancyMode?21:terminalCostMode?20:ownedArrivalAnchorMode?19:originShadowMode?18:terminalCornerMode?17:terminalRectangleMode?16:rectangleOriginsMode?15:certifiedMode?14:lazyMode?13:astarMode?12:exactCostMode?11:removalMode?10:seamBoundMode?9:occupancyPrefixMode?8:demandV3Mode?7:demandContinuationMode?6:demandQueryMode?5:groupQueryMode?4:queryMode?3:2, DemandQueryMode=demandQueryMode,DemandContinuationMode=demandContinuationMode, QueryMode=queryMode,GroupQueryMode=groupQueryMode, InputKey = input.StableKey,SessionProviders=scheduler.SessionOwnsProviders,AuthorityBase=authorityReservationBase, LastEpoch = lastEpoch,
+            var checkpoint = new Checkpoint { BoundedCorridor=boundedCorridorMode,Page0Policy=page0OccupancyMode, Spatial=SaveSpatial(),Version = paidPagePolicy?23:spatialPolicy?22:page0OccupancyMode?21:terminalCostMode?20:ownedArrivalAnchorMode?19:originShadowMode?18:terminalCornerMode?17:terminalRectangleMode?16:rectangleOriginsMode?15:certifiedMode?14:lazyMode?13:astarMode?12:exactCostMode?11:removalMode?10:seamBoundMode?9:occupancyPrefixMode?8:demandV3Mode?7:demandContinuationMode?6:demandQueryMode?5:groupQueryMode?4:queryMode?3:2, DemandQueryMode=demandQueryMode,DemandContinuationMode=demandContinuationMode, QueryMode=queryMode,GroupQueryMode=groupQueryMode, InputKey = input.StableKey,SessionProviders=scheduler.SessionOwnsProviders,AuthorityBase=authorityReservationBase, LastEpoch = lastEpoch,
                 AllocationWorkConsumed = AllocationWorkConsumed, CandidateWorkConsumed = CandidateWorkConsumed,
                 OccupancyWorkConsumed = OccupancyWorkConsumed, DirectWorkConsumed=DirectWorkConsumed,
                 AllocationRemaining = allocationRemaining, MemberIndex = memberIndex, PageIndex = pageIndex,
                 CandidateCursor = candidateCursor, OccupantCursor = occupantCursor, CandidateValidated = candidateValidated,
-                PreparationCursor = preparationCursor, PreparationPageIndex = preparationPageIndex,
+                PreparationMember=preparationMember,PreparationCursor = preparationCursor, PreparationPageIndex = preparationPageIndex,
                 PreparingClearanceKey = preparingClearanceKey,
                 PreparationValidCandidateIndices = preparationValidCandidateIndices.ToArray(),
                 PreparationCandidateIndices = ExportCandidates(preparationCandidateIndices),
@@ -525,6 +546,8 @@ namespace Spacewars.Simulation
             => new NavigationArrivalWork(exactInputs, RebindLogical(exactInputs,checkpoint));
 
         internal string LogicalContinuationBinding => restoredReady?.Continuation??NavContract.StreamingDigest(w=>{
+            if(paidPagePolicy){w.Write("paid-candidate-pages-v1");w.Write(preparationMember);foreach(var entry in preparedClearances.OrderBy(e=>e.Key.Value,StringComparer.Ordinal)){w.Write(entry.Key.Value);for(int page=0;page<pageStarts.Length;page++){var row=entry.Value.CandidateIndices[page];w.Write(row!=null);if(row!=null){w.Write(row.Count);foreach(int raw in row)w.Write(raw);w.Write(entry.Value.Regions[page]?.StableKey??"");}}}}
+            if(spatialPolicy){w.Write("paid-spatial-arrival-v1");WriteSpatialScalars(w);foreach(int v in spatialHeads)w.Write(v);foreach(int v in spatialLinks)w.Write(v);}
             if(boundedCorridorMode)w.Write("certified-group-arrival115-v1");
             if(demandContinuationMode){w.Write(page0OccupancyMode?"historical-page0-occupancy-v17":terminalCostMode?"historical-terminal-cost-v16":ownedArrivalAnchorMode?"historical-owned-arrival-anchor-v15":terminalRectangleMode?"historical-terminal-rectangle-v12":rectangleOriginsMode?"historical-rectangle-origins-v11":certifiedMode?"historical-certified-lazy-v10":lazyMode?"historical-lazy-partition-v9":astarMode?"historical-exact-astar-v8":exactCostMode?"historical-exact-cost-v7":removalMode?"historical-page0-removal-v6":seamBoundMode?"historical-seam-bound-v5":occupancyPrefixMode?"historical-occupancy-prefix-v4":"historical-demand-v2");w.Write(historicalOracle!=null);if(historicalOracle!=null){w.Write(historicalOracle.LogicalContinuationBinding);w.Write(historicalEpochBase);w.Write(historicalGate);w.Write(historicalCursor);w.Write(historicalMember);w.Write(historicalLeg);w.Write(historicalRecipe?.ArtifactKey??"");if(removalMode)foreach(int cursor in RemovalSnapshot())w.Write(cursor);if(page0OccupancyMode)foreach(int cursor in Page0OccupancySnapshot())w.Write(cursor);foreach(var leg in historicalLegs){NavContract.Location(w,leg.From);NavContract.Location(w,leg.To);w.Write(leg.Cost);w.Write((int)leg.Kind);w.Write(leg.PortalId??"");}}}
             w.Write(scheduler.LogicalContinuationBinding);w.Write(DirectWorkConsumed);

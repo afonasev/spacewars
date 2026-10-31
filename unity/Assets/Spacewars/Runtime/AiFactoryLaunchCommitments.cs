@@ -20,22 +20,22 @@ namespace Spacewars.Runtime
             internal bool Applied;
         }
         private readonly List<Launch> launches=new List<Launch>();
-        private static int Price(PlayableProfile p)=>PlayableUnitRules.Cost(p,PlayableEntityKind.Tank);
-        internal string ReservationFor(PlayableAiAction a)=>launches.FirstOrDefault(x=>x.Producer>0&&a.EntityIds.Count==1&&a.EntityIds[0]==x.Producer&&a.Kind==PlayableCommandKind.QueueTank&&a.UnitKind==PlayableEntityKind.Tank)?.Id;
+        private static int Price(PlayableProfile p,Launch x)=>PlayableUnitRules.Cost(p,x.Build.UnitKind);
+        internal string ReservationFor(PlayableAiAction a)=>launches.FirstOrDefault(x=>x.Producer>0&&a.EntityIds.Count==1&&a.EntityIds[0]==x.Producer&&a.Kind==PlayableUnitRules.ProductionCommand(x.Build.UnitKind)&&a.UnitKind==x.Build.UnitKind)?.Id;
         internal bool ContainsProducer(int id)=>launches.Any(x=>x.Producer==id);
         internal bool Contains(string id)=>launches.Any(x=>x.Id==id);
         internal bool IsStartup(AiBudgetEntry e)=>e.Purpose=="factory-startup";
-        internal int Reprice(AiBudgetEntry e,PlayableProfile p)=>checked(launches.Single(x=>x.Id==e.Id).Cycles*Price(p));
+        internal int Reprice(AiBudgetEntry e,PlayableProfile p){var x=launches.Single(x=>x.Id==e.Id);return checked(x.Cycles*Price(p,x));}
         internal void Begin(AiIntent intent,AiReceiptIdentity receipt,long tick,AiBudgetLedger budget,PlayableProfile p,AiProfile ai)
         {
             if(intent.StartupFund==0)return;
             var a=intent.Action;string id="factory-startup:"+a.SiteId+":"+a.SlotId;
             if(launches.Any(x=>x.Id==id))throw new InvalidOperationException("Duplicate factory launch commitment.");
             var x=new Launch{Id=id,BuildIntent=intent.Id,BuildReceipt=receipt.Id,Build=a,Created=tick,Expires=checked(tick+budget.ReservationLifetimeTicks),Cycles=(int)ai.Value("economy.factoryLaunchCycles")};
-            if(!budget.Reserve(Entry(x,checked(x.Cycles*Price(p)),p)))throw new InvalidOperationException("Selected launch fund no longer fits.");
+            if(!budget.Reserve(Entry(x,checked(x.Cycles*Price(p,x)),p)))throw new InvalidOperationException("Selected launch fund no longer fits.");
             launches.Add(x);launches.Sort((a,b)=>StringComparer.Ordinal.Compare(a.Id,b.Id));
         }
-        private static PlayableAiAction Target(Launch x,PlayableProfile p)=>x.Producer==0?x.Build:new PlayableAiAction(x.Build.ActionId,x.Build.PlayerId,p.ProfileId,p.Revision,x.Build.Generation,x.Build.SnapshotSequence,PlayableCommandKind.QueueTank,new[]{x.Producer},unitKind:PlayableEntityKind.Tank,seed:x.Build.Seed,sourceIdentity:x.Build.SourceIdentity);
+        private static PlayableAiAction Target(Launch x,PlayableProfile p)=>x.Producer==0?x.Build:new PlayableAiAction(x.Build.ActionId,x.Build.PlayerId,p.ProfileId,p.Revision,x.Build.Generation,x.Build.SnapshotSequence,PlayableUnitRules.ProductionCommand(x.Build.UnitKind),new[]{x.Producer},unitKind:x.Build.UnitKind,seed:x.Build.Seed,sourceIdentity:x.Build.SourceIdentity);
         private static AiBudgetEntry Entry(Launch x,int amount,PlayableProfile p)=>new AiBudgetEntry(x.Id,"factory-startup",Target(x,p),amount,1,x.Created,x.Expires,
             "new line paid cycle / factory destroyed or selling / expiry",new[]{x.Id},p.ProfileId+"@"+p.Revision);
         internal void Observe(PlayableAiObservation o,AiBudgetLedger budget,PlayableProfile p)
@@ -59,7 +59,7 @@ namespace Spacewars.Runtime
                 }
                 // Missing funding after an external bank loss/rebind is a truthful cancelled
                 // commitment. Never silently promise resources the ledger cannot protect.
-                if(x.PendingReceipt==null&&budget.ReservationAmount(x.Id)!=checked(x.Cycles*Price(p)))Drop(x,budget);
+                if(x.PendingReceipt==null&&budget.ReservationAmount(x.Id)!=checked(x.Cycles*Price(p,x)))Drop(x,budget);
             }
         }
         internal void Use(AiIntent intent,AiReceiptIdentity receipt,AiBudgetLedger budget,PlayableProfile p)
@@ -67,7 +67,7 @@ namespace Spacewars.Runtime
             if(intent.ReservationId==null)return;
             var x=launches.Single(l=>l.Id==intent.ReservationId);
             var held=budget.ReservationAmount(x.Id);
-            if(x.PendingReceipt!=null||held<intent.Credits||x.Producer==0||intent.Action.Kind!=PlayableCommandKind.QueueTank||!intent.Action.EntityIds.SequenceEqual(new[]{x.Producer}))throw new InvalidOperationException("Invalid startup admission.");
+            if(x.PendingReceipt!=null||held<intent.Credits||x.Producer==0||intent.Action.Kind!=PlayableUnitRules.ProductionCommand(x.Build.UnitKind)||!intent.Action.EntityIds.SequenceEqual(new[]{x.Producer}))throw new InvalidOperationException("Invalid startup admission.");
             budget.Release(x.Id);
             if(held>intent.Credits&&!budget.Reserve(Entry(x,checked((int)held-intent.Credits),p)))throw new InvalidOperationException("Startup remainder lost.");
             x.PendingReceipt=receipt.Id;
@@ -87,12 +87,12 @@ namespace Spacewars.Runtime
                     if(status==PlayableAiDeliveryStatus.Applied&&paid)x.Cycles--;
                     if(x.Cycles==0){Drop(x,budget);continue;}
                     budget.Release(x.Id);
-                    if(!budget.Reserve(Entry(x,checked(x.Cycles*Price(p)),p)))Drop(x,budget);
+                    if(!budget.Reserve(Entry(x,checked(x.Cycles*Price(p,x)),p)))Drop(x,budget);
                 }
             }
         }
         internal void ReconcileFunding(AiBudgetLedger budget,PlayableProfile p,long tick)
-        {foreach(var x in launches.ToArray())if(x.PendingReceipt==null&&(tick>x.Expires||budget.ReservationAmount(x.Id)!=checked(x.Cycles*Price(p))))Drop(x,budget);}
+        {foreach(var x in launches.ToArray())if(x.PendingReceipt==null&&(tick>x.Expires||budget.ReservationAmount(x.Id)!=checked(x.Cycles*Price(p,x))))Drop(x,budget);}
         internal void RebindHorizon(AiBudgetLedger budget)
         {foreach(var x in launches)x.Expires=Math.Min(x.Expires,checked(x.Created+budget.ReservationLifetimeTicks));}
         private void Drop(Launch x,AiBudgetLedger budget){budget.Release(x.Id);launches.Remove(x);}
@@ -102,7 +102,7 @@ namespace Spacewars.Runtime
             foreach(var x in launches)
             {
                 AiStateWire.Require(x.Created<=tick&&x.Expires-x.Created<=budget.ReservationLifetimeTicks&&x.Build.PlayerId==budget.OwnerId&&x.Build.Generation==budget.Generation,"startup binding");
-                long expected=checked(x.Cycles*Price(p));
+                long expected=checked(x.Cycles*Price(p,x));
                 if(x.PendingReceipt!=null)
                 {
                     int i=Enumerable.Range(0,receipts.Count).Where(n=>receipts[n].Id==x.PendingReceipt).DefaultIfEmpty(-1).Single();
@@ -110,7 +110,7 @@ namespace Spacewars.Runtime
                     expected-=pending[i].Credits;
                 }
                 AiStateWire.Require(expected>=0&&budget.ReservationAmount(x.Id)==expected,"startup ledger amount");
-                var held=budget.ReservationEntry(x.Id);AiStateWire.Require(held==null||held.Purpose=="factory-startup"&&(x.Producer==0?held.Action.Kind==PlayableCommandKind.BuildAt&&held.Action.SiteId==x.Build.SiteId&&held.Action.SlotId==x.Build.SlotId:held.Action.Kind==PlayableCommandKind.QueueTank&&held.Action.EntityIds.SequenceEqual(new[]{x.Producer})),"startup reservation target");
+                var held=budget.ReservationEntry(x.Id);AiStateWire.Require(held==null||held.Purpose=="factory-startup"&&(x.Producer==0?held.Action.Kind==PlayableCommandKind.BuildAt&&held.Action.SiteId==x.Build.SiteId&&held.Action.SlotId==x.Build.SlotId:held.Action.Kind==PlayableUnitRules.ProductionCommand(x.Build.UnitKind)&&held.Action.EntityIds.SequenceEqual(new[]{x.Producer})),"startup reservation target");
                 AiStateWire.Require(x.Applied||receipts.Any(r=>r.Id==x.BuildReceipt),"startup accepted build binding");
             }
             AiStateWire.Require(budget.Capture().Reserved.Where(IsStartup).All(e=>launches.Any(x=>x.Id==e.Id)),"orphan startup reservation");
@@ -122,7 +122,7 @@ namespace Spacewars.Runtime
         {
             var m=new AiFactoryLaunchCommitments();m.launches.AddRange(WorldWire.Array(r,()=>new Launch{Id=String(r),BuildIntent=String(r),BuildReceipt=String(r),PendingReceipt=String(r),Build=AiStateWire.ReadPlayableAiAction(r),Created=r.ReadInt64(),Expires=r.ReadInt64(),Producer=r.ReadInt32(),Cycles=r.ReadInt32(),Applied=Boolean(r)}));
             AiStateWire.Require(m.launches.Select(x=>x.Id).Distinct().Count()==m.launches.Count,"duplicate startup commitment");
-            foreach(var x in m.launches)AiStateWire.Require(x.Build!=null&&x.Build.Kind==PlayableCommandKind.BuildAt&&x.Build.BuildingKind==PlayableBuildingKind.Factory&&x.Id=="factory-startup:"+x.Build.SiteId+":"+x.Build.SlotId&&!string.IsNullOrWhiteSpace(x.BuildIntent)&&!string.IsNullOrWhiteSpace(x.BuildReceipt)&&x.Created>=0&&x.Created<=tick&&x.Expires>=x.Created&&x.Producer>=0&&x.Cycles>0&&x.Cycles<=AiProfileMetadata.Field("economy.factoryLaunchCycles").Maximum&&(!x.Applied?x.Producer==0:true),"startup values");
+            foreach(var x in m.launches)AiStateWire.Require(x.Build!=null&&x.Build.Kind==PlayableCommandKind.BuildAt&&x.Build.BuildingKind==PlayableBuildingKind.Factory&&AiRosterCatalog.Initial.For(x.Build.UnitKind).producer==PlayableBuildingKind.Factory&&x.Id=="factory-startup:"+x.Build.SiteId+":"+x.Build.SlotId&&!string.IsNullOrWhiteSpace(x.BuildIntent)&&!string.IsNullOrWhiteSpace(x.BuildReceipt)&&x.Created>=0&&x.Created<=tick&&x.Expires>=x.Created&&x.Producer>=0&&x.Cycles>0&&x.Cycles<=AiProfileMetadata.Field("economy.factoryLaunchCycles").Maximum&&(!x.Applied?x.Producer==0:true),"startup values");
             return m;
         }
     }

@@ -28,8 +28,8 @@ namespace Spacewars.Presentation
             return a+d*Mathf.Clamp01(Vector2.Dot(p-a,d)/d.sqrMagnitude);
         }
         public bool ProtectedGround(ThreeCrossingsMap map,PlayableProfile gameplay,Vector2 point,float radius)
-            =>ProtectedGround(map,gameplay,point,radius,TerritoryRules.Sites(gameplay));
-        private bool ProtectedGround(ThreeCrossingsMap map,PlayableProfile gameplay,Vector2 point,float radius,TerritorySite[] sites)
+            =>ProtectedGround(map,gameplay,point,radius,map.ReservedSites(gameplay));
+        internal bool ProtectedGround(ThreeCrossingsMap map,PlayableProfile gameplay,Vector2 point,float radius,TerritorySite[] sites)
         {
             var p=new NavPoint(point.x,point.y);float reserve=radius+Art.detailClearance;
             if(!map.SupportsFootprint(p,reserve)||Math.Abs(map.SurfaceHeight(p))>.05)return false;
@@ -37,7 +37,7 @@ namespace Spacewars.Presentation
             foreach(var site in sites)
             {
                 if(Vector2.Distance(point,new Vector2((float)site.Position.X,(float)site.Position.Z))<TerritoryRules.Radius(gameplay,site.Kind)+reserve)return false;
-                foreach(var slot in site.Slots)if(Vector2.Distance(point,new Vector2((float)slot.Position.X,(float)slot.Position.Z))<gameplay.OrdinaryPadRadius+reserve)return false;
+                foreach(var slot in site.Slots.Concat(site.DefenseSlots(gameplay)))if(Vector2.Distance(point,new Vector2((float)slot.Position.X,(float)slot.Position.Z))<gameplay.OrdinaryPadRadius+reserve)return false;
             }
             return ConstructionMask.GetPixelBilinear(point.x/(float)(map.HalfExtent*2)+.5f,point.y/(float)(map.HalfExtent*2)+.5f).g<.01f;
         }
@@ -54,7 +54,7 @@ namespace Spacewars.Presentation
         }
         public bool TryHangarAccess(ThreeCrossingsMap map,PlayableProfile gameplay,ThreeCrossingsDetails.Placement hangar,Bounds bounds,IEnumerable<ThreeCrossingsDetails.Placement> placed,out HangarAccess access)
         {
-            access=default;var items=placed.ToArray();var sites=TerritoryRules.Sites(gameplay);
+            access=default;var items=placed.ToArray();var sites=map.ReservedSites(gameplay);
             bool Fail(string reason){string key=hangar.SiteId+":"+reason;AccessSearchStats[key]=AccessSearchStats.TryGetValue(key,out var n)?n+1:1;return false;}
             var turn=Quaternion.Euler(0,hangar.Rotation,0);var localGate=turn*new Vector3(0,0,bounds.min.z*hangar.Scale);var localForward=turn*Vector3.back;
             var direction=new Vector2(localForward.x,localForward.z);var right=new Vector2(-direction.y,direction.x);
@@ -62,7 +62,7 @@ namespace Spacewars.Presentation
             var start=gate+direction*Profile.hangarApronLength;float radius=Profile.hangarAccessWidth/2;
             var boxes=new Dictionary<int,NavPolygon>();
             for(int i=0;i<items.Length;i++)if(items[i].Kind.StartsWith("Perimeter"))
-            {var mesh=CorporateOutpostModules.Compound(items[i].Kind);boxes[i]=ThreeCrossingsDetails.CompoundEnvelope(mesh.bounds,items[i].Position,items[i].Scale,0,null,items[i].Rotation);UnityEngine.Object.Destroy(mesh);}
+            {var mesh=CrossingStartYardKit.Build(items[i].Kind);boxes[i]=ThreeCrossingsDetails.CompoundEnvelope(mesh.bounds,items[i].Position,items[i].Scale,0,null,items[i].Rotation);UnityEngine.Object.Destroy(mesh);}
             var own=ThreeCrossingsDetails.CompoundEnvelope(bounds,hangar.Position,hangar.Scale,0,null,hangar.Rotation);
             bool Clear(Vector2 p,float r)
             {

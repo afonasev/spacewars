@@ -13,9 +13,11 @@ namespace Spacewars.Presentation
         public readonly PlayableCommandKind Kind;
         public readonly NavLocation? Location;
         public readonly QueueMarkerPhase Phase;
+        // Negative means selection/map exposure, not a new accepted-order animation.
+        public readonly double ConfirmationElapsed;
         public bool Attack=>Kind!=PlayableCommandKind.Move;
-        public PlayableQueueMarker(long issuance,long sequence,int number,PlayableCommandKind kind,NavLocation? location,QueueMarkerPhase phase)
-        {IssuanceId=issuance;CommandSequence=sequence;Number=number;Kind=kind;Location=location;Phase=phase;}
+        public PlayableQueueMarker(long issuance,long sequence,int number,PlayableCommandKind kind,NavLocation? location,QueueMarkerPhase phase,double confirmationElapsed=-1)
+        {IssuanceId=issuance;CommandSequence=sequence;Number=number;Kind=kind;Location=location;Phase=phase;ConfirmationElapsed=confirmationElapsed;}
     }
     // Only typed owner observations enter this derived model. It has no authority or route service.
     public static class PlayableQueueMarkers

@@ -1,0 +1,90 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: df6c6128918cc41599b46973b17cdf54, type: 3}
+  m_Name: Nereida
+  m_EditorClassIdentifier: Spacewars.Presentation::Spacewars.Presentation.ModelDetailCatalog
+  exemptions:
+  - hash: 765435ff2a5751e890f07185e666e6418ea43da6c3f9552d0585dc04b5c681fb
+    reason: already-small-protected-solids
+    vertices: 24
+    indices: 36
+    submeshes: 1
+  - hash: 9ea8e95c5058dc504ea80cf91370ace8da9ac5a2e94e7dabf065523443be577a
+    reason: already-small-protected-solids
+    vertices: 24
+    indices: 36
+    submeshes: 1
+  - hash: 5ccf0a0f399ac8d20e364644a8aa78f8ca793933863f19ffa5be62919c186098
+    reason: already-small-protected-solids
+    vertices: 24
+    indices: 36
+    submeshes: 1
+  - hash: e4036dfc4e5a34b31e61a1a2e74b029ad188f4917f9ab087734c07e7e966ecd2
+    reason: already-small-protected-solids
+    vertices: 24
+    indices: 36
+    submeshes: 1
+  - hash: c1def700a32ad7d2de50625f4d709d8faf26c0926954de998abfbafadb166e5d
+    reason: already-small-protected-solids
+    vertices: 24
+    indices: 36
+    submeshes: 1
+  - hash: f5d14edfb9e3181c3f3a308da790bc0d59356f8a8dfac0bd66385db90d1e722c
+    reason: already-small-protected-solids
+    vertices: 42
+    indices: 60
+    submeshes: 1
+  - hash: d41e3fc6275f1f6c10db4f87ebf9a4ad73ed5e4a4cef2d3a20bb8f647c63fcd7
+    reason: already-small-protected-solids
+    vertices: 36
+    indices: 60
+    submeshes: 1
+  - hash: 68514b84749f62d3615c4af98e24cb00c27b4bc357161bb12c96bceba16a63c9
+    reason: already-small-protected-solids
+    vertices: 42
+    indices: 72
+    submeshes: 1
+  - hash: aba34ad77687d1f3f8dab41f613cfb1067cd5abd31706e2908a5810030cf24d1
+    reason: already-small-protected-solids
+    vertices: 42
+    indices: 60
+    submeshes: 1
+  - hash: bc917546d151752e25120cad3323661a87fad680d919f9de9de61e8f3c577025
+    reason: already-small-protected-solids
+    vertices: 54
+    indices: 84
+    submeshes: 1
+  - hash: ba718721aa25735c80ff29108837fef8bdcc715179a177fbb92753f1fcbab33f
+    reason: already-small-protected-solids
+    vertices: 30
+    indices: 48
+    submeshes: 1
+  - hash: f1e38866ea8ac32ac1bdb92f514f0d044ef67ebbf28ca03d50866cc34f7259f5
+    reason: already-small-protected-solids
+    vertices: 48
+    indices: 84
+    submeshes: 1
+  - hash: 0aee5bbf4a5a69e44983c08ea8cbc9bd7c51807d8ab9dc60e5d8fcda940f4194
+    reason: already-small-protected-solids
+    vertices: 42
+    indices: 60
+    submeshes: 1
+  entries:
+  - hash: c94099147f6f8f3a6f5ca3e043f8d996420c38e17bed60b0552660577cb6d82d
+    vertices: 515
+    indices: 2304
+    submeshes: 1
+    normal: {fileID: 4300000, guid: 006faa5292c574edf8428ba3295d8358, type: 2}
+    far: {fileID: 4300000, guid: a758f069d720f4d9b9c84b1a81059324, type: 2}
+    compactBounds:
+    - m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 0.5, y: 0.5, z: 0.5}

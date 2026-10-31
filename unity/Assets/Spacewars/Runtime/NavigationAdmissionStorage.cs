@@ -78,6 +78,17 @@ namespace Spacewars.Runtime
             for(int i=0;i<version.Members.Count;i++){var member=(NavigationAuthorityMember)version.Members[i];if(!NavigationAdmissionMemberStorage.Matches(Value.Members[i],member,Pending(requests,member.Data.Entity)))return false;}
             return true;
         }
+        // Only a replacement against THIS already published immutable requests root.
+        // Preparation against a new root must still use MatchesProjection below.
+        internal bool MatchesPublishedReplacement(NavigationAuthorityGroup version)
+        {
+            if(Members.Count!=version.Members.Count||!SameHeader(version))return false;
+            for(int i=0;i<version.Members.Count;i++){
+                var published=Value.Members[i];
+                if(!NavigationAdmissionMemberStorage.Matches(published,(NavigationAuthorityMember)version.Members[i],published.PendingRequest))return false;
+            }
+            return true;
+        }
         internal static NavigationAdmissionGroupStorage PrepareOwned(NavigationAuthorityGroup version,NavRetainedArray<NavOwnedStorage> requests,NavigationAdmissionGroupStorage previous,INavStorageReservation reservation)
         {
             NavStorageAdmission.RequireOwned(reservation,version);
@@ -141,7 +152,11 @@ namespace Spacewars.Runtime
         private NavigationAdmissionStorage():base(Layout){Retain();}
         internal bool MatchesGroupReplacement(NavigationAuthorityGroup replacement)
         {
-            for(int i=0;i<Groups.Count;i++){var group=(NavigationAdmissionGroupStorage)Groups[i];if(group.Value.GroupId==replacement.Data.GroupId)return group.MatchesProjection(replacement,Requests);}
+            for(int i=0;i<Groups.Count;i++){var group=(NavigationAdmissionGroupStorage)Groups[i];if(group.Value.GroupId==replacement.Data.GroupId)return
+#if UNITY_INCLUDE_TESTS
+                ContactPhaseQa.LegacyAdmission?group.MatchesProjection(replacement,Requests):
+#endif
+                group.MatchesPublishedReplacement(replacement);}
             return false;
         }
         internal static NavigationAdmissionStorage PrepareOwned(long generation,long sequence,IPlayableTerrain terrain,string providerId,int surfaceVersion,NavGeometry geometry,NavigationProfile profile,NavRetainedArray<NavNameReference> terrainNames,NavRetainedArray<NavOwnedStorage> versions,NavRetainedArray<NavOwnedStorage> requests,long publication,NavigationAdmissionStorage previous,INavStorageReservation reservation)
@@ -151,7 +166,7 @@ namespace Spacewars.Runtime
             NavStorageAdmission.RequireOwned(reservation,versions);NavStorageAdmission.RequireOwned(reservation,requests);
             for(int i=0;i<versions.Count;i++){if(!(versions[i] is NavigationAuthorityGroup version)||!version.IsImmutableCaptureRoot)throw new ArgumentException("Invalid admission group input.");NavStorageAdmission.RequireOwned(reservation,version);if(i>0&&((NavigationAuthorityGroup)versions[i-1]).Data.GroupId>=version.Data.GroupId)throw new ArgumentException("Admission group order changed.");}
             for(int i=0;i<requests.Count;i++){if(!(requests[i] is NavigationHostRequest request)||!request.IsImmutableCaptureRoot)throw new ArgumentException("Invalid admission request input.");NavStorageAdmission.RequireOwned(reservation,request);if(i>0&&((NavigationHostRequest)requests[i-1]).Request.Request>request.Request.Request)throw new ArgumentException("Admission request order changed.");}
-            bool same=previous!=null&&previous.Value.Generation==generation&&previous.Value.PublishedThroughRequestSequence==sequence&&ReferenceEquals(previous.geometry,geometry.StorageRoot)&&ReferenceEquals(previous.profile,profile.StorageRoot)&&ReferenceEquals(previous.terrainNames,terrainNames)&&ReferenceEquals(previous.Value.AuthoredTerrain,PartitionNavigationProvider.SupportsTerrain(terrain)?terrain:null)&&previous.Value.SurfaceProviderId==providerId&&previous.Value.SurfaceSemanticsVersion==surfaceVersion&&previous.Groups.Count==versions.Count&&previous.Requests.Count==requests.Count;
+            bool same=previous!=null&&previous.Value.Generation==generation&&previous.Value.PublishedThroughRequestSequence==sequence&&ReferenceEquals(previous.geometry,geometry.StorageRoot)&&ReferenceEquals(previous.profile,profile.StorageRoot)&&ReferenceEquals(previous.terrainNames,terrainNames)&&ReferenceEquals(previous.Value.AuthoredTerrain,NavigationAdmission.SupportsAuthoredTerrain(terrain)?terrain:null)&&previous.Value.SurfaceProviderId==providerId&&previous.Value.SurfaceSemanticsVersion==surfaceVersion&&previous.Groups.Count==versions.Count&&previous.Requests.Count==requests.Count;
             if(same)for(int i=0;i<requests.Count;i++)if(!ReferenceEquals(previous.Requests[i],requests[i])){same=false;break;}
             if(same)for(int i=0;i<versions.Count;i++)if(!((NavigationAdmissionGroupStorage)previous.Groups[i]).MatchesProjection((NavigationAuthorityGroup)versions[i],requests)){same=false;break;}
             if(same){previous.Retain();return previous;}
@@ -211,12 +226,13 @@ namespace Spacewars.Runtime
             =>map is NavigationCommandSlots<TKey,TValue> owned?owned.Capacity:((AuthoritySlotMap<TKey,TValue>)map).SlotCount;
         private static bool ReadAdmissionSlot<TKey,TValue>(IDictionary<TKey,TValue> map,int slot,out TKey key,out TValue value)
             =>map is NavigationCommandSlots<TKey,TValue> owned?owned.TryReadSlot(slot,out key,out value):((AuthoritySlotMap<TKey,TValue>)map).TryReadSlot(slot,out key,out value);
-        private bool CanOwnAdmissionProjection()
+        private bool CanOwnAdmissionProjection(IDictionary<int,NavigationRequest> sourcePending=null,IDictionary<int,NavigationRequest> sourceProbes=null)
         {
+            sourcePending=sourcePending??pending;sourceProbes=sourceProbes??probes;
             if(groups.Count>0&&!(groups is NavigationCommandSlots<long,GroupOrderState>))return false;
             for(int slot=0;slot<AdmissionSlotCount(groups);slot++)if(ReadAdmissionSlot(groups,slot,out long key,out _)&&!(((NavigationCommandSlots<long,GroupOrderState>)groups).OwnerFor(key) is NavigationLiveGroup))return false;
-            for(int slot=0;slot<AdmissionSlotCount(pending);slot++)if(ReadAdmissionSlot(pending,slot,out _,out var request)&&request.StorageOwner==null)return false;
-            for(int slot=0;slot<AdmissionSlotCount(probes);slot++)if(ReadAdmissionSlot(probes,slot,out _,out var request)&&request.StorageOwner==null)return false;
+            for(int slot=0;slot<AdmissionSlotCount(sourcePending);slot++)if(ReadAdmissionSlot(sourcePending,slot,out _,out var request)&&request.StorageOwner==null)return false;
+            for(int slot=0;slot<AdmissionSlotCount(sourceProbes);slot++)if(ReadAdmissionSlot(sourceProbes,slot,out _,out var request)&&request.StorageOwner==null)return false;
             return true;
         }
         // Sources are either privately prepared command maps or observed live

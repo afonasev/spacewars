@@ -22,12 +22,12 @@ public sealed class NativeWreckLabTests
             yield return null;view.Page.Q<TextField>("lab-search").value="Время жизни остова";yield return null;
             var lifetime=view.Page.Q<TextField>("lab-field-unitWreckLifetimeSeconds");Assert.NotNull(lifetime);
             Assert.Greater(lifetime.worldBound.width,150);Assert.Greater(lifetime.worldBound.height,0);Assert.LessOrEqual(lifetime.worldBound.xMax,1280);
-            Assert.AreEqual("1",lifetime.value);lifetime.value="2.5";
+            Assert.AreEqual("30",lifetime.value);lifetime.value="2.5";
             view.Page.Q<Button>("lab-save").Focus();navigation.Activate();yield return null;
             int revision=(int)store.State["revisions"][store.State["revisions"].Count()-1]["revision"];
             var saved=new NativeBalanceStore(baseline,path).Resolve(revision);Assert.That(saved.UnitWreckLifetimeSeconds,Is.EqualTo(2.5));
-            store.Select(revision);Assert.That(new NativeBalanceStore(baseline,path).Selected.UnitWreckLifetimeSeconds,Is.EqualTo(1),"Startup resets to released Default without deleting experiment");
-            var old=(Newtonsoft.Json.Linq.JObject)store.State["revisions"][0];((Newtonsoft.Json.Linq.JObject)old["data"]).Remove("unitWreckLifetimeSeconds");Assert.AreEqual(1,store.Compile(old).UnitWreckLifetimeSeconds);
+            store.Select(revision);var reopened=new NativeBalanceStore(baseline,path);Assert.That(reopened.Selected.UnitWreckLifetimeSeconds,Is.EqualTo(2.5),"Reopening preserves the selected saved revision.");reopened.ResetRelease();Assert.That(reopened.Selected.UnitWreckLifetimeSeconds,Is.EqualTo(30),"Explicit release reset restores the packaged default without deleting the experiment.");
+            var old=(Newtonsoft.Json.Linq.JObject)store.State["revisions"][0];((Newtonsoft.Json.Linq.JObject)old["data"]).Remove("unitWreckLifetimeSeconds");Assert.AreEqual(30,store.Compile(old).UnitWreckLifetimeSeconds,"Rows without an explicit value use the current initial profile.");
             Assert.AreEqual(revision,store.Active.Revision);
             yield return null;yield return null;
             var folder=Path.Combine(Environment.GetEnvironmentVariable("SPACEWARS_LAB_EVIDENCE")??directory,"wreck");Directory.CreateDirectory(folder);

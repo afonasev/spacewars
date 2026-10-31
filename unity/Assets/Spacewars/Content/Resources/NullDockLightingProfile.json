@@ -1,0 +1,19 @@
+{
+  "id": "null-dock-industrial-v1",
+  "revision": 2,
+  "sunHue": 0.09,
+  "sunSaturation": 0.04,
+  "sunIntensity": 1.8,
+  "sunElevation": 48,
+  "sunAzimuth": -50,
+  "ambientHue": 0.6,
+  "ambientSaturation": 0.1,
+  "ambientValue": 0.3,
+  "shadowStrength": 0.8,
+  "steelHighlight": 0.18,
+  "steelExponent": 24,
+  "concreteHighlight": 0.03,
+  "concreteExponent": 12,
+  "shadowDistance": 90,
+  "shadowCoveragePadding": 0.3
+}

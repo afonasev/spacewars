@@ -13,6 +13,15 @@ namespace Spacewars.Editor
     public static class RingHangarAssets
     {
         const string Output="Assets/Spacewars/Content/Resources/StyleA/";
+        static string detailFolder;
+        static int detailSegments=int.MaxValue;
+        public static GameObject BuildDetail(string folder,int segments)
+        {
+            if(segments<8)throw new ArgumentOutOfRangeException(nameof(segments));
+            detailFolder=folder;detailSegments=segments;
+            try{Directory.CreateDirectory(folder);AssetDatabase.Refresh();Build();return AssetDatabase.LoadAssetAtPath<GameObject>(folder+"hangar.prefab");}
+            finally{detailFolder=null;detailSegments=int.MaxValue;}
+        }
         static readonly List<CombineInstance>[] parts={new(),new(),new(),new()};
         static readonly List<Mesh> temporary=new();
         static readonly Dictionary<string,CombineInstance[][]> movable=new();
@@ -31,6 +40,7 @@ namespace Spacewars.Editor
         static Vector3 V(float r,float y,float a)=>new(r*Mathf.Cos(a),y,r*Mathf.Sin(a));
         static void Ring(int role,float inner,float outer,float bottom,float top,int count=64,float start=0,float sweep=Mathf.PI*2,float taper=0)
         {
+            count=Math.Min(count,detailSegments);
             for(int i=0;i<count;i++){
                 float a=start+sweep*i/count,b=start+sweep*(i+1)/count;
                 Shape(role,new[]{V(inner-taper,top,a),V(inner-taper,top,b),V(outer-taper,top,b),V(outer-taper,top,a),V(inner,bottom,a),V(inner,bottom,b),V(outer,bottom,b),V(outer,bottom,a)},
@@ -88,7 +98,7 @@ namespace Spacewars.Editor
                     if(rows[i].Length==0)continue;
                     var combined=new Mesh {name="hangar-"+name+"-"+roles[i]};combined.CombineMeshes(rows[i]);
                     var points=combined.vertices;for(int v=0;v<points.Length;v++)points[v].y*=1.25f/1.754f;combined.vertices=points;combined.RecalculateNormals();combined.RecalculateTangents();combined.RecalculateBounds();
-                    string path=Output+combined.name+".asset";var old=AssetDatabase.LoadAssetAtPath<Mesh>(path);
+                    string path=(detailFolder??Output)+combined.name+".asset";var old=AssetDatabase.LoadAssetAtPath<Mesh>(path);
                     if(old){EditorUtility.CopySerialized(combined,old);UnityEngine.Object.DestroyImmediate(combined);combined=old;}else AssetDatabase.CreateAsset(combined,path);
                     var go=new GameObject("hangar:"+roles[i]);go.transform.SetParent(parent,false);go.AddComponent<MeshFilter>().sharedMesh=combined;
                     var material=name=="launchPlatform"?PlatformMaterial():AssetDatabase.LoadAssetAtPath<Material>(Output+"factory-"+roles[i]+".mat");
@@ -97,14 +107,15 @@ namespace Spacewars.Editor
                 }
             }
             Emit("body",parts.Select(p=>p.ToArray()).ToArray());foreach(var node in movable)Emit(node.Key,node.Value);
-            PrefabUtility.SaveAsPrefabAsset(root,Output+"hangar.prefab");UnityEngine.Object.DestroyImmediate(root);
+            PrefabUtility.SaveAsPrefabAsset(root,(detailFolder??Output)+"hangar.prefab");UnityEngine.Object.DestroyImmediate(root);
             foreach(var mesh in temporary)UnityEngine.Object.DestroyImmediate(mesh);
-            Icon();AssetDatabase.SaveAssets();Debug.Log("RING_HANGAR_ASSETS_PASS");
+            if(detailFolder==null)Icon();AssetDatabase.SaveAssets();Debug.Log("RING_HANGAR_ASSETS_PASS");
         }
         static Material PlatformMaterial()
         {
             const string name="hangar-platform-neutral-metal";
             var material=AssetDatabase.LoadAssetAtPath<Material>(Output+name+".mat");
+            if(detailFolder!=null)return material?material:throw new InvalidOperationException("Missing original hangar platform material");
             if(!material){material=new Material(AssetDatabase.LoadAssetAtPath<Material>(Output+"factory-neutral-metal.mat"));AssetDatabase.CreateAsset(material,Output+name+".mat");}
             float gray=new Spacewars.Presentation.ActorMaterialProfile().hangarPlatformGray;
             material.name=name;material.SetColor("_BaseColor",new Color(gray,gray,gray,1));

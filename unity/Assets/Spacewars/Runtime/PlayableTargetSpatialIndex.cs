@@ -7,11 +7,12 @@ namespace Spacewars.Runtime
     // Derived broad phase only. Eligibility and exact distances remain live domain rules.
     internal sealed class PlayableTargetSpatialIndex
     {
-        internal readonly struct Entry
+        internal readonly struct Entry:IComparable<Entry>
         {
-            internal readonly int Id;
+            internal readonly int Id,Ordinal;
             internal readonly bool Building;
-            internal Entry(int id,bool building){Id=id;Building=building;}
+            internal Entry(int id,bool building,int ordinal){Id=id;Building=building;Ordinal=ordinal;}
+            public int CompareTo(Entry other)=>Ordinal.CompareTo(other.Ordinal);
         }
         private readonly struct Cell:IEquatable<Cell>
         {
@@ -42,7 +43,7 @@ namespace Spacewars.Runtime
         internal void Add(int id,NavPoint position,bool building)
         {
             if(count==entries.Length){Array.Resize(ref entries,checked(count*2));Array.Resize(ref next,entries.Length);}
-            int index=count++;entries[index]=new Entry(id,building);
+            int index=count++;entries[index]=new Entry(id,building,index);
             if(!Coordinate(position.X,out long x)||!Coordinate(position.Z,out long z)){unbucketed=true;return;}
             var cell=new Cell(x,z);next[index]=heads.TryGetValue(cell,out int head)?head:-1;heads[cell]=index;
         }

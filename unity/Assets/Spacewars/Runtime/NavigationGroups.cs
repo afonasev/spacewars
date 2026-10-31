@@ -11,7 +11,7 @@ namespace Spacewars.Runtime
     {
         public int Entity, Slot; public long Incarnation, OrderRevision, MobilityRevision;
         public GroupMemberPhase Phase; public NavPoint Goal; public NavLocation? GoalLocation; public bool HasGoal, FormationReleased;
-        public long Branch, Reservation, ContactTick, ProgressRequest; public string ContactPhase; public double Progress; public int ProgressVersion; public double ProgressOffset;
+        public long Branch, Reservation, ContactTick, ProgressRequest; public string ContactPhase; public double Progress; public int ProgressVersion; public double ProgressOffset; public RecastMemberProgress Recast;
         internal GroupMemberState Copy()=>(GroupMemberState)MemberwiseClone();
     }
     [Serializable] public sealed class GroupOrderState
@@ -41,12 +41,12 @@ namespace Spacewars.Runtime
         internal readonly struct Values
         {
             internal readonly int Entity,Slot;internal readonly long Incarnation,OrderRevision,MobilityRevision,Branch,Reservation,ContactTick,ProgressRequest;
-            internal readonly GroupMemberPhase Phase;internal readonly NavPoint Goal,Location;internal readonly bool HasLocation,HasGoal,FormationReleased;internal readonly double Progress,ProgressOffset;internal readonly int ProgressVersion;
-            internal Values(int entity,int slot,long incarnation,long order,long mobility,GroupMemberPhase phase,NavPoint goal,NavPoint location,bool hasLocation,bool hasGoal,bool released,long branch,long reservation,long contactTick,long progressRequest,double progress,int progressVersion=0,double progressOffset=0)
-            {Entity=entity;Slot=slot;Incarnation=incarnation;OrderRevision=order;MobilityRevision=mobility;Phase=phase;Goal=goal;Location=hasLocation?location:default;HasLocation=hasLocation;HasGoal=hasGoal;FormationReleased=released;Branch=branch;Reservation=reservation;ContactTick=contactTick;ProgressRequest=progressRequest;Progress=progress;ProgressVersion=progressVersion;ProgressOffset=progressOffset;}
-            internal Values(GroupMemberState source):this(source.Entity,source.Slot,source.Incarnation,source.OrderRevision,source.MobilityRevision,source.Phase,source.Goal,source.GoalLocation?.Position??default,source.GoalLocation.HasValue,source.HasGoal,source.FormationReleased,source.Branch,source.Reservation,source.ContactTick,source.ProgressRequest,source.Progress,source.ProgressVersion,source.ProgressOffset){}
-            internal void Validate(){if(Slot<0||ContactTick<0||ProgressRequest<0||Branch<0||Reservation<0||(uint)Phase>(uint)GroupMemberPhase.Allocating||!Finite(Goal.X)||!Finite(Goal.Z)||HasLocation&&(!Finite(Location.X)||!Finite(Location.Z))||!Finite(Progress)||ProgressVersion!=0&&ProgressVersion!=2||!Finite(ProgressOffset)||ProgressVersion==0&&ProgressOffset!=0||ProgressVersion==2&&(Progress<0||ProgressOffset<0||ProgressOffset>Progress))throw new ArgumentException("Invalid immutable group member scalars.");}
-            internal bool BitwiseSame(Values other)=>Entity==other.Entity&&Slot==other.Slot&&Incarnation==other.Incarnation&&OrderRevision==other.OrderRevision&&MobilityRevision==other.MobilityRevision&&Phase==other.Phase&&HasLocation==other.HasLocation&&HasGoal==other.HasGoal&&FormationReleased==other.FormationReleased&&Branch==other.Branch&&Reservation==other.Reservation&&ContactTick==other.ContactTick&&ProgressRequest==other.ProgressRequest&&Bits(Goal.X,other.Goal.X)&&Bits(Goal.Z,other.Goal.Z)&&Bits(Location.X,other.Location.X)&&Bits(Location.Z,other.Location.Z)&&Bits(Progress,other.Progress)&&ProgressVersion==other.ProgressVersion&&Bits(ProgressOffset,other.ProgressOffset);
+            internal readonly GroupMemberPhase Phase;internal readonly NavPoint Goal,Location;internal readonly bool HasLocation,HasGoal,FormationReleased;internal readonly double Progress,ProgressOffset;internal readonly int ProgressVersion;internal readonly RecastMemberProgress Recast;
+            internal Values(int entity,int slot,long incarnation,long order,long mobility,GroupMemberPhase phase,NavPoint goal,NavPoint location,bool hasLocation,bool hasGoal,bool released,long branch,long reservation,long contactTick,long progressRequest,double progress,int progressVersion=0,double progressOffset=0,RecastMemberProgress recast=default)
+            {Entity=entity;Slot=slot;Incarnation=incarnation;OrderRevision=order;MobilityRevision=mobility;Phase=phase;Goal=goal;Location=hasLocation?location:default;HasLocation=hasLocation;HasGoal=hasGoal;FormationReleased=released;Branch=branch;Reservation=reservation;ContactTick=contactTick;ProgressRequest=progressRequest;Progress=progress;ProgressVersion=progressVersion;ProgressOffset=progressOffset;Recast=recast;}
+            internal Values(GroupMemberState source):this(source.Entity,source.Slot,source.Incarnation,source.OrderRevision,source.MobilityRevision,source.Phase,source.Goal,source.GoalLocation?.Position??default,source.GoalLocation.HasValue,source.HasGoal,source.FormationReleased,source.Branch,source.Reservation,source.ContactTick,source.ProgressRequest,source.Progress,source.ProgressVersion,source.ProgressOffset,source.Recast){}
+            internal void Validate(){Recast.Validate();if(Recast.Request>0&&(Recast.Request!=ProgressRequest||ProgressVersion!=2))throw new ArgumentException("Recast progress lost its installed request.");if(Slot<0||ContactTick<0||ProgressRequest<0||Branch<0||Reservation<0||(uint)Phase>(uint)GroupMemberPhase.Allocating||!Finite(Goal.X)||!Finite(Goal.Z)||HasLocation&&(!Finite(Location.X)||!Finite(Location.Z))||!Finite(Progress)||ProgressVersion!=0&&ProgressVersion!=2||!Finite(ProgressOffset)||ProgressVersion==0&&ProgressOffset!=0||ProgressVersion==2&&(Progress<0||ProgressOffset<0||ProgressOffset>Progress))throw new ArgumentException("Invalid immutable group member scalars.");}
+            internal bool BitwiseSame(Values other)=>Recast.Equals(other.Recast)&&Entity==other.Entity&&Slot==other.Slot&&Incarnation==other.Incarnation&&OrderRevision==other.OrderRevision&&MobilityRevision==other.MobilityRevision&&Phase==other.Phase&&HasLocation==other.HasLocation&&HasGoal==other.HasGoal&&FormationReleased==other.FormationReleased&&Branch==other.Branch&&Reservation==other.Reservation&&ContactTick==other.ContactTick&&ProgressRequest==other.ProgressRequest&&Bits(Goal.X,other.Goal.X)&&Bits(Goal.Z,other.Goal.Z)&&Bits(Location.X,other.Location.X)&&Bits(Location.Z,other.Location.Z)&&Bits(Progress,other.Progress)&&ProgressVersion==other.ProgressVersion&&Bits(ProgressOffset,other.ProgressOffset);
             private static bool Bits(double a,double b)=>BitConverter.DoubleToInt64Bits(a)==BitConverter.DoubleToInt64Bits(b);
             private static bool Finite(double value)=>!double.IsNaN(value)&&!double.IsInfinity(value);
         }
@@ -59,7 +59,7 @@ namespace Spacewars.Runtime
         internal NavNameReference GoalSelector=>goalName;
         internal NavLocation? GoalLocation=>Data.HasLocation?new NavLocation(Data.Location,goalName):(NavLocation?)null;
         internal override bool IsImmutableCaptureRoot=>sealedRoot;
-        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(NavPhysicalStorageKind.AuthorityMember,value:Data.ProgressVersion==2?NavPhysicalValueKind.GroupMarchProgressV2:NavPhysicalValueKind.None);
+        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(NavPhysicalStorageKind.AuthorityMember,value:Data.Recast.Request>0?NavPhysicalValueKind.RecastMemberProgressV2:Data.ProgressVersion==2?NavPhysicalValueKind.GroupMarchProgressV2:NavPhysicalValueKind.None);
         private NavigationAuthorityMember(Values data,bool owner):base(LayoutBytes){Data=data;if(owner)Retain();}
         private static NavigationAuthorityMember Allocate(Values data,INavStorageReservation reservation,bool owner)
         {using(var allocation=new NavStorageAllocation(reservation.TryReserve)){allocation.Reserve(LayoutBytes);return allocation.Register(new NavigationAuthorityMember(data,owner));}}
@@ -77,6 +77,9 @@ namespace Spacewars.Runtime
         {
             if(source==null||!source.IsImmutableCaptureRoot)throw new ArgumentException("Missing sealed member source.");
             NavStorageAdmission.RequireOwned(reservation,source);
+            // Non-navigation updates preserve the accepted sidecar while its exact
+            // request/incarnation/order/mobility still bind. Stops/rebinds clear it.
+            if(data.Recast.Request==0&&source.Data.Recast.Request>0&&data.ProgressRequest==source.Data.ProgressRequest&&data.ProgressRequest>0&&data.Incarnation==source.Data.Incarnation&&data.OrderRevision==source.Data.OrderRevision&&data.MobilityRevision==source.Data.MobilityRevision){data=new Values(data.Entity,data.Slot,data.Incarnation,data.OrderRevision,data.MobilityRevision,data.Phase,data.Goal,data.Location,data.HasLocation,data.HasGoal,data.FormationReleased,data.Branch,data.Reservation,data.ContactTick,data.ProgressRequest,data.Progress,data.ProgressVersion,data.ProgressOffset,source.Data.Recast);}
             return CreateOwned(data,source.contact,data.HasLocation?source.goalName:default,reservation);
         }
         internal static NavigationAuthorityMember CopyOwned(GroupMemberState source,INavStorageReservation reservation)
@@ -94,15 +97,16 @@ namespace Spacewars.Runtime
             if(!sealedRoot||StorageBytes!=NavStorageLayout.Charge(LayoutBytes)||Data.HasLocation!=(goalName.Owner!=null))throw new ArgumentException("Invalid member ownership.");Data.Validate();
             var w=writer.Output;w.Write(Data.Entity);w.Write(Data.Slot);w.Write(Data.Incarnation);w.Write(Data.OrderRevision);w.Write(Data.MobilityRevision);w.Write((int)Data.Phase);
             WorldWire.Write(w,Data.Goal);w.Write(Data.HasLocation);if(Data.HasLocation)WorldWire.Write(w,Data.Location);w.Write(Data.HasGoal);w.Write(Data.FormationReleased);
-            w.Write(Data.Branch);w.Write(Data.Reservation);w.Write(Data.ContactTick);w.Write(Data.ProgressRequest);WorldWire.Number(w,Data.Progress);if(Data.ProgressVersion==2)WorldWire.Number(w,Data.ProgressOffset);
+            w.Write(Data.Branch);w.Write(Data.Reservation);w.Write(Data.ContactTick);w.Write(Data.ProgressRequest);WorldWire.Number(w,Data.Progress);if(Data.ProgressVersion==2)WorldWire.Number(w,Data.ProgressOffset);if(Data.Recast.Request>0){w.Write(2);w.Write(Data.ProgressVersion);Data.Recast.Write(w);}
             NavPhysicalMacro.WriteEdge(writer,this,contact,true);if(goalName.Owner!=null)goalName.Validate(goalName.Resolve(),this);goalName.Write(writer);
         }
-        internal static NavigationAuthorityMember ReadPhysicalBody(NavPhysicalBodyReader reader,bool v2=false)
+        internal static NavigationAuthorityMember ReadPhysicalBody(NavPhysicalBodyReader reader,bool v2=false,bool recast=false)
         {
             var r=reader.Input;int entity=r.ReadInt32(),slot=r.ReadInt32();long incarnation=r.ReadInt64(),order=r.ReadInt64(),mobility=r.ReadInt64();var phase=(GroupMemberPhase)r.ReadInt32();
             var goal=WorldWire.ReadPoint(r);bool hasLocation=NavPhysicalMacro.ReadBoolean(reader);var location=hasLocation?WorldWire.ReadPoint(r):default;bool hasGoal=NavPhysicalMacro.ReadBoolean(reader),released=NavPhysicalMacro.ReadBoolean(reader);
             long branch=r.ReadInt64(),reservation=r.ReadInt64(),contactTick=r.ReadInt64(),progressRequest=r.ReadInt64();double progress=WorldWire.Number(r),offset=v2?WorldWire.Number(r):0;
-            var values=new Values(entity,slot,incarnation,order,mobility,phase,goal,location,hasLocation,hasGoal,released,branch,reservation,contactTick,progressRequest,progress,v2?2:0,offset);values.Validate();
+            var sidecar=default(RecastMemberProgress);int progressVersion=v2?2:0;if(recast){if(r.ReadInt32()!=2)throw new ArgumentException("Unsupported Recast progress version.");progressVersion=r.ReadInt32();sidecar=RecastMemberProgress.Read(r);if(sidecar.Request!=progressRequest)throw new ArgumentException("Recast progress request changed.");}
+            var values=new Values(entity,slot,incarnation,order,mobility,phase,goal,location,hasLocation,hasGoal,released,branch,reservation,contactTick,progressRequest,progress,progressVersion,offset,sidecar);values.Validate();
             var contact=NavPhysicalMacro.ReadEdge<NavOwnedText>(reader,true);var goalName=NavNameReference.Read(reader);
             return Create(values,contact,goalName,reader.Reservation,false);
         }
@@ -185,6 +189,16 @@ namespace Spacewars.Runtime
         {if(current==null||!current.IsImmutableCaptureRoot)throw new ArgumentException("Missing sealed group source.");NavStorageAdmission.RequireOwned(reservation,current);return Create(data,current.ownerId,current.source,data.HasLocation?current.originalName:default,current.memberRoot,reservation,true);}
         internal static NavigationAuthorityGroup CopyWithMemberOwned(NavigationAuthorityGroup current,int index,NavigationAuthorityMember member,INavStorageReservation reservation)
             =>CopyWithMemberAndMarchOwned(current,index,member,current.Data,reservation);
+        internal const int CompactMemberCount=50,CompactMemberPageSlots=64;
+        private static int MemberPageSlots(int count)
+        {
+            int slots=count==CompactMemberCount?CompactMemberPageSlots:256;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            // Exact predecessor control only; default and release use the new representation.
+            if(ContactPublishProfile.LegacyMemberPagesForQa)slots=256;
+#endif
+            return slots;
+        }
         internal static NavigationAuthorityGroup CopyWithMemberAndMarchOwned(NavigationAuthorityGroup current,int index,NavigationAuthorityMember member,Values data,INavStorageReservation reservation)
         {
             if(current==null||member==null||!current.IsImmutableCaptureRoot||!member.IsImmutableCaptureRoot||index<0||index>=current.Members.Count)throw new ArgumentException("Invalid affected member path.");NavStorageAdmission.RequireOwned(reservation,current);NavStorageAdmission.RequireOwned(reservation,member);
@@ -193,8 +207,33 @@ namespace Spacewars.Runtime
             var old=((NavigationAuthorityMember)current.Members[index]).Data;var next=member.Data;
             if(next.Entity!=old.Entity||next.Slot!=old.Slot||next.OrderRevision<current.Data.OrderRevision||next.Phase==GroupMemberPhase.Dead||next.Phase==GroupMemberPhase.Detached||(current.Data.MarchVersion==0?next.Progress<0||next.ProgressRequest!=0:current.Data.MarchVersion==1?next.Progress>0||next.ProgressVersion!=0:next.ProgressVersion!=2))throw new ArgumentException("Scalar member update changed membership/context.");
             NavPagedList<NavOwnedStorage> pages=null;
-            try{if(current.memberRoot is NavPagedList<NavOwnedStorage> existing)pages=existing.ForkOwned(reservation);else {pages=NavPagedList<NavOwnedStorage>.Create(reservation.TryReserve);for(int i=0;i<current.Members.Count;i++)pages.Add(current.Members[i]);}
+            int pageSlots=MemberPageSlots(current.Members.Count);
+            // Decode preserves the encoded shape. Normalize only at the next write of
+            // exactly fifty members; other existing page shapes retain their identity.
+            try{if(current.memberRoot is NavPagedList<NavOwnedStorage> existing&&(current.Members.Count!=CompactMemberCount||existing.PageSize==pageSlots))pages=existing.ForkOwned(reservation);else {pages=NavPagedList<NavOwnedStorage>.Create(reservation.TryReserve,pageSlots);for(int i=0;i<current.Members.Count;i++)pages.Add(current.Members[i]);}
                 pages[index]=member;pages.Seal();return Create(data,current.ownerId,current.source,current.originalName,pages,reservation,true,true,current.VersionIdentity,index);
+            }finally{pages?.ReleaseStorage();}
+        }
+        // A batch has one parent/version proof and one private writable page path.
+        // The callback creates fresh owned members; no intermediate group is sealed.
+        internal static NavigationAuthorityGroup CopyWithContactBatchOwned(NavigationAuthorityGroup current,Values data,Func<int,NavigationAuthorityMember> prepare,INavStorageReservation reservation)
+        {
+            if(current==null||!current.IsImmutableCaptureRoot||prepare==null||!data.SameIssuance(current.Data))throw new ArgumentException("Invalid group batch source.");
+            NavStorageAdmission.RequireOwned(reservation,current);NavPagedList<NavOwnedStorage> pages=null;
+            try{
+                int slots=MemberPageSlots(current.Members.Count);
+                if(current.memberRoot is NavPagedList<NavOwnedStorage> existing&&(current.Members.Count!=CompactMemberCount||existing.PageSize==slots))pages=existing.ForkOwned(reservation);
+                else{pages=NavPagedList<NavOwnedStorage>.Create(reservation.TryReserve,slots);for(int i=0;i<current.Members.Count;i++)pages.Add(current.Members[i]);}
+                for(int i=0;i<current.Members.Count;i++){
+                    var member=prepare(i);
+                    try{
+                        NavStorageAdmission.RequireOwned(reservation,member);var old=((NavigationAuthorityMember)current.Members[i]).Data;var next=member.Data;
+                        if(!member.IsImmutableCaptureRoot||next.Entity!=old.Entity||next.Slot!=old.Slot||next.OrderRevision<current.Data.OrderRevision||next.Phase==GroupMemberPhase.Dead||next.Phase==GroupMemberPhase.Detached||
+                            (data.MarchVersion==0?next.Progress<0||next.ProgressRequest!=0:data.MarchVersion==1?next.Progress>0||next.ProgressVersion!=0:next.ProgressVersion!=2))throw new ArgumentException("Batch changed member context.");
+                        pages[i]=member;
+                    }finally{member?.ReleaseStorage();}
+                }
+                pages.Seal();return Create(data,current.ownerId,current.source,current.originalName,pages,reservation,true,true,current.VersionIdentity,-2);
             }finally{pages?.ReleaseStorage();}
         }
         public void WritePhysicalBody(NavPhysicalBodyWriter writer)

@@ -121,7 +121,7 @@ namespace Spacewars.Tests.PlayMode
                     {points.Add(access.Gate+access.Direction*surfaces.Profile.hangarApronLength);zooms.Add(14);names.Add("hangar-access-"+(-access.Group));}
                     foreach(var utility in placements.Where(p=>p.Kind=="VentilationBlock"||p.Kind=="CableCabinet"||p.Kind=="PumpNode"))
                     {points.Add(new Vector2(utility.Position.x,utility.Position.z));zooms.Add(7);names.Add("utility-"+utility.Kind);}
-                    foreach(var wreck in placements.Where(p=>p.Kind=="HeavyTractorWreck"))
+                    foreach(var wreck in placements.Where(p=>CrossingIndustrialFleet.IsVehicle(p.Kind)))
                     {points.Add(new Vector2(wreck.Position.x,wreck.Position.z));zooms.Add(14);names.Add("tractor-"+names.Count);}
                 }}finally{UnityEngine.Object.Destroy(diagnostic);}
                 points.Add(Vector2.zero);zooms.Add(14);names.Add("bridge-structure");

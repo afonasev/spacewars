@@ -5,6 +5,7 @@
     "Spacewars.Simulation",
     "Spacewars.Runtime",
     "Spacewars.Presentation",
+    "Spacewars.Input",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner"
   ],

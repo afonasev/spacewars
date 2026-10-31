@@ -58,7 +58,7 @@ namespace Spacewars.Runtime
                     c.FailureReject=!keep;c.FailureRetentionReady=true;if(c.FailureReject&&fact.Mobility==long.MaxValue)return false;
                     c.FailureOutcome=effectiveStatus==NavSolveStatus.UnreachableInGraph?NavigationOutcome.Unreachable:NavigationOutcome.Rejected;if(c.FailureOutcome==NavigationOutcome.Unreachable){if(c.NextUnreachable==int.MaxValue)return false;c.NextUnreachable++;}
                     NavUnit.PrepareStopBacking();c.NextPending=CopyOrdinaryRebindMap(c,c.SourcePending,r);c.NextPending.Remove(request.Entity);
-                    bool technical=effectiveStatus==NavSolveStatus.InvalidEndpoint||effectiveStatus==NavSolveStatus.BlockedConnector||effectiveStatus==NavSolveStatus.CapacityExceeded;
+                    bool technical=effectiveStatus==NavSolveStatus.InvalidEndpoint||effectiveStatus==NavSolveStatus.BlockedConnector||effectiveStatus==NavSolveStatus.CapacityExceeded||effectiveStatus==NavSolveStatus.Partial;
                     if(c.SourceFailures.ContainsKey(request.Entity)||technical){c.NextFailures=CopyOrdinaryRebindMap(c,c.SourceFailures,r,technical&&!c.SourceFailures.ContainsKey(request.Entity)?checked(c.SourceFailures.Count+1):0);c.NextFailures.Remove(request.Entity);if(technical)c.NextFailures.SetPreparing(request.Entity,effectiveStatus);c.NextFailures.Seal();}
                     for(int slot=0;slot<c.SourceLedger.Capacity;slot++)if(c.SourceLedger.TryReadSlot(slot,out long key,out var row)&&row.Entity==request.Entity&&row.State==NavArrivalReservationKind.PendingRequest){if(c.NextLedger==null)c.NextLedger=CopyOrdinaryRebindMap(c,c.SourceLedger,r);c.NextLedger.Remove(key);}
                     if(!PrepareRebindRetainedPrune(c,scope))return false;

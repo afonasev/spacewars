@@ -13,7 +13,7 @@ namespace Spacewars.Presentation
 {
     public sealed partial class PlayableBootstrap
     {
-        private const string CrossingsLobbyName="Дальний берег (2)",FoundryLobbyName="Огненный разлом (6)",AiTestLobbyName="Полигон (8)",BasaltLobbyName=BasaltCrownMap.DisplayName,MossLobbyName=MossHighlandMap.DisplayName,MeridianLobbyName=WhiteMeridianMap.DisplayName,GroveLobbyName=CrimsonGroveMap.DisplayName;
+        private const string CrossingsLobbyName="Переправа (4)",FoundryLobbyName="Огненный разлом (6)",AiTestLobbyName="Полигон (8)",BasaltLobbyName=BasaltCrownMap.DisplayName,MossLobbyName=MossHighlandMap.DisplayName,MeridianLobbyName=WhiteMeridianMap.DisplayName,GroveLobbyName=CrimsonGroveMap.DisplayName;
         private const string CrossingsLobbyDescription="Переселенцам обещали, что за рекой начнётся безопасная территория. Последний транспорт ушёл туда перед самым прекращением связи.";
         private const string FoundryLobbyDescription="Заводы у разлома снабжали оружием весь сектор. Их владельцы давно исчезли, но подземный жар до сих пор питает аварийные печи.";
         private NativeLobbyConfiguration lobbySetup = new NativeLobbyConfiguration(), matchSetup;
@@ -23,7 +23,7 @@ namespace Spacewars.Presentation
         private ScrollView rosterScroll;
         private Button addBotButton, joinButton;
         private string lobbyActionError;
-        private bool lobbyPadArmed, lobbyRosterEdited;
+        private bool lobbyPadArmed, lobbyRosterEdited,lobbyEntryBound;
         private Button launchButton, hudLobbyButton, modalLobbyButton;
         private PlayableMapTerrain lobbyTerrain;
         private PlayableMapSurface lobbyPreview;
@@ -91,7 +91,7 @@ namespace Spacewars.Presentation
             main.Add(LobbyAction("Выйти из приложения",()=>Application.Quit()));
             lobbyScreen=MenuPage();lobbyScreen.name="premium-lobby";var shade=new VisualElement{pickingMode=PickingMode.Ignore};shade.style.position=Position.Absolute;shade.style.left=shade.style.right=shade.style.top=shade.style.bottom=0;shade.style.backgroundColor=new Color(0,.02f,.03f,.55f);lobbyScreen.Insert(0,shade);lobbyScreen.style.backgroundImage=Resources.Load<Texture2D>("OrbitalBackdrop");lobbyScreen.style.paddingLeft=lobbyScreen.style.paddingRight=38;
             var header=new VisualElement();header.style.flexDirection=FlexDirection.Row;header.style.alignItems=Align.Center;
-            var back=LobbyAction("Главное меню",ShowMainMenu);back.name="lobby-back";back.Insert(0,new NativeControllerGlyph("B"));header.Add(back);lobbyScreen.Add(header);
+            var back=LobbyAction("Главное меню",ShowMainMenu);back.name="lobby-back";new NativeControllerGlyph("B").AttachToButton(back);header.Add(back);lobbyScreen.Add(header);
             var preparationTitle=LobbyText("Подготовка матча",34);preparationTitle.name="lobby-title";lobbyScreen.Add(preparationTitle);
             lobbyColumns=new VisualElement();lobbyColumns.style.flexGrow=1;lobbyColumns.style.flexDirection=FlexDirection.Row;
             lobbyColumns.style.marginTop=18;lobbyColumns.style.marginBottom=18;lobbyScreen.Add(lobbyColumns);
@@ -99,8 +99,8 @@ namespace Spacewars.Presentation
             mapPanel=LobbyPanel();mapPanel.style.flexGrow=1;mapPanel.style.minWidth=250;mapPanel.style.flexBasis=0;lobbyColumns.Add(mapPanel);
             mapInfo=new VisualElement();mapPanel.Add(mapInfo);
             mapInfo.Add(LobbyText("КАРТА МАТЧА",12,Muted));
-            var maps=new DropdownField("Карта",new List<string>{CrossingsLobbyName,BasaltLobbyName,MossLobbyName,MeridianLobbyName,FoundryLobbyName,GroveLobbyName,AiTestLobbyName},0){name="lobby-map-choice"};StyleLobbyField(maps);mapInfo.Add(maps);
-            maps.RegisterValueChangedCallback(evt=>SelectLobbyMap(evt.newValue==FoundryLobbyName,evt.newValue==AiTestLobbyName,evt.newValue==BasaltLobbyName,evt.newValue==MossLobbyName,evt.newValue==MeridianLobbyName,evt.newValue==GroveLobbyName));
+            var maps=new DropdownField("Карта",new List<string>{CrossingsLobbyName,NullDockMap.DisplayName,BasaltLobbyName,MossLobbyName,MeridianLobbyName,FoundryLobbyName,GroveLobbyName,AiTestLobbyName},0){name="lobby-map-choice"};StyleLobbyField(maps);mapInfo.Add(maps);
+            maps.RegisterValueChangedCallback(evt=>SelectLobbyMap(evt.newValue==FoundryLobbyName,evt.newValue==AiTestLobbyName,evt.newValue==BasaltLobbyName,evt.newValue==MossLobbyName,evt.newValue==MeridianLobbyName,evt.newValue==GroveLobbyName,evt.newValue==NullDockMap.DisplayName));
             var capacity=LobbyText("2 игровых места",14);capacity.name="lobby-map-capacity";mapInfo.Add(capacity);
             lobbyTerrain=lobbyTerrain??new PlayableMapTerrain(profile);lobbyTerrain.ShowPublicTerrain();
             lobbyPreview=new PlayableMapSurface(profile,lobbyTerrain.Texture){OwnerPaint=LobbyPaint};
@@ -111,28 +111,28 @@ namespace Spacewars.Presentation
             var description=LobbyText(CrossingsLobbyDescription,14,Muted);description.name="lobby-map-description";mapPanel.Add(description);
             var footer=new VisualElement();footer.style.flexDirection=FlexDirection.Row;footer.style.alignItems=Align.Center;lobbyScreen.Add(footer);
             lobbyStatus=LobbyText("",14,Amber);lobbyStatus.name="lobby-validation";lobbyStatus.style.flexGrow=1;lobbyStatus.style.flexShrink=1;footer.Add(lobbyStatus);
-            launchButton=LobbyAction("Начать матч  ·  Start",LaunchLobbyMatch);launchButton.name="lobby-launch";launchButton.style.width=330;launchButton.Insert(0,new NativeControllerGlyph("A"));
+            launchButton=LobbyAction("Начать матч",LaunchLobbyMatch);launchButton.name="lobby-launch";launchButton.style.width=330;new NativeControllerGlyph("Start",()=>MenuPad,false).AttachToButton(launchButton);
             launchButton.style.height=50;launchButton.style.backgroundColor=new Color(.04f,.35f,.42f);launchButton.style.color=Color.white;launchButton.style.fontSize=19;launchButton.style.unityFontStyleAndWeight=FontStyle.Bold;
             launchButton.style.borderLeftWidth=launchButton.style.borderRightWidth=launchButton.style.borderTopWidth=launchButton.style.borderBottomWidth=2;launchButton.style.borderLeftColor=launchButton.style.borderRightColor=launchButton.style.borderTopColor=launchButton.style.borderBottomColor=LobbyCyan;footer.Add(launchButton);
             loadingScreen=OrbitalTheme.Loading(root,"Подготовка матча…");
             loadingScreen.style.display=DisplayStyle.None;
             lobbyScreen.RegisterCallback<GeometryChangedEvent>(_=>ResizeLobby());
-            lobbyScreen.RegisterCallback<KeyDownEvent>(evt=>{if(evt.keyCode==KeyCode.Escape){ShowMainMenu();evt.StopImmediatePropagation();}});
+
             BindLobbyDevices();RebuildRoster();ShowMainMenu();
         }
         private PlayableProfile ComposeLobbyProfile(PlayableProfile balance)
         {
-            IPlayableTerrain map=lobbySetup.CrimsonGrove?new CrimsonGroveMap(JsonUtility.FromJson<CrimsonGroveProfileData>(Resources.Load<TextAsset>("CrimsonGroveProfile").text)):lobbySetup.WhiteMeridian?new WhiteMeridianMap(JsonUtility.FromJson<WhiteMeridianProfileData>(Resources.Load<TextAsset>("WhiteMeridianProfile").text)):lobbySetup.MossHighland?new MossHighlandMap(JsonUtility.FromJson<MossHighlandProfileData>(Resources.Load<TextAsset>("MossHighlandProfile").text)):lobbySetup.BasaltCrown?new BasaltCrownMap():lobbySetup.AiTestMap?new AiTestMap():lobbySetup.Foundry?new FoundryMap(JsonUtility.FromJson<FoundryProfileData>(Resources.Load<TextAsset>("FoundryProfile").text)):(IPlayableTerrain)new ThreeCrossingsMap(JsonUtility.FromJson<ThreeCrossingsProfileData>(Resources.Load<TextAsset>("ThreeCrossingsProfile").text));
+            IPlayableTerrain map=lobbySetup.NullDock?new NullDockMap(JsonUtility.FromJson<NullDockProfileData>(Resources.Load<TextAsset>("NullDockProfile").text)):lobbySetup.CrimsonGrove?new CrimsonGroveMap(JsonUtility.FromJson<CrimsonGroveProfileData>(Resources.Load<TextAsset>("CrimsonGroveProfile").text)):lobbySetup.WhiteMeridian?new WhiteMeridianMap(JsonUtility.FromJson<WhiteMeridianProfileData>(Resources.Load<TextAsset>("WhiteMeridianProfile").text)):lobbySetup.MossHighland?new MossHighlandMap(JsonUtility.FromJson<MossHighlandProfileData>(Resources.Load<TextAsset>("MossHighlandProfile").text)):lobbySetup.BasaltCrown?new BasaltCrownMap():lobbySetup.AiTestMap?new AiTestMap():lobbySetup.Foundry?new FoundryMap(JsonUtility.FromJson<FoundryProfileData>(Resources.Load<TextAsset>("FoundryProfile").text)):(IPlayableTerrain)new ThreeCrossingsMap(JsonUtility.FromJson<ThreeCrossingsProfileData>(Resources.Load<TextAsset>("ThreeCrossingsProfile").text));
             return PlayableProfile.Create(balance.CopyData(),map,balance.DisplayName);
         }
-        private void SelectLobbyMap(bool foundry,bool aiTest=false,bool basalt=false,bool moss=false,bool meridian=false,bool grove=false)
+        private void SelectLobbyMap(bool foundry,bool aiTest=false,bool basalt=false,bool moss=false,bool meridian=false,bool grove=false,bool dock=false)
         {
             bool defaults=!lobbyRosterEdited;
-            lobbySetup.Foundry=foundry;lobbySetup.AiTestMap=aiTest;lobbySetup.BasaltCrown=basalt;lobbySetup.MossHighland=moss;lobbySetup.WhiteMeridian=meridian;lobbySetup.CrimsonGrove=grove;if(defaults){lobbySetup.Participants=null;lobbySetup.InitializeParticipants();}
+            lobbySetup.Foundry=foundry;lobbySetup.AiTestMap=aiTest;lobbySetup.BasaltCrown=basalt;lobbySetup.MossHighland=moss;lobbySetup.WhiteMeridian=meridian;lobbySetup.CrimsonGrove=grove;lobbySetup.NullDock=dock;if(defaults){lobbySetup.Participants=null;lobbySetup.InitializeParticipants();}
             EnsureBalanceStore();profile=ComposeLobbyProfile(balanceStore.Active);
             lobbyTerrain?.Dispose();lobbyTerrain=new PlayableMapTerrain(profile);lobbyTerrain.ShowPublicTerrain();lobbyPreview.Rebind(profile,lobbyTerrain.Texture);
             mapInfo.Q<Label>("lobby-map-capacity").text=grove?"8 игровых мест · 4×4 или каждый за себя":meridian?"4 игровых места · 2×2":moss?"4 игровых места":aiTest?"8 игровых мест":foundry?"6 игровых мест":"2 игровых места";
-            mapPanel.Q<Label>("lobby-map-description").text=grove?"Первые экспедиции приняли багряные кроны за цветение нового мира. Теперь под ними проходят границы восьми враждующих гарнизонов.":meridian?"Белый меридиан появился в навигационных сводках после крушения корабля, чей сигнал стал ориентиром среди соляных бурь. Передатчик всё ещё работает; принадлежность корабля засекречена.":moss?"После ухода гарнизона мох скрыл следы дорог и старые опознавательные знаки. Когда в эфире вновь прозвучал позывной заставы, на него ответили сразу несколько армий.":basalt?"Первые колонисты назвали эти чёрные скалы короной нового мира. Позже здесь возвели крепость, и название осталось уже за ней.":aiTest?"Здесь испытывали автономные боевые соединения для войны, которая тогда казалась далёкой. Приказ о завершении испытаний так и не поступил.":foundry?FoundryLobbyDescription:CrossingsLobbyDescription;
+            mapPanel.Q<Label>("lobby-map-description").text=dock?"Грузовые палубы Нулевого дока давно отрезаны от торговых маршрутов. Два гарнизона делят оставшиеся запасы, пока за обшивкой безмолвно вращается планета.":grove?"Первые экспедиции приняли багряные кроны за цветение нового мира. Теперь под ними проходят границы восьми враждующих гарнизонов.":meridian?"Белый меридиан появился в навигационных сводках после крушения корабля, чей сигнал стал ориентиром среди соляных бурь. Передатчик всё ещё работает; принадлежность корабля засекречена.":moss?"После ухода гарнизона мох скрыл следы дорог и старые опознавательные знаки. Когда в эфире вновь прозвучал позывной заставы, на него ответили сразу несколько армий.":basalt?"Первые колонисты назвали эти чёрные скалы короной нового мира. Позже здесь возвели крепость, и название осталось уже за ней.":aiTest?"Здесь испытывали автономные боевые соединения для войны, которая тогда казалась далёкой. Приказ о завершении испытаний так и не поступил.":foundry?FoundryLobbyDescription:CrossingsLobbyDescription;
             RebuildRoster();RefreshLobbyPreview();RefreshLobbyValidation();
         }
         private IEnumerator PrepareMapPresentation()
@@ -172,9 +172,9 @@ namespace Spacewars.Presentation
             rosterScroll=OrbitalTheme.Scroll();rosterScroll.style.flexGrow=1;rosterScroll.style.minHeight=0;rosterPanel.Add(rosterScroll);
             foreach(var participant in lobbySetup.Participants)ParticipantRow(participant);
             var toolbar=new VisualElement();toolbar.style.flexDirection=FlexDirection.Row;toolbar.style.flexShrink=0;toolbar.style.marginTop=12;rosterPanel.Add(toolbar);
-            joinButton=LobbyAction("Присоединиться",JoinLobbyWithKeyboardMouse);joinButton.name="lobby-join";joinButton.Insert(0,new NativeControllerGlyph("Y"));toolbar.Add(joinButton);
-            addBotButton=LobbyAction("Добавить бота",()=>AddLobbyParticipant(false,null));addBotButton.name="lobby-add-bot";addBotButton.Insert(0,new NativeControllerGlyph("X"));toolbar.Add(addBotButton);
-            var reason=LobbyText(lobbySetup.Spectator?"РЕЖИМ ЗРИТЕЛЯ · В составе только боты":humans==1?"ОБЫЧНЫЙ МАТЧ · Мышь и геймпад одновременно":"ЛОКАЛЬНАЯ ИГРА · Каждому человеку — своё устройство",13,LobbyCyan);reason.style.flexShrink=0;reason.style.marginTop=8;reason.name="lobby-mode-reason";rosterPanel.Add(reason);
+            joinButton=LobbyAction("Присоединиться",JoinLobbyWithKeyboardMouse);joinButton.name="lobby-join";new NativeControllerGlyph("Y").AttachToButton(joinButton);toolbar.Add(joinButton);
+            addBotButton=LobbyAction("Добавить бота",()=>AddLobbyParticipant(false,null));addBotButton.name="lobby-add-bot";new NativeControllerGlyph("X").AttachToButton(addBotButton);toolbar.Add(addBotButton);
+            var reason=LobbyText(lobbySetup.Spectator?"РЕЖИМ ЗРИТЕЛЯ · В составе только боты":humans==1?"ОБЫЧНЫЙ МАТЧ · Одно устройство на игрока":"ЛОКАЛЬНАЯ ИГРА · Каждому человеку — своё устройство",13,LobbyCyan);reason.style.flexShrink=0;reason.style.marginTop=8;reason.name="lobby-mode-reason";rosterPanel.Add(reason);
             ResizeLobby();RefreshLobbyValidation();
         }
         private void ParticipantRow(NativeLobbyParticipant participant)
@@ -197,11 +197,11 @@ namespace Spacewars.Presentation
             var team=new DropdownField(Enumerable.Range(1,8).Select(n=>n.ToString()).ToList(),participant.Team-1){name="lobby-team-"+index};StyleLobbyField(team);team.style.width=80;row.Add(team);team.RegisterValueChangedCallback(evt=>{lobbyRosterEdited=true;participant.Team=team.index+1;RefreshLobbyValidation();});
             if(participant.Human)
             {
-                var pads=Gamepad.all.ToArray();var choices=new List<string>{"Мышь + геймпад"};choices.AddRange(pads.Select((pad,i)=>"Геймпад "+(i+1)+" · "+pad.displayName));
+                var pads=Gamepad.all.ToArray();var choices=new List<string>{"Клавиатура + мышь"};choices.AddRange(pads.Select((pad,i)=>"Геймпад "+(i+1)+" · "+pad.displayName));
                 int deviceIndex=participant.DeviceId==0?0:Array.FindIndex(pads,pad=>pad.deviceId==participant.DeviceId)+1;
                 if(participant.DeviceId!=0&&deviceIndex==0){choices.Add("Ожидание контроллера");deviceIndex=choices.Count-1;}
                 var device=new DropdownField(choices,deviceIndex){name="lobby-device-"+index};StyleLobbyField(device);device.style.flexGrow=3;device.style.flexBasis=0;device.style.minWidth=145;row.Add(device);
-                device.RegisterValueChangedCallback(evt=>{int id=device.index==0?0:device.index<=pads.Length?pads[device.index-1].deviceId:participant.DeviceId;if(lobbySetup.Participants.Any(p=>p!=participant&&p.Human&&p.DeviceId==id)){device.SetValueWithoutNotify(evt.previousValue);lobbyActionError="Это устройство уже назначено другому участнику.";}else{lobbyRosterEdited=true;participant.DeviceId=id;lobbyActionError=null;}RefreshLobbyValidation();});
+                device.RegisterValueChangedCallback(evt=>{int id=device.index==0?0:device.index<=pads.Length?pads[device.index-1].deviceId:participant.DeviceId;if(lobbySetup.Participants.Any(p=>p!=participant&&p.Human&&p.DeviceId==id)){device.SetValueWithoutNotify(evt.previousValue);lobbyActionError="Это устройство уже назначено другому участнику.";}else{lobbyRosterEdited=true;participant.DeviceId=id;lobbyActionError=null;}RefreshLobbyValidation();menuNavigation?.UpdateHints();});
             }
             else
             {
@@ -233,9 +233,9 @@ namespace Spacewars.Presentation
             foreach(var pad in Gamepad.all)
             {
                 if(pad.buttonNorth.wasPressedThisFrame)AddLobbyParticipant(true,pad);
-                else if(pad.buttonWest.wasPressedThisFrame)AddLobbyParticipant(false,null);
+                else if(pad==MenuPad&&pad.buttonWest.wasPressedThisFrame)AddLobbyParticipant(false,null);
             }
-            foreach(var glyph in lobbyScreen.Query<NativeControllerGlyph>().ToList())glyph.Refresh(Gamepad.current);
+            menuNavigation?.UpdateHints();
         }
         private bool StartLobbyMatchFromGamepad(Gamepad pad)
         {
@@ -280,8 +280,8 @@ namespace Spacewars.Presentation
         private void RefreshLobbyValidation()
         {
             if(lobbyStatus==null)return;
-            bool oneHuman=lobbySetup.Participants.Count(p=>p.Human)==1;bool padReady=oneHuman&&Gamepad.all.Count>0;var error=lobbySetup.Validate(profile,lobbyKeyboard?.added==true||padReady,lobbyMouse?.added==true||padReady);
-            if(error==null&&!oneHuman&&lobbySetup.Participants.Any(p=>p.Human&&p.DeviceId>0&&!Gamepad.all.Any(pad=>pad.deviceId==p.DeviceId)))error="Ожидание назначенного контроллера.";
+            var error=lobbySetup.Validate(profile,lobbyKeyboard?.added==true,lobbyMouse?.added==true);
+            if(error==null&&lobbySetup.Participants.Any(p=>p.Human&&p.DeviceId>0&&!Gamepad.all.Any(pad=>pad.deviceId==p.DeviceId)))error="Ожидание назначенного контроллера.";
             lobbyStatus.text=error??lobbyActionError??("Состав готов · "+lobbySetup.Participants.Count+" / "+lobbySetup.Capacity(profile)+(lobbySetup.Spectator?" · Зритель":""));
             lobbyStatus.style.color=error==null?LobbyCyan:devicesReady?Danger:Amber;
             launchButton.SetEnabled(error==null);
@@ -295,6 +295,13 @@ namespace Spacewars.Presentation
         private IEnumerator StartEvidenceMatch()
         {
             float deadline=Time.realtimeSinceStartup+(Array.IndexOf(Environment.GetCommandLineArgs(),"-hawkCombatEvidence")>=0?90:30);
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if(SplitScreenPerformanceRequested){
+                deadline=Time.realtimeSinceStartup+120;
+                Screen.SetResolution(3456,2234,FullScreenMode.FullScreenWindow);
+                for(int frame=0;frame<10;frame++)yield return null;
+            }
+#endif
             if(nativeMainMenuEnabled)
             {
                 while(nativeMainMenu?.ScreenRoot==null&&Time.realtimeSinceStartup<deadline)yield return null;
@@ -309,9 +316,19 @@ namespace Spacewars.Presentation
             yield return new WaitForEndOfFrame();
             ScreenCapture.CaptureScreenshot(Path.Combine(evidence,"entry-lobby.png"));
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
-            if(Array.IndexOf(Environment.GetCommandLineArgs(),"-hawkCombatEvidence")>=0){
+            if(SplitScreenPerformanceRequested){
+                while(lobbySetup.Participants.Count<4)lobbySetup.AddParticipant(false,0,4);
+                for(int i=0;i<4;i++){var p=lobbySetup.Participants[i];p.Human=true;p.Team=i/2+1;p.DeviceId=i==0?0:UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Gamepad>().deviceId;p.Name="Benchmark human "+(i+1);}
+                RebuildRoster();RefreshLobbyValidation();
+            }
+            else if(Array.IndexOf(Environment.GetCommandLineArgs(),"-hawkCombatEvidence")>=0){
                 // Explicit automation seat: never reported as physical-device acceptance.
                 var pad=UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Gamepad>();lobbySetup.Participants[1].Human=true;lobbySetup.Participants[1].DeviceId=pad.deviceId;lobbySetup.Participants[1].Name="Игрок 2";RebuildRoster();RefreshLobbyValidation();
+            }
+            else if(routePerformanceEvidence&&Array.IndexOf(Environment.GetCommandLineArgs(),"-eightPlayerPerformanceEvidence")>=0){
+                lobbyScreen.Q<DropdownField>("lobby-map-choice").value=AiTestLobbyName;
+                for(int i=0;i<lobbySetup.Participants.Count;i++){var p=lobbySetup.Participants[i];p.Human=false;p.Team=i+1;p.Name="ИИ "+(i+1);p.Difficulty=Spacewars.Simulation.Ai.AiDifficulty.Fighter;}
+                RebuildRoster();RefreshLobbyValidation();
             }
             else if(routePerformanceEvidence&&Array.IndexOf(Environment.GetCommandLineArgs(),"-sixPlayerPerformanceEvidence")>=0){
                 lobbyScreen.Q<DropdownField>("lobby-map-choice").value=FoundryLobbyName;
@@ -335,14 +352,33 @@ namespace Spacewars.Presentation
             inLobby=true;menuScreen.style.display=nativeMainMenuEnabled?DisplayStyle.None:DisplayStyle.Flex;
             if(menuNavigation!=null)menuNavigation.Start=null;
             lobbyScreen.style.display=DisplayStyle.None;SetMatchUi(false);
+            if(!nativeMainMenuEnabled)menuNavigation?.SetScope(menuScreen);
             if(nativeMainMenuEnabled&&nativeMainMenu==null)
             {
                 nativeMainMenu=new GameObject("Spacewars main menu").AddComponent<NativeMainMenu>();
                 nativeMainMenu.HostRoot=root;nativeMainMenu.LocalControls=LocalControlSettings;nativeMainMenu.Navigation=menuNavigation;nativeMainMenu.Play=ShowLobby;nativeMainMenu.Campaign=LaunchCampaign;nativeMainMenu.Laboratory=OpenLaboratory;
             }
         }
-        private void ShowLobby(){CloseLobbyColorPicker(false);campaignConfiguration=null;campaignRetryBytes=null;inLobby=true;lobbyPadArmed=false;matchSetup=null;ResetSpectatorPresentation();menuScreen.style.display=DisplayStyle.None;lobbyScreen.style.display=DisplayStyle.Flex;SetMatchUi(false);RefreshLobbyValidation();RefreshLobbyPreview();if(menuNavigation!=null)menuNavigation.Start=StartLobbyMatchFromGamepad;menuNavigation?.SetScope(lobbyScreen,ShowMainMenu,launchButton);}
-        private void SetMatchUi(bool visible){top.style.display=bottom.style.display=visible?DisplayStyle.Flex:DisplayStyle.None;modal.style.display=DisplayStyle.None;if(!visible){if(spectatorPanel!=null)spectatorPanel.style.display=DisplayStyle.None;if(spectatorTooltip!=null)spectatorTooltip.style.display=DisplayStyle.None;}input.WorldInputEnabled=visible&&!preparing&&!(localCoordinator?.preparing??false);input.CommandInputEnabled=input.WorldInputEnabled&&matchSetup?.Spectator!=true;}
+        private Gamepad MenuPad
+        {
+            get
+            {
+                var coordinator=localCoordinator??this;
+                var setup=coordinator.matchSetup??coordinator.lobbySetup;
+                if(!coordinator.lobbyEntryBound&&coordinator.matchSetup==null)return Gamepad.current;
+                int device=setup?.Participants.FirstOrDefault(p=>p.Human)?.DeviceId??0;
+                return device>0?Gamepad.all.FirstOrDefault(p=>p.deviceId==device):null;
+            }
+        }
+        private bool MenuPadHints=>lobbyEntryBound||matchSetup!=null?MenuPad!=null:menuNavigation?.UsingGamepad==true;
+        private void ShowLobby(){
+            if(!lobbyEntryBound){
+                var lobbyMenuPad=nativeMainMenu!=null?nativeMainMenu.EntryGamepad:menuNavigation?.UsingGamepad==true?menuNavigation.CurrentGamepad:null;
+                var first=lobbySetup.Participants.FirstOrDefault(p=>p.Human);if(first!=null)first.DeviceId=lobbyMenuPad?.deviceId??0;
+                lobbyEntryBound=true;RebuildRoster();
+            }
+            CloseLobbyColorPicker(false);campaignConfiguration=null;campaignRetryBytes=null;inLobby=true;lobbyPadArmed=false;matchSetup=null;ResetSpectatorPresentation();menuScreen.style.display=DisplayStyle.None;lobbyScreen.style.display=DisplayStyle.Flex;SetMatchUi(false);RefreshLobbyValidation();RefreshLobbyPreview();if(menuNavigation!=null)menuNavigation.Start=StartLobbyMatchFromGamepad;menuNavigation?.SetScope(lobbyScreen,ShowMainMenu,launchButton);}
+        private void SetMatchUi(bool visible){if(!visible){CloseChat();if(chatPanel!=null)chatPanel.style.display=DisplayStyle.None;}top.style.display=bottom.style.display=visible?DisplayStyle.Flex:DisplayStyle.None;modal.style.display=DisplayStyle.None;if(!visible){if(spectatorPanel!=null)spectatorPanel.style.display=DisplayStyle.None;if(spectatorTooltip!=null)spectatorTooltip.style.display=DisplayStyle.None;}input.WorldInputEnabled=visible&&!preparing&&!(localCoordinator?.preparing??false);input.CommandInputEnabled=input.WorldInputEnabled&&matchSetup?.Spectator!=true;}
         private void LaunchLobbyMatch()
         {
             RefreshLobbyValidation();if(!launchButton.enabledSelf||preparing)return;
@@ -353,7 +389,7 @@ namespace Spacewars.Presentation
         private IEnumerator PrepareLobbyMatch()
         {
             yield return null; // Present actual preparation state before creating authority.
-            EnsureBalanceStore();profile=ComposeLobbyProfile(balanceStore.Active);NativeGameplayAudioProfile.UseSession(balanceStore.ActiveAudio);
+            EnsureBalanceStore();profile=ComposeLobbyProfile(balanceStore.Active);NativeGameplayAudioProfile.UseSession(balanceStore.ActiveAudio);ModelDetailProfile.UseSession(balanceStore.ActiveModelDetail);
             // Authority prepares on its existing worker while the main thread builds terrain.
             // It is born paused; neither match time nor gameplay input starts here.
             StartSessionCore(false);paused=true;
@@ -368,13 +404,19 @@ namespace Spacewars.Presentation
             loadingScreen.Q<Label>("loading-status").text="Подготовка первого кадра…";yield return null;
             foreach(var seat in localPresentations)seat.cameraView.enabled=true;
             ReadPresentationFrame();ServiceRoutes();Render();UpdateHud();UpdateMaps();
+            // Stage exact contact geometry before the first volley, one shared mesh per frame.
+            yield return directContactSurface.Prepare(world.Actors.Values.Select(a=>a.Hull));
             yield return null; // First prepared frame; also progresses in autonomous batch Editor QA.
             inLobby=false;preparing=preparingPresentation=false;menuNavigation?.SetScope(null);loadingScreen.style.display=DisplayStyle.None;SetMatchUi(true);Pause(false);
             Record("lobby launch "+matchSetup.MatchHumanName+" team="+matchSetup.HumanTeam+" vs "+matchSetup.MatchAiName+" team="+matchSetup.AiTeam);
         }
         private void FailLobbyPreparation(Exception error)
         {
-            Debug.LogException(error);runtime?.RequestStop();runtime=null;preparing=preparingPresentation=false;
+            Debug.LogException(error);
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if(qaDeadlinePath!=null){BeginQaFinish("FAIL match preparation "+error,true);return;}
+#endif
+            runtime?.RequestStop();runtime=null;preparing=preparingPresentation=false;
             DisposeLocalChildren();ResetLocalViewport();loadingScreen.style.display=DisplayStyle.None;ShowLobby();
             lobbyStatus.text="Не удалось подготовить матч. Проверьте журнал и повторите запуск.";lobbyStatus.style.color=Danger;
         }

@@ -28,9 +28,9 @@ namespace Spacewars.Presentation
             float diameter=Math.Min(radius*2,Math.Min(Screen.height*.72f,Screen.width*.5f*.9f));ring.style.width=diameter;ring.style.height=diameter;ring.style.left=(Screen.width*.5f-diameter)/2;ring.style.top=(Screen.height-diameter)/2;
             title.style.top=(Screen.height-diameter)/2-32;title.text=(mode=="groupAssign"?"Назначить группу":mode=="groupWheel"?"Группы":mode=="baseWheel"?"Базы":"Действия здания")+(pages>1?" · "+(page%pages+1)+"/"+pages+" · ◀ ▶":"");
             var action=next.FirstOrDefault(a=>a.Sector.Id==selected);centre.text=added?"Добавлено ✓":action?.Label??"Левый стик";
-            hint.text=added?"Отпустите RT":action==null?"Выберите сектор":!action.Sector.Enabled?"Недоступно":mode=="buildingWheel"?action.Sector.Hold=="sell"?"Удерживайте A":action.Sector.Hold=="repeat"?"A: один · удерживать: ∞":"A: подтвердить":mode=="groupAssign"?"RT: отпустить — заменить; держать — добавить":"Отпустите бампер";
+            hint.text=added?"Отпустите RB":action==null?"Выберите сектор":!action.Sector.Enabled?"Недоступно":mode=="buildingWheel"?action.Sector.Hold=="sell"?"Удерживайте A":action.Sector.Hold=="repeat"?"A: один · удерживать: ∞":"A: подтвердить":(mode=="groupAssign"||mode=="groupWheel")?"RB: выбрать · удерживать: назначить · X: добавить":"Отпустите бампер";
             this.held=held;
-            detail.style.top=(Screen.height+diameter)/2+6;detail.text=(added?"Юниты добавлены. Отпускание RT закроет кольцо.":action?.Detail??"Отпустите стик, чтобы вернуть указатель в центр")+"\n"+(added?"Назначение завершено":"B — отмена");ring.MarkDirtyRepaint();
+            detail.style.top=(Screen.height+diameter)/2+6;detail.text=(added?"Состав сохранён. Отпускание RB закроет кольцо.":action?.Detail??"Отпустите стик, чтобы вернуть указатель в центр")+"\n"+(added?"Назначение завершено":"B — отмена");ring.MarkDirtyRepaint();
         }
         private static string LabelLines(string label)
         {

@@ -1,0 +1,12 @@
+{
+  "purpose": "QA-only, not a production shader decision",
+  "package": "unity/Library/PackageCache/com.unity.render-pipelines.universal@7865b6b91f8a/Shaders",
+  "inputs": {
+    "unity/Library/PackageCache/com.unity.render-pipelines.universal@7865b6b91f8a/Shaders/Lit.shader": "6f4648b6b5271132cfed1d7d7c771ba0a73ef7972470d6694047804d259c0997",
+    "unity/Library/PackageCache/com.unity.render-pipelines.universal@7865b6b91f8a/Shaders/LitInput.hlsl": "4790ecd2f2c8093113b702fdc106486a63308754802c58995f2f0a8121b5b516"
+  },
+  "outputs": {
+    "unity/Assets/Spacewars/Tests/Fixtures/InstancedActorLit/Cycle61Lit.shader": "84c96a7edce647346d86ef4690aec8b1897276f835d4d628bdea7e8121c128da",
+    "unity/Assets/Spacewars/Tests/Fixtures/InstancedActorLit/Cycle61LitInput.hlsl": "0c7bed01a1a91ede38b775d7c7c12d414e3623cfa66dc4434c34785f970e2a4c"
+  }
+}

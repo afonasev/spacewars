@@ -1,0 +1,115 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "category_ru": "Исследования и производство",
+      "category_en": "Research and production",
+      "ru": "Добавлен третий уровень улучшений атаки и защиты: суммарные бонусы +15%, +30% и +50%.",
+      "en": "Attack and defense research now has three tiers with total bonuses of +15%, +30% and +50%."
+    },
+    {
+      "category_ru": "Исследования и производство",
+      "category_en": "Research and production",
+      "ru": "Стоимость уровней атаки и защиты: 200, 300 и 400 кредитов соответственно.",
+      "en": "Attack and defense tiers cost 200, 300 and 400 credits respectively."
+    },
+    {
+      "category_ru": "Исследования и производство",
+      "category_en": "Research and production",
+      "ru": "Научный центр можно улучшить; второй и третий уровни армейских исследований требуют улучшенного центра.",
+      "en": "Scientific centers can be upgraded; the second and third army research tiers require an upgraded center."
+    },
+    {
+      "category_ru": "Исследования и производство",
+      "category_en": "Research and production",
+      "ru": "Каждый научный центр ведёт собственную очередь исследований.",
+      "en": "Each scientific center has its own research queue."
+    },
+    {
+      "category_ru": "Исследования и производство",
+      "category_en": "Research and production",
+      "ru": "Бетон разделён на два уровня по +25% прочности зданий: каждый стоит 200 кредитов и занимает 30 секунд; второй требует улучшенного научного центра.",
+      "en": "Concrete now has two tiers adding 25% building health each, costing 200 credits and taking 30 seconds per tier; the second requires an upgraded scientific center."
+    },
+    {
+      "category_ru": "Исследования и производство",
+      "category_en": "Research and production",
+      "ru": "Улучшение переработки требует готового собственного улучшенного научного центра.",
+      "en": "The refinery upgrade requires a completed upgraded scientific center owned by the player."
+    },
+    {
+      "category_ru": "Исследования и производство",
+      "category_en": "Research and production",
+      "ru": "Улучшения завода и ангара выполняются в их производственной очереди.",
+      "en": "Factory and hangar upgrades run through their production queues."
+    },
+    {
+      "category_ru": "Исследования и производство",
+      "category_en": "Research and production",
+      "ru": "Новые улучшения доступны для обеих сторон на полигоне.",
+      "en": "New upgrades are available for both sides in the proving ground."
+    },
+    {
+      "category_ru": "Экономика и видимость",
+      "category_en": "Economy and visibility",
+      "ru": "Доход начисляется пропорционально каждые 100 миллисекунд.",
+      "en": "Income is settled proportionally every 100 milliseconds."
+    },
+    {
+      "category_ru": "Экономика и видимость",
+      "category_en": "Economy and visibility",
+      "ru": "В тумане войны сохраняется последнее увиденное состояние здания, включая модель улучшения; изменения вне обзора становятся видны после повторного обнаружения.",
+      "en": "Fog of war retains the last observed building state, including its upgrade model; changes outside vision become visible when the building is seen again."
+    },
+    {
+      "category_ru": "Интерфейс и управление",
+      "category_en": "Interface and controls",
+      "ru": "Значки исследований и цены размещаются внутри контура лепестков кругового меню.",
+      "en": "Research icons and prices fit inside the radial menu petals.",
+      "images": [
+        {
+          "path": "tools/native-release/notes/media/0.6.14-research.png",
+          "source_commit": "e6aeb900454674384011ffbfb73c9bf075983c3f",
+          "ru": "Круговое меню исследований: снимок реального интерфейса в Editor, seed 7.",
+          "en": "Research radial menu: actual interface captured in the Editor, seed 7."
+        }
+      ]
+    },
+    {
+      "category_ru": "Интерфейс и управление",
+      "category_en": "Interface and controls",
+      "ru": "Обновлены компактная контекстная панель, список выбранных войск и портреты объектов.",
+      "en": "The compact context panel, selected army roster and object portraits have been updated."
+    },
+    {
+      "category_ru": "Интерфейс и управление",
+      "category_en": "Interface and controls",
+      "ru": "Названия строительства и краткие причины недоступности показаны в круговом меню.",
+      "en": "Construction names and concise availability blockers are shown in the radial menu."
+    },
+    {
+      "category_ru": "Интерфейс и управление",
+      "category_en": "Interface and controls",
+      "ru": "Тактическая карта центрируется в области своего игрока, а зоны башен повторяют рельеф.",
+      "en": "The tactical map is centered in its player viewport, and tower coverage zones follow the terrain."
+    },
+    {
+      "category_ru": "Интерфейс и управление",
+      "category_en": "Interface and controls",
+      "ru": "Обновлены подсказки геймпада, управление группами и привязка устройств в лобби.",
+      "en": "Controller hints, group controls and lobby device assignments have been updated."
+    },
+    {
+      "category_ru": "Меню и обновления",
+      "category_en": "Menu and updates",
+      "ru": "История версий поддерживает иллюстрации и повторный просмотр сохранённых материалов без подключения к сети.",
+      "en": "Release history supports illustrations and offline reopening of cached content."
+    },
+    {
+      "category_ru": "Игровые системы",
+      "category_en": "Game systems",
+      "ru": "Обновлены групповое перемещение, обработка ИИ и сохранение их текущего состояния.",
+      "en": "Group movement, AI processing and persistence of their current state have been updated."
+    }
+  ]
+}

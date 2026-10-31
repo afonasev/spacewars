@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using NUnit.Framework;
 using Spacewars.Runtime;
 using Spacewars.Presentation;
@@ -297,6 +298,72 @@ namespace Spacewars.Tests.EditMode
                 Assert.AreEqual(AiArmyPhase.Disbanded,registry.Capture().Armies.Single(g=>g.Id==id).Phase,"Actual mission completion must release its full wave in the original bounded scenario window");Assert.True(cohort.All(u=>registry.ArmyFor(u)!=id));
             }
             a.Stop();
+        }
+        private static OfflineMatchConfiguration DeliverySafetyConfiguration()
+        {
+            var basis=A4NativeConfig();
+            // This witness supplies the CURRENT opening's two income buildings and
+            // possible mixed force; the historical A4 fixture has only one refinery.
+            var sites=new[]{new TerritorySite(1,PlayableBuildingKind.Headquarters,basis.Starts[0].Position,new[]{new TerritorySlot(1,new NavPoint(-24,-9),0),new TerritorySlot(2,new NavPoint(-14,0),0),new TerritorySlot(3,new NavPoint(-14,12),0)})}.Concat(basis.Sites.Where(x=>x.Id!=1)).ToArray();
+            // Seed4 currently requires two explorers and one tank; one explorer is the ordinary start.
+            var units=new[]{new OfflineScenarioUnit(1,PlayableEntityKind.Tank,new NavPoint(-5,-8)),new OfflineScenarioUnit(1,PlayableEntityKind.Explorer,new NavPoint(-3,-8))};
+            return new OfflineMatchConfiguration(basis.Profile,"delivery-safety-current-opening",basis.MapIdentity,basis.RouteProvenance,basis.Seed,basis.Roster.ToArray(),basis.Starts.ToArray(),sites,basis.Obstacles.ToArray(),new double[,]{{0,100},{100,0}},scenario:units,scenarioBuildings:basis.ScenarioBuildings.Concat(new[]{new OfflineScenarioBuilding(1,PlayableBuildingKind.Refinery,1,3,new NavPoint(-14,12))}).ToArray());
+        }
+        [TestCase(0)][TestCase(1)][TestCase(2)] public void Reinforcement_DelayedDeliverySafetyKeepsOrdinaryWorldTickingAndPendingAction(int completion)
+        {
+            var c=DeliverySafetyConfiguration();var a=new PlayableAuthorityTick(c,71,asynchronousRoutes:true);
+            var owner=Owners(a).Single();var planner=(AiArmyPlanner)Field(owner,"armyPlanner");var source=(PlayableDomain)Field(a,"domain");
+            PlayableRuntime runtime=null,restored=null;PlayableDomain domain=null,restoredDomain=null;CertifiedRouteWorker worker=null;
+            using var entered=new ManualResetEventSlim();using var release=new ManualResetEventSlim();int parked=0;
+            try{
+                using(var routes=new UnityHostRouteService()){
+                    void Advance(){routes.Service(a,64);Assert.True(a.TryAdvance());}
+                    for(int i=0;i<300&&(!planner.Active||!a.CaptureDiagnosticCheckpoints().Single().Records.Any(r=>r.Policy==AiArmyPlanner.Policy&&r.Status==PlayableAiDeliveryStatus.Applied));i++)Advance();
+                    Assert.True(planner.Active);source.GetType().GetMethod("SpawnProduced",F).Invoke(source,new object[]{new NavPoint(-20,-8),(NavPoint?)null,PlayableOwner.Player,PlayableEntityKind.Tank});
+                    int wave=a.ParticipantView("player-1").Entities.Where(u=>u.Owner==PlayableOwner.Player&&u.Kind==PlayableEntityKind.Tank).Max(u=>u.Id);object pending=null;
+                    for(int i=0;i<150&&pending==null;i++){
+                        Advance();pending=((System.Collections.IEnumerable)Field(owner,"pendingItems")).Cast<object>().FirstOrDefault(x=>(string)Field(x,"PolicyName")==AiArmyPlanner.Policy&&(((PlayableAiAction)Field(x,"Action")).Kind==PlayableCommandKind.Move||((PlayableAiAction)Field(x,"Action")).Kind==PlayableCommandKind.Follow)&&((PlayableAiAction)Field(x,"Action")).EntityIds.Contains(wave));
+                    }
+                    TestContext.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(new{a.Tick,Wave=a.ParticipantView("player-1").Entities.Single(u=>u.Id==wave),Mission=planner.Capture(),Registry=((AiArmyRegistry)Field(owner,"armies")).Capture(),Pending=((System.Collections.IEnumerable)Field(owner,"pendingItems")).Cast<object>().Select(x=>new{Action=(PlayableAiAction)Field(x,"Action"),Policy=(string)Field(x,"PolicyName")}),Records=a.CaptureDiagnosticCheckpoints().Single().Records}));
+                    Assert.NotNull(pending,"Actual policy must schedule a reinforcement Move.");
+                    var action=(PlayableAiAction)Field(pending,"Action");long due=(long)Field(pending,"DueTick");
+                    while(a.Tick<due-1)Advance();
+                    using(var state=a.CaptureWorldState(a.PublicationSequence,_=>0)){
+                        // A current supported transport envelope around this exact live authority.
+                        state.SetTransportCapture(w=>{w.Write(3);w.Write(false);w.Write(false);w.Write(0L);w.Write(0);w.Write(0L);w.Write(0);w.Write(0);w.Write(0);w.Write(false);});
+                        runtime=PlayableRuntime.RestoreBytesForTests(state.Encode(),c,d=>{d.BeforeArmySafetyPathForTests=(pendingAction,actor)=>{if(pendingAction.ActionId==action.ActionId&&Interlocked.CompareExchange(ref parked,1,0)==0){entered.Set();if(!release.Wait(10000))throw new TimeoutException("Safety path boundary not released.");}};});
+                    }
+                    domain=(PlayableDomain)Field(runtime,"domain");
+                    worker=new CertifiedRouteWorker(runtime.NavigationBinding,4,new CertifiedRouteKernel(),()=>runtime.IsStopRequested,runtime.ReportRouteFailure);
+                    runtime.RequestPause(false);bool reached=entered.Wait(15000);
+                    if(!reached)TestContext.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(new{SafetyProbeMiss=true,completion,Action=action,Snapshot=runtime.Latest.Tick,Failure=runtime.Latest.Failure,Checkpoint=runtime.AiCheckpoint,Actor=runtime.ParticipantView("player-1").Entities.FirstOrDefault(u=>u.Id==wave)}));
+                    Assert.True(reached,"Real due delivery must reach its safety solver.");long tick=runtime.Latest.Tick;
+                    Assert.True(SpinWait.SpinUntil(()=>runtime.Latest.Tick>=tick+10||runtime.IsStopped,2000),"A delayed delivery safety solve must not stop world time.");
+                    Assert.False(runtime.IsStopped,runtime.Latest.Failure);
+                    Assert.False(runtime.AiCheckpoint.Records.Any(r=>r.ActionId==action.ActionId&&r.Status!=PlayableAiDeliveryStatus.Scheduled),"Pending is not unsafe or unreachable.");
+                    Assert.AreEqual(action.ActionId,runtime.AiCheckpoint.PendingActionId,"Keep the exact original action while its current safety path is pending.");
+                    if(completion==2){
+                        runtime.RequestStop();Assert.True(SpinWait.SpinUntil(()=>runtime.IsStopped,5000),"Stopping the world must not wait for the parked safety solver.");Assert.Zero(runtime.Latest.Metrics.Errors);return;
+                    }
+                    if(completion==0){
+                        var origin=runtime.ParticipantView("player-1").Entities.Single(u=>u.Id==wave).Position;release.Set();
+                        Assert.True(SpinWait.SpinUntil(()=>runtime.IsStopped||runtime.AiCheckpoint.Records.Any(r=>r.ActionId==action.ActionId&&r.Status==PlayableAiDeliveryStatus.Applied)&&runtime.ParticipantView("player-1").Entities.Any(u=>u.Id==wave&&!u.Position.Equals(origin)&&u.OrderStamp?.Origin==PlayableOrderOrigin.Ai),15000),"The released original action must apply and produce real AI-controlled displacement.");
+                        Assert.False(runtime.IsStopped,runtime.Latest.Failure);Assert.Zero(runtime.Latest.Metrics.Errors);return;
+                    }
+                    runtime.RequestPause(true);Assert.True(SpinWait.SpinUntil(()=>runtime.Latest.Paused||runtime.IsStopped,5000));Assert.False(runtime.IsStopped,runtime.Latest.Failure);
+                    var capture=runtime.RequestCaptureBytes();Assert.False(capture.Wait(50),"Explicit save must settle pending safety work.");release.Set();Assert.True(capture.Wait(10000));
+                    restored=PlayableRuntime.RestoreBytes(capture.Result,c);restoredDomain=(PlayableDomain)Field(restored,"domain");
+                    Assert.True(SpinWait.SpinUntil(()=>restored.Latest.Paused||restored.IsStopped,5000));Assert.False(restored.IsStopped,restored.Latest.Failure);Assert.AreEqual(runtime.Latest.Tick,restored.Latest.Tick);
+                    runtime.RequestPause(false);
+                    Assert.True(SpinWait.SpinUntil(()=>runtime.IsStopped||runtime.AiCheckpoint.Records.Any(r=>r.ActionId==action.ActionId&&r.Status!=PlayableAiDeliveryStatus.Scheduled),15000),"Released action must receive an explicit terminal result.");
+                    Assert.False(runtime.IsStopped,runtime.Latest.Failure);Assert.Zero(runtime.Latest.Metrics.Errors);
+                }
+            }finally{
+                release.Set();restored?.RequestStop();runtime?.RequestStop();worker?.Dispose();
+                if(restored!=null){Assert.True(SpinWait.SpinUntil(()=>restored.IsStopped&&restoredDomain.ObservedPathWorkerStopped,5000));restored.Dispose();restoredDomain.DestroyOwnedNavigation();}
+                if(runtime!=null){Assert.True(SpinWait.SpinUntil(()=>runtime.IsStopped&&(worker==null||worker.IsStopped)&&domain.ObservedPathWorkerStopped,5000));runtime.Dispose();domain.DestroyOwnedNavigation();}
+                a.Stop();source.DestroyOwnedNavigation();
+            }
         }
         [TestCase(false,false)][TestCase(true,false)][TestCase(false,true)][TestCase(true,true)] public void Reinforcement_ActualDueDeliveryRechecksMovingVisibleThreatOutsideBase(bool intrusion,bool follow)
         {

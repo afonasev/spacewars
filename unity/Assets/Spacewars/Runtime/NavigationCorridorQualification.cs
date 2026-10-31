@@ -67,9 +67,16 @@ namespace Spacewars.Runtime
             if(current&&corridor.Group!=0&&
                 (!group.Exists||corridor.RootRevision!=group.RootRevision||
                 corridor.CommandSequence!=group.CommandSequence||corridor.IssuedTick!=group.IssuedTick))return QualificationFailure(out reason,"current root");
-            NavLocation at=corridor.Origin;
+            var plan=corridor.RecastPlan;
+            if(plan!=null){
+                try{plan.ValidateBindings(corridor.GraphKey,provider.Binding,corridor.ProfileBinding,corridor.HoldBinding,corridor.Radius,request.Geometry.Revision);}
+                catch(ArgumentException){return QualificationFailure(out reason,"Recast coordination binding");}
+            }
+            NavLocation at=corridor.Origin;int typedIndex=0;
             foreach(var leg in corridor.Legs){
-                if(!leg.From.Equals(at)||leg.Section!=NavCorridorSection.IndividualConnector||
+                var section=plan==null?NavCorridorSection.IndividualConnector:typedIndex<plan.OriginLegs?NavCorridorSection.IndividualConnector:typedIndex<plan.TerminalLeg?NavCorridorSection.SharedTrunk:NavCorridorSection.TerminalConnector;
+                typedIndex++;
+                if(!leg.From.Equals(at)||leg.Section!=section||
                     leg.Branch!=0||leg.DownstreamMergeLeg!=0)return QualificationFailure(out reason,"leg shape");
                 if(leg.Kind==NavTypedLegKind.Surface){
                     double cost=LayeredNavigationProvider.Distance(leg.From.Position,leg.To.Position)*
@@ -79,6 +86,11 @@ namespace Spacewars.Runtime
                             request.Geometry.SegmentFree(leg.From.Position,leg.To.Position,clearance.Radius)
                         :provider.CanSweep(leg.From,leg.To,clearance);
                     if(!surfaceValid||Math.Abs(leg.Cost-cost)>1e-7)return QualificationFailure(out reason,"surface clearance/cost");
+                }else if(provider is LayeredNavigationProvider layered){
+                    var portal=layered.Portals.FirstOrDefault(p=>p.Id==leg.PortalId);
+                    bool forward=portal!=null&&leg.From.Equals(portal.Entry)&&leg.To.Equals(portal.Exit);
+                    bool reverse=portal!=null&&portal.Direction==NavPortalDirection.Both&&leg.From.Equals(portal.Exit)&&leg.To.Equals(portal.Entry);
+                    if(portal==null||!leg.From.Position.Equals(leg.To.Position)||(!forward&&!reverse)||leg.Cost!=portal.TraversalCost||layered.QualificationStatus(portal,clearance)!=NavConnectorStatus.Ready)return QualificationFailure(out reason,"physical layered portal");
                 }else if(!leg.From.Position.Equals(leg.To.Position)||leg.Cost!=0||
                     !(provider is PartitionNavigationProvider partition)||
                     !partition.Seams.Any(s=>s.Allowed&&s.Id==leg.PortalId&&

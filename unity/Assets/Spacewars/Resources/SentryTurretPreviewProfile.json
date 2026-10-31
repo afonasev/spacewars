@@ -1,0 +1,16 @@
+{
+  "id": "sentry-turret-preview-v1",
+  "revision": 1,
+  "yawDegreesPerSecond": 360,
+  "pitchDegreesPerSecond": 180,
+  "depressionDegrees": 20,
+  "rotatingSpreadMultiplier": 1.3,
+  "tracerSpeed": 40,
+  "tracerLength": 0.65,
+  "tracerWidth": 0.025,
+  "flashSeconds": 0.06,
+  "targetDistance": 5,
+  "targetDegreesPerSecond": 65,
+  "targetHeight": 3,
+  "cameraSize": 7
+}

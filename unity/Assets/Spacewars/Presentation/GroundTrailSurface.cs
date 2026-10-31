@@ -22,7 +22,9 @@ namespace Spacewars.Presentation
             if(map is WhiteMeridianMap)return GroundTrailSurfaceKind.Salt;
             if(map is ThreeCrossingsMap)return support.Id.StartsWith("platform-")?GroundTrailSurfaceKind.Hard:GroundTrailSurfaceKind.Soil;
             if(map is CampaignOpeningMap||map is AiTestMap)return GroundTrailSurfaceKind.Sand;
-            // Foundry is solid volcanic rock / industrial decks, including its roads.
+            // Foundry open quarry ground is loose sand/slag; exact site pad
+            // footprints are excluded by PlayableWorld with the active art profile.
+            if(map is FoundryMap)return GroundTrailSurfaceKind.Sand;
             return GroundTrailSurfaceKind.Hard;
         }
     }

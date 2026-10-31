@@ -14,10 +14,13 @@ namespace Spacewars.Editor
     {
         const string Source = "Assets/Spacewars/Content/StyleA/hawk.glb";
         const string Output = "Assets/Spacewars/Content/Resources/StyleA/";
+        static string Evidence=>Environment.GetEnvironmentVariable("HAWK_VISUAL_OUTPUT")??Path.GetFullPath("../.local/refine-hawk-visuals/import");
         static readonly string[] Nodes = { "modelRoot", "mainRotor", "tailRotor", "muzzleLeft", "muzzleRight" };
 
         [MenuItem("Spacewars/Assets/Prepare Hawk Model")]
-        public static void Prepare()
+        public static void Prepare(){PreparePrefab();RenderPreviews();}
+        public static void PrepareOptimizedPrefab()=>PreparePrefab(false);
+        static void PreparePrefab(bool refreshMaterials=true)
         {
             AssetDatabase.ImportAsset(Source, ImportAssetOptions.ForceSynchronousImport);
             var source = AssetDatabase.LoadAssetAtPath<GameObject>(Source);
@@ -34,9 +37,10 @@ namespace Spacewars.Editor
                         string role = materials[i].name;
                         string path = Output + "hawk-" + role + ".mat";
                         var material = AssetDatabase.LoadAssetAtPath<Material>(path);
+                        if(!refreshMaterials){if(!material)throw new InvalidOperationException("Missing approved Hawk material "+role);materials[i]=material;continue;}
                         if (!material)
                         {
-                            var template = AssetDatabase.LoadAssetAtPath<Material>(Output + "tank-" + role + ".mat");
+                            Material template = null;
                             material = template ? new Material(template) : new Material(Shader.Find("Universal Render Pipeline/Lit"));
                             material.name = role;
                             var color = role switch
@@ -72,6 +76,7 @@ namespace Spacewars.Editor
                         throw new InvalidOperationException("Missing/duplicate articulated node: " + name);
                 if (model.GetComponentsInChildren<Collider>(true).Length != 0)
                     throw new InvalidOperationException("Standalone visual asset must not introduce gameplay colliders");
+                var expected=UnitModelResources.CombineHawkStaticGroups(model,Output);
                 var meshes = model.GetComponentsInChildren<MeshFilter>(true);
                 if (meshes.Length == 0) throw new InvalidOperationException("Empty Hawk mesh");
                 foreach (var filter in meshes)
@@ -89,9 +94,13 @@ namespace Spacewars.Editor
                 var right = transforms.Single(t => t.name == "muzzleRight");
                 if (Mathf.Abs(left.position.x - right.position.x) < 1 || left.position.z < .5f || right.position.z < .5f)
                     throw new InvalidOperationException("Rocket sockets must be separated and face +Z");
-                PrefabUtility.SaveAsPrefabAsset(model, Output + "hawk.prefab");
-                AssetDatabase.SaveAssets();
-                var evidence = Path.GetFullPath("../design/hawk/previews");
+                // Model preparation preserves the approved textured material assets.
+                // Fleet finish changes are explicit via RefreshFleetFinish.
+                transforms.Single(t=>t.name=="upgradedOnly").gameObject.SetActive(false);
+                string prefabPath=Output+"hawk.prefab";PrefabUtility.SaveAsPrefabAsset(model,prefabPath);
+                AssetDatabase.SaveAssets();AssetDatabase.ImportAsset(prefabPath,ImportAssetOptions.ForceSynchronousImport);
+                StaticBuildingMeshes.ValidateSaved(AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath),expected);
+                var evidence = Evidence;
                 Directory.CreateDirectory(evidence);
                 File.WriteAllText(Path.Combine(evidence, "unity-import.json"),
                     JsonUtility.ToJson(new ImportReport {
@@ -102,7 +111,30 @@ namespace Spacewars.Editor
                 Debug.Log("HAWK_IMPORT_PASS " + envelope.size);
             }
             finally { UnityEngine.Object.DestroyImmediate(model); }
-            RenderPreviews();
+        }
+
+        static void ApplyFleetFinish(Material material)
+        {
+            string role = material.name.EndsWith("team-primary") ? "team-primary" :
+                material.name.EndsWith("neutral-metal") ? "neutral-metal" : null;
+            if (role == null) return;
+            var template = AssetDatabase.LoadAssetAtPath<Material>(Output + "explorer-" + role + ".mat");
+            if (!template || !template.GetTexture("_BaseMap")) throw new InvalidOperationException("Missing fleet coating " + role);
+            material.SetTexture("_BaseMap", template.GetTexture("_BaseMap"));
+            if (role == "neutral-metal") material.SetColor("_BaseColor", template.GetColor("_BaseColor"));
+            EditorUtility.SetDirty(material);
+        }
+
+        public static void RefreshFleetFinish()
+        {
+            foreach (string role in new[] { "team-primary", "neutral-metal" })
+            {
+                var material = AssetDatabase.LoadAssetAtPath<Material>(Output + "hawk-" + role + ".mat");
+                if (!material) throw new InvalidOperationException("Missing Hawk material " + role);
+                ApplyFleetFinish(material);
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log("HAWK_FLEET_FINISH_PASS");
         }
 
         [Serializable] sealed class ImportReport
@@ -152,7 +184,7 @@ namespace Spacewars.Editor
                     var old = RenderTexture.active; RenderTexture.active = texture;
                     var image = new Texture2D(1280, 960, TextureFormat.RGB24, false);
                     image.ReadPixels(new Rect(0, 0, 1280, 960), 0, 0); image.Apply();
-                    File.WriteAllBytes(Path.GetFullPath("../design/hawk/previews/unity-" + names[i] + ".png"), image.EncodeToPNG());
+                    File.WriteAllBytes(Path.Combine(Evidence,"unity-" + names[i] + ".png"), image.EncodeToPNG());
                     UnityEngine.Object.DestroyImmediate(image); RenderTexture.active = old;
                 }
             }

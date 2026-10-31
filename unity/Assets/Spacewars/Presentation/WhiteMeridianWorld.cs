@@ -40,6 +40,7 @@ namespace Spacewars.Presentation
         }
         private void MeridianMesh(string name,Mesh mesh,int kind,Color color,Vector4? siteBounds=null)
         {
+            FinalProceduralMesh.IndexOwned(mesh);
             terrainMeshes.Add(mesh);var obj=new GameObject(name);obj.transform.SetParent(root,false);obj.AddComponent<MeshFilter>().sharedMesh=mesh;var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=meridianMaterial;
             var properties=new MaterialPropertyBlock();properties.SetFloat("_Kind",kind);properties.SetColor("_BaseColor",color);if(siteBounds.HasValue)properties.SetVector("_SiteBounds",siteBounds.Value);renderer.SetPropertyBlock(properties);
         }

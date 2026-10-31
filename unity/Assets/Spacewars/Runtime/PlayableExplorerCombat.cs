@@ -8,7 +8,7 @@ namespace Spacewars.Runtime
         {
             if(AirTarget(u.Target)){FireAirTracer(u,from,target);return;}
             var velocity=units.TryGetValue(u.Target,out var victim)?victim.Velocity:default(NavPoint);
-            Sound(PlayableSoundKind.Shot,from,u.Kind,u.Owner);
+            RememberDefaultShot(u);Sound(PlayableSoundKind.Shot,from,u.Kind,u.Owner);
             double dx=target.X-from.X,dz=target.Z-from.Z,speed=profile.ExplorerProjectileSpeed;
             double a=velocity.X*velocity.X+velocity.Z*velocity.Z-speed*speed,b=2*(dx*velocity.X+dz*velocity.Z),c=dx*dx+dz*dz,t=0;
             if(Math.Abs(a)<1e-9){if(Math.Abs(b)>1e-9)t=-c/b;}

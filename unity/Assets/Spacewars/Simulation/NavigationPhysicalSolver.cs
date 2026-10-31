@@ -37,24 +37,24 @@ namespace Spacewars.Simulation
     public sealed partial class NavTypedRoute : INavPhysicalBody
     {
         internal override bool IsImmutableCaptureRoot=>IsRegistered&&ownedSubscription!=null&&Legs is NavOwnedStorage storage&&storage.IsImmutableCaptureRoot;
-        NavPhysicalTag INavPhysicalBody.PhysicalTag=>new NavPhysicalTag(NavPhysicalStorageKind.TypedRoute);
+        NavPhysicalTag INavPhysicalBody.PhysicalTag=>new NavPhysicalTag(NavPhysicalStorageKind.TypedRoute,value:RecastPlan==null?NavPhysicalValueKind.None:NavPhysicalValueKind.RecastRouteV2);
         void INavPhysicalBody.WritePhysicalBody(NavPhysicalBodyWriter writer)
         {
             if(!IsImmutableCaptureRoot||StorageBytes!=NavStorageLayout.Charge(128)||NavStorageLayout.ObjectBytesBound(GetType())>128||!ReferenceEquals(Subscription.MetadataOwner,ownedSubscription))throw new ArgumentException("Physical route owner/layout contradiction.");
-            writer.Output.Write(Cost);NavPhysicalMacro.WriteMetadata(writer,this,Subscription);NavPhysicalMacro.WriteEdge(writer,this,(NavOwnedStorage)Legs);
+            writer.Output.Write(Cost);NavPhysicalMacro.WriteMetadata(writer,this,Subscription);NavPhysicalMacro.WriteEdge(writer,this,(NavOwnedStorage)Legs);if(RecastPlan!=null){RecastPlan.Validate(this);NavPhysicalMacro.WriteEdge(writer,this,RecastPlan);}
         }
         private NavTypedRoute(NavRouteSubscription subscription,IReadOnlyList<NavTypedLeg> legs,double cost,bool physicalBirth):base(128)
         {Subscription=subscription;Legs=legs;Cost=cost;}
-        internal static NavTypedRoute ReadPhysicalBody(NavPhysicalBodyReader reader)
+        internal static NavTypedRoute ReadPhysicalBody(NavPhysicalBodyReader reader,bool recast=false)
         {
             double cost=reader.Input.ReadDouble();if(!NavPhysicalSolveValidation.Cost(cost)||NavStorageLayout.ObjectBytesBound(typeof(NavTypedRoute))>128)throw new ArgumentException("Invalid physical route cost/layout.");
             var subscription=NavPhysicalMacro.ReadMetadata<NavRouteSubscription>(reader,NavMetadataRole.Subscription);var storage=NavPhysicalMacro.ReadEdge<NavOwnedStorage>(reader);
-            if(!(storage is NavPagedList<NavTypedLeg>)&&!(storage is NavRetainedArray<NavTypedLeg>))throw new ArgumentException("Wrong physical route leg representation.");var legs=(IReadOnlyList<NavTypedLeg>)storage;
+            if(!(storage is NavPagedList<NavTypedLeg>)&&!(storage is NavRetainedArray<NavTypedLeg>))throw new ArgumentException("Wrong physical route leg representation.");var legs=(IReadOnlyList<NavTypedLeg>)storage;var plan=recast?NavPhysicalMacro.ReadEdge<NavRecastMemberPlan>(reader):null;
             using(NavStorageScratch.Reserve(reader.Reservation,8192)){
                 NavPhysicalSolveValidation.Legs(legs,out double sum);if(sum!=cost||legs.Count>0&&(!legs[0].From.Equals(subscription.Origin)||!legs[legs.Count-1].To.Equals(subscription.AssignedEndpoint)))throw new ArgumentException("Physical route endpoint/cost contradiction.");
             }
             using(var allocation=new NavStorageAllocation(reader.Reservation.TryReserve)){
-                allocation.Reserve(128);var route=allocation.Register(new NavTypedRoute(subscription,legs,cost,true));route.ownedSubscription=NavPhysicalMacro.Acquire(route,subscription.MetadataOwner);NavPhysicalMacro.Acquire(route,storage);return route;
+                allocation.Reserve(128);var route=allocation.Register(new NavTypedRoute(subscription,legs,cost,true));route.ownedSubscription=NavPhysicalMacro.Acquire(route,subscription.MetadataOwner);NavPhysicalMacro.Acquire(route,storage);if(plan!=null){plan.Validate(route);route.RecastPlan=NavPhysicalMacro.Acquire(route,plan);}return route;
             }
         }
     }

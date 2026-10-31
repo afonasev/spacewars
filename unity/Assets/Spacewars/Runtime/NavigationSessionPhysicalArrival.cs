@@ -48,7 +48,7 @@ namespace Spacewars.Runtime
         // and monotonicity checks before using this historical oracle.
         private bool HistoricalBirthPending(NavigationArrivalWork work)
         {
-            var source=work.HistoricalSource;if(!source.IsHistoricalCandidate)return false;
+            var source=work.HistoricalSource;if(!source.IsPhysicalBirthHistoricalCandidate)return false;
             var members=source.PhysicalInput.Members;if(members.Count==0)return false;var first=members[0];
             if(!groups.TryGetValue(first.GroupId,out var group)||group.CommandSequence!=first.CommandSequence)return false;
             int count=0;foreach(var row in allocating.Values)if(row.MemberIdentity.GroupId==first.GroupId){
@@ -98,11 +98,14 @@ namespace Spacewars.Runtime
         }
         private bool PreparePhysicalArrivalAttemptCore(out bool refused,out bool resolvingRefusal)
         {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            QaArrivalLifecycle.Ticket lifecycleBirth=default;string lifecycleBirthReason="not-installed";
+#endif
             refused=false;resolvingRefusal=false;
             if(!physicalArrivalEnabled)return false;
             NavigationRetentionBudget.Scope scope=null;NavigationHostRoot source=null,next=null;
             NavArrivalInput input=null;NavigationArrivalWork work=null;NavigationPreparedArrivalObservation observation=null;
-            NavigationLiveArrivalAttempt preparedAttempt=null;bool installedAttempt=false;
+            NavigationLiveArrivalAttempt preparedAttempt=null;bool installedAttempt=false;OriginalGroupRecord originalBirth=default;bool originalObserved=false;
             NavigationLiveArrivalTables observedTables=null,preparedTables=null;int tableRevision=0;long providerSequence=0,preparedProviderSequence=0;
             try{
                 if(!TryOpenPhysicalHostScope(NavigationPreparationKind.Arrival,Generation,Admission.PublicationIdentity,out scope,out resolvingRefusal)){refused=true;return false;}
@@ -123,6 +126,10 @@ namespace Spacewars.Runtime
                     var liveGroup=groups[first.MemberIdentity.GroupId];if(liveGroup.Members.Length>memberCapacity)return false;
                     group=liveGroup.Copy();basis=navigationGeometry;observed=Admission;id=checked(arrivalSequence+1);operation=authorityOperationIdentity;attachment=certifiedHostAttachmentIdentity;worker=certifiedHost;observedTables=liveArrivalTables;observedTables?.Retain();tableRevision=observedTables?.Revision??0;providerSequence=arrivalProviderSequence;
                     observedProfile=profile;observedGeometry=geometry;observedCrowd=Crowd;observedNames=terrainNameOwners;
+                    if(OriginalGroupDiagnostics.Active){originalBirth=new OriginalGroupRecord{Kind=OriginalGroupEvent.Birth,Sequence=group.CommandSequence,Group=group.GroupId,Attempt=id,Members=rows.Length,Request=first.Request,Operation=operation,Geometry=basis.Revision,Profile=observedProfile.Revision,Quantum=committedHostRoot?.QuantumSerial??0};originalObserved=true;}
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    if(QaArrivalLifecycle.Enabled)lifecycleBirth=QaArrivalLifecycle.BeginBirth(Generation,id,group.CommandSequence,group.GroupId,rows);
+#endif
                     observation.Observe(rows,group);observation.ObserveTerrain(terrain,observedNames);observation.Pin(observedProfile.StorageRoot);observation.Pin(observedGeometry.StorageRoot);observation.Pin(basis.StorageRoot);observation.Pin(observedNames);observation.Pin(admissionOwner);
                     var groupOwner=(groups as NavigationCommandSlots<long,GroupOrderState>)?.OwnerFor(group.GroupId) as NavigationLiveGroup;observation.Pin(groupOwner?.ImmutableVersion);
                     source=PinCommittedHostRoot();if(source==null)throw new InvalidOperationException("Physical arrival creator needs a committed Pump root.");observation.Pin(source);
@@ -156,9 +163,20 @@ namespace Spacewars.Runtime
                     using(NavStorageScratch.Reserve(reservation,construction)){
                         for(int n=0;n<rows.Length;n++)bindings[n]=new NavArrivalWorkingBinding(rows[n].Entity,ArrivalProvider(canonical[n].Geometry,canonical[n].HeldIdentity),
                             new NavGraphProfile(NavigationAdmission.ExactProfileBinding(canonical[n].Profile),"distance",1,rows[n].Profile.GridCell));
-                        using(EnterTransport()){if(!ObservationCurrent()||checked(3*Crowd.Units.Count+pending.Count+arrivalLedger.Count)>occupantCapacity)return false;observation.ObserveOccupancy(CaptureArrivalOccupancySnapshot(members));}
+                        using(EnterTransport()){
+                            if(!ObservationCurrent()){
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                                if(QaArrivalLifecycle.Enabled)lifecycleBirthReason="authority-observation-changed";
+#endif
+                                return false;}
+                            if(checked(3*Crowd.Units.Count+pending.Count+arrivalLedger.Count)>occupantCapacity){
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                                if(QaArrivalLifecycle.Enabled)lifecycleBirthReason="occupancy-capacity-changed";
+#endif
+                                return false;}
+                            observation.ObserveOccupancy(CaptureArrivalOccupancySnapshot(members));}
                         var raw=new NavArrivalInput("geometry:"+basis.Revision,"profile:"+NavigationAdmission.ExactProfileBinding(observedProfile),bindings[0].Provider,bindings[0].Profile,terms,
-                            new NavGraphCompileLimits(1048576,300000,1200000),new NavArrivalCandidateSource("authority-spiral",1,group.OriginalLocation??candidates[0],candidates),members,
+                            new NavGraphCompileLimits(1048576,300000,1200000),new NavArrivalCandidateSource("authority-spatial-spiral",1,group.OriginalLocation??candidates[0],NavigationArrivalSlotOrdering.Align(candidates,members)),members,
                             observation.Occupancy,1048576,bindings,true);
                         input=NavigationArrivalPhysicalInput.CopyInitial(raw,reservation);
                     }
@@ -195,10 +213,18 @@ namespace Spacewars.Runtime
                         if(preparedTables!=null){liveArrivalTables=preparedTables;arrivalAttempts=preparedTables.Ordered;arrivalProviders=preparedTables.References;arrivalProviderIds=preparedTables.Ids;arrivalProviderSequence=preparedProviderSequence;}
                         else{OwnArrivalInput(attempt);arrivalAttempts.Add(id,attempt);}arrivalSequence=id;installedAttempt=true;
                     });
-                    SignalHost();return true;
+                    NavArrivalDiagnostic.Buffer?.Birth(work,id);SignalHost();return true;
                 }
-            }catch(InvalidOperationException error){if(installedAttempt)throw;refused=IsPhysicalArrivalAdmissionRefusal(error);return false;}
-            finally{if(!installedAttempt)preparedTables?.ReleaseStorage();if(!installedAttempt||preparedTables!=null)preparedAttempt?.ReleaseStorage();if(installedAttempt&&preparedTables!=null)observedTables?.Release();observedTables?.Release();observation?.Release();work?.Release();input?.StorageRoot.Release();next?.ReleaseStorage();scope?.Discard();source?.Release();}
+            }catch(InvalidOperationException error){if(installedAttempt)throw;refused=IsPhysicalArrivalAdmissionRefusal(error);
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                if(QaArrivalLifecycle.Enabled)lifecycleBirthReason=refused?"prepared-admission-refused":error.Message=="Physical arrival input lost its authority observation."?"authority-observation-lost":"invalid-operation";
+#endif
+                return false;}
+            finally{
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                if(QaArrivalLifecycle.Enabled)QaArrivalLifecycle.FinishBirth(lifecycleBirth,work,installedAttempt,installedAttempt?"committed":lifecycleBirthReason,refused);
+#endif
+                if(originalObserved){var r=work!=null?work.OriginalDiagnostic(OriginalGroupEvent.Birth):originalBirth;r.Attempt=originalBirth.Attempt;r.Request=originalBirth.Request;r.Operation=originalBirth.Operation;r.Geometry=originalBirth.Geometry;r.Profile=originalBirth.Profile;r.Quantum=originalBirth.Quantum;r.Committed=installedAttempt?1:0;r.Reason=installedAttempt?0:refused?4:7;OriginalGroupTrace.Append(r);}if(!installedAttempt)preparedTables?.ReleaseStorage();if(!installedAttempt||preparedTables!=null)preparedAttempt?.ReleaseStorage();if(installedAttempt&&preparedTables!=null)observedTables?.Release();observedTables?.Release();observation?.Release();work?.Release();input?.StorageRoot.Release();next?.ReleaseStorage();scope?.Discard();source?.Release();}
         }
         private static void UpdatePhysicalArrivalSnapshot(ArrivalAttempt attempt)
         {
@@ -267,18 +293,27 @@ namespace Spacewars.Runtime
                 observedAttemptOwner?.Retain();observedWork.Retain();observedHistory.Retain();attempt.Working=true;observedAttemptOwner?.ChangedNoThrow();
             }
             NavigationHostRoot next=null;NavigationArrivalWork fork=null;NavigationHostArrivalHistory history=null;NavigationRetentionBudget.Scope scope=null;NavigationArrivalWork retiredWork=null;NavigationHostArrivalHistory retiredHistory=null;bool workPin=false,historyPin=false;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            QaArrivalLifecycle.Ticket lifecycleAdvance=default;
+#endif
+            string diagnosticOutcome="not-committed";long diagnosticQuantum=0;bool diagnosticBegan=false;
             NavOwnedText nextFrontier=null,nextPhase=null,retiredFrontier=null,retiredPhase=null;
             try{
-                TraceArrivalService("advance-start");source=PinCommittedHostRoot();if(source==null)return false;
-                if(!TryOpenPhysicalHostScope(NavigationPreparationKind.Arrival,attempt.Id,Admission.PublicationIdentity,out scope)){TraceArrivalService("scope-refused");return false;}
+                TraceArrivalService("advance-start");source=PinCommittedHostRoot();if(source==null)return false;diagnosticQuantum=source.QuantumSerial;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                if(QaArrivalLifecycle.Enabled)lifecycleAdvance=QaArrivalLifecycle.BeginAdvance(Generation,attempt.Id,observedEpoch,diagnosticQuantum,step.Allocation,observedWork);
+#endif
+                NavArrivalDiagnostic.Buffer?.Begin(observedWork,attempt.Id,observedEpoch,diagnosticQuantum,step.Allocation);diagnosticBegan=true;
+                if(!TryOpenPhysicalHostScope(NavigationPreparationKind.Arrival,attempt.Id,Admission.PublicationIdentity,out scope)){diagnosticOutcome="scope-refused";TraceArrivalService("scope-refused");return false;}
                 var reservation=scope.OwnedReservation();next=source.ForkOwned(reservation);using(PerformanceProfile.Measure(ProfileStage.ArrivalFork))fork=observedWork.ForkOwned(reservation);
-                if(!fork.TryReserveAuthorityBytes(step.External)){TraceArrivalService("authority-bytes-refused");return false;}
+                if(!fork.TryReserveAuthorityBytes(step.External)){diagnosticOutcome="authority-bytes-refused";TraceArrivalService("authority-bytes-refused");return false;}
                 using(PerformanceProfile.Measure(ProfileStage.ArrivalAdvance))fork.Advance(step.Epoch,step.Allocation,new NavEpochQuota(step.Graph,step.Field,step.Connectors,step.Bookkeeping,step.Maintenance));
+                NavArrivalDiagnostic.Buffer?.Proposed(fork,attempt.Id,observedEpoch,diagnosticQuantum,step.Allocation);
                 PerformanceProfile.Add(ProfileWork.ArrivalConsumed,fork.LastAdvanceConsumed);
                 PerformanceProfile.Add(ProfileWork.ArrivalCandidate,fork.CandidateWorkConsumed-observedWork.CandidateWorkConsumed);
                 PerformanceProfile.Add(ProfileWork.ArrivalOccupancy,fork.OccupancyWorkConsumed-observedWork.OccupancyWorkConsumed);
                 PerformanceProfile.Add(ProfileWork.ArrivalDirect,fork.DirectWorkConsumed-observedWork.DirectWorkConsumed);
-                if(fork.LastAdvanceRetentionBlocked){TraceArrivalService("advance-retention-blocked");return false;}
+                if(fork.LastAdvanceRetentionBlocked){diagnosticOutcome="advance-retention-blocked";TraceArrivalService("advance-retention-blocked");return false;}
                 BeforeArrivalAdvanceCommit?.Invoke(fork.Status);using(PerformanceProfile.Measure(ProfileStage.ArrivalSeal))fork.SealPrepared();history=observedHistory.AppendOwned(step,reservation);next.StageArrivalHistory(attempt.Id,history,reservation);next.StageArrivalWork(attempt.Id,fork,reservation);
                 string frontier,phase;
                 using(PerformanceProfile.Measure(ProfileStage.ArrivalFrontier))
@@ -295,8 +330,12 @@ namespace Spacewars.Runtime
                     attempt.Frontier=frontier;attempt.SnapshotPhase=phase;attempt.SnapshotStatus=status;attempt.SnapshotCandidate=candidate;attempt.SnapshotOccupancy=occupancy;attempt.SnapshotMember=member;
                     observedAttemptOwner?.ChangedNoThrow();
                 });
-                TraceArrivalService("committed");return true;
-            }catch(InvalidOperationException e)when(IsPhysicalArrivalAdmissionRefusal(e)){TraceArrivalService("prepared-admission-refused");return false;}finally{TraceArrivalService("release-start");nextFrontier?.Release();nextPhase?.Release();retiredFrontier?.Release();retiredPhase?.Release();if(workPin)fork?.Release();if(historyPin)history?.Release();retiredWork?.Release();retiredHistory?.Release();history?.Release();next?.ReleaseStorage();fork?.Release();scope?.Discard();source?.Release();try{using(EnterTransport()){attempt.Working=false;observedAttemptOwner?.ChangedNoThrow();PruneArrivalAttempts();}}finally{observedWork.Release();observedHistory.Release();observedAttemptOwner?.Release();TraceArrivalService("release-end");}}
+                diagnosticOutcome="committed";TraceArrivalService("committed");return true;
+            }catch(InvalidOperationException e)when(IsPhysicalArrivalAdmissionRefusal(e)){diagnosticOutcome="prepared-admission-refused";TraceArrivalService("prepared-admission-refused");return false;}catch(PhysicalIngressRefused){diagnosticOutcome="source-owner-refused";throw;}catch{diagnosticOutcome="exception";throw;}finally{
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                if(QaArrivalLifecycle.Enabled)QaArrivalLifecycle.FinishAdvance(lifecycleAdvance,fork,diagnosticOutcome);
+#endif
+                OriginalGroupDiagnostics.Service(attempt.Work,fork,attempt.Id,observedEpoch,diagnosticQuantum,step.Allocation,diagnosticOutcome);if(diagnosticBegan)NavArrivalDiagnostic.Buffer?.Finish(attempt.Work,attempt.Id,attempt.Epoch,diagnosticQuantum,step.Allocation,diagnosticOutcome);TraceArrivalService("release-start");nextFrontier?.Release();nextPhase?.Release();retiredFrontier?.Release();retiredPhase?.Release();if(workPin)fork?.Release();if(historyPin)history?.Release();retiredWork?.Release();retiredHistory?.Release();history?.Release();next?.ReleaseStorage();fork?.Release();scope?.Discard();source?.Release();try{using(EnterTransport()){attempt.Working=false;observedAttemptOwner?.ChangedNoThrow();PruneArrivalAttempts();}}finally{observedWork.Release();observedHistory.Release();observedAttemptOwner?.Release();TraceArrivalService("release-end");}}
         }
     }
 }

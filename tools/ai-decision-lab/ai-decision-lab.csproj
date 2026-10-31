@@ -7,8 +7,18 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Current production diagnostics use JsonConvert. Reuse the .NET 8 SDK's
+         bundled assembly; keep this offline tool free of NuGet restores. -->
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(MSBuildToolsPath)/Newtonsoft.Json.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
     <Compile Include="../../unity/Assets/Spacewars/Runtime/**/*.cs" />
     <Compile Include="../../unity/Assets/Spacewars/Simulation/**/*.cs" />
     <Compile Include="Program.cs" />
   </ItemGroup>
+  <Target Name="RequireSdkJson" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(MSBuildToolsPath)/Newtonsoft.Json.dll')"
+           Text="The decision lab requires the Newtonsoft.Json assembly bundled with the .NET 8 SDK; no fallback or NuGet download is permitted." />
+  </Target>
 </Project>

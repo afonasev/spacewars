@@ -28,7 +28,7 @@ namespace Spacewars.Runtime
         {
             if(!b.Ready||b.Health<=0||b.Sale!=null)return "Здание недоступно";
             if(b.Repair!=null)return "Ремонт уже активен";
-            if(b.Health>=TerritoryRules.Health(profile,b.Kind))return "Здание не повреждено";
+            if(b.Health>=BuildingMaximumHealth(b.Owner,b.Kind))return "Здание не повреждено";
             return CombatLocked(b,profile.BuildingRepairCombatLockoutSec)?"Ремонт запрещён: здание находится в бою":null;
         }
         private PlayableCommandStatus SellBuilding(int id,PlayableOwner owner,out string message)
@@ -38,6 +38,7 @@ namespace Spacewars.Runtime
             message=SaleBlocked(b);if(message!=null)return PlayableCommandStatus.Rejected;
             foreach(var item in SaleGroup(b))
             {
+                Fact(owner,MatchFactKind.BuildingSold,0,(int)item.Kind);
                 AddCredits(owner,SaleRefund(item));
                 item.Sale=new SaleState{TermsRevision=profile.Revision,Duration=profile.BuildingSaleDemolitionSec};
                 item.Repair=null;if(item.Upgrade?.Complete!=true)item.Upgrade=null;item.Orders.Clear();item.RepeatTank=false;
@@ -50,7 +51,9 @@ namespace Spacewars.Runtime
             message="Выберите собственное повреждённое здание";
             if(!buildings.TryGetValue(id,out var b)||b.Owner!=owner)return PlayableCommandStatus.InvalidEntity;
             message=RepairBlocked(b);if(message!=null)return PlayableCommandStatus.Rejected;
-            double missing=TerritoryRules.Health(profile,b.Kind)-b.Health,ratio=missing/TerritoryRules.Health(profile,b.Kind);
+            // Store missing HP in base-health units, so research can scale the ongoing
+            // repair without changing its frozen price, duration or save fields.
+            double missing=TerritoryRules.Health(profile,b.Kind)-b.Health/BuildingHealthMultiplier(b.Owner,profile),ratio=missing/TerritoryRules.Health(profile,b.Kind);
             b.Repair=new RepairState{TermsRevision=profile.Revision,MissingHealth=missing,TotalCost=TerritoryRules.Cost(profile,b.Kind)*profile.BuildingRepairCostRatio*ratio,Duration=profile.BuildingRepairDurationSec*ratio};
             Sound(PlayableSoundKind.RepairStarted,b.Position,PlayableEntityKind.Tank,owner,true);
             message="Ремонт начат";return PlayableCommandStatus.Applied;
@@ -85,10 +88,10 @@ namespace Spacewars.Runtime
                     double remaining=r.Duration-r.PaidSeconds,slice=Math.Min(1,remaining);
                     bool terminal=slice>=remaining-1e-9;
                     double cost=terminal?Math.Max(0,r.TotalCost-r.TotalCost*Math.Min(1,r.PaidSeconds/r.Duration)):r.TotalCost*slice/r.Duration;
-                    if(Balance(b.Owner)+1e-9<cost){r.Waiting=true;continue;}
+                    if(!FreeProvingGround&&Balance(b.Owner)+1e-9<cost){r.Waiting=true;continue;}
                     AddCredits(b.Owner,-cost);
-                    double maximum=TerritoryRules.Health(profile,b.Kind);
-                    b.Health=Math.Min(maximum,b.Health+r.MissingHealth*slice/r.Duration);
+                    double maximum=BuildingMaximumHealth(b.Owner,b.Kind);
+                    b.Health=Math.Min(maximum,b.Health+r.MissingHealth*BuildingHealthMultiplier(b.Owner,profile)*slice/r.Duration);
                     // Settle sub-nanohitpoint accumulation before the integer HUD ceiling.
                     if(terminal)b.Health=Math.Round(b.Health,9);
                     r.PaidSeconds+=slice;r.Waiting=false;
@@ -97,7 +100,8 @@ namespace Spacewars.Runtime
             }
             if(removed)RebuildGeometry();
         }
-        private int SaleRefund(Building b)=>(int)Math.Floor((b.PaidCost+(b.Upgrade?.PaidCost??0))*profile.BuildingSaleRefundRatio*Math.Max(0,b.Health)/TerritoryRules.Health(profile,b.Kind));
+        private double LocalCenterUpgradeInvestment(Building b)=>research.TryGetValue(b.Owner,out var orders)?orders.Where(o=>o.CenterId==b.Id&&PlayableResearchRules.Local(o.Kind)&&(o.Active||o.Complete)).Sum(o=>o.PaidCost):0;
+        private int SaleRefund(Building b)=>(int)Math.Floor((b.PaidCost+(b.Upgrade?.PaidCost??0)+(b.ProducerUpgrade?.PaidCost??0)+b.Orders.Where(o=>o.IsUpgrade&&o.Active).Sum(o=>o.PaidCost)+LocalCenterUpgradeInvestment(b))*profile.BuildingSaleRefundRatio*Math.Max(0,b.Health)/BuildingMaximumHealth(b.Owner,b.Kind));
         private PlayableBuildingLifecycleSnapshot LifecycleSnapshot(Building b)
         {
             bool center=TerritoryRules.Center(b.Kind),lastCenter=center;int count=1;
@@ -109,7 +113,7 @@ namespace Spacewars.Runtime
             }
             return new PlayableBuildingLifecycleSnapshot(b.Sale!=null,b.Sale==null?0:b.Sale.Elapsed/b.Sale.Duration,b.Repair!=null,b.Repair?.Waiting??false,
                 b.Repair?.PaidSeconds??0,b.Repair?.Duration??0,SaleBlocked(b),RepairBlocked(b),count,refund,lastCenter,
-                b.Repair==null?TerritoryRules.Cost(profile,b.Kind)*profile.BuildingRepairCostRatio*Math.Max(0,1-b.Health/TerritoryRules.Health(profile,b.Kind)):
+                b.Repair==null?TerritoryRules.Cost(profile,b.Kind)*profile.BuildingRepairCostRatio*Math.Max(0,1-b.Health/BuildingMaximumHealth(b.Owner,b.Kind)):
                     Math.Max(0,b.Repair.TotalCost-b.Repair.TotalCost*Math.Min(1,b.Repair.PaidSeconds/b.Repair.Duration)),b.Repair?.TermsRevision??profile.Revision);
         }
     }

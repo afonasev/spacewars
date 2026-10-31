@@ -59,11 +59,11 @@ namespace Spacewars.Runtime
         internal IReadOnlyList<string> EliminatedOwners=>eliminated.OrderBy(x=>(int)x).Select(x=>offline==null?(x==PlayableOwner.Player?PlayerId:"enemy-1"):offline.Roster[(int)x].Id).ToArray();
         private void MaterializeOffline()
         {
-            foreach(var owner in Owners.Where(_=>!offline.CampaignOpening)){var start=offline.Starts[offline.Assignments[(int)owner]];AddBuilding(owner,PlayableBuildingKind.Headquarters,start.Position,true);var b=buildings[sites[start.SiteId].CenterId];b.Heading=start.Heading;}
+            foreach(var owner in Owners.Where(_=>!offline.CampaignOpening)){var start=offline.Starts[offline.Assignments[(int)owner]];AddBuilding(owner,PlayableBuildingKind.Headquarters,start.Position,true);var b=buildings[sites[start.SiteId].CenterId];b.Heading=TerritoryRules.BuildingHeading;}
             foreach(var entity in offline.ScenarioBuildings.OrderBy(b=>b.SlotId==0?0:1)){
                 int index=Enumerable.Range(0,offline.Roster.Count).Where(i=>offline.Roster[i].LogicalPlayer==entity.LogicalPlayer).DefaultIfEmpty(-1).First();if(index<0)continue;
                 var owner=(PlayableOwner)index;var state=sites[entity.SiteId];int id=nextId++;int parent=entity.SlotId==0?0:state.CenterId;if(entity.SlotId!=0&&(parent==0||buildings[parent].Owner!=owner))throw new ArgumentException("Scenario parent binding mismatch.");
-                var b=new Building{TermsRevision=profile.Revision,Id=id,Owner=owner,Kind=entity.Kind,SiteId=entity.SiteId,SlotId=entity.SlotId,ParentId=parent,Position=entity.Position,Heading=entity.Heading,PaidCost=TerritoryRules.Cost(profile,entity.Kind),Health=TerritoryRules.Health(profile,entity.Kind),Build=TerritoryRules.Duration(profile,entity.Kind),Ready=true,Phase=ConstructionPhase.Ready};buildings.Add(id,b);if(entity.SlotId==0){state.CenterId=id;state.Locked=owner;state.Claimant=owner;state.Progress=1;}
+                var b=new Building{TermsRevision=profile.Revision,Id=id,Owner=owner,Kind=entity.Kind,SiteId=entity.SiteId,SlotId=entity.SlotId,ParentId=parent,Position=entity.Position,Heading=TerritoryRules.BuildingHeading,PaidCost=TerritoryRules.Cost(profile,entity.Kind),Health=BuildingMaximumHealth(owner,entity.Kind),Build=TerritoryRules.Duration(profile,entity.Kind),Ready=true,Phase=ConstructionPhase.Ready};buildings.Add(id,b);if(entity.SlotId==0){state.CenterId=id;state.Locked=owner;state.Claimant=owner;state.Progress=1;}
             }
             RebuildGeometry();
             foreach(var owner in Owners.Where(_=>!offline.CampaignOpening&&offline.ProvingGround==null)){var start=offline.Starts[offline.Assignments[(int)owner]];int id=SpawnUnit(start.ExplorerAnchor,owner,PlayableEntityKind.Explorer);TryActor(id,out var n);n.Heading=start.Heading+Math.PI;units[id].Turret=n.Heading;}
@@ -76,7 +76,7 @@ namespace Spacewars.Runtime
             if(offline.ProvingGround!=null)return;
             if(offline.CampaignOpening){AdvanceCampaignOpening();return;}
             foreach(var owner in Owners.Where(x=>!eliminated.Contains(x)).ToArray())if(!buildings.Values.Any(b=>b.Owner==owner&&TerritoryRules.Center(b.Kind)&&b.Phase!=ConstructionPhase.Pending)){
-                eliminated.Add(owner);
+                eliminated.Add(owner);RecordPlayerExit(owner,false);
                 foreach(var u in units.Values.Where(u=>u.Owner==owner)){tacticalQueues.Remove(u.Id);InvalidateSpatialCompletion(u.Id);InterruptBurst(u);u.Target=0;u.ExplicitTarget=false;u.HasAttackMove=false;u.CurrentOrder=null;navigation.Stop(u.Id,true);}
                 foreach(var b in buildings.Values.Where(b=>b.Owner==owner).ToArray()){b.Repair=null;b.Orders.Clear();b.RepeatTank=false;if(b.Phase==ConstructionPhase.Pending)RemoveBuilding(b,false);}
                 research.Remove(owner);ResynchronizeTankMobility(owner);foreach(var key in centerDamage.Keys.ToArray())if(centerDamage[key].Owner==owner||!units.ContainsKey(centerDamage[key].AttackerId))centerDamage.Remove(key);

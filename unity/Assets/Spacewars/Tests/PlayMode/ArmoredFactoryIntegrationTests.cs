@@ -22,6 +22,43 @@ namespace Spacewars.Tests.PlayMode
             10,PlayableOwner.Player,PlayableBuildingKind.Factory,new NavPoint(4,7),100,progress,working?1:0,0,default,
             launchPhase:stage,launchTime:time,launchKind:stage==1||stage==2?(PlayableEntityKind?)PlayableEntityKind.Tank:null,includePrivateState:visible,orders:working?new[]{new PlayableProductionOrderSnapshot(1,PlayableEntityKind.Tank,150,1,10,5,true)}:null);
 
+        [Test] public void AllBuildingFrontsStaySouthForEveryOwnerAndCameraOrbit()
+        {
+            var root=new GameObject("Fixed building front regression");var camera=new GameObject("Orbit camera").AddComponent<Camera>();camera.transform.SetParent(root.transform);
+            try
+            {
+                var data=PlayableProfile.Default.CopyData();data.cameraOffsetX=23;
+                using var world=new PlayableWorld(root.transform,PlayableProfile.Create(data));int id=0;
+                foreach(bool friendly in new[]{true,false})foreach(string kind in new[]{"Headquarters","Outpost","Mine","Factory","Refinery","ScientificCenter","Hangar"})foreach(bool upgraded in kind=="Refinery"?new[]{false,true}:new[]{false})
+                {
+                    var actor=world.Building(++id,kind,friendly,upgraded);
+                    world.FaceBuilding(actor);Assert.That(Vector3.Dot(actor.Hull.forward,Vector3.back),Is.GreaterThan(.999f),kind+" starts south before the first snapshot");
+                    actor.Root.rotation=Quaternion.Euler(0,73,0);
+                    foreach(float yaw in new[]{0f,90f,180f,270f})
+                    {
+                        camera.transform.rotation=Quaternion.Euler(45,yaw,0);world.FaceBuilding(actor,camera);
+                        Assert.That(Vector3.Dot(actor.Hull.forward,Vector3.back),Is.GreaterThan(.999f),kind+" must keep world south for camera yaw "+yaw);
+                    }
+                }
+            }
+            finally{UnityEngine.Object.DestroyImmediate(root);}
+        }
+
+        [Test] public void SavedActiveReleaseKeepsItsVisibleCorridorUntilClosed()
+        {
+            var root=new GameObject("Legacy corridor front regression");
+            try
+            {
+                using var world=new PlayableWorld(root.transform,PlayableProfile.Default);var actor=world.Building(10,"Factory",true);
+                var old=Building(stage:1);var view=new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,0,null,Array.Empty<PlayableEntitySnapshot>(),new[]{old},Array.Empty<PlayableProjectileSnapshot>(),null,null);
+                world.UpdateFactoryModel(actor,old,view);world.FaceBuilding(actor);
+                Assert.That(Vector3.Dot(actor.Hull.forward,Vector3.right),Is.GreaterThan(.999f));
+                world.UpdateFactoryModel(actor,Building(),view);world.FaceBuilding(actor);
+                Assert.That(Vector3.Dot(actor.Hull.forward,Vector3.back),Is.GreaterThan(.999f));
+            }
+            finally{UnityEngine.Object.DestroyImmediate(root);}
+        }
+
         [UnityTest] public IEnumerator SnapshotLifecycleFreezesAndDoesNotMistakeCancellationForRelease()
         {
             var root=new GameObject("Factory lifecycle regression");
@@ -108,12 +145,21 @@ namespace Spacewars.Tests.PlayMode
                 while((Factory()==null||Factory().Progress<1||Factory().Phase!=ConstructionPhase.Ready)&&Time.realtimeSinceStartupAsDouble<until){Trace("observe");Assert.False(runtime.IsStopped,runtime.Latest?.Failure);yield return null;}
                 var factory=Factory();Assert.NotNull(factory,"Normal construction command created factory");Assert.AreEqual(1,factory.Progress,"Factory completed within fixed budget");
                 var world=Get<PlayableWorld>("world");var actor=world.Actors[factory.Id];Assert.NotNull(actor.Factory);
+                Assert.AreEqual(TerritoryRules.BuildingHeading,factory.Heading);
+                Assert.That(Vector3.Dot(actor.Hull.forward,Vector3.back),Is.GreaterThan(.999f),"Gate faces the default southern camera");
                 int initialUnits=View().Entities.Count(e=>e.Owner==PlayableOwner.Player);
                 inspection=new GameObject("Factory game-scene inspection camera").AddComponent<Camera>();inspection.CopyFrom(Get<Camera>("cameraView"));inspection.enabled=false;
                 var direction=new Vector3((float)Math.Cos(factory.Heading),0,(float)Math.Sin(factory.Heading));
                 inspection.orthographicSize=7;inspection.transform.position=actor.Root.position+direction*12+Vector3.Cross(Vector3.up,direction)*9+Vector3.up*12;inspection.transform.LookAt(actor.Root.position+Vector3.up*.5f);
                 target=new RenderTexture(1600,1000,24){antiAliasing=CameraAntialiasingProfile.Load().Samples};target.Create();inspection.targetTexture=target;
                 Capture(inspection,target,Path.Combine(output,"idle.png"));
+                void DefaultView(string name)
+                {
+                    var position=inspection.transform.position;var rotation=inspection.transform.rotation;float size=inspection.orthographicSize;
+                    var p=Get<PlayableProfile>("profile");inspection.transform.position=actor.Root.position+new Vector3((float)p.CameraOffsetX,(float)p.CameraHeight,(float)p.CameraOffsetZ);inspection.transform.LookAt(actor.Root.position);inspection.orthographicSize=(float)p.CameraOrthoSize;
+                    Capture(inspection,target,Path.Combine(output,name));inspection.transform.SetPositionAndRotation(position,rotation);inspection.orthographicSize=size;
+                }
+                DefaultView("default-camera-idle.png");
                 Submit(PlayableCommandKind.QueueTank,new[]{factory.Id});until=Time.realtimeSinceStartupAsDouble+90;
                 while(actor.Factory.SmokeParticles==0&&Time.realtimeSinceStartupAsDouble<until){Trace("observe");Assert.False(runtime.IsStopped,runtime.Latest?.Failure);yield return null;}
                 Assert.AreEqual(FactoryModelPresentation.Phase.Working,actor.Factory.phase);Assert.Greater(actor.Factory.SmokeParticles,0);
@@ -124,7 +170,7 @@ namespace Spacewars.Tests.PlayMode
                 until=Time.realtimeSinceStartupAsDouble+90;
                 while((Factory().LaunchPhase!=FactoryReleaseRules.Driving||Factory().LaunchTime<.4)&&Time.realtimeSinceStartupAsDouble<until){Trace("driving");Assert.False(runtime.IsStopped,runtime.Latest?.Failure);yield return null;}
                 Assert.AreEqual(FactoryReleaseRules.Driving,Factory().LaunchPhase);Assert.AreEqual(1,actor.Factory.doorOpen);Assert.AreEqual(initialUnits,View().Entities.Count(e=>e.Owner==PlayableOwner.Player),"Staged vehicle is not yet an ordinary command or damage target");
-                Assert.True(actor.FactoryStaged&&actor.FactoryStaged.gameObject.activeSelf);Assert.AreEqual(0,actor.FactoryStaged.GetComponentsInChildren<Collider>().Length);Capture(inspection,target,Path.Combine(output,"driving.png"));
+                Assert.True(actor.FactoryStaged&&actor.FactoryStaged.gameObject.activeSelf);Assert.AreEqual(0,actor.FactoryStaged.GetComponentsInChildren<Collider>().Length);Capture(inspection,target,Path.Combine(output,"driving.png"));DefaultView("default-camera-driving.png");
                 until=Time.realtimeSinceStartupAsDouble+90;
                 while(View().Entities.Count(e=>e.Owner==PlayableOwner.Player)==initialUnits&&Time.realtimeSinceStartupAsDouble<until){Trace("activation");Assert.False(runtime.IsStopped,runtime.Latest?.Failure);yield return null;}
                 Assert.Greater(View().Entities.Count(e=>e.Owner==PlayableOwner.Player),initialUnits,"Authority activated unit after full clearance");Assert.AreEqual(FactoryReleaseRules.Closing,Factory().LaunchPhase);Assert.False(actor.FactoryStaged.gameObject.activeSelf);

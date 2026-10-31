@@ -5,7 +5,7 @@ namespace Spacewars.Input
 {
     [Serializable] public sealed class NativeLocalInputProfile
     {
-        public float deadzone,cursorSpeed,cameraSpeed,zoomSpeed,holdMs,selectAllHoldMs,selectionGrowth,cursorRadius,cursorWidth,doubleTapMs,cameraDefaultZoom,cameraMinZoom,cameraMaxZoom,radialDeadzone,radialRadius,basePageSize,controlGroupFocusRadius,cursorRecenterIdleMs;
+        public float deadzone,cursorSpeed,mapCursorSpeed,cameraSpeed,zoomSpeed,holdMs,selectAllHoldMs,selectionGrowth,cursorRadius,cursorWidth,doubleTapMs,cameraDefaultZoom,cameraMinZoom,cameraMaxZoom,radialDeadzone,radialRadius,basePageSize,controlGroupFocusRadius,cursorRecenterIdleMs;
         public Field[] metadata;
         [Serializable] public sealed class Field {public string path,label,description,unit;public float min,max,step,value;}
         public void Validate()
@@ -15,15 +15,16 @@ namespace Spacewars.Input
             foreach(var field in metadata){var key=field.path.Substring(field.path.LastIndexOf('.')+1);if(key=="controlGroupDoubleTapMs")key="doubleTapMs";var member=GetType().GetField(key);if(member!=null&&member.FieldType==typeof(float)){float value=(float)member.GetValue(this);if(value!=field.value||Math.Abs((value-field.min)/field.step-Math.Round((value-field.min)/field.step))>.001)throw new ArgumentException("Input differs from source metadata: "+field.path);}}
             if(cameraMinZoom<=0||cameraMaxZoom<=cameraMinZoom||cameraDefaultZoom<cameraMinZoom||cameraDefaultZoom>cameraMaxZoom)throw new ArgumentException("Invalid source camera metadata.");
             if((float.IsNaN(cursorRecenterIdleMs)||float.IsInfinity(cursorRecenterIdleMs))||cursorRecenterIdleMs<0||!Array.Exists(metadata,f=>f.path=="system.gamepad.cursorRecenterIdleMs"))throw new ArgumentException("Missing cursor recenter timing metadata.");
+            if(mapCursorSpeed<=0||!Array.Exists(metadata,f=>f.path=="system.gamepad.mapCursorSpeed"))throw new ArgumentException("Missing tactical map cursor speed metadata.");
             if(doubleTapMs<=0)throw new ArgumentException("Missing source double-tap timing.");
             if(deadzone<=0||deadzone>=1||holdMs<=0||selectAllHoldMs<=holdMs||cursorSpeed<=0||cameraSpeed<=0)throw new ArgumentException("Invalid source input values.");
         }
     }
     public sealed class OfflinePadSector
     {
-        public string Id;public bool Enabled;public string Hold;
-        public OfflinePadSector(string id,bool enabled,string hold=null){Id=id;Enabled=enabled;Hold=hold;}
-        public OfflinePadSector Copy()=>new OfflinePadSector(Id,Enabled,Hold);
+        public string Id;public bool Enabled,RecallEnabled,CanAssign,CanAdd;public string Hold;
+        public OfflinePadSector(string id,bool enabled,string hold=null){Id=id;Enabled=enabled;RecallEnabled=enabled;Hold=hold;}
+        public OfflinePadSector Copy()=>new OfflinePadSector(Id,Enabled,Hold){RecallEnabled=RecallEnabled,CanAssign=CanAssign,CanAdd=CanAdd};
     }
     public readonly struct OfflinePadIntent
     {
@@ -33,14 +34,14 @@ namespace Spacewars.Input
     // Per-seat gestures with explicit time and no authority/UI access.
     public sealed class OfflinePadGestures
     {
-        private sealed class Gesture{public double Since;public string Mode;public bool Ground,Consumed,Add,DoubleTap;public OfflinePadSector Sector;public double? SectorSince;}
+        private sealed class Gesture{public double Since;public string Mode;public bool Ground,Consumed,DoubleTap,Directed;public OfflinePadSector Sector;public double? SectorSince;}
         private readonly Dictionary<int,Gesture> gestures=new Dictionary<int,Gesture>();
         private int previous;private double? rbTapAt;
         public string Mode{get;private set;}="world";
         public bool Blocked{get;private set;}=true;
         public bool Map=>Mode=="tacticalMap"||Mode=="rallyMap";
         public bool Added{get;private set;}
-        public string AddedSectorId=>Added&&gestures.TryGetValue(128,out var rt)?rt.Sector?.Id:null;
+        public string AddedSectorId=>Added&&gestures.TryGetValue(32,out var rb)?rb.Sector?.Id:null;
         public bool AttackPreview{get;private set;}
         public bool QueuePreview{get;private set;}
         public bool ScreenPreview{get;private set;}
@@ -53,45 +54,59 @@ namespace Spacewars.Input
         {var result=StepDetailed(now,mask,connected,focused,profile,ground);var kinds=new List<string>();foreach(var intent in result)kinds.Add(intent.Kind);return kinds;}
         public IReadOnlyList<OfflinePadIntent> StepDetailed(double now,int mask,bool connected,bool focused,NativeLocalInputProfile profile,bool ground=true,OfflinePadSector sector=null)
         {
-            int prior=previous;previous=mask;QueuePreview=false;AttackPreview=false;ScreenPreview=false;SelectionHeldMs=0;Progress=0;
+            // RT is deliberately unbound; it must not affect neutral gates or pending RB taps.
+            mask&=~128;int prior=previous;previous=mask;QueuePreview=false;AttackPreview=false;ScreenPreview=false;SelectionHeldMs=0;Progress=0;
             var intents=new List<OfflinePadIntent>();bool pressed(int bit)=>(mask&bit)!=0&&(prior&bit)==0;
             void add(string kind,string id=null,double held=0,bool append=false)=>intents.Add(new OfflinePadIntent(kind,id,held,append));
             bool WorldOrMap()=>Mode=="world"||Mode=="tacticalMap";
             if(!connected||!focused){Cancel();return intents;}
             if(Blocked){if(mask==0)Blocked=false;return intents;}
-            if((mask&~32)!=0){rbTapAt=null;if(gestures.TryGetValue(32,out var second)&&second.DoubleTap&&!second.Consumed)gestures.Remove(32);}
+            if((mask&~32)!=0){rbTapAt=null;if(gestures.TryGetValue(32,out var second)&&second.DoubleTap&&!second.Consumed)second.DoubleTap=false;}
             if(pressed(16)){add("pause");SetMode("world");return intents;}
             if(pressed(8)&&(WorldOrMap()||Mode=="rallyTarget"||Mode=="rallyMap"))
             {SetMode(Mode=="rallyTarget"?"rallyMap":Mode=="rallyMap"?"rallyTarget":Mode=="world"?"tacticalMap":"world");return intents;}
             if(pressed(2)&&!WorldOrMap())
             {bool rally=Mode=="rallyTarget"||Mode=="rallyMap";if(rally)add("cancelRally");else if(Mode=="buildingWheel")add("deselect");SetMode(rally?"buildingWheel":"world");return intents;}
             if(rbTapAt.HasValue&&now-rbTapAt.Value>profile.doubleTapMs){rbTapAt=null;if(WorldOrMap())add("cycleGroup");}
-            foreach(int bit in new[]{128,32,64,1,2,256,4})
+            foreach(int bit in new[]{32,64,1,2,256,4})
             {
                 if(pressed(bit))
                 {
-                    if((bit==32||bit==64||bit==128||bit==4)&&!WorldOrMap())continue;
+                    if((bit==32||bit==64||bit==4)&&!WorldOrMap())continue;
                     if(bit==1&&!(WorldOrMap()||Mode=="buildingWheel"||Mode=="rallyTarget"||Mode=="rallyMap"))continue;
                     if((bit==2||bit==256)&&!WorldOrMap())continue;
                     var started=new Gesture{Since=now,Mode=Mode,Ground=ground,Sector=sector?.Copy()};gestures[bit]=started;
-                    if(bit==32){started.DoubleTap=rbTapAt.HasValue;rbTapAt=null;}
-                    if(bit==128){Mode="groupAssign";gestures.Clear();gestures[128]=started;}
+                    if(bit==32){started.DoubleTap=rbTapAt.HasValue;rbTapAt=null;Mode="groupWheel";gestures.Clear();gestures[32]=started;}
                 }
                 if(!gestures.TryGetValue(bit,out var gesture))continue;
-                if(bit==128)
+                if(bit==32)
                 {
                     var valid=sector!=null&&sector.Enabled&&sector.Id!="all"?sector:null;
                     double? since=valid==null?null:gesture.Sector?.Id==valid.Id&&gesture.SectorSince.HasValue?gesture.SectorSince:now;
                     double progress=since.HasValue?Math.Min(1,Math.Max(0,now-since.Value)/profile.holdMs):0;
-                    if(!gesture.Consumed){gesture.Sector=valid?.Copy();gesture.SectorSince=since;if(valid!=null&&progress>=1){add("addGroup",valid.Id);gesture.Consumed=true;Added=true;}}
-                    if((mask&128)!=0)Progress=gesture.Consumed?1:progress;
-                    else{if(!gesture.Consumed&&valid!=null)add("assignGroup",valid.Id);SetMode(gesture.Mode=="tacticalMap"?"tacticalMap":"world");}
+                    if(!gesture.Consumed)
+                    {
+                        gesture.Sector=valid?.Copy();gesture.SectorSince=since;if(valid!=null)gesture.Directed=true;
+                        // Assignment is confirmed on RB release, leaving X available throughout the dwell.
+                        if((mask&32)!=0&&pressed(4)&&valid!=null&&valid.CanAdd){add("addGroup",valid.Id);gesture.Consumed=true;Added=true;}
+                    }
+                    if((mask&32)!=0)Progress=gesture.Consumed?1:valid!=null&&valid.CanAssign?progress:0;
+                    else
+                    {
+                        bool tap=now-gesture.Since<profile.holdMs&&!gesture.Consumed&&valid==null&&!gesture.Directed;
+                        if(!gesture.Consumed&&valid!=null){if(valid.CanAssign&&progress>=1)add("assignGroup",valid.Id);else if(valid.RecallEnabled)add("recallGroup",valid.Id);}
+                        bool doubleTap=gesture.DoubleTap;
+                        SetMode(gesture.Mode=="tacticalMap"?"tacticalMap":"world");
+                        if(tap){if(doubleTap)add("selectAllArmy");else rbTapAt=now;}
+                        return intents;
+                    }
                     continue;
                 }
                 double held=Math.Max(0,now-gesture.Since);LastHeldMs=held;bool longer=held>=profile.holdMs;
                 if((mask&bit)!=0)
                 {
-                    if((bit==32||bit==64)&&longer&&!gesture.Consumed){Mode=bit==64?"baseWheel":gesture.Add?"groupAssign":"groupWheel";gesture.Consumed=true;gestures.Clear();gestures[bit]=gesture;}
+                    if(bit==64&&longer&&!gesture.Consumed){Mode="baseWheel";gesture.Consumed=true;gestures.Clear();gestures[bit]=gesture;}
+                    if(bit==1&&gesture.Mode=="world"&&!gesture.Consumed&&held>=profile.selectAllHoldMs){add("selectScreen",held:held);gesture.Consumed=true;}
                     if(bit==1&&gesture.Mode=="buildingWheel")
                     {
                         bool valid=sector!=null&&sector.Enabled&&gesture.Sector!=null&&gesture.Sector.Enabled&&sector.Id==gesture.Sector.Id;
@@ -104,7 +119,7 @@ namespace Spacewars.Input
                 if(bit==32||bit==64)
                 {
                     if(gesture.Consumed){if(sector!=null&&sector.Enabled&&Mode!="groupAssign")add(bit==32?"recallGroup":"selectBase",sector.Id);SetMode(gesture.Mode=="tacticalMap"?"tacticalMap":"world");}
-                    else if(!longer&&!(bit==32&&gesture.Add)&&gesture.Mode==Mode){if(bit==64)add("cycleBase");else if(gesture.DoubleTap)add("selectAllArmy");else rbTapAt=now;}
+                    else if(!longer&&gesture.Mode==Mode){if(bit==64)add("cycleBase");else if(gesture.DoubleTap)add("selectAllArmy");else rbTapAt=now;}
                     continue;
                 }
                 if(gesture.Consumed||gesture.Mode!=Mode)continue;

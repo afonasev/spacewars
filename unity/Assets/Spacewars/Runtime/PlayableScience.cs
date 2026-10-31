@@ -15,8 +15,8 @@ namespace Spacewars.Runtime
         {
             if(b.Kind!=PlayableBuildingKind.Refinery||!b.Ready||b.Health<=0||b.Sale!=null)return "Нужен готовый собственный завод";
             if(b.Upgrade!=null)return b.Upgrade.Complete?"Завод уже улучшен":"Улучшение уже начато";
-            if(!buildings.Values.Any(s=>s.Owner==b.Owner&&s.Kind==PlayableBuildingKind.ScientificCenter&&s.Ready&&s.Health>0&&s.Sale==null))return "Нужен готовый собственный Научный центр";
-            return Balance(b.Owner)<profile.RefineryUpgradeCost?"Недостаточно кредитов":null;
+            if(!buildings.Values.Any(s=>ReadyResearchCenter(s.Id,b.Owner)&&CenterUpgraded(s.Id)))return "Нужен готовый собственный улучшенный научный центр";
+            return !CanAfford(b.Owner,profile.RefineryUpgradeCost)?"Недостаточно кредитов":null;
         }
         private PlayableCommandStatus StartRefineryUpgrade(int id,PlayableOwner owner,out string message)
         {
@@ -24,7 +24,7 @@ namespace Spacewars.Runtime
             if(!buildings.TryGetValue(id,out var b)||b.Owner!=owner)return PlayableCommandStatus.InvalidEntity;
             message=UpgradeBlocked(b);if(message!=null)return PlayableCommandStatus.Rejected;
             AddCredits(owner,-profile.RefineryUpgradeCost);
-            b.Upgrade=new RefineryUpgrade{TermsRevision=profile.Revision,PaidCost=profile.RefineryUpgradeCost,Duration=profile.RefineryUpgradeSeconds};
+            b.Upgrade=new RefineryUpgrade{TermsRevision=profile.Revision,PaidCost=profile.RefineryUpgradeCost,Duration=ActionDuration(profile.RefineryUpgradeSeconds)};
             Fact(owner,MatchFactKind.RefineryUpgradeOrdered,b.Upgrade.PaidCost,(int)b.Kind);
             Sound(PlayableSoundKind.UpgradeStarted,b.Position,PlayableEntityKind.Tank,owner,true);
             message="Улучшение завода начато";return PlayableCommandStatus.Applied;
@@ -42,14 +42,15 @@ namespace Spacewars.Runtime
             {
                 var u=b.Upgrade;if(eliminated.Contains(b.Owner)||u==null||u.Complete||b.Sale!=null||!b.Ready)continue;
                 u.Elapsed=Math.Min(u.Duration,u.Elapsed+dt);
-                if(u.Elapsed+1e-9>=u.Duration){u.Elapsed=u.Duration;u.Complete=true;Sound(PlayableSoundKind.UpgradeComplete,b.Position,PlayableEntityKind.Tank,b.Owner,true);}
+                if(u.Elapsed+1e-9>=u.Duration){u.Elapsed=u.Duration;u.Complete=true;Fact(b.Owner,MatchFactKind.RefineryUpgradeCompleted,u.PaidCost,(int)b.Kind,PlayableResearchRules.RefineryDescription(profile));Sound(PlayableSoundKind.UpgradeComplete,b.Position,PlayableEntityKind.Tank,b.Owner,true);}
             }
         }
         private PlayableRefineryUpgradeSnapshot UpgradeSnapshot(Building b)
         {
+            if(b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar)return ProducerUpgradeSnapshot(b);
             if(b.Kind!=PlayableBuildingKind.Refinery||!b.Ready)return null;
             var u=b.Upgrade;
-            return new PlayableRefineryUpgradeSnapshot(u!=null&&!u.Complete,u?.Complete??false,u?.PaidCost??0,u?.Elapsed??0,u?.Duration??profile.RefineryUpgradeSeconds,UpgradeBlocked(b));
+            return new PlayableRefineryUpgradeSnapshot(u!=null&&!u.Complete,u?.Complete??false,u?.PaidCost??0,u?.Elapsed??0,u?.Duration??ActionDuration(profile.RefineryUpgradeSeconds),UpgradeBlocked(b));
         }
     }
 }

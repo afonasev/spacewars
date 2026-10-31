@@ -14,12 +14,21 @@ namespace Spacewars.Input
         // Index zero selects the whole army; other indices assign/recall groups.
         public Action<int, bool, double> SelectionKey;
         public Action ResetCamera;
+        public Action FocusLatestEvent;
+        public Action<bool> OpenChat;
+        public Func<bool> IsTextEntryActive;
+        private bool waitForNeutral;
+        public void SuppressUntilNeutral(){ClearMode();waitForNeutral=true;}
         public float DoubleClickMilliseconds = 450, SelectionDragPixels = 5;
         public bool AttackMode => attackMode;
+        public bool SelectionAppendHeld => SeatKeyboard?.shiftKey.isPressed==true;
         public Action<Vector2, bool, bool> Order;
         public Action Hold, Stop, TogglePause, Restart, FocusLost, Capture, ToggleMap, CloseMap;
         // 0 world, 1 compact, 2 tactical, 3 tactical backdrop (consumes input).
         public Func<Vector2,int> MapAt;
+        public Func<Vector2,bool,bool,bool,bool> SignalPointer;
+        public Func<bool> SignalModal;
+        public Action CancelSignal;
         public Action<int,Vector2,Vector2,bool> MapSelect;
         public Action<int,Vector2> MapPan;
         public Action<int,Vector2,bool,bool> MapOrder;
@@ -41,11 +50,13 @@ namespace Spacewars.Input
         private Mouse SeatMouse {get{var device=AssignedMouse??Mouse.current;return device?.added==true?device:null;}}
         private Keyboard SeatKeyboard {get{var device=AssignedKeyboard??Keyboard.current;return device?.added==true?device:null;}}
         public Func<bool> CanReadWorld;
-        private bool WorldAllowed=>WorldInputEnabled&&(CanReadWorld?.Invoke()!=false);
+        private bool WorldAllowed=>WorldInputEnabled&&IsTextEntryActive?.Invoke()!=true&&!waitForNeutral&&(CanReadWorld?.Invoke()!=false);
         private bool CommandAllowed=>WorldAllowed&&CommandInputEnabled;
         public bool WorldInputEnabled = true;
         // Observer viewports retain camera/map navigation while command gestures stay inert.
         public bool CommandInputEnabled = true;
+        // Preparation may select placement targets without permitting battle orders.
+        public bool PlacementInputEnabled;
         public bool HasFocus { get; private set; } = true;
         private bool dragging, attackMode;
         private Vector2 origin;
@@ -56,7 +67,7 @@ namespace Spacewars.Input
         private struct PointerEdge
         {
             public Vector2 Position;
-            public bool Left, Down, Shift, Append, AttackAction;
+            public bool Left, Down, Shift, Append, AttackAction, Alt;
             public int Group;
             public bool SelectionAction, Assign, Home;
             public double Time;
@@ -85,8 +96,8 @@ namespace Spacewars.Input
                 {
                     bool Pressed(Key key) => keyboardEvent[key].ReadValueFromEvent(evt, out var value) && value > 0 && !keyboardEvent[key].isPressed;
                     bool Held(Key key) => keyboardEvent[key].ReadValueFromEvent(evt, out var value) ? value > 0 : keyboardEvent[key].isPressed;
-                    foreach(var command in new[]{Key.Escape,Key.F12,Key.Tab,Key.H,Key.S})
-                        if(Pressed(command))pointerEdges.Enqueue(new PointerEdge {Command=command});
+                    foreach(var command in new[]{Key.Enter,Key.NumpadEnter,Key.Escape,Key.F12,Key.Tab,Key.H,Key.S,Key.Space})
+                        if(Pressed(command))pointerEdges.Enqueue(new PointerEdge {Command=command,Shift=Held(Key.LeftShift)||Held(Key.RightShift)});
                     if(WorldAllowed)
                     {
                         if(CommandAllowed&&Pressed(Key.A))pointerEdges.Enqueue(new PointerEdge {AttackAction=true});
@@ -114,7 +125,7 @@ namespace Spacewars.Input
             // onEvent runs before device state is applied, so the current button is the prior state.
             // Simultaneous edges in one device event use a stable LMB-then-RMB tie break.
             if (mouse.leftButton.ReadValueFromEvent(evt, out var left) && (left > 0) != mouse.leftButton.isPressed)
-                pointerEdges.Enqueue(new PointerEdge { Position = position, Left = true, Down = left > 0, Shift = shift, Append = append, Time = evt.time });
+                pointerEdges.Enqueue(new PointerEdge { Position = position, Left = true, Down = left > 0, Shift = shift, Append = append, Alt=keyboard!=null&&(keyboard.leftAltKey.isPressed||keyboard.rightAltKey.isPressed), Time = evt.time });
             if (mouse.rightButton.ReadValueFromEvent(evt, out var right) && (right > 0) != mouse.rightButton.isPressed)
                 pointerEdges.Enqueue(new PointerEdge { Position = position, Left = false, Down = right > 0, Shift = shift, Append = append });
         }
@@ -132,20 +143,30 @@ namespace Spacewars.Input
         {
             if (!HasFocus) { pointerEdges.Clear(); return; }
             var keyboard = SeatKeyboard;
+            if(IsTextEntryActive?.Invoke()==true){ClearMode();return;}
+            if(waitForNeutral)
+            {
+                ClearMode();var heldMouse=SeatMouse;
+                if(keyboard?.anyKey.isPressed==true||heldMouse?.leftButton.isPressed==true||heldMouse?.rightButton.isPressed==true||heldMouse?.middleButton.isPressed==true)return;
+                waitForNeutral=false;
+            }
             while (pointerEdges.Count > 0)
             {
                 var edge=pointerEdges.Dequeue();
                 if(!HasFocus){pointerEdges.Clear();ClearMode();return;}
                 bool uiFocus=IsKeyboardInUi?.Invoke()==true;
+                if(SignalModal?.Invoke()==true&&edge.Command!=Key.None){if(edge.Command==Key.Escape)CancelSignal?.Invoke();continue;}
                 if(edge.Command!=Key.None)
                 {
                     if(uiFocus)continue;
-                    if(edge.Command==Key.Escape){if(attackMode)ResetMode();else if(CancelContext?.Invoke()!=true)TogglePause?.Invoke();}
+                    if(edge.Command==Key.Enter||edge.Command==Key.NumpadEnter){if(WorldAllowed){OpenChat?.Invoke(edge.Shift);if(IsTextEntryActive?.Invoke()==true){ClearMode();return;}}}
+                    else if(edge.Command==Key.Escape){if(attackMode||dragging||mapDrag>0)ResetMode();else if(CancelContext?.Invoke()!=true)TogglePause?.Invoke();}
                     else if(edge.Command==Key.F12)Capture?.Invoke();
                     else if(WorldAllowed)
                     {
                         lastClickTime=double.NegativeInfinity;ResetMode();
-                        if(edge.Command==Key.Tab)ToggleMap?.Invoke();
+                        if(edge.Command==Key.Space)FocusLatestEvent?.Invoke();
+                        else if(edge.Command==Key.Tab)ToggleMap?.Invoke();
                         else if(CommandAllowed&&edge.Command==Key.H)Hold?.Invoke();
                         else if(CommandAllowed&&edge.Command==Key.S)Stop?.Invoke();
                     }
@@ -153,6 +174,7 @@ namespace Spacewars.Input
                 else if(WorldAllowed)DispatchPointerEdge(edge);
             }
             if (!WorldAllowed) { ClearMode(); CloseMap?.Invoke(); return; }
+            if(SignalModal?.Invoke()==true)return;
             if (keyboard != null && (IsKeyboardBlockingCamera??IsKeyboardInUi)?.Invoke()!=true)
             {
                 var axis = new Vector2((keyboard.rightArrowKey.isPressed ? 1 : 0) - (keyboard.leftArrowKey.isPressed ? 1 : 0),
@@ -176,10 +198,21 @@ namespace Spacewars.Input
             }
             if(IsPointerOverUi?.Invoke(position)==true)return;
             float scroll = mouse.scroll.ReadValue().y;
-            if (scroll != 0) Zoom?.Invoke(scroll);
+            if (scroll != 0) Zoom?.Invoke(CameraWheelDelta(scroll));
+        }
+        private static float CameraWheelDelta(float scroll)
+        {
+            // Balance Lab's camera.zoomSpeed is calibrated in legacy wheel units
+            // (120 per notch). Current Input System defaults to one unit per notch.
+            // This is a unit conversion, not another camera sensitivity setting.
+            bool nativeWindows = InputSystem.settings.scrollDeltaBehavior == InputSettings.ScrollDeltaBehavior.KeepPlatformSpecificInputRange
+                && (Application.platform == RuntimePlatform.WindowsEditor || Application.platform == RuntimePlatform.WindowsPlayer);
+            return nativeWindows ? scroll : scroll * 120f;
         }
         private void DispatchPointerEdge(PointerEdge edge)
         {
+            if(!edge.AttackAction&&!edge.SelectionAction&&!edge.Home&&SignalPointer?.Invoke(edge.Position,edge.Left,edge.Down,edge.Alt)==true){ResetMode();return;}
+            if(SignalModal?.Invoke()==true)return;
             if (edge.AttackAction&&CommandAllowed)
             {
                 if (IsKeyboardInUi?.Invoke() != true) { attackMode = true; AttackModeChanged?.Invoke(attackMode); }
@@ -244,8 +277,8 @@ namespace Spacewars.Input
                 {
                     bool click = (position - origin).magnitude <= SelectionDragPixels;
                     bool doubleClick = click && edge.Time - lastClickTime <= DoubleClickMilliseconds / 1000d && (position - lastClickPosition).magnitude <= SelectionDragPixels;
-                    if (doubleClick && SelectSameType != null) { SelectSameType(position); lastClickTime = double.NegativeInfinity; }
-                    else if(CommandAllowed) { Select?.Invoke(origin, position, edge.Shift); lastClickTime = click ? edge.Time : double.NegativeInfinity; lastClickPosition = position; }
+                    if (doubleClick && SelectSameType != null && !PlacementInputEnabled) { SelectSameType(position); lastClickTime = double.NegativeInfinity; }
+                    else if(CommandAllowed||PlacementInputEnabled) { Select?.Invoke(origin, position, edge.Shift); lastClickTime = click ? edge.Time : double.NegativeInfinity; lastClickPosition = position; }
                 }
             }
         }

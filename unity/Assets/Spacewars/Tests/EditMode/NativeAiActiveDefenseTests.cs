@@ -83,5 +83,22 @@ namespace Spacewars.Tests.EditMode
             var attack=p.Propose(ready,opening,P,AiProfile.Initial,r);Assert.NotNull(attack);Assert.AreEqual(PlayableCommandKind.Attack,attack.Kind);p.Commit(ready,attack,r);
             Assert.AreEqual(AiArmyRole.Attack,r.Capture().Armies.Single(g=>g.Phase!=AiArmyPhase.Disbanded).Role);r.AssertInvariants();
         }
+        [Test] public void SafeAirOpeningCanLaunchAfterItsHangarAndIncomeAreReady()
+        {
+            var source=View(tanks:4,offense:true);
+            var own=source.Entities.Select(u=>new PlayableEntitySnapshot(u.Id,u.Owner,PlayableEntityKind.Hawk,u.Position,(int)P.HawkHealth,false,0,0,0)).ToArray();
+            var buildings=source.Buildings.Concat(new[]{
+                new PlayableBuildingSnapshot(70,PlayableOwner.Player,PlayableBuildingKind.Refinery,new NavPoint(-12,0),P.RefineryHealth,1,0,0,default),
+                new PlayableBuildingSnapshot(71,PlayableOwner.Player,PlayableBuildingKind.Hangar,new NavPoint(-8,0),P.HangarHealth,1,0,0,default)}).ToArray();
+            var routes=source.RouteProofs.Select(r=>new PlayableRouteProof(r.UnitId,r.Owner,71,10,1,r.Origin,PlayableUnitRules.Radius(P,PlayableEntityKind.Hawk),r.Kind,r.TargetId,r.Target,r.Goal,r.Path.ToArray())).ToArray();
+            var o=PlayableAiObservation.From(new PlayableSnapshot(P.ProfileId,P.Revision,71,7,10,10,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,
+                own,buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:source.Vision,routeProofs:routes));
+            var planner=new AiArmyPlanner(o.OwnerId,o.Generation);planner.Rebind(P);var registry=Registry();
+            var opening=PlayableAiOpeningComposition.Initialize(7,o.OwnerId,forcedOpening:PlayableAiOpening.Safe);
+            var attack=planner.Propose(o,opening,P,AiProfile.Initial,registry);
+            Assert.NotNull(attack,"Safe opening must use its ready air producer instead of waiting for an unplanned factory");
+            Assert.AreEqual(PlayableCommandKind.Attack,attack.Kind);planner.Commit(o,attack,registry);
+            Assert.True(planner.Active);Assert.True(registry.Capture().Armies.Single(a=>a.Phase!=AiArmyPhase.Disbanded).Members.All(id=>own.Any(u=>u.Id==id)));
+        }
     }
 }

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using Spacewars.Runtime;
+using Spacewars.Presentation;
 using Spacewars.Simulation;
 namespace Spacewars.Tests.EditMode
 {
@@ -37,9 +38,10 @@ namespace Spacewars.Tests.EditMode
             // Prevent the target from shooting without changing health/weapon contracts.
             Unit(a,enemy).GetType().GetField("Reload").SetValue(Unit(a,enemy),1000d);Unit(a,leader).GetType().GetField("Reload").SetValue(Unit(a,leader),1000d);
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(a,1,PlayableCommandKind.Follow,new[]{follower},leader).Status);
-            OfflineParticipantAuthorityTests.Step(a,kind==PlayableEntityKind.Shkval?180:75);Assert.AreEqual(leader,Order(a,follower).TargetId);a.Navigation.Crowd.TryGet(follower,out var n);Assert.AreEqual(-10,n.Position.X,1e-8);Assert.AreEqual(-10,n.Position.Z,1e-8);Assert.Less(Field<int>(Unit(a,enemy),"Health"),PlayableProfile.Default.TankHealth);
+            OfflineParticipantAuthorityTests.Step(a,kind==PlayableEntityKind.Shkval?180:75);Assert.AreEqual(leader,Order(a,follower).TargetId);a.Navigation.Crowd.TryGet(follower,out var n);Assert.AreEqual(-10,n.Position.X,1e-8);Assert.AreEqual(-10,n.Position.Z,1e-8);Assert.Less(Field<double>(Unit(a,enemy),"Health"),PlayableProfile.Default.TankHealth);
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(a,1,PlayableCommandKind.Move,new[]{leader},point:new NavPoint(-10,0),owner:"owner-45").Status);
-            bool leaderMoved=false;for(int tick=0;tick<45;tick++){OfflineParticipantAuthorityTests.Deliver(a,tick);a.Step(1d/30);var velocity=Field<NavPoint>(Unit(a,leader),"Velocity");if(Math.Sqrt(velocity.X*velocity.X+velocity.Z*velocity.Z)>.0001){leaderMoved=true;break;}}Assert.True(leaderMoved,"Exercise actual leader velocity, not merely an accepted route or heading turn.");Assert.AreEqual(PlayableTacticalOrderKind.Follow,Order(a,follower).Kind);Assert.AreEqual(0,Field<int>(Unit(a,follower),"Target"));Assert.AreEqual(0,Field<int>(Unit(a,follower),"BurstRemaining"));
+            using var host=new UnityHostRouteService();var domain=(PlayableDomain)OfflineParticipantAuthorityTests.Domain(a);
+            bool leaderMoved=false;for(int tick=0;tick<45;tick++){host.Service(new PlayableRouteBinding(domain.Geometry,PlayableProfile.Default,a.Navigation.Admission,a.Navigation.RoutePort),4);OfflineParticipantAuthorityTests.Deliver(a,tick);a.Step(1d/30);var velocity=Field<NavPoint>(Unit(a,leader),"Velocity");if(Math.Sqrt(velocity.X*velocity.X+velocity.Z*velocity.Z)>.0001){leaderMoved=true;break;}}Assert.True(leaderMoved,"Exercise actual leader velocity, not merely an accepted route or heading turn.");Assert.AreEqual(PlayableTacticalOrderKind.Follow,Order(a,follower).Kind);Assert.AreEqual(0,Field<int>(Unit(a,follower),"Target"));Assert.AreEqual(0,Field<int>(Unit(a,follower),"BurstRemaining"));
         }
         [Test] public void StaleAnswerAfterReplacementCannotReviveFollowRoute()
         {
@@ -78,9 +80,9 @@ namespace Spacewars.Tests.EditMode
         [Test] public void FollowContinuationIncludesPaidResearchProductionAndCaptureSettlement()
         {
             var a=World();long seq=1;
-            foreach(var p in a.Configuration.Roster){var v=a.View(p.Id);var h=v.Buildings.Single(x=>x.Owner==v.Owner);Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(OfflineParticipantAuthorityTests.Send(a,seq++,p.Id,PlayableCommandKind.BuildAt,site:h.SiteId,slot:1,parent:h.Id,building:PlayableBuildingKind.ScientificCenter)).Status);}
+            foreach(var p in a.Configuration.Roster){var v=a.View(p.Id);var h=v.Buildings.Single(x=>x.Owner==v.Owner);Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(OfflineParticipantAuthorityTests.Send(a,seq++,p.Id,PlayableCommandKind.BuildAt,site:h.SiteId,slot:2,parent:h.Id,building:PlayableBuildingKind.Factory)).Status);}
             OfflineParticipantAuthorityTests.Step(a,6000);
-            foreach(var p in a.Configuration.Roster){var v=a.View(p.Id);var h=v.Buildings.Single(x=>x.Owner==v.Owner&&x.Kind==PlayableBuildingKind.Headquarters);Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(OfflineParticipantAuthorityTests.Send(a,seq++,p.Id,PlayableCommandKind.BuildAt,site:h.SiteId,slot:2,parent:h.Id)).Status);}
+            foreach(var p in a.Configuration.Roster){var v=a.View(p.Id);var h=v.Buildings.Single(x=>x.Owner==v.Owner&&x.Kind==PlayableBuildingKind.Headquarters);Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(OfflineParticipantAuthorityTests.Send(a,seq++,p.Id,PlayableCommandKind.BuildAt,site:h.SiteId,slot:1,parent:h.Id,building:PlayableBuildingKind.ScientificCenter)).Status);}
             OfflineParticipantAuthorityTests.Step(a,600);
             foreach(var p in a.Configuration.Roster){var v=a.View(p.Id);var f=v.Buildings.Single(x=>x.Owner==v.Owner&&x.Kind==PlayableBuildingKind.Factory);var science=v.Buildings.Single(x=>x.Owner==v.Owner&&x.Kind==PlayableBuildingKind.ScientificCenter);Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(OfflineParticipantAuthorityTests.Send(a,seq++,p.Id,PlayableCommandKind.QueueTank,f.Id)).Status);foreach(var kind in new[]{PlayableResearchKind.TankChassis,PlayableResearchKind.ExplorerAssaultGuns,PlayableResearchKind.ShkvalGuidance})Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(OfflineParticipantAuthorityTests.Send(a,seq++,p.Id,PlayableCommandKind.QueueResearch,science.Id,research:kind)).Status);}
             var scout=a.View("owner-11").Entities.Single(x=>x.Owner==PlayableOwner.Player);int follower=Spawn(a,PlayableOwner.Player,PlayableEntityKind.Explorer,new NavPoint(scout.Position.X,scout.Position.Z+2));

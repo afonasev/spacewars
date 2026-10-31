@@ -57,7 +57,8 @@ namespace Spacewars.Runtime
         {lock(gate){if(!captureActive||epoch!=captureEpoch)throw new InvalidOperationException("Invalid physical capture lane release.");captureActive=false;}}
         internal bool CaptureActive {get{lock(gate)return captureActive;}}
         private int active,resolvingScopes;
-        private Action pendingResolutionWake;
+        private Action pendingResolutionWake,pendingCommandResolutionWake;
+        private bool resolutionFaulted;
         internal Func<long,bool> AllocationAdmission;
         internal NavigationRetentionBudget(long committedBytes=0,long sequence=0)
         {
@@ -79,6 +80,18 @@ namespace Spacewars.Runtime
             =>TryOpenScope(kind,owner,publication,out scope,wakeAfterResolution,out _);
         internal bool TryOpenScope(NavigationPreparationKind kind,long owner,long publication,out Scope scope,
             Action wakeAfterResolution,out bool resolvingRefusal)
+            =>TryOpenScopeCore(kind,owner,publication,out scope,wakeAfterResolution,out resolvingRefusal,false);
+        // A sole authority command may settle a healthy foreign resolution in its
+        // current call. Its wake must never overwrite the route worker's wake.
+        internal bool TryOpenCommandScope(long owner,long publication,out Scope scope,Action wake,out bool resolvingRefusal)
+        {
+            if(wake==null)throw new ArgumentNullException(nameof(wake));
+            return TryOpenScopeCore(NavigationPreparationKind.Admission,owner,publication,out scope,wake,out resolvingRefusal,true);
+        }
+        internal void ClearCommandResolutionWake(Action wake)
+        {lock(gate)if(pendingCommandResolutionWake==wake)pendingCommandResolutionWake=null;}
+        private bool TryOpenScopeCore(NavigationPreparationKind kind,long owner,long publication,out Scope scope,
+            Action wakeAfterResolution,out bool resolvingRefusal,bool command)
         {
             resolvingRefusal=false;
             if(!Enum.IsDefined(typeof(NavigationPreparationKind),kind)||owner<0||publication<0)
@@ -89,9 +102,15 @@ namespace Spacewars.Runtime
                 if(resolvingScopes!=0){
                     // Coalesce the already allocated host event snapshot. Only
                     // this known transient refusal registers an availability wake.
-                    resolvingRefusal=true;
-                    if(wakeAfterResolution!=null)pendingResolutionWake=wakeAfterResolution;
-                    return false;
+                    if(command){
+                        if(resolutionFaulted)return false;
+                        for(var activeScope=activeHead;activeScope!=null;activeScope=activeScope.ActiveNext)
+                            if(activeScope.ResolvingOnCurrentThread)return false;
+                        if(pendingCommandResolutionWake!=null&&pendingCommandResolutionWake!=wakeAfterResolution)
+                            throw new InvalidOperationException("Another authority command is already waiting for resolution.");
+                        pendingCommandResolutionWake=wakeAfterResolution;
+                    }else if(wakeAfterResolution!=null)pendingResolutionWake=wakeAfterResolution;
+                    resolvingRefusal=true;return false;
                 }
                 if(ScopeBytes>LayeredNavigationScheduler.MaxRetainedBytes-committed-held-physical-(Background(kind)?ProtectedBytes():0)||sequence==long.MaxValue)return false;
                 // Charge the scope before its allocation; it owns its metadata.
@@ -117,6 +136,7 @@ namespace Spacewars.Runtime
             // mutation-local births have died. Budget.PhysicalBytes is live retention.
             internal long HeldBytes {get{lock(budget.gate)return bytes+registered;}}
             internal bool IsResolving {get{lock(budget.gate)return resolving;}}
+            internal bool ResolvingOnCurrentThread=>resolving&&ownerThread==Thread.CurrentThread.ManagedThreadId;
             internal bool IsResolved {get{lock(budget.gate)return resolved;}}
             internal bool IsCancelled {get{lock(budget.gate)return cancelled;}}
             internal object Prepared {get{lock(budget.gate)return prepared;}}
@@ -227,26 +247,38 @@ namespace Spacewars.Runtime
                 lock(budget.gate){if(resolved)return false;CheckOwner();if(resolving||publishing||scratchHeld!=0)throw new InvalidOperationException("Preparation is resolving/publishing or has live scratch.");
                     resolving=true;budget.resolvingScopes++;head=births;births=null;owned=discard&&!published?preparedStorage:null;prepared=null;preparedStorage=null;
                 }
-                bool released=false;
+                bool released=false;Exception releaseFailure=null;
                 try{
                     owned?.ReleaseOwner();
                     while(head!=null){var next=head.BirthNext;head.BirthNext=null;head.Release();head=next;}
                     released=true;
-                }finally{
-                    Action resume=null;
-                    // Availability is published only after every owning edge and
-                    // birth has gone. A teardown fault remains an error; it must
-                    // neither retain nor invoke a stale availability callback.
+                }catch(Exception error){releaseFailure=error;throw;}finally{
+                    Action resume=null,commandResume=null;
+                    Exception resolutionFailure=null;
+                    // A fault never signals worker availability. An already waiting
+                    // command gets a terminal notification to revalidate the now
+                    // poisoned ledger, which still refuses all scope admission.
                     lock(budget.gate){
-                        if(!released)budget.pendingResolutionWake=null;
-                        else{
-                            try{Resolve();}
-                            catch{budget.pendingResolutionWake=null;throw;}
+                        if(released){try{Resolve();}catch(Exception error){resolutionFailure=error;}}
+                        if(!released||resolutionFailure!=null){
+                            budget.resolutionFaulted=true;commandResume=budget.pendingCommandResolutionWake;
+                            budget.pendingResolutionWake=budget.pendingCommandResolutionWake=null;
+                        }else{
                             resolving=false;budget.resolvingScopes--;
-                            if(budget.resolvingScopes==0){resume=budget.pendingResolutionWake;budget.pendingResolutionWake=null;}
+                            if(budget.resolvingScopes==0){resume=budget.pendingResolutionWake;commandResume=budget.pendingCommandResolutionWake;budget.pendingResolutionWake=budget.pendingCommandResolutionWake=null;}
                         }
                     }
-                    resume?.Invoke();
+                    var terminalFailure=releaseFailure??resolutionFailure;
+                    if(terminalFailure!=null){
+                        try{commandResume?.Invoke();}catch(Exception secondary){PlayableDomain.PreserveTacticalSecondary(terminalFailure,secondary);}
+                        if(releaseFailure==null)System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(terminalFailure).Throw();
+                    }else{
+                        try{resume?.Invoke();}catch(Exception primary){
+                            try{commandResume?.Invoke();}catch(Exception secondary){PlayableDomain.PreserveTacticalSecondary(primary,secondary);}
+                            throw;
+                        }
+                        commandResume?.Invoke();
+                    }
                 }
                 return true;
             }

@@ -5,7 +5,7 @@
   "zoomSpeed": 10,
   "rotationSpeed": 2,
   "holdMs": 300,
-  "selectAllHoldMs": 1400,
+  "selectAllHoldMs": 2000,
   "selectionGrowth": 8,
   "groupDwellMs": 600,
   "radialDeadzone": 0.35,
@@ -105,7 +105,7 @@
       "min": 150,
       "max": 1000,
       "step": 10,
-      "description": "Различает короткий приказ и удержание, покупку и повтор выпуска; задаёт время индикатора добавления юнитов при удержании RT над одним слотом группы.",
+      "description": "Различает короткий приказ и удержание, покупку и повтор выпуска; задаёт время назначения выделенных юнитов при удержании RB над одним слотом группы.",
       "kind": "numeric",
       "path": "system.gamepad.holdMs",
       "value": 300
@@ -121,10 +121,10 @@
       "min": 500,
       "max": 4000,
       "step": 10,
-      "description": "После этого удержания A круг заменяется выбором собственной армии на экране.",
+      "description": "После этого удержания A круг резко заменяется прямоугольником viewport и выбором своих юнитов на экране.",
       "kind": "numeric",
       "path": "system.gamepad.selectAllHoldMs",
-      "value": 1400
+      "value": 2000
     },
     {
       "section": "Управление · Геймпад",
@@ -339,6 +339,22 @@
       "kind": "numeric",
       "path": "system.gamepad.cursorRecenterIdleMs",
       "value": 1000
+    },
+    {
+      "section": "Управление · Геймпад",
+      "group": "Курсор и жесты",
+      "target": "system",
+      "key": "gamepad",
+      "subkey": "mapCursorSpeed",
+      "label": "Скорость курсора на карте",
+      "unit": "карт/с",
+      "min": 0.1,
+      "max": 3,
+      "step": 0.05,
+      "description": "Скорость курсора LS на тактической карте в долях ширины карты за секунду; не меняет курсор RS в мире.",
+      "kind": "numeric",
+      "path": "system.gamepad.mapCursorSpeed",
+      "value": 0.75
     }
   ],
   "doubleTapMs": 450,
@@ -346,5 +362,6 @@
   "cameraMinZoom": 6,
   "cameraMaxZoom": 30,
   "controlGroupFocusRadius": 12,
-  "cursorRecenterIdleMs": 1000
+  "cursorRecenterIdleMs": 1000,
+  "mapCursorSpeed": 0.75
 }

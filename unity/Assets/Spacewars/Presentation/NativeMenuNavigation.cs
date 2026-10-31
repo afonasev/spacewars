@@ -20,6 +20,11 @@ namespace Spacewars.Presentation
         private Action back;
         private Label hints;
         private bool dispatching,armed;
+        private VisualElement dropdownOverlay;
+        private DropdownField dropdownAnchor;
+        private TextField editingField;
+        public Func<bool> ShowGamepadHints;
+        private bool PadHints=>ShowGamepadHints?.Invoke()??UsingGamepad;
         private readonly HashSet<KeyCode> pressedKeys=new HashSet<KeyCode>();
         private readonly HashSet<NavigationSubmitEvent> ownedSubmits=new HashSet<NavigationSubmitEvent>();
         private Vector2 held;
@@ -44,9 +49,11 @@ namespace Spacewars.Presentation
             root.RegisterCallback<PointerDownEvent>(PointerDown,TrickleDown.TrickleDown);
         }
         public void UseGamepad(){UsingGamepad=true;UpdateHints();}
+        public void UseKeyboardMouse(){UsingGamepad=false;UpdateHints();}
         public void SetScope(VisualElement element,Action onBack=null,VisualElement preferred=null,Label hintLabel=null)
         {
-            if(scope!=null)foreach(var label in scope.Query<Label>(name:"menu-pad-glyph").ToList())label.RemoveFromHierarchy();
+            if(dropdownOverlay!=null)CloseDropdown(false);
+            if(scope!=null)foreach(var label in scope.Query<NativeControllerGlyph>(name:"menu-pad-glyph").ToList())label.RemoveFromHierarchy();
             scope=element;back=onBack;hints=hintLabel;armed=false;held=Vector2.zero;
             if(scope==null)return;
             Focus(Visible(preferred)?preferred:Controls().FirstOrDefault());UpdateHints();
@@ -57,19 +64,21 @@ namespace Spacewars.Presentation
             TickGamepad(gamepad(),Time.unscaledTime);
             if(keyboardAllowed?.Invoke()!=false&&Mouse.current?.delta.ReadValue().sqrMagnitude>0){UsingGamepad=false;UpdateHints();}
         }
+        private INativeMenuScope ScopeNavigation=>scope?.userData as INativeMenuScope;
         private bool DropdownOpen=>root.panel?.visualTree.Q(className:"unity-base-dropdown")!=null;
         private void TickGamepad(Gamepad pad,float now)
         {
             // Native popups live outside the menu scope and own their focus/input until closed.
-            if(scope==null||DropdownOpen)return;
+            if(scope==null||DropdownOpen&&dropdownOverlay==null)return;
             if(pad==null){armed=true;return;}
             Vector2 axis=pad.dpad.ReadValue();if(axis.sqrMagnitude<.1f)axis=pad.leftStick.ReadValue();
             axis=axis.magnitude<.55f?Vector2.zero:Mathf.Abs(axis.x)>Mathf.Abs(axis.y)?new Vector2(Mathf.Sign(axis.x),0):new Vector2(0,Mathf.Sign(axis.y));
             bool north=pad.buttonNorth.isPressed;
             bool confirm=pad.buttonSouth.isPressed,cancel=pad.buttonEast.isPressed||pad.startButton.isPressed;
-            if(axis!=Vector2.zero||pad.buttonNorth.wasPressedThisFrame||pad.buttonSouth.wasPressedThisFrame||pad.buttonEast.wasPressedThisFrame||pad.startButton.wasPressedThisFrame){UseGamepad();}
+            if(axis!=Vector2.zero||pad.buttonNorth.wasPressedThisFrame||pad.buttonSouth.wasPressedThisFrame||pad.buttonEast.wasPressedThisFrame||pad.startButton.wasPressedThisFrame||pad.leftShoulder.wasPressedThisFrame||pad.rightShoulder.wasPressedThisFrame||pad.rightStick.ReadValue().sqrMagnitude>.1f){UseGamepad();}
             if(!armed){if(axis==Vector2.zero&&!confirm&&!cancel&&!north)armed=true;return;}
-            if(axis!=Vector2.zero&&(axis!=held||now>=repeatAt))
+            bool ownsDirection=ScopeNavigation?.ReadGamepad(pad,now)??false;
+            if(!ownsDirection&&axis!=Vector2.zero&&(axis!=held||now>=repeatAt))
             {Move(axis);repeatAt=now+(axis!=held?.35f:.10f);}
             held=axis;
             if(pad.buttonEast.wasPressedThisFrame){Back();return;}
@@ -85,16 +94,18 @@ namespace Spacewars.Presentation
         }
         public void Move(Vector2 direction)
         {
+            editingField=null;
+            if(ScopeNavigation?.Move(direction)==true)return;
             var controls=Controls();if(controls.Count==0)return;
             var focused=Current(controls);
-            if(scope.ClassListContains("orbital-keyboard")&&focused!=null)
+            if((scope.name=="premium-lobby"||scope.ClassListContains("orbital-keyboard")||scope.ClassListContains("result-spatial-navigation"))&&focused!=null)
             {
                 var axis=new Vector2(direction.x,-direction.y);var origin=focused.worldBound.center;
                 var next=controls.Where(x=>x!=focused&&Vector2.Dot(x.worldBound.center-origin,axis)>1)
                     .OrderBy(x=>{var delta=x.worldBound.center-origin;return Vector2.Dot(delta,axis)+4*Mathf.Abs(delta.x*axis.y-delta.y*axis.x);}).FirstOrDefault();
                 Focus(next??focused);return;
             }
-            if(focused is ScrollView scroll&&scroll.name=="controls-scroll"&&direction.y!=0)
+            if(focused is ScrollView scroll&&(scroll.name=="controls-scroll"||scroll.name=="history-scroll")&&direction.y!=0)
             {float before=scroll.scrollOffset.y;float after=Mathf.Clamp(before-direction.y*80,0,Mathf.Max(0,scroll.contentContainer.resolvedStyle.height-scroll.contentViewport.resolvedStyle.height));if(Mathf.Abs(after-before)>.5f){scroll.scrollOffset=new Vector2(0,after);return;}}
             if(direction.x!=0&&Adjust(focused,(int)Mathf.Sign(direction.x)))return;
             int index=controls.IndexOf(focused),step=direction.y>0||direction.x<0?-1:1;
@@ -103,34 +114,35 @@ namespace Spacewars.Presentation
         public void Activate()
         {
             var element=Current(Controls());if(!Visible(element))return;
+            if(ScopeNavigation?.Submit(element)==true){UpdateHints();return;}
             if(element is LobbyColorField color){ActivateElement(color.Trigger);return;}
-            if(element is TextField text){OpenKeyboard(text);return;}
+            if(element is TextField text){if(UsingGamepad)OpenKeyboard(text);else{editingField=text;text.Focus();text.SelectAll();}return;}
             if(element is Toggle toggle){toggle.value=!toggle.value;return;}
-            if(element is DropdownField dropdown){Adjust(dropdown,1);return;}
+            if(element is DropdownField dropdown){OpenDropdown(dropdown);return;}
             ActivateElement(element);
         }
         public void ActivateElement(VisualElement element)
         {
+            if(element is DropdownField dropdown){OpenDropdown(dropdown);return;}
             dispatching=true;
             try{using(var evt=NavigationSubmitEvent.GetPooled()){evt.target=element;ownedSubmits.Add(evt);element.SendEvent(evt);}}
             finally{dispatching=false;}
         }
-        public void Back(){armed=false;back?.Invoke();}
+        public void Back(){armed=false;if(ScopeNavigation?.Cancel()==true){UpdateHints();return;}back?.Invoke();}
         private bool Adjust(VisualElement element,int step)
         {
             if(element?.userData is Action<int> custom){custom(step);return true;}
             if(element is Slider slider){slider.value=Mathf.Clamp(slider.value+step*(slider.highValue-slider.lowValue)/20f,slider.lowValue,slider.highValue);return true;}
             if(element is SliderInt integer){integer.value=Mathf.Clamp(integer.value+step,integer.lowValue,integer.highValue);return true;}
-            if(element is DropdownField dropdown&&dropdown.choices.Count>0){dropdown.index=(dropdown.index+step+dropdown.choices.Count)%dropdown.choices.Count;return true;}
             if(element is Toggle toggle){toggle.value=step>0;return true;}
             return false;
         }
         private VisualElement Current(List<VisualElement> controls)
         {
             var focused=root.focusController?.focusedElement as VisualElement;
-            return controls.FirstOrDefault(x=>x==focused||x.Contains(focused))??controls.FirstOrDefault();
+            return controls.FirstOrDefault(x=>x==focused)??controls.FirstOrDefault(x=>x.Contains(focused))??controls.FirstOrDefault();
         }
-        private List<VisualElement> Controls()=>scope==null?new List<VisualElement>():scope.Query<VisualElement>().ToList().Where(x=>(x is LobbyColorField||x is Button&&x.GetFirstAncestorOfType<LobbyColorField>()==null||x is Toggle||x is Slider||x is SliderInt||x is DropdownField||x is TextField||x is ScrollView&&x.name=="controls-scroll")&&Visible(x)).ToList();
+        private List<VisualElement> Controls()=>scope==null?new List<VisualElement>():scope.Query<VisualElement>().ToList().Where(x=>(x.ClassListContains("result-focusable")||x is LobbyColorField||x is Button&&x.GetFirstAncestorOfType<LobbyColorField>()==null||x is Toggle||x is Slider||x is SliderInt||x is DropdownField||x is TextField||x is ScrollView&&(x.name=="controls-scroll"||x.name=="history-scroll"))&&Visible(x)&&(ScopeNavigation?.IncludesControl(x)??true)).ToList();
         public static bool Visible(VisualElement element)
         {
             if(element==null||!element.enabledInHierarchy||!element.focusable)return false;
@@ -146,9 +158,11 @@ namespace Spacewars.Presentation
         private void Wheel(WheelEvent evt){if(keyboardAllowed?.Invoke()!=false){UsingGamepad=false;UpdateHints();}}
         private void KeyDown(KeyDownEvent evt)
         {
-            if(scope==null||dispatching||DropdownOpen)return;if(keyboardAllowed?.Invoke()==false){evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);return;}UsingGamepad=false;UpdateHints();
-            // Ordinary typing remains native; only escape/tab leave a text editor.
-            bool typing=evt.target is VisualElement target&&(target is TextField||target.GetFirstAncestorOfType<TextField>()!=null);
+            if(scope==null||dispatching||DropdownOpen&&dropdownOverlay==null)return;if(keyboardAllowed?.Invoke()==false){evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);return;}UsingGamepad=false;UpdateHints();
+            // Directional focus is distinct from editing: Enter or a pointer enters native text editing.
+            var textTarget=evt.target as TextField??(evt.target as VisualElement)?.GetFirstAncestorOfType<TextField>();
+            if(textTarget!=null&&evt.character>=32&&!evt.ctrlKey&&!evt.altKey)editingField=textTarget;
+            bool typing=editingField!=null&&evt.target is VisualElement target&&(target==editingField||editingField.Contains(target));
             bool oneShot=evt.keyCode==KeyCode.Escape||!typing&&(evt.keyCode==KeyCode.Return||evt.keyCode==KeyCode.KeypadEnter||evt.keyCode==KeyCode.Space);
             if(oneShot&&!pressedKeys.Add(evt.keyCode)){evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);return;}
             if(evt.keyCode==KeyCode.Escape)Back();
@@ -161,27 +175,80 @@ namespace Spacewars.Presentation
             else return;
             evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);
         }
-        private void BlockMove(NavigationMoveEvent evt){if((Active||worldOwnsInput?.Invoke()==true||WorldOwnsNavigation?.Invoke()==true)&&!dispatching&&!DropdownOpen){evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);}}
-        private void BlockSubmit(NavigationSubmitEvent evt){if(ownedSubmits.Remove(evt))return;if(!DropdownOpen&&(Active||worldOwnsInput?.Invoke()==true))evt.StopImmediatePropagation();}
-        private void BlockCancel(NavigationCancelEvent evt){if((Active||worldOwnsInput?.Invoke()==true)&&!dispatching&&!DropdownOpen)evt.StopImmediatePropagation();}
-        private void PointerDown(PointerDownEvent evt){if(keyboardAllowed?.Invoke()==false)return;UsingGamepad=false;UpdateHints();}
-        private void UpdateHints()
+        private void BlockMove(NavigationMoveEvent evt){if((Active||worldOwnsInput?.Invoke()==true||WorldOwnsNavigation?.Invoke()==true)&&!dispatching&&(!DropdownOpen||dropdownOverlay!=null)){evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);}}
+        private void BlockSubmit(NavigationSubmitEvent evt){if(ownedSubmits.Remove(evt))return;if((!DropdownOpen||dropdownOverlay!=null)&&(Active||worldOwnsInput?.Invoke()==true))evt.StopImmediatePropagation();}
+        private void BlockCancel(NavigationCancelEvent evt){if((Active||worldOwnsInput?.Invoke()==true)&&!dispatching&&(!DropdownOpen||dropdownOverlay!=null))evt.StopImmediatePropagation();}
+        private void PointerDown(PointerDownEvent evt)
         {
-            var pad=gamepad();
+            if(keyboardAllowed?.Invoke()==false)return;UseKeyboardMouse();
+            var target=evt.target as VisualElement;
+            editingField=target as TextField??target?.GetFirstAncestorOfType<TextField>();
+            var dropdown=target as DropdownField??target?.GetFirstAncestorOfType<DropdownField>();
+            if(scope!=null&&dropdown!=null&&scope.Contains(dropdown)&&evt.button==0)
+            {OpenDropdown(dropdown);evt.StopImmediatePropagation();root.focusController?.IgnoreEvent(evt);}
+        }
+        public void UpdateHints()
+        {
+            var pad=gamepad();bool show=PadHints&&pad!=null;
             if(scope!=null)
             {
-                foreach(var label in scope.Query<Label>(name:"menu-pad-glyph").ToList())label.RemoveFromHierarchy();
-                if(UsingGamepad)foreach(var button in scope.Query<Button>().ToList())
+                foreach(var glyph in scope.Query<NativeControllerGlyph>(name:"menu-pad-glyph").ToList())glyph.RemoveFromHierarchy();
+                foreach(var glyph in scope.Query<NativeControllerGlyph>().ToList())glyph.SetMenuVisibility(show,pad);
+                if(show)foreach(var button in scope.Query<Button>().ToList())
                 {
-                    if(!Visible(button))continue;bool isBack=back!=null&&(button.name?.EndsWith("-back")==true||button.name?.EndsWith("-cancel")==true);
+                    if(!Visible(button)||button.Q<NativeControllerGlyph>()!=null)continue;
+                    bool isBack=back!=null&&(button.name?.EndsWith("-back")==true||button.name?.EndsWith("-cancel")==true);
                     bool isReset=scope.name=="settings-screen"&&button.name=="settings-reset-all";
-                    var focused=root.focusController?.focusedElement;var color=button.GetFirstAncestorOfType<LobbyColorField>();
-                    if(!isReset&&!isBack&&focused!=button&&(color==null||focused!=color))continue;
-                    var glyph=new Label(isReset?NativeControllerGlyph.TopSymbol(pad):NativeControllerGlyph.Symbol(isBack?"B":"A",pad)){name="menu-pad-glyph",pickingMode=PickingMode.Ignore};glyph.style.position=Position.Absolute;glyph.style.right=5;glyph.style.top=5;glyph.style.fontSize=11;button.Add(glyph);
+                    if(!isReset&&!isBack)continue;
+                    var glyph=new NativeControllerGlyph(isReset?"Y":"B",()=>gamepad(),false){name="menu-pad-glyph"};
+                    glyph.AttachToButton(button);
                 }
             }
-            if(hints==null)return;
-            hints.text=UsingGamepad?(NativeControllerGlyph.Symbol("A",pad)+"  Выбрать    "+NativeControllerGlyph.Symbol("B",pad)+"  Назад    ↔  Изменить"):"";
+            if(ScopeNavigation!=null){if(show)ScopeNavigation.Hints(pad);else if(ScopeNavigation is PostMatchResultsView result)result.HideGamepadHints();}
+            if(hints!=null)hints.text="";
+        }
+        private void OpenDropdown(DropdownField field)
+        {
+            if(dropdownAnchor==field||field.choices.Count==0)return;
+            var oldScope=scope;var oldBack=back;var oldHints=hints;
+            if(dropdownOverlay!=null)CloseDropdown(false);
+            var overlay=new VisualElement{name="menu-dropdown-overlay"};
+            overlay.style.position=Position.Absolute;overlay.style.left=overlay.style.right=overlay.style.top=overlay.style.bottom=0;
+            root.Add(overlay);
+            var popup=new VisualElement();popup.AddToClassList("unity-base-dropdown");popup.style.position=Position.Absolute;
+            float availableWidth=root.resolvedStyle.width,availableHeight=root.resolvedStyle.height;
+            float width=Mathf.Min(Mathf.Max(field.worldBound.width,240),availableWidth);
+            float height=Mathf.Min(field.choices.Count*38+12,availableHeight-16);
+            var anchor=root.WorldToLocal(field.worldBound);
+            popup.style.left=Mathf.Clamp(anchor.xMin,0,Mathf.Max(0,availableWidth-width));
+            popup.style.top=Mathf.Clamp(anchor.yMax+height<=availableHeight?anchor.yMax:anchor.yMin-height,0,Mathf.Max(0,availableHeight-height));
+            popup.style.width=width;popup.style.height=height;popup.style.backgroundColor=new Color(.05f,.08f,.1f);
+            popup.style.paddingLeft=popup.style.paddingRight=popup.style.paddingTop=popup.style.paddingBottom=6;OrbitalPrecision.Frame(popup);overlay.Add(popup);
+            var scroll=OrbitalTheme.Scroll();scroll.style.flexGrow=1;scroll.style.minHeight=0;popup.Add(scroll);
+            Button selected=null;
+            for(int i=0;i<field.choices.Count;i++)
+            {
+                int index=i;var option=new Button(){name="menu-dropdown-option-"+i};option.AddToClassList("unity-base-dropdown__item");
+                option.style.height=38;option.style.flexShrink=0;option.style.marginLeft=option.style.marginRight=option.style.marginTop=option.style.marginBottom=0;
+                var label=new Label(field.choices[i]){pickingMode=PickingMode.Ignore};label.AddToClassList("unity-base-dropdown__label");label.style.whiteSpace=WhiteSpace.Normal;option.Add(label);
+                void Apply(){if(dropdownOverlay!=overlay)return;CloseDropdown(true);field.index=index;}
+                option.clicked+=Apply;
+                option.RegisterCallback<PointerUpEvent>(evt=>{if(evt.button==0){Apply();evt.StopImmediatePropagation();}});
+                option.RegisterCallback<FocusInEvent>(_=>option.style.backgroundColor=new Color(.08f,.22f,.28f));
+                option.RegisterCallback<FocusOutEvent>(_=>option.style.backgroundColor=new Color(.05f,.08f,.1f));
+                scroll.Add(option);if(i==field.index)selected=option;
+            }
+            dropdownRestore=()=>SetScope(oldScope,oldBack,field,oldHints);
+            overlay.RegisterCallback<PointerDownEvent>(evt=>{if(evt.target==overlay){CloseDropdown(true);evt.StopImmediatePropagation();}});
+            // SetScope cancels an older popup, so establish this popup's identity afterwards.
+            SetScope(overlay,()=>CloseDropdown(true),selected);dropdownOverlay=overlay;dropdownAnchor=field;
+        }
+        private Action dropdownRestore;
+        private void CloseDropdown(bool restore)
+        {
+            var overlay=dropdownOverlay;var action=dropdownRestore;
+            dropdownOverlay=null;dropdownAnchor=null;dropdownRestore=null;overlay?.RemoveFromHierarchy();
+            if(restore)action?.Invoke();
         }
         private void OpenKeyboard(TextField field)
         {
@@ -206,7 +273,7 @@ namespace Spacewars.Presentation
             root.UnregisterCallback<NavigationMoveEvent>(BlockMove,TrickleDown.TrickleDown);
             root.UnregisterCallback<NavigationSubmitEvent>(BlockSubmit,TrickleDown.TrickleDown);
             root.UnregisterCallback<NavigationCancelEvent>(BlockCancel,TrickleDown.TrickleDown);
-            root.UnregisterCallback<PointerDownEvent>(PointerDown,TrickleDown.TrickleDown);scope=null;
+            root.UnregisterCallback<PointerDownEvent>(PointerDown,TrickleDown.TrickleDown);CloseDropdown(false);scope=null;
         }
     }
 }

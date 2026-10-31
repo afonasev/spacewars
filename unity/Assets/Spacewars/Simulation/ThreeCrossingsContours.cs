@@ -8,7 +8,7 @@ namespace Spacewars.Simulation
     [Serializable] public sealed class MapContourData{public string id;public MapVertexData[] vertices;}
     public sealed partial class ThreeCrossingsProfileData
     {
-        public double platformRadius=11.5,platformChamfer=3,platformHeight=2,rampLength=5,rampWidth=8,platformWallWidth=.6,platformWallHeight=.8;
+        public double platformRadius=11.5,platformChamfer=3,platformHeight=1,rampLength=5,rampWidth=8,platformWallWidth=.6,platformWallHeight=.4;
         public double rockHeight=5,rockCrownHeight=3,rockCrownInset=.8;
         public MapContourData[] contours=DefaultContours();
         public MapVertexData[] riverBends=new[]{new MapVertexData("south-mouth",-10,-56),new MapVertexData("south-upper",-10,-27),new MapVertexData("south-middle",-11,-22),new MapVertexData("south-lower",-9,-17),new MapVertexData("north-lower",-9,17),new MapVertexData("north-middle",-11,22),new MapVertexData("north-upper",-10,27),new MapVertexData("north-mouth",-10,56)};

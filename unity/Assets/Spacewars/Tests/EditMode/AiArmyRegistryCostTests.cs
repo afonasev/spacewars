@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
+using System.IO;
 using NUnit.Framework;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
@@ -41,6 +42,83 @@ namespace Spacewars.Tests.EditMode
             if(nextId<1||all.Any(a=>a.Id<=0||a.Id>=nextId||a.OwnerId!=OwnerId||string.IsNullOrWhiteSpace(a.TacticalOwner)||!Enum.IsDefined(typeof(AiArmyRole),a.Role)||!Enum.IsDefined(typeof(AiArmyPhase),a.Phase)||a.CreatedTick<0||a.ProgressTick<a.CreatedTick||a.MinimumViableForce<1||!Finite(a.Anchor)||!Finite(a.Rally)||a.Reinforcements.Except(a.Members).Any()||a.Reinforcements.Any(x=>x<=0)||a.Reinforcements.Distinct().Count()!=a.Reinforcements.Length||!a.Reinforcements.SequenceEqual(a.Reinforcements.OrderBy(x=>x)))||active.Count(a=>a.Major)>majorCap||active.Count(a=>a.Role==AiArmyRole.Scout)>scoutCap||active.Any(a=>a.Members.Length==0||a.Members.Any(x=>x<=0)||!a.Members.Contains(a.LeaderId))||all.Where(a=>a.Phase==AiArmyPhase.Disbanded).Any(a=>a.Members.Length!=0||a.Reinforcements.Length!=0||a.LeaderId!=0)||active.SelectMany(a=>a.Members).Distinct().Count()!=active.Sum(a=>a.Members.Length)||membership.Count!=active.Sum(a=>a.Members.Length)||active.Any(a=>a.Members.Any(id=>ArmyFor(id)!=a.Id)))throw new InvalidOperationException("Army registry invariant");
         }
         static bool Accepts(Action action){try{action();return true;}catch(InvalidOperationException e){Assert.AreEqual("Army registry invariant",e.Message);return false;}}
+        static PlayableSnapshot ScoutSnapshot(bool loseScout=false)
+        {
+            var p=PlayableProfile.Default;
+            var entities=Enumerable.Range(1,9).Where(id=>!loseScout||id!=7).Select(id=>new PlayableEntitySnapshot(id,PlayableOwner.Player,id<=6?PlayableEntityKind.Tank:PlayableEntityKind.Explorer,new NavPoint(id,0),100,false,0,0,0)).ToArray();
+            return new PlayableSnapshot(p.ProfileId,p.Revision,71,41,1,10,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,100,new NavGeometry(20,Array.Empty<NavObstacle>(),1),entities,Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,ownerId:"player-1");
+        }
+        static byte[] RegistryBytes(AiArmyRegistry r)
+        {using var stream=new MemoryStream();using(var writer=new BinaryWriter(stream,System.Text.Encoding.UTF8,true))r.WriteState(writer);return stream.ToArray();}
+        static bool DetachedScout(AiArmyRegistry r,int id)=>r.Capture().Armies.Any(a=>a.Role==AiArmyRole.Scout&&a.Members.Contains(id));
+        [Test] public void SelectedArmyCopiesPreservePredicatesFreshnessDetachmentAndCurrentColdWire()
+        {
+            foreach(int history in new[]{0,64}){
+                var r=Registry(history);long id=history+1;
+                void EqualArmy(AiArmyState expected,AiArmyState actual)
+                {
+                    if(expected==null){Assert.Null(actual);return;}Assert.NotNull(actual);Assert.AreNotSame(expected,actual);
+                    foreach(var f in typeof(AiArmyState).GetFields(BindingFlags.Public|BindingFlags.Instance)){
+                        if(f.FieldType==typeof(int[]))CollectionAssert.AreEqual((int[])f.GetValue(expected),(int[])f.GetValue(actual),f.Name);
+                        else Assert.AreEqual(f.GetValue(expected),f.GetValue(actual),f.Name);
+                    }
+                }
+                void Check()
+                {
+                    r.AssertInvariants();var bytes=RegistryBytes(r);
+                    foreach(long selected in new[]{-1L,0L,1L,id,id+1,long.MaxValue}){
+                        var original=r.Capture().Armies;var fresh=r.CaptureArmy(selected);
+                        Assert.AreEqual(original.Count(a=>a.Id==selected),fresh.Length);
+                        EqualArmy(original.FirstOrDefault(a=>a.Id==selected&&a.Phase!=AiArmyPhase.Disbanded),fresh.FirstOrDefault(a=>a.Id==selected&&a.Phase!=AiArmyPhase.Disbanded));
+                        foreach(string policy in new[]{"army","foreign",null})EqualArmy(original.FirstOrDefault(a=>a.Id==selected&&a.TacticalOwner==policy&&a.Phase!=AiArmyPhase.Disbanded),fresh.FirstOrDefault(a=>a.Id==selected&&a.TacticalOwner==policy&&a.Phase!=AiArmyPhase.Disbanded));
+                        if(original.Any(a=>a.Id==selected))EqualArmy(original.Single(a=>a.Id==selected),fresh.Single(a=>a.Id==selected));
+                        else{
+                            var before=Assert.Throws<InvalidOperationException>(()=>original.Single(a=>a.Id==selected));
+                            var after=Assert.Throws<InvalidOperationException>(()=>fresh.Single(a=>a.Id==selected));Assert.AreEqual(before.Message,after.Message);
+                        }
+                        foreach(var detached in fresh){
+                            detached.OwnerId="foreign";detached.TacticalOwner="changed";detached.Phase=AiArmyPhase.Disbanded;
+                            if(detached.Members.Length>0)detached.Members[0]=-1;
+                            if(detached.Reinforcements.Length>0)detached.Reinforcements[0]=-1;
+                        }
+                    }
+                    CollectionAssert.AreEqual(bytes,RegistryBytes(r),"All selected reads and mutations of their detached results leave current authority unchanged.");
+                    using var stream=new MemoryStream(bytes);using var reader=new BinaryReader(stream);
+                    var cold=AiArmyRegistry.ReadState(reader,AiProfile.Initial,AiDifficulty.Fighter,10,"player-1",71);
+                    CollectionAssert.AreEqual(bytes,RegistryBytes(cold));EqualArmy(r.CaptureArmy(id).Single(),cold.CaptureArmy(id).Single());
+                }
+                Check();var retained=r.CaptureArmy(id).Single();var oldMembers=retained.Members.ToArray();var oldReinforcements=retained.Reinforcements.ToArray();
+                r.Disband(id+1);Assert.True(r.TryReinforce(Observation(),id,"army",new[]{4,5,6}));Check();
+                CollectionAssert.AreEqual(oldMembers,retained.Members);CollectionAssert.AreEqual(oldReinforcements,retained.Reinforcements);
+                CollectionAssert.AreEqual(new[]{1,2,3,4,5,6},r.CaptureArmy(id).Single().Members);
+                var beforeJoin=r.CaptureArmy(id).Single();r.JoinReinforcements(id,"army",new[]{3,4});Check();
+                CollectionAssert.AreEqual(new[]{3,4,5,6},beforeJoin.Reinforcements);CollectionAssert.AreEqual(new[]{5,6},r.CaptureArmy(id).Single().Reinforcements);
+                r.Disband(id);Check();Assert.AreEqual(AiArmyPhase.Disbanded,r.CaptureArmy(id).Single().Phase);
+            }
+        }
+        [Test] public void ScoutMembershipMatchesDetachedPredicateAfterAdmittedChangesAndCurrentColdWire()
+        {
+            var profile=AiProfile.Initial;var r=new AiArmyRegistry("player-1",71,profile,AiDifficulty.Fighter);var o=PlayableAiObservation.From(ScoutSnapshot());
+            void Check()
+            {
+                r.AssertInvariants();var bytes=RegistryBytes(r);
+                for(int id=-1;id<=12;id++)Assert.AreEqual(DetachedScout(r,id),r.IsScoutMember(id),"actual member="+id);
+                CollectionAssert.AreEqual(bytes,RegistryBytes(r),"Queries cannot change current serialized authority.");
+                using var stream=new MemoryStream(bytes);using var reader=new BinaryReader(stream);
+                var cold=AiArmyRegistry.ReadState(reader,profile,AiDifficulty.Fighter,10,"player-1",71);CollectionAssert.AreEqual(bytes,RegistryBytes(cold));
+                for(int id=-1;id<=12;id++)Assert.AreEqual(r.IsScoutMember(id),cold.IsScoutMember(id));
+            }
+            Check();Assert.True(r.TryCreate(o,AiArmyRole.Scout,AiScoutPlanner.Policy,new[]{7,8},out var scout));
+            Assert.True(r.TryCreate(o,AiArmyRole.Attack,AiArmyPlanner.Policy,new[]{1,2,3},out var attack));Check();var original=r.Capture();
+            var duplicate=r.Capture();duplicate.Armies.Single(a=>a.Id==scout).Members=new[]{7,7,8};Assert.Throws<InvalidDataException>(()=>AiArmyRegistry.Restore(duplicate,profile,AiDifficulty.Fighter,10));
+            duplicate=r.Capture();duplicate.Armies.Single(a=>a.Id==attack).Members=new[]{1,2,3,7};Assert.Throws<InvalidDataException>(()=>AiArmyRegistry.Restore(duplicate,profile,AiDifficulty.Fighter,10));
+            Assert.Throws<InvalidDataException>(()=>AiArmyRegistry.Restore(null,profile,AiDifficulty.Fighter,10));
+            Assert.True(r.TryTransfer(o,scout,attack,new[]{8}));Check();Assert.True(r.IsScoutMember(7));Assert.False(r.IsScoutMember(8));
+            Assert.True(r.PreemptDefense(attack,new[]{1,2,3,8}));Check();
+            r.Observe(PlayableAiObservation.From(ScoutSnapshot(true)));Check();Assert.False(r.IsScoutMember(7));
+            r.Disband(attack);Check();r.Disband(scout);Check();
+            r=AiArmyRegistry.Restore(original,profile,AiDifficulty.Fighter,10);Check();Assert.True(r.IsScoutMember(7));Assert.True(r.IsScoutMember(8));
+        }
         [Test] public void OriginalPredicateMatchesValidHistoryAndCorruptScalarMembershipCases()
         {
             var mutations=new Action<AiArmyRegistry,AiArmyState,Dictionary<int,long>>[]{

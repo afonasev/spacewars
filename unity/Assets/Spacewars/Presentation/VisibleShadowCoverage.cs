@@ -17,6 +17,8 @@ namespace Spacewars.Presentation
         private readonly Plane[] planes=new Plane[6];
         private UniversalRenderPipelineAsset activePipeline;
         private float previousDistance;
+        public int LastRendererCount{get;private set;}
+        public double LastCoverageMilliseconds{get;private set;}
         public float LastRequiredDistance{get;private set;}
         public void Configure(Transform sceneRoot,IndustrialLightingProfile settings)
         {settings.Validate();scene=sceneRoot;profile=settings;view=GetComponent<Camera>();}
@@ -27,17 +29,18 @@ namespace Spacewars.Presentation
         public static float RequiredDistance(Camera camera,IReadOnlyList<Renderer> objects,float minimum,float padding,Plane[] clippingPlanes)
         {
             GeometryUtility.CalculateFrustumPlanes(camera,clippingPlanes);
-            float farthest=0;var forward=camera.transform.forward;
+            float farthest=0;var cameraTransform=camera.transform;var forward=cameraTransform.forward;var position=cameraTransform.position;int mask=camera.cullingMask;
             for(int i=0;i<objects.Count;i++)
             {
                 var r=objects[i];
-                if(!r||!r.enabled||!r.gameObject.activeInHierarchy||(camera.cullingMask&(1<<r.gameObject.layer))==0)continue;
+                if(!r||!r.enabled)continue;
+                var objectState=r.gameObject;if(!objectState.activeInHierarchy||(mask&(1<<objectState.layer))==0)continue;
                 // Rings, HUD projections and transparent weapon visuals have no solid shadow role.
                 if(r.shadowCastingMode==ShadowCastingMode.Off&&!r.receiveShadows)continue;
                 var bounds=r.bounds;if(!GeometryUtility.TestPlanesAABB(clippingPlanes,bounds))continue;
                 var e=bounds.extents;
                 float radius=Mathf.Abs(forward.x)*e.x+Mathf.Abs(forward.y)*e.y+Mathf.Abs(forward.z)*e.z;
-                float depth=Vector3.Dot(bounds.center-camera.transform.position,forward)+radius;
+                float depth=Vector3.Dot(bounds.center-position,forward)+radius;
                 farthest=Mathf.Max(farthest,depth);
             }
             return Mathf.Min(camera.farClipPlane,Mathf.Max(minimum,farthest*(1+padding)));
@@ -47,8 +50,11 @@ namespace Spacewars.Presentation
             if(camera!=view||!scene||profile==null)return;
             Restore();
             if(!(GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset pipeline))return;
+            long stamp=Spacewars.Simulation.PerformanceProfile.Enabled?System.Diagnostics.Stopwatch.GetTimestamp():0;
             scene.GetComponentsInChildren(false,renderers);
+            LastRendererCount=renderers.Count;
             LastRequiredDistance=RequiredDistance(camera,renderers,profile.shadowDistance,profile.shadowCoveragePadding,planes);
+            if(stamp!=0)LastCoverageMilliseconds=(System.Diagnostics.Stopwatch.GetTimestamp()-stamp)*1000d/System.Diagnostics.Stopwatch.Frequency;
             activePipeline=pipeline;previousDistance=pipeline.shadowDistance;pipeline.shadowDistance=LastRequiredDistance;
         }
         private void End(ScriptableRenderContext context,Camera camera){if(camera==view)Restore();}

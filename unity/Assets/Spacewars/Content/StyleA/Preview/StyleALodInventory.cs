@@ -56,8 +56,11 @@ namespace Spacewars.StyleA.Preview
                 if (!prefab) throw new InvalidOperationException("Missing audit prefab");
                 var filters = prefab.GetComponentsInChildren<MeshFilter>(true);
                 if (filters.Any(f => !f.sharedMesh)) throw new InvalidOperationException("Missing mesh: " + prefab.name);
-                var meshes = filters.Select(f => f.sharedMesh).Distinct().ToArray();
-                var renderers = prefab.GetComponentsInChildren<MeshRenderer>(true);
+                var skins = prefab.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+                if (skins.Any(r => !r.sharedMesh)) throw new InvalidOperationException("Missing skinned mesh: " + prefab.name);
+                var instances = filters.Select(f => f.sharedMesh).Concat(skins.Select(r => r.sharedMesh)).ToArray();
+                var meshes = instances.Distinct().ToArray();
+                var renderers = prefab.GetComponentsInChildren<Renderer>(true).Where(r => r is MeshRenderer || r is SkinnedMeshRenderer).ToArray();
                 var slots = renderers.SelectMany(r => r.sharedMaterials).ToArray();
                 if (slots.Any(m => !m)) throw new InvalidOperationException("Missing material: " + prefab.name);
                 var materials = slots.Distinct().ToArray();
@@ -67,12 +70,12 @@ namespace Spacewars.StyleA.Preview
                 allTextures.UnionWith(textures);
                 rows.Add(new AssetRow
                 {
-                    name = prefab.name, meshInstances = filters.Length, uniqueMeshes = meshes.Length,
+                    name = prefab.name, meshInstances = instances.Length, uniqueMeshes = meshes.Length,
                     renderers = renderers.Length, materialSlots = slots.Length, uniqueMaterials = materials.Length,
                     lodGroups = prefab.GetComponentsInChildren<LODGroup>(true).Length,
                     unreadableMeshes = meshes.Count(m => !m.isReadable),
-                    triangleInstances = filters.Sum(f => Triangles(f.sharedMesh)),
-                    uniqueMeshTriangles = meshes.Sum(Triangles), vertexInstances = filters.Sum(f => (long)f.sharedMesh.vertexCount),
+                    triangleInstances = instances.Sum(Triangles),
+                    uniqueMeshTriangles = meshes.Sum(Triangles), vertexInstances = instances.Sum(m => (long)m.vertexCount),
                     uniqueMeshRuntimeBytes = meshes.Sum(m => Profiler.GetRuntimeMemorySizeLong(m)),
                     textureRuntimeBytes = textures.Sum(t => Profiler.GetRuntimeMemorySizeLong(t)),
                     textures = textures.Select(t => new TextureRow { name = t.name, width = t.width, height = t.height,

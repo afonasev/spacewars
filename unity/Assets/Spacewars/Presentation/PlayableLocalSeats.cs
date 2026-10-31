@@ -18,6 +18,7 @@ namespace Spacewars.Presentation
         private NativeLobbyParticipant localBinding;
         private int localRosterIndex,localViewportIndex,localHumanCount=1;
         private VisualElement panelRoot,sharedMapFrame;
+        private SplitScreenDividers splitDividers;
         private PanelSettings ownedPanelSettings;
         private PlayableMapTerrain sharedMapTerrain;
         private PlayableMapSurface sharedLocalMap;
@@ -26,12 +27,14 @@ namespace Spacewars.Presentation
         private void CreateSharedLocalMap()
         {
             if(localPresentations.Count<2)return;
+            panelRoot.AddToClassList("local-split-screen");OrbitalTheme.LayoutDeviceDiagnostics(panelRoot);
+            splitDividers=new SplitScreenDividers();panelRoot.Add(splitDividers);
             sharedMapTerrain=new PlayableMapTerrain(profile);
             sharedMapFrame=new VisualElement{name="ordinary-shared-minimap"};sharedMapFrame.style.position=Position.Absolute;sharedMapFrame.style.left=Length.Percent(localPresentations.Count==3?75:50);StyleRegion(sharedMapFrame);OrbitalPrecision.Frame(sharedMapFrame,MinimapOutline,localPresentations.Count==2);
             sharedMapFrame.style.paddingLeft=sharedMapFrame.style.paddingRight=sharedMapFrame.style.paddingTop=sharedMapFrame.style.paddingBottom=4;
             if(localPresentations.Count==2)sharedMapFrame.style.bottom=0;
             else sharedMapFrame.style.top=Length.Percent(localPresentations.Count==3?75:50);
-            panelRoot.Add(sharedMapFrame);
+            panelRoot.Add(sharedMapFrame);sharedMapFrame.RegisterCallback<GeometryChangedEvent>(_=>UpdateLocalDividers());
             sharedLocalMap=new PlayableMapSurface(profile,sharedMapTerrain.Texture){OwnerPaint=owner=>LobbyPaint(owner)};sharedLocalMap.style.flexShrink=0;sharedMapFrame.Add(sharedLocalMap);
             sharedMapClock=new Label();sharedMapClock.style.fontSize=12;sharedMapClock.style.color=Ink;sharedMapClock.style.unityTextAlign=TextAnchor.MiddleCenter;sharedMapClock.style.height=20;sharedMapClock.style.flexShrink=0;sharedMapClock.style.marginTop=sharedMapClock.style.marginBottom=sharedMapClock.style.marginLeft=sharedMapClock.style.marginRight=0;sharedMapFrame.Add(sharedMapClock);
             sharedMapLayoutCallback=_=>LayoutSharedLocalMap();panelRoot.RegisterCallback(sharedMapLayoutCallback);LayoutSharedLocalMap();
@@ -46,6 +49,7 @@ namespace Spacewars.Presentation
             float size=localPresentations.Count==3?Mathf.Max(64,Mathf.Min(panelRoot.contentRect.width*.5f-24,panelRoot.contentRect.height*.5f-44)):144;
             sharedLocalMap.style.width=sharedLocalMap.style.height=size;sharedMapFrame.style.width=size+8;sharedMapFrame.style.height=size+28;sharedMapFrame.style.marginLeft=-(size+8)/2;
             if(localPresentations.Count>2)sharedMapFrame.style.marginTop=-(size+28)/2;
+            UpdateLocalDividers();
         }
         private void UpdateSharedLocalMap(OfflinePresentationFrame frame)
         {
@@ -55,8 +59,20 @@ namespace Spacewars.Presentation
             var markers=OfflineMapProjection.Shared(frame,localPresentations.Select(seat=>seat.LocalOwnerId).ToArray()).Select(m=>new PlayableMapMark(m.Id,m.Position,Enum.TryParse<PlayableBuildingKind>(m.Kind,out var kind)?kind:default(PlayableBuildingKind),m.State,m.Owner)).ToArray();
             sharedLocalMap.SetPublic(markers,profile.ArenaHalfExtent);sharedLocalMap.SetOrderMarkers(Array.Empty<PlayableQueueMarker>());
             long seconds=view.Tick/30;sharedMapClock.text=(seconds/60).ToString("D2")+":"+(seconds%60).ToString("D2");
+            UpdateLocalDividers();
         }
-        private void DisposeSharedLocalMap(){if(sharedMapLayoutCallback!=null){panelRoot.UnregisterCallback(sharedMapLayoutCallback);sharedMapLayoutCallback=null;}sharedMapFrame?.RemoveFromHierarchy();sharedMapFrame=null;sharedLocalMap=null;sharedMapTerrain?.Dispose();sharedMapTerrain=null;}
+        private void UpdateLocalDividers()
+        {
+            if(splitDividers==null)return;
+            bool visible=!paused&&!ResultsVisible&&!inLobby&&!preparing&&localPresentations.Count>=2;
+            splitDividers.style.display=visible?DisplayStyle.Flex:DisplayStyle.None;
+            Rect? map=null;
+            if(sharedMapFrame!=null&&sharedMapFrame.style.display.value!=DisplayStyle.None&&sharedMapFrame.worldBound.width>0)
+            {var r=sharedMapFrame.worldBound;r.position=splitDividers.WorldToLocal(r.position);map=r;}
+            splitDividers.Set(localPresentations.Count,map);
+            if(visible){splitDividers.BringToFront();if(map.HasValue)sharedMapFrame.BringToFront();OrbitalTheme.LayoutDeviceDiagnostics(panelRoot);}
+        }
+        private void DisposeSharedLocalMap(){panelRoot?.RemoveFromClassList("local-split-screen");OrbitalTheme.LayoutDeviceDiagnostics(panelRoot);splitDividers?.RemoveFromHierarchy();splitDividers=null;if(sharedMapLayoutCallback!=null){panelRoot.UnregisterCallback(sharedMapLayoutCallback);sharedMapLayoutCallback=null;}sharedMapFrame?.RemoveFromHierarchy();sharedMapFrame=null;sharedLocalMap=null;sharedMapTerrain?.Dispose();sharedMapTerrain=null;}
         private void ExpandLocalMenu(bool expanded)
         {
             if(!expanded){ConfigureLocalViewport(localViewportIndex,localHumanCount);return;}
@@ -71,18 +87,17 @@ namespace Spacewars.Presentation
         private PlayableOwner LocalOwner=>localBinding==null?(view?.Owner??PlayableOwner.Player):(PlayableOwner)localRosterIndex;
         private string LocalOwnerId=>localBinding==null?"player-1":localRosterIndex==0?"player-1":"foundry-"+(localRosterIndex+1);
         private Vector2 SeatScreenCenter=>cameraView==null?new Vector2(Screen.width/2f,Screen.height/2f):cameraView.pixelRect.center;
-        private bool SeatUsesKeyboard=>localBinding==null||localBinding.DeviceId==0||localHumanCount==1;
+        private bool SeatUsesKeyboard=>localBinding==null||localBinding.DeviceId==0;
         private Gamepad SeatPad
         {
             get
             {
                 if(localBinding==null)return Gamepad.current;
                 if(localBinding.DeviceId>0)return Gamepad.all.FirstOrDefault(p=>p.deviceId==localBinding.DeviceId);
-                var reserved=new HashSet<int>((matchSetup?.Participants??new List<NativeLobbyParticipant>()).Where(p=>p.Human&&p.DeviceId>0).Select(p=>p.DeviceId));
-                return Gamepad.current!=null&&!reserved.Contains(Gamepad.current.deviceId)?Gamepad.current:Gamepad.all.FirstOrDefault(p=>!reserved.Contains(p.deviceId));
+                return null;
             }
         }
-        private bool SeatReady=>localBinding==null?devicesReady:localHumanCount==1?(Keyboard.current?.added==true&&Mouse.current?.added==true||SeatPad?.added==true):localBinding.DeviceId>0?SeatPad?.added==true:Keyboard.current?.added==true&&Mouse.current?.added==true;
+        private bool SeatReady=>localBinding==null?devicesReady:localBinding.DeviceId>0?SeatPad?.added==true:Keyboard.current?.added==true&&Mouse.current?.added==true;
         private bool LocalMenuVisible=>localCoordinator==null?localPauseOwner==null||localPauseOwner==this:localCoordinator.localPauseOwner==this;
         private static Rect LocalRect(int index,int count)=>count<=1?new Rect(0,0,1,1):count==2?new Rect(index*.5f,0,.5f,1):new Rect(index%2*.5f,1-(index/2+1)*.5f,.5f,.5f);
         private void ConfigureLocalPresentations()=>LoadingPreparation.Drain(PrepareLocalPresentations());
@@ -110,7 +125,7 @@ namespace Spacewars.Presentation
                 seat.inLobby=false;seat.root.Q("tactical-minimap-frame").style.display=DisplayStyle.Flex;seat.SetMatchUi(true);seat.ConfigureLocalViewport(index,humans.Length);
                 var own=seat.view.Buildings.FirstOrDefault(b=>b.Owner==seat.LocalOwner&&b.Kind==PlayableBuildingKind.Headquarters);
                 if(own!=null){var center=seat.Ground(seat.SeatScreenCenter);seat.cameraView.transform.position+=new Vector3((float)(own.Position.X-center.X),0,(float)(own.Position.Z-center.Z));seat.RememberKeyboardCamera();}
-                seat.root.RegisterCallback<PointerDownEvent>(evt=>{if(!seat.SeatUsesKeyboard){evt.StopImmediatePropagation();seat.root.focusController?.IgnoreEvent(evt);}},TrickleDown.TrickleDown);
+                seat.root.RegisterCallback<PointerDownEvent>(evt=>{if(!seat.SeatUsesKeyboard&&!seat.MenuOwnsInput){evt.StopImmediatePropagation();seat.root.focusController?.IgnoreEvent(evt);}},TrickleDown.TrickleDown);
             }
             CreateSharedLocalMap();
         }
@@ -119,9 +134,9 @@ namespace Spacewars.Presentation
         private void BindLocalKeyboardInput()
         {
             input.Select=Select;input.Order=Order;input.Stop=()=>Submit(PlayableCommandKind.Stop);input.Hold=()=>Submit(PlayableCommandKind.Hold);
-            input.CancelContext=()=>{if(mapOpen){CloseMap();return true;}return CloseBattleContext();};input.TogglePause=()=>Pause(!paused);input.Restart=Restart;input.FocusLost=()=>{var coordinator=localCoordinator??this;if(!coordinator.battleHudUnattended&&!coordinator.routePerformanceEvidence)Pause(true);};
+            input.CancelContext=()=>{if(CancelTeamSignal())return true;if(mapOpen){CloseMap();return true;}return CloseBattleContext();};input.TogglePause=()=>Pause(!paused);input.Restart=Restart;input.FocusLost=()=>{var coordinator=localCoordinator??this;if(!coordinator.battleHudUnattended&&!coordinator.routePerformanceEvidence)Pause(true);};
             input.IsPointerOverUi=OverUi;input.IsKeyboardInUi=()=>MenuOwnsInput||root?.focusController?.focusedElement is VisualElement focused&&root.Contains(focused)&&(focused is Button||focused is TextField);
-            input.MapAt=MapAt;input.MapSelect=MapSelect;input.MapPan=PanMap;input.MapOrder=MapOrder;input.ToggleMap=ToggleMap;input.CloseMap=CloseMap;input.Pan=Pan;input.Zoom=Zoom;input.Drag=DrawDrag;BindKeyboardCommands();
+            input.MapAt=MapAt;input.MapSelect=MapSelect;input.MapPan=PanMap;input.MapOrder=MapOrder;input.ToggleMap=ToggleMap;input.CloseMap=CloseMap;input.Pan=Pan;input.Zoom=Zoom;input.Drag=DrawDrag;BindKeyboardCommands();BindChatInput();
             input.AttackModeChanged=active=>{commandCursor?.Set(false);notice="";};
         }
         private void ConfigureLocalViewport(int index,int count)
@@ -149,16 +164,18 @@ namespace Spacewars.Presentation
             {
                 seat.RefreshLocalKeyboardBinding();seat.ownerFrame=frame;seat.view=frame.Views[seat.LocalOwnerId];seat.paused=paused;seat.restarting=restarting;seat.quitting=quitting;
                 seat.input.WorldInputEnabled=seat.SeatReady&&!paused&&!preparing&&!returningToLobby&&!restarting&&!quitting&&seat.view.Outcome==PlayableMatchOutcome.Playing&&!ResultsVisible;
-                seat.RebindPresentation();seat.Render();seat.UpdateHud();seat.UpdateMaps();seat.UpdateLifecycleMarkers();seat.UpdateIncomeMarkers();seat.PollBattleController();seat.UpdateKeyboardPresentation();seat.UpdateOrderMarkers(receipts.Where(r=>r.OwnerId==seat.LocalOwnerId).ToArray());
+                seat.input.CommandInputEnabled=seat.input.WorldInputEnabled&&seat.matchSetup?.Spectator!=true;
+                seat.RebindPresentation();seat.Render();seat.UpdateHud();seat.UpdateMaps();seat.UpdateTeamSignalPresentation();seat.UpdateMatchNotifications();seat.UpdateLifecycleMarkers();seat.UpdateIncomeMarkers();seat.PollBattleController();seat.UpdateKeyboardPresentation();seat.UpdateOrderMarkers(receipts.Where(r=>r.OwnerId==seat.LocalOwnerId).ToArray());
             }
             UpdateSharedLocalMap(frame);
         }
-        private void PauseFrom(PlayableBootstrap seat,bool value){localPauseOwner=value?seat:null;Pause(value);}
+        private void PauseFrom(PlayableBootstrap seat,bool value){localPauseOwner=value?this:null;Pause(value);}
         private void BroadcastPause(bool value)
         {
             if(value&&localPauseOwner==null)localPauseOwner=this;
-            foreach(var seat in localPresentations){seat.root.style.display=value&&seat!=localPauseOwner?DisplayStyle.None:DisplayStyle.Flex;seat.ExpandLocalMenu(value&&seat==localPauseOwner);seat.paused=value;seat.input?.ClearMode();seat.battleGestures.Cancel();seat.CloseMap();if(!value){seat.CloseChildMenu();seat.menuNavigation?.SetScope(null);}}
+            foreach(var seat in localPresentations){seat.root.style.display=value&&seat!=localPauseOwner?DisplayStyle.None:DisplayStyle.Flex;seat.ExpandLocalMenu(value&&seat==localPauseOwner);seat.paused=value;if(value)seat.CloseChat();seat.input?.ClearMode();seat.battleGestures.Cancel();seat.CloseMap();if(!value){seat.CloseChildMenu();seat.menuNavigation?.SetScope(null);}}
             if(!value)localPauseOwner=null;
+            UpdateLocalDividers();
         }
     }
 }

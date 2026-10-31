@@ -19,25 +19,53 @@ namespace Spacewars.Simulation
     // Deliberately excludes HP, queues, progress, targets and other live state.
     public sealed class KnownBuilding
     {
-        public KnownBuilding(int id,int team,PlayableOwner owner,PlayableBuildingKind kind,NavPoint position,double heading,bool refineryUpgraded=false)
-        {RefineryUpgraded=refineryUpgraded;Id=id;Team=team;Owner=owner;Kind=kind;Position=position;Heading=heading;}
-        public bool RefineryUpgraded{get;} public int Id{get;} public int Team{get;} public PlayableOwner Owner{get;}
+        public KnownBuilding(int id,int team,PlayableOwner owner,PlayableBuildingKind kind,NavPoint position,double heading,bool refineryUpgraded=false,bool scientificCenterUpgraded=false)
+        {ScientificCenterUpgraded=scientificCenterUpgraded;RefineryUpgraded=refineryUpgraded;Id=id;Team=team;Owner=owner;Kind=kind;Position=position;Heading=heading;}
+        public bool ScientificCenterUpgraded{get;} public bool ModelUpgraded=>RefineryUpgraded||ScientificCenterUpgraded; public bool RefineryUpgraded{get;} public int Id{get;} public int Team{get;} public PlayableOwner Owner{get;}
         public PlayableBuildingKind Kind{get;} public NavPoint Position{get;} public double Heading{get;}
+    }
+
+    // Derived rejection only. Every surviving point uses the original exact circles.
+    internal readonly struct VisionQueryBounds
+    {
+        private const double CertifiedCoordinate=1048576;
+        private readonly bool valid;
+        private readonly double minX,maxX,minZ,maxZ;
+        private VisionQueryBounds(double minX,double maxX,double minZ,double maxZ)
+        {this.minX=minX;this.maxX=maxX;this.minZ=minZ;this.maxZ=maxZ;valid=true;}
+        internal static VisionQueryBounds Create(VisionSource[] sources)
+        {
+            // For short lists the original loop is cheaper than a broad phase.
+            if(sources.Length<4)return default;
+            double minX=double.PositiveInfinity,minZ=minX,maxX=double.NegativeInfinity,maxZ=maxX;
+            foreach(var s in sources){
+                if(!(Math.Abs(s.Position.X)<=CertifiedCoordinate&&Math.Abs(s.Position.Z)<=CertifiedCoordinate&&s.Radius>=0&&s.Radius<=CertifiedCoordinate))return default;
+                double reach=s.Radius+0.0001;
+                // One metre slack dominates double rounding throughout the certified
+                // range. This is not the vision edge; exact circle math stays intact.
+                minX=Math.Min(minX,s.Position.X-reach-1);maxX=Math.Max(maxX,s.Position.X+reach+1);
+                minZ=Math.Min(minZ,s.Position.Z-reach-1);maxZ=Math.Max(maxZ,s.Position.Z+reach+1);
+            }
+            return new VisionQueryBounds(minX,maxX,minZ,maxZ);
+        }
+        internal bool MayContain(NavPoint p)=>!valid||!(Math.Abs(p.X)<=CertifiedCoordinate&&Math.Abs(p.Z)<=CertifiedCoordinate)||
+            !(p.X<minX||p.X>maxX||p.Z<minZ||p.Z>maxZ);
     }
 
     public sealed class TeamVisionSnapshot
     {
         private readonly VisionSource[] sourceValues;
+        private readonly VisionQueryBounds queryBounds;
         internal TeamVisionSnapshot(int team,long revision,long fogRevision,double halfWidth,double halfDepth,double cellSize,VisionSource[] sources,long[] cells,byte[] coverage,KnownBuilding[] memory)
         {
             Team=team;Revision=revision;FogRevision=fogRevision;HalfWidth=halfWidth;HalfDepth=halfDepth;CellSize=cellSize;
-            sourceValues=(VisionSource[])sources.Clone();Sources=Array.AsReadOnly(sourceValues);DiscoveredCells=Array.AsReadOnly((long[])cells.Clone());
+            sourceValues=(VisionSource[])sources.Clone();queryBounds=VisionQueryBounds.Create(sourceValues);Sources=Array.AsReadOnly(sourceValues);DiscoveredCells=Array.AsReadOnly((long[])cells.Clone());
             Coverage=Array.AsReadOnly((byte[])coverage.Clone());KnownBuildings=Array.AsReadOnly((KnownBuilding[])memory.Clone());
         }
         public int Team{get;} public long Revision{get;} public long FogRevision{get;} public double HalfWidth{get;} public double HalfDepth{get;} public double CellSize{get;}
         public IReadOnlyList<VisionSource> Sources{get;} public IReadOnlyList<long> DiscoveredCells{get;}
         public IReadOnlyList<byte> Coverage{get;} public IReadOnlyList<KnownBuilding> KnownBuildings{get;}
-        public bool IsVisible(NavPoint p)=>PlayableVision.VisibleArray(sourceValues,p);
+        public bool IsVisible(NavPoint p)=>queryBounds.MayContain(p)&&PlayableVision.VisibleArray(sourceValues,p);
     }
 
     // One owner-thread instance per team. No renderer, terrain or camera dependency.
@@ -49,6 +77,7 @@ namespace Spacewars.Simulation
         private readonly int team;
         private readonly double halfWidth,halfDepth,cellSize,feather;
         private VisionSource[] sources=Array.Empty<VisionSource>();
+        private VisionQueryBounds queryBounds;
         private readonly HashSet<long> discovered=new HashSet<long>();
         private readonly Dictionary<int,KnownBuilding> known=new Dictionary<int,KnownBuilding>();
         private readonly byte[] coverage=new byte[RasterResolution*RasterResolution];
@@ -66,7 +95,7 @@ namespace Spacewars.Simulation
         }
         private static bool Positive(double n)=>VisionSource.Finite(n)&&n>0;
         public long CoverageUpdates{get;private set;}
-        public bool IsVisible(NavPoint point)=>VisibleArray(sources,point);
+        public bool IsVisible(NavPoint point)=>queryBounds.MayContain(point)&&VisibleArray(sources,point);
         public bool IsDiscovered(NavPoint point)=>VisionSource.Finite(point.X)&&VisionSource.Finite(point.Z)&&Math.Abs(point.X)<=halfWidth&&Math.Abs(point.Z)<=halfDepth&&discovered.Contains(CellKey((int)Math.Floor(point.X/cellSize),(int)Math.Floor(point.Z/cellSize)));
         public static long CellKey(int x,int z)=>((long)x<<32)|(uint)z;
         public static bool Visible(IReadOnlyList<VisionSource> current,NavPoint point)
@@ -123,7 +152,7 @@ namespace Spacewars.Simulation
             var next=input.OrderBy(s=>s.Position.X).ThenBy(s=>s.Position.Z).ThenBy(s=>s.Radius).ToArray();
             bool changed=next.Length!=sources.Length;
             for(int i=0;!changed&&i<next.Length;i++)changed=next[i].Position.X!=sources[i].Position.X||next[i].Position.Z!=sources[i].Position.Z||next[i].Radius!=sources[i].Radius;
-            if(changed){var previous=sources;sources=next;Explore(previous);}
+            if(changed){var previous=sources;sources=next;queryBounds=VisionQueryBounds.Create(sources);Explore(previous);}
             bool memoryChanged=false;
             var confirmed=new HashSet<int>();
             foreach(var b in actualBuildings)
@@ -150,7 +179,7 @@ namespace Spacewars.Simulation
             }
             return true;
         }
-        private static bool Same(KnownBuilding a,KnownBuilding b)=>a.Id==b.Id&&a.Team==b.Team&&a.Owner==b.Owner&&a.Kind==b.Kind&&a.Position.X==b.Position.X&&a.Position.Z==b.Position.Z&&a.Heading==b.Heading&&a.RefineryUpgraded==b.RefineryUpgraded;
+        private static bool Same(KnownBuilding a,KnownBuilding b)=>a.Id==b.Id&&a.Team==b.Team&&a.Owner==b.Owner&&a.Kind==b.Kind&&a.Position.X==b.Position.X&&a.Position.Z==b.Position.Z&&a.Heading==b.Heading&&a.RefineryUpgraded==b.RefineryUpgraded&&a.ScientificCenterUpgraded==b.ScientificCenterUpgraded;
         private void Explore(VisionSource[] previous)
         {
             CoverageUpdates++;
@@ -197,7 +226,7 @@ namespace Spacewars.Simulation
         {
             if(phase==ConstructionPhase.Pending)return 0;
             double radius;
-            switch(kind){case PlayableBuildingKind.Hangar:radius=p.HangarVisionRange;break;case PlayableBuildingKind.ScientificCenter:radius=p.ScienceVisionRange;break;case PlayableBuildingKind.Headquarters:radius=p.HeadquartersVisionRange;break;case PlayableBuildingKind.Outpost:radius=p.OutpostVisionRange;break;case PlayableBuildingKind.Factory:radius=p.FactoryVisionRange;break;case PlayableBuildingKind.Refinery:radius=p.RefineryVisionRange;break;case PlayableBuildingKind.Mine:radius=p.MineVisionRange;break;default:throw new ArgumentOutOfRangeException(nameof(kind));}
+            switch(kind){case PlayableBuildingKind.GaussTower:radius=p.GaussRange;break;case PlayableBuildingKind.RepairTower:case PlayableBuildingKind.SentryTurret:radius=p.TurretVision;break;case PlayableBuildingKind.Hangar:radius=p.HangarVisionRange;break;case PlayableBuildingKind.ScientificCenter:radius=p.ScienceVisionRange;break;case PlayableBuildingKind.Headquarters:radius=p.HeadquartersVisionRange;break;case PlayableBuildingKind.Outpost:radius=p.OutpostVisionRange;break;case PlayableBuildingKind.Factory:radius=p.FactoryVisionRange;break;case PlayableBuildingKind.Refinery:radius=p.RefineryVisionRange;break;case PlayableBuildingKind.Mine:radius=p.MineVisionRange;break;default:throw new ArgumentOutOfRangeException(nameof(kind));}
             return phase==ConstructionPhase.Ready?radius:radius*p.ConstructionVisionMultiplier;
         }
     }

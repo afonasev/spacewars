@@ -13,6 +13,39 @@ namespace Spacewars.Input.Tests
         [SetUp] public override void Setup(){base.Setup();host=new GameObject("PlayableInputTests");input=host.AddComponent<PlayableInput>();keyboard=InputSystem.AddDevice<Keyboard>();mouse=InputSystem.AddDevice<Mouse>();keyboard.MakeCurrent();mouse.MakeCurrent();input.SetFocus(true);}
         [TearDown] public override void TearDown(){Object.DestroyImmediate(host);base.TearDown();}
 
+        [TestCase(1f,120f)]
+        [TestCase(-1f,-120f)]
+        [TestCase(.25f,30f)]
+        [TestCase(3f,360f)]
+        public void NormalizedWheelRestoresProfileUnitsWithoutDiscardingFractionalOrBatchedScroll(float scroll,float expected)
+        {
+            InputSystem.settings.scrollDeltaBehavior=InputSettings.ScrollDeltaBehavior.UniformAcrossAllPlatforms;
+            float received=0;int calls=0;input.Zoom=value=>{received=value;calls++;};
+            InputSystem.QueueStateEvent(mouse,new MouseState{scroll=new Vector2(0,scroll)});InputSystem.Update();input.Poll();
+            Assert.AreEqual(expected,received);Assert.AreEqual(1,calls);
+            InputSystem.Update();input.Poll();Assert.AreEqual(1,calls,"An idle frame must not repeat wheel movement");
+        }
+        [Test] public void PlatformSpecificWheelKeepsTheSameProfileUnits()
+        {
+            InputSystem.settings.scrollDeltaBehavior=InputSettings.ScrollDeltaBehavior.KeepPlatformSpecificInputRange;
+            bool windows=Application.platform==RuntimePlatform.WindowsEditor||Application.platform==RuntimePlatform.WindowsPlayer;
+            float received=0;input.Zoom=value=>received=value;
+            InputSystem.QueueStateEvent(mouse,new MouseState{scroll=new Vector2(0,windows?120:1)});InputSystem.Update();input.Poll();
+            Assert.AreEqual(120f,received);
+        }
+
+        [Test] public void PreparationPlacementUsesWorldClicksAndMapsButNeverBattleOrders()
+        {
+            input.CommandInputEnabled=false;input.PlacementInputEnabled=true;
+            int placed=0,maps=0,orders=0,tabs=0;input.SelectSameType=p=>orders++;input.Select=(a,b,shift)=>placed++;input.Order=(p,a,append)=>orders++;input.MapOrder=(k,p,a,append)=>orders++;input.MapSelect=(k,a,b,shift)=>maps++;input.ToggleMap=()=>tabs++;
+            input.MapAt=p=>p.x<100?1:0;
+            MouseState(new Vector2(150,80),1);MouseState(new Vector2(150,80),0);Assert.AreEqual(1,placed);
+            MouseState(new Vector2(50,50),1);MouseState(new Vector2(50,50),0);Assert.AreEqual(1,maps);Assert.AreEqual(1,placed);
+            MouseState(new Vector2(150,80),2);MouseState(new Vector2(150,80),0);KeyboardState(Key.Tab);KeyboardState();
+            Assert.AreEqual(1,tabs);Assert.Zero(orders);
+            MouseState(new Vector2(150,80),1);MouseState(new Vector2(150,80),0);MouseState(new Vector2(150,80),1);MouseState(new Vector2(150,80),0);Assert.AreEqual(3,placed);Assert.Zero(orders,"Double click remains a placement gesture");
+            input.WorldInputEnabled=false;MouseState(new Vector2(150,80),1);MouseState(new Vector2(150,80),0);Assert.AreEqual(3,placed);
+        }
         [Test] public void ArrowCameraScrollNormalizesDiagonalsAndRespectsUiPauseAndFocus()
         {
             int calls=0;Vector2 axis=Vector2.zero;input.Pan=value=>{calls++;axis=value;};

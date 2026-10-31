@@ -21,7 +21,7 @@ namespace Spacewars.Runtime
             w.Write(v.BurstSize);
             Number(w,v.BurstSpread);
             Number(w,v.BurstDelay);Number(w,v.HawkBurstReload);
-            w.Write(v.ExplicitTarget);
+            w.Write(v.WreckWaiting);w.Write(v.ExplicitTarget);
             WorldWire.Write(w,v.PreviousPosition);
             WorldWire.Write(w,v.Velocity);
             w.Write(v.Id);
@@ -46,7 +46,7 @@ namespace Spacewars.Runtime
             v.BurstSize=r.ReadInt32();
             v.BurstSpread=Number(r);
             v.BurstDelay=Number(r);v.HawkBurstReload=Number(r);
-            v.ExplicitTarget=Boolean(r);
+            v.WreckWaiting=Boolean(r);v.ExplicitTarget=Boolean(r);
             v.PreviousPosition=ReadPoint(r);
             v.Velocity=ReadPoint(r);
             v.Id=r.ReadInt32();
@@ -65,8 +65,11 @@ namespace Spacewars.Runtime
             }
         private static void WriteRecord(BinaryWriter w,Building v) {w.Write(v!=null);
             if(v==null)return;
+            w.Write(v.Gauss!=null);if(v.Gauss!=null){var g=v.Gauss;WorldWire.Write(w,g.Start);WorldWire.Write(w,g.End);Number(w,g.VisibleSeconds);Array(w,g.Targets,x=>w.Write(x));Array(w,g.Damage,x=>Number(w,x));w.Write(g.Next);}
+            w.Write(v.Healing!=null);if(v.Healing!=null){w.Write(v.Healing.Target);Number(w,v.Healing.Heading);Number(w,v.Healing.Pitch);w.Write(v.Healing.Initialized);}
+            w.Write(v.Weapon!=null);if(v.Weapon!=null){var s=v.Weapon;w.Write(s.Target);w.Write(s.Remaining);w.Write(s.BurstSequence);w.Write(s.ShotSequence);Number(w,s.Heading);Number(w,s.Pitch);Number(w,s.Reload);Number(w,s.Delay);w.Write(s.Turning);w.Write(s.BurstSize);Number(w,s.BurstSpread);}
             w.Write(v.TermsRevision);
-            WriteRecord(w,v.Upgrade);
+            WriteRecord(w,v.Upgrade);WriteRecord(w,v.ProducerUpgrade);
             w.Write(v.LastDamageTime.HasValue);
             if(v.LastDamageTime.HasValue)Number(w,v.LastDamageTime.Value);
             WriteRecord(w,v.Sale);
@@ -96,8 +99,12 @@ namespace Spacewars.Runtime
             w.Write((int)v.RepeatKind);w.Write(v.LaunchPhase);w.Write(v.LaunchedId);Number(w,v.LaunchTime);
             }
         private static Building ReadBuilding(BinaryReader r) {if(!Boolean(r))return null;
-            var v=Record(r,()=>new Building());v.TermsRevision=r.ReadInt32();
-            v.Upgrade=ReadRefineryUpgrade(r);
+            var v=Record(r,()=>new Building());
+            if(Boolean(r))v.Gauss=new GaussShotState{Start=ReadBallisticPoint(r),End=ReadBallisticPoint(r),VisibleSeconds=Number(r),Targets=Array(r,()=>r.ReadInt32()),Damage=Array(r,()=>Number(r)),Next=r.ReadInt32()};
+            if(Boolean(r))v.Healing=new RepairTowerState{Target=r.ReadInt32(),Heading=Number(r),Pitch=Number(r),Initialized=Boolean(r)};
+            if(Boolean(r))v.Weapon=new SentryTurretState{Target=r.ReadInt32(),Remaining=r.ReadInt32(),BurstSequence=r.ReadInt32(),ShotSequence=r.ReadInt32(),Heading=Number(r),Pitch=Number(r),Reload=Number(r),Delay=Number(r),Turning=Boolean(r),BurstSize=r.ReadInt32(),BurstSpread=Number(r)};
+            v.TermsRevision=r.ReadInt32();
+            v.Upgrade=ReadRefineryUpgrade(r);v.ProducerUpgrade=ReadRefineryUpgrade(r);
             v.LastDamageTime=Boolean(r)?(double?)Number(r):null;
             v.Sale=ReadSaleState(r);
             v.Repair=ReadRepairState(r);
@@ -122,6 +129,8 @@ namespace Spacewars.Runtime
             v.Orders.AddRange(Array(r,()=>ReadProductionOrder(r)));
             v.RepeatTank=Boolean(r);
             v.RepeatKind=EnumValue<PlayableEntityKind>(r);v.LaunchPhase=r.ReadInt32();v.LaunchedId=r.ReadInt32();v.LaunchTime=Number(r);
+            // Finish an already staged pre-rule release along its saved corridor; all other fronts normalize immediately.
+            if(v.Kind!=PlayableBuildingKind.Factory||v.LaunchPhase==FactoryReleaseRules.Closed)v.Heading=TerritoryRules.BuildingHeading;
             return v;
             }
         private static void WriteRecord(BinaryWriter w,Projectile v) {w.Write(v!=null);
@@ -171,7 +180,7 @@ namespace Spacewars.Runtime
             w.Write(v.PopulationCost);
             Number(w,v.Duration);
             Number(w,v.Remaining);
-            w.Write(v.Active);
+            w.Write(v.Active);w.Write(v.IsUpgrade);Number(w,v.SpeedMultiplier);w.Write(v.SpeedRevision);
             }
         private static ProductionOrder ReadProductionOrder(BinaryReader r) {if(!Boolean(r))return null;
             var v=Record(r,()=>new ProductionOrder());v.TermsRevision=r.ReadInt32();
@@ -181,7 +190,7 @@ namespace Spacewars.Runtime
             v.PopulationCost=r.ReadInt32();
             v.Duration=Number(r);
             v.Remaining=Number(r);
-            v.Active=Boolean(r);
+            v.Active=Boolean(r);v.IsUpgrade=Boolean(r);v.SpeedMultiplier=Number(r);v.SpeedRevision=r.ReadInt32();
             return v;
             }
         private static void WriteRecord(BinaryWriter w,ResearchOrder v) {w.Write(v!=null);
@@ -265,6 +274,7 @@ namespace Spacewars.Runtime
             Number(w,v.MarkerStartRadius);
             Number(w,v.MarkerOpacity);
             Number(w,v.BuildingHeight);
+            w.Write(v.BuildingTarget);
             }
         private static Rocket ReadRocket(BinaryReader r) {if(!Boolean(r))return null;
             var v=Record(r,()=>new Rocket());
@@ -276,6 +286,7 @@ namespace Spacewars.Runtime
             v.MarkerStartRadius=Number(r);
             v.MarkerOpacity=Number(r);
             v.BuildingHeight=Number(r);
+            v.BuildingTarget=Boolean(r);
             return v;
             }
     }

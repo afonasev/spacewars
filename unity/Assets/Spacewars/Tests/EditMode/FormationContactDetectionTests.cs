@@ -79,6 +79,45 @@ namespace Spacewars.Tests.EditMode
             var cold=D.GetMethod("RestoreWorldBytes",BindingFlags.NonPublic|BindingFlags.Static).Invoke(null,new object[]{bytes,PlayableProfile.Default,7,"contact-prefilter"});
             CollectionAssert.AreEqual(bytes,(byte[])Call(cold,"CaptureWorldBytes",7,"contact-prefilter"));
         }
+        [Test] public void ReportExact400ContactLookupPredecessorCandidatePredecessor()
+        {
+            var profile=PlayableProfile.Create(PlayableProfile.Default.CopyData(),new AiTestMap());
+            var setup=new NativeLobbyConfiguration{AiTestMap=true,HasExplicitSeed=true,ExplicitSeed=7};setup.InitializeParticipants();
+            using(var runtime=PlayableRuntime.CreateEightPlayerPerformanceMatch(profile,1,setup,startPaused:true)){
+                var config=Field<OfflineMatchConfiguration>(runtime,"offlineConfiguration");
+                var views=runtime.SpectatorFrame(PlayableRuntime.LocalSpectatorId).Players.OrderBy(v=>(int)v.Owner).ToArray();
+                byte[] initial=null,final=null;long finalOperation=0;string finalGroups=null;var timings=new double[3];
+                for(int arm=0;arm<3;arm++){
+                    var authority=new PlayableAuthorityTick(config,1);var domain=Field<object>(authority,"domain");var nav=(NavigationSession)D.GetProperty("Navigation",F).GetValue(domain);
+                    try{
+                        foreach(var view in views){var command=PlayableRuntime.CreateEightPlayerMovingPerformanceCommand(view,PlayableRuntime.EightPlayerMovingPerformanceSequence(view.Owner,0));Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(command).Status);}
+                        Assert.AreEqual(400,nav.Crowd.Units.Count);Assert.AreEqual(8,nav.GroupOrders.Count);Assert.True(nav.GroupOrders.All(g=>g.Members.Length==50));
+                        Call(domain,"RefreshVision");var before=(byte[])Call(domain,"CaptureWorldBytes",7,"contact-lookup-control");
+                        if(initial==null)initial=before;else CollectionAssert.AreEqual(initial,before,"identical fixed input for each arm");
+                        var predecessor=Bind<Func<PlayableOwner,NavPoint,double,double,bool>>(domain,"FormationContactPredecessorForQa");var candidate=Detect(domain);
+                        var queries=views.SelectMany(v=>v.Entities.Where(e=>e.Owner==v.Owner).Select(e=>(v.Owner,e.Position))).ToArray();Assert.AreEqual(400,queries.Length);
+                        foreach(var q in queries)Assert.AreEqual(predecessor(q.Owner,q.Position,profile.TankRange,profile.TankProjectileCollisionRadius),candidate(q.Owner,q.Position,profile.TankRange,profile.TankProjectileCollisionRadius));
+                        var detect=arm==1?candidate:predecessor;for(int warm=0;warm<4;warm++)foreach(var q in queries)detect(q.Owner,q.Position,profile.TankRange,profile.TankProjectileCollisionRadius);
+                        int hits=0;var watch=Stopwatch.StartNew();for(int repeat=0;repeat<32;repeat++)foreach(var q in queries)if(detect(q.Owner,q.Position,profile.TankRange,profile.TankProjectileCollisionRadius))hits++;watch.Stop();timings[arm]=watch.Elapsed.TotalMilliseconds;
+                        long operation=Field<long>(nav,"authorityOperationIdentity");
+                        var publish=Bind<Action>(domain,arm==1?"RefreshFormationContacts":"RefreshFormationContactsPredecessorForQa");
+                        // Frozen bodies and issued intents; advance only the observation tick,
+                        // never the gameplay loop, route worker, grants or authority physics.
+                        var tick=D.GetProperty("Tick",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic);
+                        for(int observation=1;observation<=4;observation++){
+                            tick.SetValue(domain,(long)observation);publish();Assert.AreEqual(operation+400L*observation,Field<long>(nav,"authorityOperationIdentity"));
+                            Assert.True(nav.GroupOrders.SelectMany(g=>g.Members).All(m=>m.ContactTick==observation&&m.ContactPhase=="PostMovementVisibility"));
+                        }
+                        var after=(byte[])Call(domain,"CaptureWorldBytes",7,"contact-lookup-control");var groups=string.Join("|",nav.GroupOrders.Select(g=>g.GroupId+":"+g.MembershipRevision+":"+string.Join(",",g.Members.Select(m=>m.Entity+":"+m.ContactTick+":"+m.FormationReleased+":"+m.Phase))));
+                        if(final==null){final=after;finalOperation=Field<long>(nav,"authorityOperationIdentity");finalGroups=groups;}
+                        else{CollectionAssert.AreEqual(final,after,"full authority/save bytes across A/B/A");Assert.AreEqual(finalOperation,Field<long>(nav,"authorityOperationIdentity"));Assert.AreEqual(finalGroups,groups);}
+                        Assert.AreEqual(0d,Field<double>(domain,"elapsed")); // No gameplay time advanced.
+                        TestContext.WriteLine($"CONTACT_LOOKUP_CONTROL arm={arm} predecessor={arm!=1} queries={32*queries.Length} hits={hits} detect_wall_ms={timings[arm]:F6} mutations=1600 save_bytes={after.Length} operation={finalOperation}");
+                    }finally{authority.Stop();Call(domain,"DestroyOwnedNavigation");}
+                }
+                TestContext.WriteLine($"CONTACT_LOOKUP_ABA A1={timings[0]:F6} B={timings[1]:F6} A2={timings[2]:F6} B_over_A1={timings[1]/timings[0]:F6} B_over_A2={timings[1]/timings[2]:F6}");
+            }
+        }
         [Test] public void ReportDetectionCostWithoutTimingThreshold()
         {
             var d=Activator.CreateInstance(D,F,null,new object[]{PlayableProfile.Default,1L,false},null);

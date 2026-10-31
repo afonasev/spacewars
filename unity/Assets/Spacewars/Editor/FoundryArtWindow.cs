@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using Spacewars.Presentation;
 using UnityEditor;
 using UnityEngine;
@@ -9,16 +10,18 @@ namespace Spacewars.Editor
     public sealed class FoundryArtWindow:EditorWindow
     {
         private const string ProfilePath="Assets/Spacewars/Content/Resources/FoundrySurfaceProfile.json";
+        private const string IndustrialProfilePath="Assets/Spacewars/Content/Resources/FoundryIndustrialProfile.json";
+        private FoundryIndustrialProfile industry;
         private FoundrySurfaceProfile profile;private Vector2 scroll;private string failure;
         [MenuItem("Spacewars/Balance Lab/Foundry Art")]
         public static void Open()=>GetWindow<FoundryArtWindow>("Foundry art");
-        private void OnEnable(){profile=JsonUtility.FromJson<FoundrySurfaceProfile>(File.ReadAllText(ProfilePath));}
+        private void OnEnable(){profile=JsonUtility.FromJson<FoundrySurfaceProfile>(File.ReadAllText(ProfilePath));industry=JsonUtility.FromJson<FoundryIndustrialProfile>(File.ReadAllText(IndustrialProfilePath));}
         private void OnGUI()
         {
-            if(profile==null)return;
-            EditorGUILayout.LabelField(profile.id+" @"+profile.revision);scroll=EditorGUILayout.BeginScrollView(scroll);
+            if(profile==null||industry==null)return;
+            EditorGUILayout.LabelField(profile.id+" @"+profile.revision);EditorGUILayout.LabelField(industry.id+" @"+industry.revision);scroll=EditorGUILayout.BeginScrollView(scroll);
             string group=null;
-            foreach(var field in profile.Parameters())
+            foreach(var field in profile.Parameters().Concat(industry.Parameters()))
             {
                 if(group!=field.Group){group=field.Group;EditorGUILayout.LabelField(group,EditorStyles.boldLabel);}
                 EditorGUI.BeginChangeCheck();
@@ -27,7 +30,7 @@ namespace Spacewars.Editor
             }
             EditorGUILayout.EndScrollView();if(failure!=null)EditorGUILayout.HelpBox(failure,MessageType.Error);
             if(GUILayout.Button("Validate and save art revision"))try
-            {profile.Validate();profile.revision++;File.WriteAllText(ProfilePath,JsonUtility.ToJson(profile,true)+"\n");AssetDatabase.Refresh();failure=null;}
+            {profile.Validate();industry.Validate();profile.revision++;industry.revision++;File.WriteAllText(ProfilePath,JsonUtility.ToJson(profile,true)+"\n");File.WriteAllText(IndustrialProfilePath,JsonUtility.ToJson(industry,true)+"\n");AssetDatabase.Refresh();failure=null;}
             catch(Exception e){failure=e.Message;}
         }
     }

@@ -53,25 +53,8 @@ namespace Spacewars.Runtime
             if(command.Kind==PlayableCommandKind.Follow&&(!units.TryGetValue(command.TargetId,out var leader)||Hostile(leader.Owner,owner)||ids.Contains(command.TargetId)))return PlayableCommandStatus.InvalidTarget;
             int[] ground=ids.Where(id=>units[id].Air==null).ToArray();
             var aircraft=ids.Where(id=>units[id].Air!=null).OrderBy(id=>id).ToArray();
-            var destinations=new List<NavPoint>();
-            if(spatial)
-            {
-                foreach(int id in aircraft)
-                {
-                    bool found=false;
-                    // Search deterministic rings for separate group endpoints. Bound follows map diameter.
-                    double spacing=2*profile.HawkRadius+profile.HawkSeparation;
-                    for(int ring=0;ring<=Math.Ceiling(2*profile.ArenaHalfExtent/spacing)&&!found;ring++)
-                    for(int slot=0;slot<(ring==0?1:8*ring);slot++)
-                    {
-                        double angle=slot*Math.PI/(4*Math.Max(1,ring));
-                        var p=new NavPoint(command.Target.X+ring*spacing*Math.Cos(angle),command.Target.Z+ring*spacing*Math.Sin(angle));
-                        if(!AirInside(p)||destinations.Any(x=>Distance(x,p)<spacing)||units.Values.Any(other=>other.Air!=null&&!aircraft.Contains(other.Id)&&Distance(other.Air.Actor.Position,p)<spacing))continue;
-                        destinations.Add(p);found=true;break;
-                    }
-                    if(!found)return PlayableCommandStatus.InvalidTarget;
-                }
-            }
+            var destinations=spatial?AirDestinations(command.Target,aircraft):Array.Empty<NavPoint>();
+            if(destinations==null)return PlayableCommandStatus.InvalidTarget;
             if(command.Mode==PlayableOrderMode.Append&&aircraft.Any(id=>(units[id].Air.Actor.Moving||units[id].CurrentOrder!=null)&&units[id].Air.Deferred.Count>=profile.UnitOrderQueueLimit))return PlayableCommandStatus.Overflow;
             if(ground.Length>0)
             {
@@ -92,8 +75,30 @@ namespace Spacewars.Runtime
             if(recordHuman&&command.Origin==PlayableOrderOrigin.Human)RecordHumanAction(command.PlayerId);
             message="Aircraft order accepted.";return PlayableCommandStatus.Applied;
         }
+        // Shared by observed AI delivery and command admission. Only own aircraft
+        // occupancy can be supplied from the owner projection without hidden facts.
+        private NavPoint[] AirDestinations(NavPoint target,int[] aircraft,NavPoint[] occupied=null)
+        {
+            var destinations=new List<NavPoint>();
+            occupied=occupied??units.Values.Where(other=>other.Air!=null&&!aircraft.Contains(other.Id)).Select(other=>other.Air.Actor.Position).ToArray();
+            foreach(int id in aircraft)
+            {
+                bool found=false;double spacing=2*profile.HawkRadius+profile.HawkSeparation;
+                for(int ring=0;ring<=Math.Ceiling(2*profile.ArenaHalfExtent/spacing)&&!found;ring++)
+                for(int slot=0;slot<(ring==0?1:8*ring);slot++)
+                {
+                    double angle=slot*Math.PI/(4*Math.Max(1,ring));
+                    var p=new NavPoint(target.X+ring*spacing*Math.Cos(angle),target.Z+ring*spacing*Math.Sin(angle));
+                    if(!AirInside(p)||destinations.Any(x=>Distance(x,p)<spacing)||occupied.Any(other=>Distance(other,p)<spacing))continue;
+                    destinations.Add(p);found=true;break;
+                }
+                if(!found)return null;
+            }
+            return destinations.ToArray();
+        }
         private void SetAirOrder(Unit u,PlayableCommand command,NavPoint goal)
         {
+            ResetDefaultCombat(u);
             var a=u.Air;var n=a.Actor;bool previousShort=a.Short&&n.Moving;bool stationary=!n.Moving&&Distance(default,a.Velocity)<1e-5;
             if(u.BurstRemaining>0)u.Reload=profile.HawkReloadSeconds;u.BurstRemaining=0;u.BurstTarget=0;u.StoppedSeconds=0;
             a.Short=false;a.Escape=false;a.FacingTarget=0;n.Held=false;

@@ -20,6 +20,16 @@ public sealed class PlayableBuildingLifecycleHudTests
         Set("view",new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,900,null,Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
     }
     [TearDown] public void Cleanup()=>UnityEngine.Object.DestroyImmediate(host);
+    [Test] public void AutonomousRouteQaKeepsClockRunningOnFocusLossWhileOrdinaryGamePauses()
+    {
+        var runtime=new Spacewars.Runtime.PlayableRuntime(PlayableProfile.Default,71,7,autonomousOwnerAi:false,autonomousEnemyAi:false);
+        try{
+            Set("runtime",runtime);Set("routePerformanceEvidence",true);Call("OnApplicationFocus",false);
+            Assert.False((bool)Get("menuPaused"));Assert.False((bool)Get("localInputFocused"));
+            Set("routePerformanceEvidence",false);Call("OnApplicationFocus",true);Call("OnApplicationFocus",false);
+            Assert.True((bool)Get("menuPaused"));Assert.True((bool)Get("paused"));
+        }finally{runtime.RequestStop();Assert.True(System.Threading.SpinWait.SpinUntil(()=>runtime.IsStopped,5000));runtime.Dispose();var domain=typeof(Spacewars.Runtime.PlayableRuntime).GetField("domain",Flags).GetValue(runtime);domain.GetType().GetMethod("DestroyOwnedNavigation",Flags).Invoke(domain,null);Set("runtime",null);}
+    }
     private void Show(int id=1,string blocked=null,bool repairing=false,bool selling=false,bool waiting=false)
     {
         var state=new PlayableBuildingLifecycleSnapshot(selling,.5,repairing,waiting,1,15,blocked,repairing?"Ремонт уже активен":null,3,400,true);

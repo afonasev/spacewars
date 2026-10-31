@@ -24,6 +24,7 @@ namespace Spacewars.Tests.EditMode
             {
                 Steps(30);var view=View();
                 Assert.AreEqual(profile.StartingCredits+second*profile.HeadquartersIncomePerSecond,view.ExactCredits,1e-8);
+                Assert.AreEqual(profile.StartingCredits+second*profile.HeadquartersIncomePerSecond,view.Credits,"Integer HUD credits must not lose a unit at whole-second boundaries");
                 Assert.AreEqual(second==5?1:0,view.IncomeEvents.Count);
             }
             var e=View().IncomeEvents.Single();Assert.AreEqual(150,e.Tick);Assert.AreEqual(profile.HeadquartersIncomePerPeriod,e.Amount);
@@ -32,11 +33,35 @@ namespace Spacewars.Tests.EditMode
             Steps(29);Assert.AreEqual(1,View().IncomeEvents.Count);Steps(1);Assert.IsEmpty(View().IncomeEvents);
             Steps(120);Assert.AreEqual(300,View().IncomeEvents.Single().Tick);
         }
-        [Test] public void ConfiguredPeriodChangesPresentationAndRateWithoutChangingOneSecondSettlement()
+        [Test] public void ConfiguredPeriodChangesPresentationAndRateWithoutChangingSettlementCadence()
         {
             var data=profile.CopyData();data.incomePeriodSeconds=3;profile=PlayableProfile.Create(data);
             domain=Activator.CreateInstance(D,F,null,new object[]{profile,1L},null);
             for(int second=1;second<=3;second++){Steps(30);Assert.AreEqual(profile.StartingCredits+second*profile.HeadquartersIncomePerSecond,View().ExactCredits,1e-8);Assert.AreEqual(second==3?1:0,View().IncomeEvents.Count);}
+        }
+        [Test] public void CreditsSettleEveryHundredMillisecondsAndRestoreKeepsRemainder()
+        {
+            Assert.AreEqual(.1d,profile.IncomeSettlementSeconds);
+            var shipped=PlayableProfile.Create(Newtonsoft.Json.JsonConvert.DeserializeObject<PlayableProfileData>(System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(),"Assets/Spacewars/Content/Resources/PlayableProfile.json"))));
+            Assert.AreEqual(profile.IncomeSettlementSeconds,shipped.IncomeSettlementSeconds,"Serialized and fallback defaults must agree");
+            Steps(2);Assert.AreEqual(profile.StartingCredits,View().ExactCredits);
+            Steps(1);Assert.AreEqual(profile.StartingCredits+profile.HeadquartersIncomePerSecond*.1d,View().ExactCredits,1e-8);
+            Steps(1);var bytes=(byte[])Call("CaptureWorldBytes",7,"income-test");
+            domain=D.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{bytes,profile,7,"income-test"});
+            CollectionAssert.AreEqual(bytes,(byte[])Call("CaptureWorldBytes",7,"income-test"));
+            Steps(1);Assert.AreEqual(profile.StartingCredits+profile.HeadquartersIncomePerSecond*.1d,View().ExactCredits,1e-8);
+            Steps(1);Assert.AreEqual(profile.StartingCredits+profile.HeadquartersIncomePerSecond*.2d,View().ExactCredits,1e-8);
+            Assert.IsEmpty(View().IncomeEvents);
+        }
+        [TestCase(.1d,5d,5.1d)][TestCase(.2d,5d,5d)][TestCase(.3d,4.8d,5.1d)]
+        public void ConfiguredSettlementPreservesRateAndIndependentMarkerCadence(double interval,double settledAtFiveSeconds,double settledAtFivePointOneSeconds)
+        {
+            var data=profile.CopyData();data.incomeSettlementSeconds=interval;profile=PlayableProfile.Create(data);
+            domain=Activator.CreateInstance(D,F,null,new object[]{profile,1L},null);
+            Steps(150);Assert.AreEqual(profile.StartingCredits+profile.HeadquartersIncomePerSecond*settledAtFiveSeconds,View().ExactCredits,1e-8);
+            Assert.AreEqual(150,View().IncomeEvents.Single().Tick);
+            Steps(3);Assert.AreEqual(profile.StartingCredits+profile.HeadquartersIncomePerSecond*settledAtFivePointOneSeconds,View().ExactCredits,1e-8);
+            Steps(27);Assert.AreEqual(profile.StartingCredits+profile.HeadquartersIncomePerSecond*6d,View().ExactCredits,1e-8,"All three intervals credit the same total at their common six-second boundary");
         }
         [Test] public void UnreadyAndSellingBuildingsDoNotEarnOrCreateMarkers()
         {

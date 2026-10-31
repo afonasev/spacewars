@@ -46,8 +46,8 @@ public sealed class PostMatchResultsUiTests
         var maximumCells=ui.Root.Query<Label>().ToList().Where(label=>label.text.Contains("★")).ToArray();Assert.IsNotEmpty(maximumCells);Assert.IsTrue(maximumCells.All(label=>label.text.StartsWith("★ ")));
         Assert.IsNotNull(ui.Root.Q<Button>("result-overview"));Assert.IsNotNull(ui.Root.Q<Button>("result-menu"));Assert.IsNotNull(ui.Root.Q<Button>("result-repeat"));Assert.IsFalse(ui.Root.Query<Button>().ToList().Any(b=>b.text.ToLowerInvariant().Contains("replay")));
         ui.Root.Q<Button>("result-tab-1").Focus();navigation.Activate();Assert.AreEqual(1,ui.SelectedTab);
-        var filter=ui.Root.Q<Toggle>("result-filter-0");Assert.AreEqual(Color.clear,filter.style.backgroundColor.value);Assert.AreEqual(0,filter.style.borderLeftWidth.value);Assert.IsTrue(ui.Root.Query<Toggle>().ToList().All(toggle=>!((toggle.text??"").Contains("━")||(toggle.text??"").Contains("●")||(toggle.text??"").Contains("■"))));filter.Focus();navigation.Activate();Assert.IsFalse(filter.value);ui.InspectTime(10);Assert.IsFalse(ui.Root.Q<Label>("result-graph-values").text.Contains("Игрок 1"));
-        filter.value=true;ui.InspectTime(0);Assert.That(ui.Root.Q<Label>("result-graph-values").text,Does.Contain("0 кр/с"));
+        var filter=ui.Root.Q<Toggle>("result-filter-0");Assert.AreEqual(Color.clear,filter.style.backgroundColor.value);Assert.AreEqual(0,filter.style.borderLeftWidth.value);Assert.IsTrue(ui.Root.Query<Toggle>().ToList().All(toggle=>!((toggle.text??"").Contains("━")||(toggle.text??"").Contains("●")||(toggle.text??"").Contains("■"))));filter.Focus();navigation.Activate();Assert.IsFalse(filter.value);ui.InspectTime(10);Assert.IsFalse(ui.Root.Q("result-graph-tooltip").Query<Label>().ToList().Select(l=>l.text).Aggregate("",(a,b)=>a+" "+b).Contains("Игрок 1"));
+        filter.value=true;ui.InspectTime(0);Assert.IsTrue(ui.Root.Q("result-graph-tooltip").Query<OrbitalGlyph>().ToList().Any(g=>g.Kind=="credits"));Assert.That(ui.Root.Q("result-plots").Query<Label>().ToList().Where(l=>new[]{"Доход","Армия","APM","Исследования"}.Contains(l.text)).Count(),Is.EqualTo(4));Assert.That(ui.Root.Q("result-hover-value-0").Query<Label>().ToList().Last().text,Is.EqualTo("0"));
         ui.ShowTab(2);var left=ui.Root.Q<DropdownField>("result-log-player-0");var right=ui.Root.Q<DropdownField>("result-log-player-1");Assert.AreEqual(0,left.index);Assert.AreEqual(1,right.index);
         Assert.AreEqual(DisplayStyle.None,ui.Root.Q<Toggle>("result-ai-log-0").style.display.value);Assert.AreEqual(DisplayStyle.Flex,ui.Root.Q<Toggle>("result-ai-log-1").style.display.value);ui.Root.Q<Toggle>("result-ai-log-1").value=true;Assert.That(ui.Root.Query<Label>().ToList().Any(l=>l.text.StartsWith("01:20")&&l.text.Contains("Стартовый план:")));Assert.IsFalse(ui.Root.Q<Toggle>("result-ai-log-0").value);
         right.index=0;Assert.AreEqual(0,ui.Root.Q<DropdownField>("result-log-player-0").index);Assert.AreEqual(0,ui.Root.Q<DropdownField>("result-log-player-1").index);Assert.AreEqual(facts,result.Facts.Count);
@@ -63,7 +63,7 @@ public sealed class PostMatchResultsUiTests
     }
     [Test]public void ApprovedRollingApmDefaultsToHumanLinesAndSharesPlayerFilter()
     {
-        var candidate=new PostMatchResultsView(ui.Result,()=>{},()=>{},()=>{});ui.Root.RemoveFromHierarchy();host.GetComponent<UIDocument>().rootVisualElement.Add(candidate.Root);candidate.ShowTab(1);Assert.IsNotNull(candidate.Root.Q("result-graph-2"));candidate.InspectTime(20);Assert.That(candidate.Root.Q<Label>("result-graph-values").text,Does.Contain("9 APM"));Assert.AreEqual(1,candidate.Root.Q<Label>("result-graph-values").text.Split(new[]{"APM"},StringSplitOptions.None).Length-1);candidate.Root.Q<Toggle>("result-filter-0").value=false;candidate.InspectTime(20);Assert.IsFalse(candidate.Root.Q<Label>("result-graph-values").text.Contains("Игрок 1"));Assert.That(ui.Result.Facts.Count(f=>f.Kind==MatchFactKind.HumanAction),Is.EqualTo(3));
+        var candidate=new PostMatchResultsView(ui.Result,()=>{},()=>{},()=>{});ui.Root.RemoveFromHierarchy();host.GetComponent<UIDocument>().rootVisualElement.Add(candidate.Root);candidate.ShowTab(1);Assert.IsNotNull(candidate.Root.Q("result-graph-2"));candidate.Root.Q("result-graph-2").Focus();typeof(PostMatchResultsView).GetField("activeMetric",F).SetValue(candidate,2);candidate.InspectTime(20);Assert.That(candidate.Root.Q("result-graph-tooltip").Query<Label>().ToList().Select(l=>l.text).Aggregate("",(a,b)=>a+" "+b),Does.Contain("9 APM"));Assert.AreEqual(1,candidate.Root.Q("result-graph-tooltip").Query<Label>().ToList().Select(l=>l.text).Aggregate("",(a,b)=>a+" "+b).Split(new[]{"APM"},StringSplitOptions.None).Length-1);candidate.Root.Q<Toggle>("result-filter-0").value=false;candidate.InspectTime(20);Assert.IsFalse(candidate.Root.Q("result-graph-tooltip").Query<Label>().ToList().Select(l=>l.text).Aggregate("",(a,b)=>a+" "+b).Contains("Игрок 1"));Assert.That(ui.Result.Facts.Count(f=>f.Kind==MatchFactKind.HumanAction),Is.EqualTo(3));
     }
     [UnityTest]public IEnumerator CompactEightSlotTableScrollsWithoutVisibleScrollbars()
     {
@@ -86,7 +86,7 @@ public sealed class PostMatchResultsUiTests
         void Set(string name,object value)=>type.GetField(name,F).SetValue(hud,value);
         T Get<T>(string name)=>(T)type.GetField(name,F).GetValue(hud);
         void Call(string name)=>type.GetMethod(name,F).Invoke(hud,null);
-        Set("profile",PlayableProfile.Default);Call("CreateHud");var runtime=PlayableRuntime.CreateHumanMatch(PlayableProfile.Default,1,7);runtime.RequestPause(true);Set("runtime",runtime);Set("paused",true);Set("view",runtime.Latest);Call("UpdateHud");
+        Set("profile",PlayableProfile.Default);Call("CreateHud");var runtime=PlayableRuntime.CreateHumanMatch(PlayableProfile.Default,1,7);runtime.RequestPause(true);Set("runtime",runtime);Set("paused",true);Set("menuPaused",true);Set("view",runtime.Latest);Call("UpdateHud");
         var root=Get<VisualElement>("root");var nav=Get<NativeMenuNavigation>("menuNavigation");var finish=root.Q<Button>("pause-finish");finish.Focus();nav.Activate();Assert.AreEqual("Подтвердить завершение",finish.text);Assert.IsNull(runtime.Result);finish.Focus();nav.Activate();
         float deadline=Time.realtimeSinceStartup+5;while(runtime.Result==null&&Time.realtimeSinceStartup<deadline)yield return null;
         Assert.IsNotNull(runtime.Result);Assert.IsNull(runtime.Result.WinnerTeam);Assert.IsTrue(runtime.Result.Manual);var frozen=runtime.Result;
@@ -140,7 +140,7 @@ public sealed class PostMatchResultsUiTests
             for(int tab=0;tab<2;tab++){
                 ui.ShowTab(tab);for(int i=0;i<8;i++)yield return null;
                 if(tab==0){Assert.AreEqual(8,ui.Root.Query<VisualElement>().ToList().Count(e=>e.name.StartsWith("result-player-")));var scroll=ui.Root.Q<ScrollView>();Assert.LessOrEqual(scroll.verticalScroller.highValue,.5f);Assert.LessOrEqual(scroll.horizontalScroller.highValue,.5f);}
-                else{Assert.AreEqual(8,ui.Root.Query<Toggle>().ToList().Count);AssertGraphLayoutFits();}
+                else{Assert.AreEqual(8,ui.Root.Query<Toggle>().ToList().Count(t=>t.name.StartsWith("result-filter-")));Assert.IsFalse(ui.Root.Q<Toggle>("result-hide-events").value);AssertGraphLayoutFits();}
                 SaveCapture(target,"eight-slot-"+(tab==0?"results":"graphs")+".png");
             }
         }finally{panel.targetTexture=null;target.Release();UnityEngine.Object.Destroy(target);}
@@ -148,12 +148,15 @@ public sealed class PostMatchResultsUiTests
     private void AssertGraphLayoutFits()
     {
         Assert.IsNull(ui.Root.Q("result-summary"));Assert.IsNull(ui.Root.Q<ScrollView>(),"The graph screen has no scrolling containers.");
-        var content=ui.Root.Q("result-content");var values=ui.Root.Q<Label>("result-graph-values");var actions=ui.Root.Q("result-actions");
-        for(int metric=0;metric<3;metric++){
+        var content=ui.Root.Q("result-content");var actions=ui.Root.Q("result-actions");
+        Assert.IsNull(ui.Root.Q("result-graph-values"),"Global values row was replaced by local tooltips.");
+        for(int metric=0;metric<4;metric++){
             var block=ui.Root.Q("result-graph-block-"+metric);var chart=ui.Root.Q("result-graph-"+metric);
-            Assert.Greater(chart.worldBound.height,40);Assert.GreaterOrEqual(block.worldBound.yMin,content.worldBound.yMin-.5f);Assert.LessOrEqual(block.worldBound.yMax,values.worldBound.yMin+.5f);
+            Assert.Greater(chart.worldBound.height,40);Assert.GreaterOrEqual(block.worldBound.yMin,content.worldBound.yMin-.5f);Assert.LessOrEqual(block.worldBound.yMax,actions.worldBound.yMin+.5f);
+            Assert.Less(block.worldBound.width,content.worldBound.width*.55f);
         }
-        Assert.LessOrEqual(values.worldBound.yMax,actions.worldBound.yMin+.5f);
+        Assert.That(ui.Root.Q("result-graph-0").worldBound.yMin,Is.EqualTo(ui.Root.Q("result-graph-1").worldBound.yMin).Within(.5));
+        Assert.Greater(ui.Root.Q("result-graph-2").worldBound.yMin,ui.Root.Q("result-graph-0").worldBound.yMax);
         var first=ui.Root.Q<Button>("result-overview");var last=ui.Root.Q<Button>("result-repeat");Assert.That(first.worldBound.height,Is.EqualTo(32).Within(.5f));Assert.That(last.worldBound.width,Is.EqualTo(132).Within(.5f));Assert.Greater(first.worldBound.xMin,ui.Root.worldBound.center.x);Assert.That(last.worldBound.xMax,Is.EqualTo(ui.Root.worldBound.xMax-ui.Root.resolvedStyle.paddingRight).Within(.5f));Assert.LessOrEqual(actions.worldBound.yMax,ui.Root.worldBound.yMax-ui.Root.resolvedStyle.paddingBottom+.5f);
     }
     private static void SaveCapture(RenderTexture target,string name)
@@ -171,6 +174,7 @@ public sealed class PostMatchResultsUiTests
                 for(int tab=0;tab<3;tab++){
                     ui.ShowTab(tab);if(tab==1)ui.InspectTime(20);if(tab==2)ui.Root.Q<Toggle>("result-ai-log-1").value=true;for(int i=0;i<8;i++)yield return null;
                     Assert.IsNull(ui.Root.Q("result-summary"));if(tab==1)AssertGraphLayoutFits();
+                    if(tab==1){var hover=ui.Root.Q("result-graph-tooltip");Assert.GreaterOrEqual(hover.worldBound.yMin,ui.Root.Q("result-graph-0").worldBound.yMin,"Pre-layout inspection follows the graph after layout.");foreach(var label in hover.Query<Label>().ToList())Assert.LessOrEqual(label.worldBound.yMax,hover.worldBound.yMax+.5f,"Every visible value fits its tooltip.");}
                     SaveCapture(target,new[]{"results","graphs","action-log"}[tab]+"-"+size.x+"x"+size.y+".png");
                 }
             }finally{panel.targetTexture=null;target.Release();UnityEngine.Object.Destroy(target);}

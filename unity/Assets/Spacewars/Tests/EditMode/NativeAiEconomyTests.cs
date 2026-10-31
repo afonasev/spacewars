@@ -96,7 +96,10 @@ namespace Spacewars.Tests.EditMode
                 var snapshot=(PlayableSnapshot)Call("PlayerSnapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,c.Seed,logical);
                 var site=snapshot.Sites.Single(x=>x.Owner==logical&&x.Site.Kind==PlayableBuildingKind.Headquarters);
                 foreach(var slot in site.Site.Slots)
+                {
                     Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",site.Site.Id,slot.Id,slot.Id==site.Site.Slots[0].Id?PlayableBuildingKind.Factory:PlayableBuildingKind.ScientificCenter,site.CenterId,logical,null));
+                    if(slot.Id==site.Site.Slots[0].Id){Call("AdvanceFoundations");Call("AdvanceBuildings",c.Profile.FactoryBuildSeconds+1d);}
+                }
             }
             Call("AdvanceFoundations");Call("AdvanceBuildings",(double)Math.Max(c.Profile.FactoryBuildSeconds,TerritoryRules.Duration(c.Profile,PlayableBuildingKind.ScientificCenter))+1);
             if(populationFull)foreach(var owner in Owners(a))
@@ -741,6 +744,8 @@ namespace Spacewars.Tests.EditMode
             var domain=Activator.CreateInstance(d,F,null,new object[]{profile,71L},null);
             object Call(string name,params object[] args)=>d.GetMethod(name,F).Invoke(domain,args);
             Call("AddCredits",PlayableOwner.Player,10000d);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,1,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));
+            Call("AdvanceFoundations");Call("AdvanceBuildings",profile.FactoryBuildSeconds+1d);
             Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,2,PlayableBuildingKind.ScientificCenter,1,PlayableOwner.Player,null));
             Call("AdvanceFoundations");Call("AdvanceBuildings",TerritoryRules.Duration(profile,PlayableBuildingKind.ScientificCenter)+1);
             var snapshot=(PlayableSnapshot)Call("PlayerSnapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,19092026,PlayableOwner.Player);

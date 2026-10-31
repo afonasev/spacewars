@@ -9,15 +9,18 @@ namespace Spacewars.Presentation
     {
         static readonly System.Collections.Generic.Dictionary<string, Texture2D> Textures = new();
         readonly Image artwork;
+        readonly ModelPortrait portrait;
+        readonly VisualElement emblem;
         readonly VisualElement progressOverlay;
         string kind;
         Color tint = OrbitalTheme.Ink;
-        public string Kind { get => kind; set { if(kind==value)return;kind=value;artwork.image=TextureFor(value); } }
-        public Color Tint { get => tint; set { tint=value;artwork.tintColor=new Color(value.r/OrbitalTheme.Ink.r,value.g/OrbitalTheme.Ink.g,value.b/OrbitalTheme.Ink.b,value.a); } }
+        public string Kind { get => kind; set { if(kind==value)return;kind=value;UpdateArtwork(); } }
+        public Color Tint { get => tint; set { tint=value;artwork.tintColor=new Color(value.r/OrbitalTheme.Ink.r,value.g/OrbitalTheme.Ink.g,value.b/OrbitalTheme.Ink.b,value.a);portrait.SetOutlineColor(value==OrbitalTheme.Ink?new Color(.60f,.72f,.77f,.65f):value);emblem.MarkDirtyRepaint(); } }
         double progress=-1;
         public double Progress { get => progress; set { progress=value;progressOverlay.MarkDirtyRepaint(); } }
         public static Texture2D TextureFor(string kind)
         {
+            var portrait=DockArtwork.TextureFor(kind);if(portrait!=null)return portrait;
             string asset=kind switch { "credits" or "income" or "sale" => "dollar", "science" => "scientific-center", "building" => "headquarters", _ => kind };
             if(string.IsNullOrEmpty(asset))return null;
             if(!Textures.TryGetValue(asset,out var texture)){
@@ -32,11 +35,25 @@ namespace Spacewars.Presentation
             artwork=new Image {name="glyph-artwork",pickingMode=PickingMode.Ignore,scaleMode=ScaleMode.ScaleToFit};
             artwork.style.position=Position.Absolute;artwork.style.left=0;artwork.style.right=0;artwork.style.top=0;artwork.style.bottom=0;
             Add(artwork);
+            portrait=new ModelPortrait("glyph-portrait"){name="glyph-model"};
+            emblem=new VisualElement{name="glyph-emblem",pickingMode=PickingMode.Ignore};
+            foreach(var layer in new VisualElement[]{portrait,emblem}){layer.style.position=Position.Absolute;layer.style.left=layer.style.right=layer.style.top=layer.style.bottom=0;Add(layer);}
+            emblem.generateVisualContent+=ctx=>{if(ResearchEmblem.Supports(this.kind))ResearchEmblem.Draw(ctx,this.kind,emblem.contentRect,tint==OrbitalTheme.Ink?OrbitalTheme.Cyan:tint);};
             // Paint after the texture so opaque silhouette pixels cannot hide the existing arc.
             progressOverlay=new VisualElement {name="glyph-progress",pickingMode=PickingMode.Ignore};
             progressOverlay.style.position=Position.Absolute;progressOverlay.style.left=0;progressOverlay.style.right=0;progressOverlay.style.top=0;progressOverlay.style.bottom=0;
             progressOverlay.generateVisualContent+=Draw;Add(progressOverlay);
             Kind=kind;Tint=OrbitalTheme.Ink;
+        }
+        void UpdateArtwork()
+        {
+            bool isEmblem=ResearchEmblem.Supports(kind);portrait.Set(isEmblem?null:kind);
+            bool model=portrait.Texture!=null;
+            portrait.style.display=model?DisplayStyle.Flex:DisplayStyle.None;
+            emblem.style.display=isEmblem?DisplayStyle.Flex:DisplayStyle.None;
+            artwork.image=model||isEmblem?null:TextureFor(kind);
+            artwork.style.display=model||isEmblem?DisplayStyle.None:DisplayStyle.Flex;
+            Tint=tint;emblem.MarkDirtyRepaint();
         }
         public void Set(string kind,Color tint,double progress=-1){Kind=kind;Tint=tint;Progress=progress;MarkDirtyRepaint();}
         void Draw(MeshGenerationContext ctx)
@@ -50,7 +67,11 @@ namespace Spacewars.Presentation
 
     public static class OrbitalPrecision
     {
+        static RadialCardProfile queueProfile;
         public static string BuildingGlyph(Spacewars.Simulation.PlayableBuildingKind kind)=>kind switch {
+            Spacewars.Simulation.PlayableBuildingKind.GaussTower=>"gauss-tower",
+            Spacewars.Simulation.PlayableBuildingKind.RepairTower=>"repair-tower",
+            Spacewars.Simulation.PlayableBuildingKind.SentryTurret=>"sentry-turret",
             Spacewars.Simulation.PlayableBuildingKind.Headquarters=>"headquarters",
             Spacewars.Simulation.PlayableBuildingKind.Outpost=>"outpost",
             Spacewars.Simulation.PlayableBuildingKind.Mine=>"mine",
@@ -64,11 +85,16 @@ namespace Spacewars.Presentation
             Spacewars.Simulation.PlayableResearchKind.TankChassis=>"chassis",
             Spacewars.Simulation.PlayableResearchKind.ExplorerAssaultGuns=>"assault",
             Spacewars.Simulation.PlayableResearchKind.ShkvalGuidance=>"guidance",
+            Spacewars.Simulation.PlayableResearchKind.ReinforcedConcrete=>"reinforced-concrete",
+            Spacewars.Simulation.PlayableResearchKind.AdvancedReinforcedConcrete=>"reinforced-concrete",
             Spacewars.Simulation.PlayableResearchKind.HawkSalvoSystems=>"hawk-salvo",
             Spacewars.Simulation.PlayableResearchKind.ImprovedWeaponSystems=>"weapon-systems-1",
             Spacewars.Simulation.PlayableResearchKind.AdvancedWeaponSystems=>"weapon-systems-2",
             Spacewars.Simulation.PlayableResearchKind.ImprovedDefensiveSystems=>"defensive-systems-1",
             Spacewars.Simulation.PlayableResearchKind.AdvancedDefensiveSystems=>"defensive-systems-2",
+            Spacewars.Simulation.PlayableResearchKind.UltimateWeaponSystems=>"weapon-systems-3",
+            Spacewars.Simulation.PlayableResearchKind.UltimateDefensiveSystems=>"defensive-systems-3",
+            Spacewars.Simulation.PlayableResearchKind.ScientificCenterUpgrade=>"upgrade",
             _=>"science"
         };
         public static string Glyph(string id)
@@ -77,9 +103,10 @@ namespace Spacewars.Presentation
             var suffix=id.Substring(id.LastIndexOf(':')+1);
             if(id.StartsWith("build:",StringComparison.Ordinal)&&Enum.TryParse<Spacewars.Simulation.PlayableBuildingKind>(suffix,out var building))return BuildingGlyph(building);
             return suffix switch {
-                "rally"=>"rally", "sale"=>"sale", "repair"=>"repair", "upgrade"=>"upgrade",
+                "rally"=>"rally", "sale"=>"sale", "repair"=>"repair", "upgrade"=>"upgrade", "producer-upgrade"=>"upgrade",
                 "tank"=>"tank", "explorer"=>"explorer", "shkval"=>"shkval", "hawk"=>"hawk",
-                "tank-chassis"=>"chassis", "explorer-assault-guns"=>"assault", "shkval-guidance"=>"guidance", "HawkSalvoSystems"=>"hawk-salvo",
+                "tank-chassis"=>"chassis", "explorer-assault-guns"=>"assault", "shkval-guidance"=>"guidance", "HawkSalvoSystems"=>"hawk-salvo", "ReinforcedConcrete"=>"reinforced-concrete", "AdvancedReinforcedConcrete"=>"reinforced-concrete",
+                "UltimateWeaponSystems"=>"weapon-systems-3", "UltimateDefensiveSystems"=>"defensive-systems-3", "ScientificCenterUpgrade"=>"upgrade",
                 "ImprovedWeaponSystems"=>"weapon-systems-1", "AdvancedWeaponSystems"=>"weapon-systems-2",
                 "ImprovedDefensiveSystems"=>"defensive-systems-1", "AdvancedDefensiveSystems"=>"defensive-systems-2",
                 _=>"building"
@@ -104,8 +131,8 @@ namespace Spacewars.Presentation
         {
             bool active=filled&&progress>=0;
             button.AddToClassList("dock-order");button.EnableInClassList("dock-spare",!filled);
-            // Fixed round waiting wells keep their shape; narrow queues wrap instead of squeezing portraits.
-            float width=active?172:filled?64:28,height=active?76:filled?64:28;
+            var p=queueProfile??=RadialCardProfile.Load();
+            float width=active?p.dockActiveWidth:p.dockOrderHeight,height=p.dockOrderHeight;
             button.style.width=width;button.style.minWidth=width;button.style.maxWidth=width;
             button.style.height=height;button.style.minHeight=height;button.style.maxHeight=height;
             button.style.alignSelf=Align.Center;button.style.flexGrow=0;button.style.flexShrink=0;button.style.flexBasis=StyleKeyword.Auto;
@@ -114,31 +141,32 @@ namespace Spacewars.Presentation
             button.style.paddingLeft=active?36:1;button.style.paddingRight=active?8:1;
             button.style.marginLeft=0;button.style.marginRight=4;button.style.marginTop=button.style.marginBottom=0;
             button.style.backgroundColor=active?new Color(.14f,.27f,.31f,.55f):new Color(.2f,.3f,.35f,filled?.10f:0);
-            button.style.borderTopLeftRadius=button.style.borderTopRightRadius=button.style.borderBottomLeftRadius=button.style.borderBottomRightRadius=height/2;
+            button.style.borderTopLeftRadius=button.style.borderTopRightRadius=button.style.borderBottomLeftRadius=button.style.borderBottomRightRadius=3;
             var edge=active?new Color(.4f,.78f,.85f,.45f):new Color(.5f,.65f,.7f,filled?.16f:.10f);
             button.style.borderTopColor=button.style.borderBottomColor=button.style.borderLeftColor=button.style.borderRightColor=edge;
             button.style.borderTopWidth=button.style.borderBottomWidth=button.style.borderLeftWidth=button.style.borderRightWidth=1;
             var icon=button.Q<OrbitalGlyph>();if(icon==null){icon=new OrbitalGlyph(glyph);icon.style.position=Position.Absolute;button.Add(icon);}
-            var portrait=button.Q<Image>("order-portrait");if(portrait==null){portrait=new Image{name="order-portrait",pickingMode=PickingMode.Ignore,scaleMode=ScaleMode.ScaleToFit};portrait.style.position=Position.Absolute;button.Add(portrait);}
-            var texture=filled?DockArtwork.TextureFor(glyph):null;
-            portrait.image=texture;portrait.style.display=texture!=null?DisplayStyle.Flex:DisplayStyle.None;
+            var portrait=button.Q<ModelPortrait>("order-artwork");if(portrait==null){portrait=new ModelPortrait("order-portrait"){name="order-artwork"};portrait.style.position=Position.Absolute;button.Add(portrait);}
+            portrait.Set(filled?glyph:null);var texture=portrait.Texture;
+            portrait.style.display=texture!=null?DisplayStyle.Flex:DisplayStyle.None;
             icon.style.display=filled&&texture==null?DisplayStyle.Flex:DisplayStyle.None;icon.Set(glyph,OrbitalTheme.Ink,progress);icon.Q("glyph-progress").style.display=DisplayStyle.None;
             foreach(var art in new VisualElement[]{icon,portrait})
             {
-                float size=active?76:64;
+                float size=p.dockOrderHeight;
                 art.style.left=active?new StyleLength(0f):new StyleLength(Length.Percent(50));
                 art.style.marginLeft=active?0:-size/2;art.style.top=0;art.style.width=size;art.style.height=size;
             }
             // Repeat is part of the title, so it follows short names without a vacant fixed-width gap.
             var titleRow=button.Q("order-title-row");if(titleRow==null){titleRow=new VisualElement{name="order-title-row",pickingMode=PickingMode.Ignore};titleRow.style.position=Position.Absolute;titleRow.style.flexDirection=FlexDirection.Row;titleRow.style.alignItems=Align.Center;titleRow.style.height=18;button.Add(titleRow);}
-            titleRow.style.left=active?76:14;titleRow.style.right=active?8:14;titleRow.style.top=active?14:42;titleRow.style.display=active||repeat?DisplayStyle.Flex:DisplayStyle.None;
+            titleRow.style.left=active?p.dockOrderHeight:4;titleRow.style.right=4;titleRow.style.top=active?2:p.dockOrderHeight-18;titleRow.style.display=active||repeat?DisplayStyle.Flex:DisplayStyle.None;
             var caption=button.Q<Label>("order-name");if(caption==null){caption=new Label{name="order-name",pickingMode=PickingMode.Ignore};caption.style.flexShrink=1;caption.style.flexGrow=0;caption.style.minWidth=0;caption.style.marginLeft=caption.style.marginRight=caption.style.marginTop=caption.style.marginBottom=0;caption.style.paddingLeft=caption.style.paddingRight=0;caption.style.unityTextAlign=TextAnchor.MiddleLeft;caption.style.fontSize=10;caption.style.color=OrbitalTheme.Ink;caption.style.whiteSpace=WhiteSpace.NoWrap;caption.style.overflow=Overflow.Hidden;caption.style.textOverflow=TextOverflow.Ellipsis;titleRow.Add(caption);}
             caption.text=title??glyph;
             var state=button.Q<Label>("order-status");if(state==null){state=new Label{name="order-status",pickingMode=PickingMode.Ignore};state.style.position=Position.Absolute;state.style.whiteSpace=WhiteSpace.NoWrap;button.Add(state);}
             state.text=active?status??button.text:filled?"":"·";state.style.display=filled&&!active?DisplayStyle.None:DisplayStyle.Flex;state.style.color=active?OrbitalTheme.Ink:OrbitalTheme.Muted;
             state.style.fontSize=active?11:9;state.style.unityTextAlign=active?TextAnchor.MiddleLeft:TextAnchor.MiddleCenter;
-            state.style.left=active?76:0;state.style.right=active?5:0;state.style.top=active?37:5;
+            state.style.left=active?p.dockOrderHeight:0;state.style.right=4;state.style.top=active?p.dockOrderHeight-24:5;
             var rail=button.Q("order-progress-rail");if(rail==null){rail=new VisualElement{name="order-progress-rail",pickingMode=PickingMode.Ignore};rail.style.position=Position.Absolute;rail.style.left=28;rail.style.right=28;rail.style.bottom=10;rail.style.overflow=Overflow.Hidden;rail.style.borderTopLeftRadius=rail.style.borderTopRightRadius=rail.style.borderBottomLeftRadius=rail.style.borderBottomRightRadius=2;rail.style.height=3;rail.style.backgroundColor=OrbitalTheme.Line;var fill=new VisualElement{name="order-progress",pickingMode=PickingMode.Ignore};fill.style.height=3;fill.style.backgroundColor=OrbitalTheme.Cyan;rail.Add(fill);button.Add(rail);}
+            rail.style.left=8;rail.style.right=8;rail.style.bottom=4;
             rail.style.display=active?DisplayStyle.Flex:DisplayStyle.None;rail[0].style.width=Length.Percent((float)(Math.Max(0,Math.Min(1,progress))*100));
             var badge=button.Q<Label>("repeat-badge");if(badge==null){badge=new Label("∞"){name="repeat-badge",pickingMode=PickingMode.Ignore};badge.style.flexShrink=0;badge.style.width=14;badge.style.fontSize=13;badge.style.marginLeft=3;badge.style.marginRight=badge.style.marginTop=badge.style.marginBottom=0;badge.style.paddingLeft=badge.style.paddingRight=0;badge.style.color=OrbitalTheme.Cyan;titleRow.Add(badge);}badge.style.display=repeat?DisplayStyle.Flex:DisplayStyle.None;
 

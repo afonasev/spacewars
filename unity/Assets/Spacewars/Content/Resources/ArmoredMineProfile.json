@@ -1,8 +1,8 @@
 {
   "id": "armored-mine-v1",
-  "revision": 2,
+  "revision": 6,
   "cycleSeconds": 5,
-  "rockerDegrees": 12,
+  "rockerDegrees": 16,
   "dustRate": 12,
   "dustLifetime": 0.55,
   "dustRise": 0.12,
@@ -10,5 +10,16 @@
   "dustOpacity": 0.13,
   "wellEmission": 2.2,
   "wellLightIntensity": 1.2,
-  "wellLightRange": 1.15
+  "wellLightRange": 1.15,
+  "facingYawDegrees": -30,
+  "sparkCount": 8,
+  "sparkLifetime": 0.42,
+  "sparkSpeed": 3.4,
+  "sparkSize": 0.045,
+  "sparkSpread": 40,
+  "sparkGravity": 1,
+  "impactGlowBoost": 0.4,
+  "impactGlowDuration": 0.38,
+  "sparkOriginDepth": 0.22,
+  "impactGlowHue": 0.16
 }

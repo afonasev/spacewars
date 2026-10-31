@@ -9,20 +9,21 @@ using UnityEngine.UIElements;
 
 public sealed class NativeMainMenuTests
 {
-    private static IEnumerator Capture(NativeMainMenu menu,string name,int width=1280,int height=800)
+    private static IEnumerator Capture(NativeMainMenu menu,string name,int width=1280,int height=800,VisualElement screen=null)
     {
         string output=Environment.GetEnvironmentVariable("LOBBY_LAYOUT_EVIDENCE");if(string.IsNullOrEmpty(output))yield break;
         var panel=menu.GetComponent<UIDocument>().panelSettings;var texture=new RenderTexture(width,height,24);texture.Create();panel.targetTexture=texture;
         try
         {
+            screen=screen??menu.ScreenRoot;
             // A fresh capture target needs every retained UI element repainted, even if its layout did not change.
-            foreach(var element in menu.ScreenRoot.Query<VisualElement>().ToList())element.MarkDirtyRepaint();
+            foreach(var element in screen.Query<VisualElement>().ToList())element.MarkDirtyRepaint();
             for(int i=0;i<5;i++)yield return null;
-            var copyright=menu.ScreenRoot.Q<Label>("menu-copyright");
+            var copyright=screen.Q<Label>("menu-copyright");
             Assert.AreEqual(DisplayStyle.Flex,copyright.resolvedStyle.display,name+" copyright display");
-            Debug.Log(name+" copyright bounds "+copyright.worldBound+" screen "+menu.ScreenRoot.worldBound);
+            Debug.Log(name+" copyright bounds "+copyright.worldBound+" screen "+screen.worldBound);
             Assert.Greater(copyright.worldBound.height,0,name+" copyright height");
-            Assert.LessOrEqual(copyright.worldBound.yMax,menu.ScreenRoot.worldBound.yMax,name+" copyright viewport");
+            Assert.LessOrEqual(copyright.worldBound.yMax,screen.worldBound.yMax,name+" copyright viewport");
             var prior=RenderTexture.active;RenderTexture.active=texture;var png=new Texture2D(width,height,TextureFormat.RGB24,false);
             try{png.ReadPixels(new Rect(0,0,width,height),0,0);png.Apply();System.IO.Directory.CreateDirectory(output);System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,name+".png"),png.EncodeToPNG());}
             finally{RenderTexture.active=prior;UnityEngine.Object.Destroy(png);}
@@ -51,7 +52,7 @@ public sealed class NativeMainMenuTests
         {
             var root=go.GetComponent<UIDocument>().rootVisualElement;
             var actions=root.Query<Button>().ToList();
-            CollectionAssert.AreEqual(new[]{"В бой!","Кампания","Сетевая игра","Настройки","Управление","Что нового","Лаборатория геймдизайна","Выйти","Обновить","Отменить загрузку","Перезапустить"},actions.ConvertAll(b=>b.text));
+            CollectionAssert.AreEqual(new[]{"В бой!","Кампания","Сетевая игра","Настройки","Лаборатория геймдизайна","Выйти","Обновить","Отменить загрузку","Перезапустить"},actions.ConvertAll(b=>b.text));
             Assert.False(actions[2].enabledSelf);Assert.That(root.Q<Button>("main-restart").style.display.value,Is.EqualTo(DisplayStyle.None));Assert.IsNull(root.Q<Button>("main-check"));
             Assert.IsNull(root.Q(className:"orbital-hints"));
             Assert.AreEqual(DisplayStyle.Flex,root.Q("main-update-panel").style.display.value,"Panel is visible before startup status is received");
@@ -158,7 +159,7 @@ public sealed class NativeMainMenuTests
         }finally{listener.Stop();UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",saved);}
     }
 
-    [UnityTest] public IEnumerator HistoryLoadsInstalledAndRecentVersionsAndRestoresMainFocus()
+    [UnityTest] public IEnumerator HistoryLoadsFromSettingsAndRestoresSettingsFocus()
     {
         var saved=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT");Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",null);
         var go=new GameObject("release history HTTP UI fixture");var menu=go.AddComponent<NativeMainMenu>();yield return null;
@@ -176,7 +177,20 @@ public sealed class NativeMainMenuTests
         try
         {
             var type=typeof(NativeMainMenu);type.GetField("endpoint",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,"http://127.0.0.1:"+((System.Net.IPEndPoint)listener.LocalEndpoint).Port);
-            yield return menu.StartCoroutine((IEnumerator)type.GetMethod("OpenHistory",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(menu,null));
+            var hostRoot=go.GetComponent<UIDocument>().rootVisualElement;
+            Assert.IsNull(hostRoot.Q("main-controls"));Assert.IsNull(hostRoot.Q("main-history"));
+            menu.Navigation.ActivateElement(hostRoot.Q<Button>("main-settings"));
+            var settings=hostRoot.Q("settings-screen");Assert.NotNull(settings);
+            menu.Navigation.ActivateElement(settings.Q<Button>("settings-tab-Управление"));
+            menu.Navigation.ActivateElement(settings.Q<Button>("settings-controls"));
+            Assert.AreEqual(DisplayStyle.None,settings.style.display.value);
+            menu.Navigation.Back();yield return null;
+            Assert.AreEqual(DisplayStyle.Flex,settings.style.display.value);
+            Assert.AreSame(settings.Q<Button>("settings-controls"),hostRoot.focusController.focusedElement);
+            yield return Capture(menu,"settings-with-history-800x620",800,620,settings);
+            menu.Navigation.ActivateElement(settings.Q<Button>("settings-history"));
+            float deadline=Time.realtimeSinceStartup+30;
+            while(hostRoot.Q<DropdownField>("history-version").choices.Count==0&&Time.realtimeSinceStartup<deadline)yield return null;
             Assert.True(server.IsCompleted&&!server.IsFaulted,server.Exception?.ToString());
             var root=go.GetComponent<UIDocument>().rootVisualElement;var page=root.Q("release-history");var choice=page.Q<DropdownField>("history-version");Assert.AreEqual(2,choice.choices.Count);StringAssert.Contains("установлена",choice.choices[1]);
             choice.index=1;Assert.True(page.Query<Label>().ToList().Exists(l=>l.text.Contains("Предыдущая версия.")));choice.index=0;
@@ -185,7 +199,11 @@ public sealed class NativeMainMenuTests
             Assert.LessOrEqual(page.Q<Button>("history-back").worldBound.yMax,620);
             string output=Environment.GetEnvironmentVariable("LOBBY_LAYOUT_EVIDENCE");if(!string.IsNullOrEmpty(output)){
                 var prior=RenderTexture.active;RenderTexture.active=target;var png=new Texture2D(800,620,TextureFormat.RGB24,false);try{png.ReadPixels(new Rect(0,0,800,620),0,0);png.Apply();System.IO.Directory.CreateDirectory(output);System.IO.File.WriteAllBytes(System.IO.Path.Combine(output,"history-fixture-800x620.png"),png.EncodeToPNG());}finally{RenderTexture.active=prior;UnityEngine.Object.Destroy(png);}}
-            menu.Navigation.Back();Assert.IsNull(root.Q("release-history"));Assert.AreSame(root.Q<Button>("main-history"),root.focusController.focusedElement);
+            menu.Navigation.Back();Assert.IsNull(root.Q("release-history"));Assert.AreSame(settings.Q<Button>("settings-history"),root.focusController.focusedElement);
+            Assert.AreEqual(DisplayStyle.Flex,settings.style.display.value);
+            Assert.AreEqual(DisplayStyle.None,menu.ScreenRoot.style.display.value);
+            menu.Navigation.Back();Assert.IsNull(root.Q("settings-screen"));
+            Assert.AreSame(root.Q<Button>("main-settings"),root.focusController.focusedElement);
         }
         finally {listener.Stop();if(target){go.GetComponent<UIDocument>().panelSettings.targetTexture=null;target.Release();UnityEngine.Object.Destroy(target);}UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",saved);}
     }

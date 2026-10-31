@@ -80,7 +80,10 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void CaptureEncodingDoesNotHoldRenderIngressAndKeepsCapturedWatermarks()
         {
-            var config=OfflineParticipantAuthorityTests.Config(2,false);var runtime=Held(config);
+            var config=OfflineParticipantAuthorityTests.Config(2,false);var runtime=new PlayableRuntime(config,71,startPaused:true);
+            Assert.True(Until(()=>runtime.Latest.Status==RuntimeStatus.Paused));var initial=config.Roster[0].Id;int actor=runtime.ParticipantView(initial).Entities.Single(e=>e.Owner==runtime.ParticipantView(initial).Owner).Id;
+            runtime.RequestPause(false);Assert.True(Until(()=>!runtime.Latest.Paused));Assert.True(runtime.TrySubmit(new PlayableCommand(71,1,initial,PlayableCommandKind.Move,new[]{actor},new NavPoint(-8,8))).Accepted);
+            Assert.True(Until(()=>runtime.Latest.Metrics.NavigationPending>0));
             using(var entered=new ManualResetEventSlim())using(var release=new ManualResetEventSlim()){
                 runtime.BeforeCaptureSerialization=()=>{entered.Set();Assert.True(release.Wait(TimeSpan.FromSeconds(10)));};
                 try{

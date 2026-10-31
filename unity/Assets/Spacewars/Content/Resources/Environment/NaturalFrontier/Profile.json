@@ -1,6 +1,6 @@
 {
   "id": "natural-frontier-v1",
-  "revision": 12,
+  "revision": 13,
   "earthTile": 7,
   "rockTile": 6,
   "concreteTile": 5,
@@ -54,5 +54,14 @@
   "outpostApronMargin": 0.75,
   "orderMarkerRadius": 8,
   "orderMarkerWidth": 1.25,
-  "orderMarkerFontSize": 11
+  "orderMarkerFontSize": 11,
+  "orderConfirmationDuration": 0.65,
+  "orderConfirmationRadius": 16,
+  "orderConfirmationTravel": 0.65,
+  "orderConfirmationConverge": 0.2,
+  "orderConfirmationRecoil": 0.12,
+  "orderConfirmationFadeStart": 0.45,
+  "orderConfirmationWidth": 1.25,
+  "orderConfirmationOpacity": 1,
+  "orderConfirmationMergeRadius": 0.75
 }

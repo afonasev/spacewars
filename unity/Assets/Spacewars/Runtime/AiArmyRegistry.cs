@@ -46,12 +46,32 @@ namespace Spacewars.Runtime
         }
         private IEnumerable<AiArmyState> Active=>armies.Values.Where(a=>a.Phase!=AiArmyPhase.Disbanded).OrderBy(a=>a.Id);
         public AiArmyRegistryState Capture()=>new AiArmyRegistryState{OwnerId=OwnerId,Generation=Generation,NextId=nextId,Armies=armies.Values.OrderBy(a=>a.Id).Select(a=>a.Copy()).ToArray()};
+        // Selected reads retain the same detached state (including disbanded rows).
+        // Call again after an admission: never cache or expose the owned army.
+        internal AiArmyState[] CaptureArmy(long id)=>armies.TryGetValue(id,out var army)?new[]{army.Copy()}:System.Array.Empty<AiArmyState>();
         public long ArmyFor(int unit)=>membership.TryGetValue(unit,out var id)?id:0;
+        // The validated registry owns both maps. Query the current assignment;
+        // a detached deep capture is only needed when exporting army state.
+        internal bool IsScoutMember(int unit)=>membership.TryGetValue(unit,out var id)&&armies[id].Role==AiArmyRole.Scout;
+        internal bool CanYieldScoutToDefense(int unit)=>membership.TryGetValue(unit,out var id)&&
+            armies.TryGetValue(id,out var a)&&a.Phase!=AiArmyPhase.Disbanded&&a.Role==AiArmyRole.Scout&&
+            a.TacticalOwner==AiScoutPlanner.Policy&&a.Members.Length==1&&a.Members[0]==unit;
+        // Singleton AI scouts may yield to one whole major army or a new
+        // defense slot. Transport and cross-major handoffs remain forbidden.
+        internal bool CanAdmitDefense(IEnumerable<int> members)
+        {
+            var ids=members.Distinct().ToArray();
+            var assigned=ids.Select(ArmyFor).Where(id=>id!=0).Distinct().Select(id=>armies[id]).ToArray();
+            if(assigned.Any(a=>!a.Major&&!a.Members.All(CanYieldScoutToDefense)))return false;
+            var majors=assigned.Where(a=>a.Major).ToArray();
+            return majors.Length<=1&&(majors.Length==0?Active.Count(a=>a.Major)<majorCap:
+                majors[0].TacticalOwner==AiDefensePlanner.Policy||majors[0].Members.All(ids.Contains));
+        }
         public bool TryReinforce(PlayableAiObservation o,long id,string tacticalOwner,IEnumerable<int> units)
         {
             if(!Binding(o)||units==null||!armies.TryGetValue(id,out var a)||!a.Major||a.Phase==AiArmyPhase.Disbanded||a.TacticalOwner!=tacticalOwner)return false;
             var ids=units.OrderBy(x=>x).ToArray();var catalog=AiRosterCatalog.Initial;
-            if(ids.Length==0||ids.Distinct().Count()!=ids.Length||ids.Any(membership.ContainsKey)||ids.Any(x=>!o.Entities.Any(u=>u.Id==x&&u.Owner==o.Owner&&u.Health>0&&catalog.For(u.Kind).lineWeight+catalog.For(u.Kind).supportWeight>0)))return false;
+            if(ids.Length==0||ids.Distinct().Count()!=ids.Length||ids.Any(membership.ContainsKey)||ids.Any(x=>!o.Entities.Any(u=>u.Id==x&&u.Owner==o.Owner&&u.Health>0&&catalog.LineWeight(u.Kind)+catalog.SupportWeight(u.Kind)>0)))return false;
             a.Members=a.Members.Concat(ids).OrderBy(x=>x).ToArray();a.Reinforcements=a.Reinforcements.Concat(ids).OrderBy(x=>x).ToArray();
             foreach(var unit in ids)membership.Add(unit,id);AssertInvariants();return true;
         }
@@ -63,13 +83,13 @@ namespace Spacewars.Runtime
             if(ids.Length==0||ids.Any(id=>id<=0)||ids.Distinct().Count()!=ids.Length)return false;
             var own=o.Entities.Where(e=>e.Owner==o.Owner&&e.Health>0).ToDictionary(e=>e.Id);
             if(ids.Any(id=>!own.ContainsKey(id)))return false;
-            return role==AiArmyRole.Scout||role==AiArmyRole.Transport?ids.All(id=>catalog.For(own[id].Kind).reconWeight>0&&catalog.For(own[id].Kind).lineWeight==0&&catalog.For(own[id].Kind).supportWeight==0):ids.Count(id=>catalog.For(own[id].Kind).lineWeight+catalog.For(own[id].Kind).supportWeight>0)>=(required??minimum)&&ids.Any(id=>catalog.For(own[id].Kind).lineWeight>0);
+            return role==AiArmyRole.Scout||role==AiArmyRole.Transport?ids.All(id=>catalog.ReconWeight(own[id].Kind)>0):ids.Count(id=>catalog.LineWeight(own[id].Kind)+catalog.SupportWeight(own[id].Kind)>0)>=(required??minimum)&&ids.Any(id=>catalog.LineWeight(own[id].Kind)>0);
         }
-        public bool TryCreate(PlayableAiObservation o,AiArmyRole role,string tacticalOwner,IEnumerable<int> members,out long id,AiRosterCatalog catalog=null)
+        public bool TryCreate(PlayableAiObservation o,AiArmyRole role,string tacticalOwner,IEnumerable<int> members,out long id,AiRosterCatalog catalog=null,int? requiredMinimum=null)
         {
             id=0;if(!Binding(o)||!Enum.IsDefined(typeof(AiArmyRole),role)||string.IsNullOrWhiteSpace(tacticalOwner)||members==null)return false;
             var units=members.OrderBy(x=>x).ToArray();bool major=role!=AiArmyRole.Scout&&role!=AiArmyRole.Transport;
-            int required=role==AiArmyRole.MobileDefense&&(tacticalOwner==AiDefensePlanner.Policy||tacticalOwner==AiArmyPlanner.Policy)?1:minimum;
+            int required=role==AiArmyRole.MobileDefense&&(tacticalOwner==AiDefensePlanner.Policy||AiArmyPlanner.IsArmyPolicy(tacticalOwner))?1:AiArmyPlanner.IsArmyPolicy(tacticalOwner)&&requiredMinimum.HasValue?Math.Max(1,requiredMinimum.Value):minimum;
             if((major&&Active.Count(a=>a.Major)>=majorCap)||(role==AiArmyRole.Scout&&Active.Count(a=>a.Role==role)>=scoutCap)||!Units(o,units,role,catalog??AiRosterCatalog.Initial,required)||units.Any(membership.ContainsKey))return false;
             id=nextId;nextId=checked(nextId+1);var a=new AiArmyState{Id=id,OwnerId=OwnerId,Role=role,TacticalOwner=tacticalOwner,Members=units,LeaderId=units[0],MinimumViableForce=major?required:1,CreatedTick=o.Tick,ProgressTick=o.Tick,Phase=AiArmyPhase.Forming};
             armies.Add(id,a);foreach(var unit in units)membership.Add(unit,id);AssertInvariants();return true;
@@ -114,6 +134,8 @@ namespace Spacewars.Runtime
         public string Reject(AiIntent intent)
         {
             if(intent.Action.PlayerId!=OwnerId||intent.Action.Generation!=Generation)return "army owner/generation mismatch";
+            bool defenseHandoff=intent.Policy==AiDefensePlanner.Policy&&intent.Priority>=2&&
+                intent.Action.Kind==PlayableCommandKind.Attack&&CanAdmitDefense(intent.Action.EntityIds);
             foreach(var id in intent.Action.EntityIds)
             {
                 if(!membership.TryGetValue(id,out var armyId))continue;
@@ -126,9 +148,9 @@ namespace Spacewars.Runtime
                     a.TacticalOwner==AiDefensePlanner.Policy&&a.Major&&a.Reinforcements.Contains(id)&&intent.Action.EntityIds.All(unit=>membership.TryGetValue(unit,out var assigned)&&assigned==a.Id);
                 bool defenseCoreAttack=intent.Policy==AiDefensePlanner.Policy&&intent.Action.Kind==PlayableCommandKind.Attack&&a.TacticalOwner==AiDefensePlanner.Policy&&a.Major&&
                     a.Members.Contains(id)&&!a.Reinforcements.Contains(id)&&intent.Action.EntityIds.All(unit=>membership.TryGetValue(unit,out var assigned)&&assigned==a.Id&&!a.Reinforcements.Contains(unit));
-                if(a.TacticalOwner!=intent.Policy&&!preparationHandoff&&!defenseAssembly&&!defenseCoreAttack&&!(intent.Policy==AiDefensePlanner.Policy&&intent.Priority>=2&&a.Major&&a.Members.SequenceEqual(intent.Action.EntityIds.OrderBy(x=>x))))return "unit tactical owner conflict";
+                if(a.TacticalOwner!=intent.Policy&&!preparationHandoff&&!defenseAssembly&&!defenseCoreAttack&&!defenseHandoff)return "unit tactical owner conflict";
                 if(!a.Major&&intent.Action.Kind!=PlayableCommandKind.Move&&intent.Action.Kind!=PlayableCommandKind.Hold&&intent.Action.Kind!=PlayableCommandKind.Stop&&
-                    !(preparationHandoff&&intent.Action.Kind==PlayableCommandKind.BuildAt)&&!(a.Role==AiArmyRole.Transport&&intent.Action.Kind==PlayableCommandKind.BuildAt))return "scout/transport combat requires major army";
+                    !defenseHandoff&&!(preparationHandoff&&intent.Action.Kind==PlayableCommandKind.BuildAt)&&!(a.Role==AiArmyRole.Transport&&intent.Action.Kind==PlayableCommandKind.BuildAt))return "scout/transport combat requires major army";
             }
             return null;
         }
@@ -198,7 +220,7 @@ namespace Spacewars.Runtime
             var owner=OwnerFor(registry.OwnerId);registry.AssertInvariants();
             AiStateWire.Require(registry.Generation==navigation.Generation&&registry.Capture().Armies.SelectMany(a=>a.Members).All(id=>units.TryGetValue(id,out var u)&&u.Owner==owner&&u.Health>0),"army world membership");
             var catalog=AiRosterCatalog.Initial;
-            AiStateWire.Require(registry.Capture().Armies.Where(a=>!a.Major).SelectMany(a=>a.Members).All(id=>{var role=catalog.For(units[id].Kind);return role.reconWeight>0&&role.lineWeight==0&&role.supportWeight==0;}),"army scout/transport world classification");
+            AiStateWire.Require(registry.Capture().Armies.Where(a=>!a.Major).SelectMany(a=>a.Members).All(id=>{var role=catalog.For(units[id].Kind);return role.reconWeight>0;}),"army scout/transport world classification");
         }
     }
 }

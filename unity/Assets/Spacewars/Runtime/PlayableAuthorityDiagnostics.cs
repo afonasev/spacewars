@@ -6,6 +6,7 @@ namespace Spacewars.Runtime
     public sealed partial class PlayableAuthorityTick
     {
         // Trusted local diagnostic host only; private AI checkpoints must never enter network projection.
+        public string[] CaptureDiagnosticOwnerIds()=>domain.DiagnosticOwnerIds;
         public PlayableAiOwnerCheckpoint[] CaptureDiagnosticCheckpoints()=>scheduler.Owners.Select(o=>o.Checkpoint).ToArray();
         public PlayableSnapshot ParticipantView(string id)=>domain.PlayerSnapshot(sequence,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,seed,domain.OwnerFor(id));
         // Detached live ledger, not the older policy-observation checkpoint. Read-only diagnostics.
@@ -22,6 +23,7 @@ namespace Spacewars.Runtime
     }
     internal sealed partial class PlayableDomain
     {
+        internal string[] DiagnosticOwnerIds=>Owners.Select(OwnerName).ToArray();
         internal int DiagnosticUnitCount=>units.Count;
         internal int DiagnosticBuildingCount=>buildings.Count;
         internal bool DiagnosticFactoryExitUsable(int id,PlayableEntityKind kind)=>buildings.TryGetValue(id,out var b)&&b.Kind==PlayableBuildingKind.Factory&&PlayableUnitRules.Supported(kind)&&TryFactoryExit(b,kind,out _);

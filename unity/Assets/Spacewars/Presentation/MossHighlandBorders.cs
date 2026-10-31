@@ -55,7 +55,7 @@ namespace Spacewars.Presentation
                 Vector2 Xz(int i){var p=polygon.Vertices[i];return new Vector2((float)p.X,(float)p.Z);}
                 for(int i=0;i<polygon.Triangles.Count;i+=3)Triangle(Xz(polygon.Triangles[i]),Xz(polygon.Triangles[i+1]),Xz(polygon.Triangles[i+2]),0);
                 var mesh=new Mesh{name=river?"Authored river and bank":"Authored mountain shoulder",indexFormat=UnityEngine.Rendering.IndexFormat.UInt32};
-                mesh.SetVertices(vertices);mesh.SetTriangles(indices,0);mesh.SetUVs(0,shore);mesh.RecalculateNormals();mesh.RecalculateBounds();terrainMeshes.Add(mesh);
+                mesh.SetVertices(vertices);mesh.SetTriangles(indices,0);mesh.SetUVs(0,shore);mesh.RecalculateNormals();mesh.RecalculateBounds();FinalProceduralMesh.IndexOwned(mesh);terrainMeshes.Add(mesh);
                 var obj=new GameObject(river?"Moss border river":"Moss border mountain");obj.transform.SetParent(root,false);
                 obj.AddComponent<MeshFilter>().sharedMesh=mesh;var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=mossTerrainMaterial;
                 var properties=new MaterialPropertyBlock();properties.SetFloat("_BorderSurface",river?2:1);renderer.SetPropertyBlock(properties);

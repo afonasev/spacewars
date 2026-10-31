@@ -52,6 +52,11 @@ namespace Spacewars.Simulation.Ai
         public AiProfileData CopyData()=>new AiProfileData{id=Id,revision=Revision,fields=values.OrderBy(v=>v.Key,StringComparer.Ordinal).Select(v=>new AiNumericValue{path=v.Key,value=v.Value}).ToArray()};
         private void ValidateGroups()
         {
+            string prefix="openingsMidgame.";
+            foreach(var group in new[]{new[]{"opening.aggressive","opening.doubleIncome","opening.greedy","opening.allIn","opening.air"},new[]{"ground.balanced","ground.tanks","ground.heavy","ground.explorers"},new[]{"combined.hawksTanks","combined.hawksExplorers","combined.balancedSmallAir","combined.heavySmallAir"},new[]{"personality.defensive","personality.aggressive","personality.harassing"},new[]{"personality.defensive","personality.aggressive"}})
+                if(group.Sum(key=>Value(prefix+key))<=0)throw new ArgumentException("Empty opening/midgame weight group: "+group[0]);
+            foreach(var range in new[]{new[]{"reinforcedMin","reinforcedMax"},new[]{"allInMin","allInMax"},new[]{"outpostMin","outpostMax"},new[]{"adaptation.firstMinSeconds","adaptation.firstMaxSeconds"},new[]{"airFirst","airCalm"},new[]{"airFactoryThreat","airFactoryCalm"}})
+                if(Value(prefix+range[0])>Value(prefix+range[1]))throw new ArgumentException("Opening/midgame range: "+range[0]);
             foreach(var name in new[]{"decisionSeconds","reactionSeconds","estimateNoise","actionsPerDecision","scoutAssignments"})
             {
                 double a=DifficultyValue(AiDifficulty.Recruit,name),b=DifficultyValue(AiDifficulty.Fighter,name),c=DifficultyValue(AiDifficulty.Veteran,name);

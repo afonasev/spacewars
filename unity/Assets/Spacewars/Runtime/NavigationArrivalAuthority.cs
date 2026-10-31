@@ -275,6 +275,7 @@ namespace Spacewars.Runtime
         private ILayeredNavigationProvider ArrivalProvider(NavGeometry value,string hold)
         {
             BeforeArrivalProviderConstruction?.Invoke();
+            if(terrain is StackedRampQualificationMap physical)return physical.ForGeometry(value,hold);
             return terrain==null ? NavigationAdmission.CertifiedFlatProvider(value) : new PartitionNavigationProvider(terrain,value,hold);
         }
         private long ProspectiveInputOwnerMetadata(int added)
@@ -331,7 +332,7 @@ namespace Spacewars.Runtime
                 }
                 var input=new NavArrivalInput("geometry:"+navigationGeometry.Revision,"profile:"+NavigationAdmission.ExactProfileBinding(profile),
                     bindings[0].Provider,bindings[0].Profile,terms,new NavGraphCompileLimits(1048576,300000,1200000),
-                    new NavArrivalCandidateSource("authority-spiral",1,group.OriginalLocation??candidates[0],candidates),members,
+                    new NavArrivalCandidateSource("authority-spatial-spiral",1,group.OriginalLocation??candidates[0],NavigationArrivalSlotOrdering.Align(candidates,members)),members,
                     CaptureArrivalOccupancySnapshot(members),1048576,bindings,true);
                 var attempt=new ArrivalAttempt{Id=++arrivalSequence,Group=group.GroupId,Input=input,
                     Work=new NavigationArrivalWork(input),Intents=rows,Epoch=0};

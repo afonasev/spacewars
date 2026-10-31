@@ -28,6 +28,8 @@ namespace Spacewars.Tests.EditMode
             object Call(string method,params object[] args)=>type.GetMethod(method,flags).Invoke(domain,args);
             PlayableSpectatorFrame Frame()=>(PlayableSpectatorFrame)Call("SpectatorSnapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
             Call("AddCredits",PlayableOwner.Player,10000d);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,5,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));
+            Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
             Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,2,PlayableBuildingKind.ScientificCenter,1,PlayableOwner.Player,null));
             var pending=Frame().Players[0].Buildings.Single(b=>b.Kind==PlayableBuildingKind.ScientificCenter);Assert.AreNotEqual(ConstructionPhase.Ready,pending.Phase);
             Call("AdvanceFoundations");Call("AdvanceBuildings",PlayableProfile.Default.ScienceBuildSeconds+1);

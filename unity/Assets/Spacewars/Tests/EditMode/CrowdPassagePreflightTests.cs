@@ -16,7 +16,9 @@ namespace Spacewars.Tests.EditMode
         [Test] public void QueuedTrafficColdRestoreAfterOrdinarySubsetCommandKeepsSurvivorAgeAndExactNext()=>RunFiniteHeldRow(false,true);
         [Test] public void FirstTrafficActivationRefusesBeforeIncomingReadyInstallAndThenPublishesComposedFrame()=>RunFiniteHeldRow(false,false,true);
         [TestCase(false)][TestCase(true)] public void ActualTrafficCandidateLastArrayRefusalUnwindsMovementAndComposedResults(bool ready)=>RunFiniteHeldRow(false,false,false,ready?2:1);
-        private void RunFiniteHeldRow(bool motion,bool cold=false,bool activation=false,int trafficRefusal=0)
+        [TestCase(false)][TestCase(true)] public void ReadyTrafficSubsetPublishesWhileOtherPhysicalRoutesRetainLeases(bool refuse)=>RunFiniteHeldRow(false,partialLeases:true,partialRefusal:refuse);
+        [Test] public void ChangedPhysicalLeaseRevisionRefusesReadyTrafficSubsetAtomically()=>RunFiniteHeldRow(false,partialLeases:true,partialLeaseMutation:true);
+        private void RunFiniteHeldRow(bool motion,bool cold=false,bool activation=false,int trafficRefusal=0,bool partialLeases=false,bool partialRefusal=false,bool partialLeaseMutation=false)
         {
             var basis=CrowdPassageTests.Configuration();var terrain=basis.Profile.AuthoredMap;
             double radius=basis.Profile.TankCollisionRadius;
@@ -33,20 +35,22 @@ namespace Spacewars.Tests.EditMode
             var movement=new NavGeometry(terrain.HalfExtent,basis.Obstacles.ToArray(),1);
             var originalTop=new NavPoint(middle,maxZ-radius);
             TestContext.WriteLine("B2_ORIGINAL_ROW "+Newtonsoft.Json.JsonConvert.SerializeObject(new{entry,exit,minZ,maxZ,OriginalTop=originalTop,OriginalTopFree=movement.IsFree(originalTop,radius),Blocking=movement.Obstacles.Where(o=>o.DistanceSquared(originalTop)<=radius*radius).Select(o=>new{o.MinX,o.MinZ,o.MaxX,o.MaxZ}).ToArray()}));
-            // Strict packing replaces the touching row: half of the spare width belongs
-            // to the traversable edge gap; the other half is shared by the top and seven
-            // interior gaps. No pair touches and no narrow internal gap admits a mover.
+            // Keep eight HOLD circles with strict internal/edge gaps, and
+            // leave one full-footprint lane containing the first solver grid row.
+            // Split only the lane's admissible width; all remaining spare width
+            // belongs to the eight non-traversable gaps (top + seven interiors).
             double spare=maxZ-minZ-18*radius;
             double grid=crowdGrid(basis.Profile.Navigation),gridLane=Math.Ceiling((minZ+radius)/grid)*grid;
-            // Half the admissible non-lane gap keeps the first supported ordinary
-            // lattice row inside the single lane; all eight other gaps stay strict.
-            double gap=(spare-(gridLane-(minZ+radius)))/16;
+            double laneWidth=(gridLane-(minZ+radius)+2*radius)/2;
+            double gap=(spare-laneWidth)/8;
             Assert.Greater(spare,0);Assert.Greater(gap,0);
+            Assert.Less(gap,2*radius,"interior and top edge gaps do not admit another full circle");
             double top=maxZ-radius-gap;
             var held=Enumerable.Range(0,8).Select(i=>new NavPoint(middle,top-i*(2*radius+gap))).ToArray();
             double low=minZ+radius,high=held.Last().Z-2*radius,lane=(low+high)/2;
             Assert.GreaterOrEqual(high,low,"one full-footprint lane exists");
             Assert.Less(high-low,2*radius,"two opposing full circles cannot pass at the row plane");
+            Assert.GreaterOrEqual(gridLane,low);Assert.LessOrEqual(gridLane,high,"single lane contains an ordinary solver grid row");
             foreach(var point in held)Assert.True(movement.IsFree(point,radius)&&terrain.SupportsFootprint(point,radius),"derived row legal full footprint "+Newtonsoft.Json.JsonConvert.SerializeObject(point));
             var scenario=basis.ScenarioUnits.Concat(held.Select(p=>new OfflineScenarioUnit(basis.Roster[0].LogicalPlayer,PlayableEntityKind.Tank,p,0))).ToArray();
             var costs=new double[basis.Starts.Count,basis.Starts.Count];for(int i=0;i<basis.Starts.Count;i++)for(int j=0;j<basis.Starts.Count;j++)costs[i,j]=basis.RouteCost(i,j);
@@ -67,7 +71,55 @@ namespace Spacewars.Tests.EditMode
                     var group=movers.Where(id=>Math.Sign(nav.Crowd.Units.Single(u=>u.Id==id).Position.X)==-direction).ToArray();Assert.AreEqual(2,group.Length);
                     Assert.AreEqual(PlayableCommandStatus.Applied,world.Apply(new PlayableCommand(71,sequence++,c.Roster[0].Id,PlayableCommandKind.Move,group,new NavPoint(direction*18,0)).AsHuman()).Status);
                 }
-                for(;preparation<CrowdPassageTests.RoutePreparationBound&&nav.PendingCount>0;preparation++){host.Service(new PlayableRouteBinding(world.Domain.Geometry,c.Profile,nav.Admission,nav.RoutePort),CrowdPassageTests.RouteBudget);if(activation&&nav.Answers.Count>0)break;nav.ApplyResults();}
+                int LeaseCount()=>((System.Collections.Generic.IDictionary<long,ArrivalProviderLease>)typeof(NavigationSession).GetField("arrivalProjectionLeases",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(nav)).Count;
+                for(;preparation<CrowdPassageTests.RoutePreparationBound&&nav.PendingCount>0;preparation++){
+                    host.Service(new PlayableRouteBinding(world.Domain.Geometry,c.Profile,nav.Admission,nav.RoutePort),partialLeases?1:CrowdPassageTests.RouteBudget);
+                    if(partialLeases){nav.PrepareDeliveryBarrier();if(nav.RoutePort.AllocationCount==0&&nav.Answers.Count>0&&LeaseCount()>0)break;continue;}
+                    if(activation&&nav.Answers.Count>0)break;nav.ApplyResults();
+                }
+                if(partialLeases){
+                    Assert.Zero(nav.RoutePort.AllocationCount,"Reach post-Ready PLAN ingress before testing partial route completion.");
+                    Assert.Greater(nav.Answers.Count,0,"A real completed route answer must be waiting.");
+                    int leases=LeaseCount();Assert.Greater(leases,0,"Other real physical rows still retain projection leases.");
+                    var prefix=world.CaptureBytes();
+                    if(partialRefusal||partialLeaseMutation){
+                        int denied=0,appliedBefore=nav.AppliedResults,batchesBefore=nav.OwnedResultBatchPublications,movementBefore=nav.OwnedMovementPublications;long physical=nav.PhysicalHostBudget.PhysicalBytes;
+                        var frameLayout=typeof(NavPreparedCrowdStep).GetMethod("Layout",System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic);
+                        long frameBytes=NavStorageLayout.Charge((long)frameLayout.Invoke(null,new object[]{nav.Crowd.Units.Count}));
+                        nav.PhysicalHostBudget.AllocationAdmission=bytes=>{
+                            if(bytes!=frameBytes||!new System.Diagnostics.StackTrace().GetFrames().Any(f=>f.GetMethod().DeclaringType==typeof(NavPreparedCrowdStep)&&f.GetMethod().Name=="Create"))return true;
+                            denied++;
+                            if(partialLeaseMutation){
+                                // Invalidate just the captured source version. This test-only
+                                // mutation isolates the new lease guard from answer/mailbox guards.
+                                var gate=typeof(NavigationSession).GetField("transportGate",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(nav);
+                                lock(gate){
+                                    var live=(System.Collections.Generic.IDictionary<long,ArrivalProviderLease>)typeof(NavigationSession).GetField("arrivalProjectionLeases",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(nav);
+                                    live.Values.First().StorageOwner.Revision++;
+                                }
+                                return true;
+                            }
+                            return false;
+                        };
+                        try{nav.Step(1d/30);}finally{nav.PhysicalHostBudget.AllocationAdmission=null;}
+                        Assert.AreEqual(1,denied,"Reach the paid composed frame while unrelated physical leases remain.");
+                        if(partialLeaseMutation)Assert.AreEqual(19,nav.LastResultBatchSourceReason,"Exact live lease version is revalidated before publication.");
+                        Assert.AreEqual(appliedBefore,nav.AppliedResults);Assert.AreEqual(batchesBefore,nav.OwnedResultBatchPublications);Assert.AreEqual(movementBefore,nav.OwnedMovementPublications);Assert.AreEqual(physical,nav.PhysicalHostBudget.PhysicalBytes);
+                        Assert.AreEqual(leases,LeaseCount());Assert.Zero(nav.PhysicalHostBudget.HeldBytes);Assert.Zero(nav.PhysicalHostBudget.ActiveScopes);Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(nav),nav.PhysicalHostBudget.PhysicalBytes);ExactWorldBytes(prefix,world.CaptureBytes(),"partial-route allocation/source refusal is atomic");
+                    }
+                    var restored=OfflineParticipantAuthority.Restore(prefix,c);
+                    try{
+                        ExactWorldBytes(prefix,restored.CaptureBytes(),"partial-route current-format checkpoint");
+                        int applied=nav.AppliedResults,publications=nav.OwnedResultBatchPublications,movements=nav.OwnedMovementPublications;nav.Step(1d/30);
+                        Assert.Greater(nav.AppliedResults,applied,"A ready Traffic subset must not wait for unrelated route leases.");
+                        Assert.Greater(nav.OwnedResultBatchPublications,publications);Assert.Greater(nav.OwnedMovementPublications,movements,"This exact step publishes movement alongside the ready subset.");
+                        Assert.AreEqual(leases,LeaseCount(),"Answer consumption and motion preserve unrelated physical leases.");
+                        restored.Navigation.Step(1d/30);ExactWorldBytes(world.CaptureBytes(),restored.CaptureBytes(),"partial-route exact next composed frame");
+                        Assert.Zero(nav.PhysicalHostBudget.HeldBytes);Assert.Zero(nav.PhysicalHostBudget.ActiveScopes);
+                        Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(nav),nav.PhysicalHostBudget.PhysicalBytes);
+                    }finally{restored.Navigation.ReleaseCommittedHostRoot();restored.Domain.DestroyOwnedNavigation();Assert.Zero(restored.Navigation.PhysicalHostBudget.PhysicalBytes);}
+                    return;
+                }
                 if(activation){RunFirstActivationBoundary(world,host,c,nav,facts);return;}
                 facts.Add(new{entry,exit,minZ,maxZ,middle,low,high,lane,held,Preparation=preparation,nav.PendingCount,Grid=grid,gridLane,Actors=movers.Select(id=>{var a=nav.Crowd.Units.Single(u=>u.Id==id);return new{a.Id,a.Outcome,a.Moving,a.InstalledRequest};}).ToArray()});
                 facts.Add(new{OrdinaryHostSolverEpoch=host.SolverEpoch,OrdinaryHostCounters=host.CertifiedCounters,host.LastProjectionFailure,Arrival=FinalArrivalScalars(nav),Allocating=nav.RoutePort.AllocationCount,QueuedRequests=nav.RoutePort.QueuedRequestCount,Answers=nav.Answers.Count,nav.PhysicalHostBudget.PhysicalBytes,nav.PhysicalHostBudget.HeldBytes,nav.PhysicalHostBudget.ActiveScopes});

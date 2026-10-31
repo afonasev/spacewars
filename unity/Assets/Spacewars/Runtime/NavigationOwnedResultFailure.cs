@@ -36,13 +36,34 @@ namespace Spacewars.Runtime
             for(int slot=0;slot<c.Goals.Capacity;slot++)if(c.Goals.TryReadSlot(slot,out int id,out _)&&!c.Allocating.ContainsKey(id)&&Crowd.TryGet(id,out _)&&c.Identities.TryGetValue(id,out var held)&&!CurrentHeldBinding(held,id))return false;
             return true;
         }
+        // A completed answer owns its corridor independently of other registered
+        // physical rows. Pin those unrelated leases instead of waiting for the
+        // entire host queue to become empty before publishing a Traffic frame.
+        private void ObserveResultBatchLeases(PreparedResultBatch c)
+        {
+            c.LeaseTable=NavPhysicalMacro.Acquire(c,liveArrivalLeaseTable);c.LeaseRevision=c.LeaseTable?.Revision??0;c.LeaseTokenRevision=c.LeaseTable?.Tokens.Revision??0;
+            for(int i=0;i<c.Leases.Length;i++){
+                var lease=c.LeaseTable.Tokens[c.LeaseTable.AcquisitionToken(i)];ref var row=ref c.Leases[i];
+                if(lease.StorageOwner==null)throw new InvalidOperationException("Physical result lease lost its owner.");
+                row.Owner=NavPhysicalMacro.Acquire(c,lease.StorageOwner);row.Values=NavigationArrivalLeaseValues.Read(lease);row.Revision=row.Owner.Revision;row.Attached=lease.Attached;row.Staging=lease.StagingBytes;row.Provider=lease.Provider;row.Projection=lease.Projection;row.Previous=row.Owner.RetirementPrevious;row.Next=row.Owner.RetirementNext;
+            }
+        }
+        private bool ResultBatchLeasesCurrent(PreparedResultBatch c)
+        {
+            if(!ReferenceEquals(liveArrivalLeaseTable,c.LeaseTable)||(c.LeaseTable?.Revision??0)!=c.LeaseRevision||(c.LeaseTable?.Tokens.Revision??0)!=c.LeaseTokenRevision||arrivalProjectionLeases.Count!=c.Leases.Length||(liveArrivalLeaseTable?.Count??0)!=c.Leases.Length)return false;
+            foreach(var row in c.Leases){
+                var lease=row.Owner.Record;
+                if(!ReferenceEquals(c.LeaseTable.Tokens.OwnerFor(lease.Token),row.Owner)||row.Owner.Revision!=row.Revision||!row.Values.Same(NavigationArrivalLeaseValues.Read(lease))||lease.Attached!=row.Attached||lease.StagingBytes!=row.Staging||!ReferenceEquals(lease.Provider,row.Provider)||!ReferenceEquals(lease.Projection,row.Projection)||!ReferenceEquals(row.Owner.RetirementPrevious,row.Previous)||!ReferenceEquals(row.Owner.RetirementNext,row.Next))return false;
+            }
+            return true;
+        }
         private bool ObserveResultBatchAttempts(PreparedResultBatch c)
         {
             for(int i=0;i<c.Attempts.Length;i++){var a=c.Arrival.Attempts[c.Arrival.SortedId(i)];if(a.StorageOwner==null||!a.Work.HasPhysicalLifetime||a.OwnedProviders==null)return false;ref var f=ref c.Attempts[i];f.Owner=NavPhysicalMacro.Acquire(c,a.StorageOwner);f.Revision=f.Owner.Revision;f.Working=a.Working;f.Reconstructing=a.Reconstructing;f.Retiring=a.Retiring;f.Restored=a.RestoredRetiringCompute;f.Retirement=a.Retirement;}return true;
         }
         private bool ResultBatchAttemptsCurrent(PreparedResultBatch c)
         {
-            if(c.Arrival.Count!=c.Attempts.Length||arrivalProjectionLeases.Count!=0||(liveArrivalLeaseTable?.Count??0)!=0)return false;
+            if(c.Arrival.Count!=c.Attempts.Length||!ResultBatchLeasesCurrent(c))return false;
             for(int i=0;i<c.Attempts.Length;i++){
                 var f=c.Attempts[i];var a=f.Owner.Record;
                 if(!ReferenceEquals(c.Arrival.Attempts.OwnerFor(c.Arrival.SortedId(i)),f.Owner))return false;
@@ -55,9 +76,13 @@ namespace Spacewars.Runtime
         }
         private bool PrepareResultBatchPrune(PreparedResultBatch c,NavigationRetentionBudget.Scope scope)
         {
+            // This carrier preserves leases; any operation that would retire one
+            // must use the existing retirement path, never omit its publication.
+            foreach(var row in c.Leases)if(!row.Values.Retiring&&!ReadyContainsRequest(c.NextLedger??c.Ledger,c.Allocating,row.Values.Request))return false;
             for(int i=0;i<c.Attempts.Length;i++){ref var f=ref c.Attempts[i];if(f.Removed)continue;var a=f.Owner.Record;bool present=false;foreach(var intent in a.Intents)if(ReadyContainsRequest(c.NextLedger??c.Ledger,c.Allocating,intent.Request)){present=true;break;}if(present)continue;
                 if(!f.Retiring&&!f.PlannedRetiring){if(f.Revision==int.MaxValue)return false;f.PlannedRetiring=true;c.Retirements[c.RetirementCount++]=new RebindRetirement{Index=i,Sequence=checked(++c.NextRetirement)};}
-                if(!f.Working&&!f.Restored){var r=scope.OwnedReservation();if(c.NextArrival==null){c.NextArrival=NavigationLiveArrivalTables.AllocatePrepared(c.Arrival.Attempts.Capacity,c.Arrival.References.Capacity,r,c.Arrival,c.Arrival.Ids.Capacity);using(EnterTransport()){if(!ResultBatchSourceCurrent(c))return false;c.NextArrival.CopySourceObserved(c.Arrival);}}
+                bool hasLease=false;foreach(var row in c.Leases)if(row.Values.Attempt==a.Id){hasLease=true;break;}
+                if(!f.Working&&!f.Restored&&!hasLease){var r=scope.OwnedReservation();if(c.NextArrival==null){c.NextArrival=NavigationLiveArrivalTables.AllocatePrepared(c.Arrival.Attempts.Capacity,c.Arrival.References.Capacity,r,c.Arrival,c.Arrival.Ids.Capacity);using(EnterTransport()){if(!ResultBatchSourceCurrent(c))return false;c.NextArrival.CopySourceObserved(c.Arrival);}}
                     foreach(var provider in a.OwnedProviders)c.NextArrival.DecrementProviderPreparing(provider,r);c.NextArrival.RemoveAttemptPreparing(a);if(c.NextArrival.Ids.Count==0)c.NextArrival.ResetEmptyProvidersPreparing();f.Removed=true;
                 }
             }return true;
@@ -87,7 +112,7 @@ namespace Spacewars.Runtime
             op.FailureReject=!keep;if(op.FailureReject&&op.FailureSource.Mobility==long.MaxValue)return false;
             if(op.Tracked)c.AnswerBytes-=answer.Corridor.EstimatedRetainedBytes;op.Kind=ResultOperationKind.Failure;op.FailureOutcome=effectiveStatus==NavSolveStatus.UnreachableInGraph?NavigationOutcome.Unreachable:NavigationOutcome.Rejected;if(op.FailureOutcome==NavigationOutcome.Unreachable)c.UnreachableCount++;c.FailureCount++;if(invalidReady){c.InvalidReadyCount++;c.RejectedCount++;}NavUnit.PrepareStopBacking();
             if(c.NextPending==null)c.NextPending=ResultBatchCopy(c,c.Pending,scope);c.NextPending.Remove(request.Entity);
-            bool technical=effectiveStatus==NavSolveStatus.InvalidEndpoint||effectiveStatus==NavSolveStatus.BlockedConnector||effectiveStatus==NavSolveStatus.CapacityExceeded;var failures=c.NextFailures??c.Failures;
+            bool technical=effectiveStatus==NavSolveStatus.InvalidEndpoint||effectiveStatus==NavSolveStatus.BlockedConnector||effectiveStatus==NavSolveStatus.CapacityExceeded||effectiveStatus==NavSolveStatus.Partial;var failures=c.NextFailures??c.Failures;
             if(failures.ContainsKey(request.Entity)||technical){int capacity=technical&&!failures.ContainsKey(request.Entity)?checked(failures.Count+1):0;if(c.NextFailures==null)c.NextFailures=ResultBatchCopy(c,c.Failures,scope,capacity);else if(capacity>c.NextFailures.Capacity){var grown=NavigationCommandSlots<int,NavSolveStatus>.CreateOwned(capacity,scope.OwnedReservation());try{grown.CopyPreparedFrom(c.NextFailures);}catch{grown.ReleaseStorage();throw;}c.NextFailures.ReleaseStorage();c.NextFailures=grown;}c.NextFailures.Remove(request.Entity);if(technical)c.NextFailures.SetPreparing(request.Entity,effectiveStatus);}
             var ledger=c.NextLedger??c.Ledger;for(int slot=0;slot<ledger.Capacity;slot++)if(ledger.TryReadSlot(slot,out long key,out var row)&&row.Entity==request.Entity&&row.State==NavArrivalReservationKind.PendingRequest){if(c.NextLedger==null)c.NextLedger=ResultBatchCopy(c,c.Ledger,scope);c.NextLedger.Remove(key);}
             if(!PrepareResultBatchPrune(c,scope))return false;

@@ -17,7 +17,8 @@ namespace Spacewars.Simulation.Ai
         public double After(PlayableProfile p)=>Global?1+PlayableResearchRules.Bonus(p,Kind)/100:Effect==AiResearchEffect.Mobility?PlayableUnitRules.Speed(p,Unit,true):Effect==AiResearchEffect.BurstDamage?PlayableUnitRules.DamagePerSecond(p,Unit,true):PlayableUnitRules.Range(p,Unit,true);
         public double RelativeGain(PlayableProfile p)=>Math.Max(0,After(p)/Before(p)-1);
     }
-    // All ordinary QueueResearch branches, with gameplay effects and terms. No AI balance constants.
+    // Military research choices for the existing army policy. Building durability is
+    // offered to humans/proving; it does not acquire an invented military payoff.
     public static class AiResearchCatalog
     {
         public static IReadOnlyList<AiResearchDescriptor> All{get;}=Array.AsReadOnly(new[]{

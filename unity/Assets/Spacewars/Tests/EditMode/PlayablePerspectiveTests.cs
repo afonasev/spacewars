@@ -204,7 +204,7 @@ namespace Spacewars.Tests.EditMode
             fog.Refresh(sources,Array.Empty<KnownBuilding>());
             Assert.True(fog.IsVisible(unit.Position)&&fog.IsVisible(target),"Both friendly semantic endpoints are currently observed");
             Assert.False(fog.IsVisible(new NavPoint((unit.Position.X+target.X)/2,(unit.Position.Z+target.Z)/2)),"Actual vision-source separation creates a fog interval");
-            var proofs=(PlayableRouteProof[])Type.GetMethod("ProjectRoutes",Flags).Invoke(domain,new object[]{PlayableOwner.Player,new[]{request},fog,visible.Entities,visible.Buildings,null});
+            var proofs=(PlayableRouteProof[])Type.GetMethod("ProjectRoutes",Flags).Invoke(domain,new object[]{PlayableOwner.Player,new[]{request},fog,visible.Entities,visible.Buildings,null,false});
             var fogView=new PlayableSnapshot(visible.ProfileId,visible.ProfileRevision,visible.Generation,visible.Seed,visible.Sequence,visible.Tick,visible.Status,visible.Paused,
                 visible.Outcome,visible.Credits,geometry,visible.Entities.ToArray(),visible.Buildings.ToArray(),visible.Projectiles.ToArray(),visible.Metrics,visible.Failure,
                 vision:fog.Snapshot(),routeProofs:proofs,owner:visible.Owner,ownerId:visible.OwnerId,team:visible.Team,participants:visible.Participants.ToArray(),activeProfile:profile);
@@ -230,6 +230,18 @@ namespace Spacewars.Tests.EditMode
                 accepted=(bool)Type.GetMethod("ArmyMoveSafe",Flags).Invoke(domain,new object[]{action});
             }
             Assert.True(accepted,"A free known-map Move destination beyond current vision remains valid");
+        }
+        [Test] public void ArmyAircraftCrossesGroundBlockerAndIgnoresGroundOnlyThreat()
+        {
+            var p=PlayableProfile.Default;var home=p.Headquarters(PlayableOwner.Player);var from=new NavPoint(home.X-6,home.Z);var goal=new NavPoint(home.X+6,home.Z);
+            int hawk=(int)Call("SpawnUnit",from,PlayableOwner.Player,PlayableEntityKind.Hawk);
+            var geometry=(NavGeometry)Type.GetProperty("Geometry",Flags).GetValue(domain);
+            Assert.False(geometry.SegmentFree(from,goal,p.HawkRadius),"The witness must cross an actual ground obstacle");
+            var view=View();var action=new PlayableAiAction(1,"player-1",view.ProfileId,view.ProfileRevision,view.Generation,view.Sequence,PlayableCommandKind.Move,new[]{hawk},goal,seed:view.Seed);
+            Call("SpawnUnit",new NavPoint(goal.X+1,goal.Z+2),PlayableOwner.Enemy,PlayableEntityKind.Tank);
+            Assert.True((bool)Type.GetMethod("ArmyMoveSafe",Flags).Invoke(domain,new object[]{action}),"Ground-only weapons and ground solids cannot reject an air route");
+            Call("SpawnUnit",new NavPoint(goal.X+1,goal.Z-2),PlayableOwner.Enemy,PlayableEntityKind.Explorer);
+            Assert.False((bool)Type.GetMethod("ArmyMoveSafe",Flags).Invoke(domain,new object[]{action}),"Visible anti-air threat still blocks the same route");
         }
         [Test] public void EnemyRouteProofUsesOnlyItsOwnVisibleAnchor()
         {
@@ -303,7 +315,8 @@ namespace Spacewars.Tests.EditMode
             int scout=Spawn(10,-4);Assert.True(View().Vision.KnownBuildings.Any(b=>b.Id==2));
             Call("Damage",scout,100000);var hidden=View();Call("Damage",2,100000);
             Assert.True(View().Vision.KnownBuildings.Any(b=>b.Id==2));Assert.IsEmpty(View().Buildings.Where(b=>b.Id==2));
-            Spawn(10,-4);Assert.False(View().Vision.KnownBuildings.Any(b=>b.Id==2));Assert.True(hidden.Vision.KnownBuildings.Any(b=>b.Id==2));
+            // Revisit from beside the wreck; its collision footprint remains authoritative.
+            Spawn(12,-4);Assert.False(View().Vision.KnownBuildings.Any(b=>b.Id==2));Assert.True(hidden.Vision.KnownBuildings.Any(b=>b.Id==2));
         }
         [Test] public void ExplicitTargetMustBeVisibleAtApplication()
         {

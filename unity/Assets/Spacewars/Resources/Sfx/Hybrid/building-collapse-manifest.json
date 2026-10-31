@@ -1,0 +1,10 @@
+{
+  "id": "building-collapse-a-v1",
+  "authorship": "Local deterministic oscillator/noise synthesis",
+  "generator": "tools/generate_building_collapse_audio.py",
+  "sample_rate": 24000,
+  "seconds": 2.4,
+  "sample_peak": 0.6,
+  "rms": 0.06389015446610731,
+  "sha256": "20fe843854af5f302ed1d4fde7d531aaa8386f08bdcf3f2e4b27071b02cae9a0"
+}

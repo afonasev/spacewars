@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
+using Spacewars.Editor;
 using UnityEditor;
 using UnityEngine;
 
@@ -66,7 +67,11 @@ namespace Spacewars.Tests.EditorAsset
             {
                 Assert.IsNotNull(filter.sharedMesh, filter.name);
                 Assert.Greater(filter.sharedMesh.vertexCount, 0, filter.name);
-                Assert.AreEqual(Source + unit + ".glb", AssetDatabase.GetAssetPath(filter.sharedMesh), filter.name);
+                string sourceKey=UnitModelResources.ExactMeshKey(filter.sharedMesh);
+                Assert.NotNull(sourceKey,filter.name);
+                Assert.True(glb.GetComponentsInChildren<MeshFilter>(true).Any(f=>UnitModelResources.ExactMeshKey(f.sharedMesh)==sourceKey),"Complete native source buffer/bounds/index layout retained: "+filter.name);
+                string meshPath=AssetDatabase.GetAssetPath(filter.sharedMesh);
+                Assert.True(meshPath==Source+unit+".glb"||meshPath.StartsWith(Prefabs+"SharedUnitMeshes/unit-shared-",StringComparison.Ordinal),"Source or independent immutable resource required: "+filter.name);
             }
             Assert.IsEmpty(prefab.GetComponentsInChildren<Collider>(true), "Simulation owns collision; import must add none");
             Assert.IsEmpty(prefab.GetComponentsInChildren<LODGroup>(true), "No authored LOD exists for this unit");
@@ -82,7 +87,7 @@ namespace Spacewars.Tests.EditorAsset
             Assert.IsNotNull(prefab);
             var roles = prefab.GetComponentsInChildren<MeshRenderer>(true)
                 .SelectMany(r => r.sharedMaterials).Distinct().ToArray();
-            var expected = unit == "explorer"
+            var expected = unit == "shkval" ? new[] { "neutral-metal", "structure", "system-emissive", "team-primary", "rubber", "canopy" } : unit == "explorer"
                 ? new[] { "neutral-metal", "structure", "system-emissive", "team-primary", "copper-metal" }
                 : new[] { "neutral-metal", "structure", "system-emissive", "team-primary" };
             CollectionAssert.AreEquivalent(expected, roles.Select(m => m.name).ToArray());
@@ -91,6 +96,19 @@ namespace Spacewars.Tests.EditorAsset
                 Assert.AreEqual(Prefabs + unit + "-" + role.name + ".mat", AssetDatabase.GetAssetPath(role));
                 Assert.AreEqual("Universal Render Pipeline/Lit", role.shader.name);
                 Assert.IsTrue(role.shader.isSupported, role.name);
+                if(unit=="shkval"){
+                    Assert.AreEqual(0,role.GetFloat("_Cull"),"Open bore liners retain double-sided rendering");
+                    if(role.name=="rubber"||role.name=="canopy"){
+                        Assert.IsNull(role.GetTexture("_BaseMap"));Assert.IsNull(role.GetTexture("_BumpMap"));
+                    }else{
+                        var peer=AssetDatabase.LoadAssetAtPath<Material>("Assets/Spacewars/Content/Resources/StyleA/explorer-"+role.name+".mat");Assert.NotNull(peer);
+                        foreach(var map in new[]{"_BaseMap","_BumpMap","_MetallicGlossMap","_OcclusionMap"})Assert.AreSame(peer.GetTexture(map),role.GetTexture(map),role.name+map);
+                        Assert.AreEqual(peer.GetFloat("_BumpScale"),role.GetFloat("_BumpScale"));
+                    }
+                    if(role.name=="rubber")Assert.AreEqual(0,role.GetFloat("_Metallic"));
+                    if(role.name=="canopy")Assert.Greater(role.GetFloat("_Smoothness"),.6f);
+                    continue;
+                }
                 if (!new[] { "neutral-metal", "structure", "team-primary" }.Contains(role.name)) continue;
                 Assert.IsNotNull(role.GetTexture("_BaseMap"), role.name + " base color");
                 Assert.IsNotNull(role.GetTexture("_BumpMap"), role.name + " normal");

@@ -11,6 +11,7 @@ namespace Spacewars.Presentation
     {
         [Serializable] private sealed class UpdateState { public string version,available,state,error,notice; public long done,total; }
         public Action Play, Laboratory, Campaign;
+        public UnityEngine.InputSystem.Gamepad EntryGamepad {get;private set;}
         public VisualElement HostRoot;
         public NativeMenuNavigation Navigation;
         public VisualElement ScreenRoot { get; private set; }
@@ -39,8 +40,6 @@ namespace Spacewars.Presentation
             card.Add(OrbitalTheme.Action("Кампания",OpenCampaign,"main-campaign"));
             var network=OrbitalTheme.Action("Сетевая игра",()=>{},"main-network");network.SetEnabled(false);network.style.display=DisplayStyle.None;network.tooltip="Пока недоступно";card.Add(network);
             var settings=OrbitalTheme.Action("Настройки",()=>OpenSettings(),"main-settings");card.Add(settings);
-            card.Add(OrbitalTheme.Action("Управление",()=>{ScreenRoot.style.display=DisplayStyle.None;NativeControlsHelp.Open(HostRoot??GetComponent<UIDocument>().rootVisualElement,Navigation,()=>RestoreFocus(card.Q<Button>("main-controls")));},"main-controls"));
-            card.Add(OrbitalTheme.Action("Что нового",()=>StartCoroutine(OpenHistory()),"main-history"));
             card.Add(OrbitalTheme.Action("Лаборатория геймдизайна",()=>Laboratory?.Invoke(),"main-laboratory"));
             card.Add(OrbitalTheme.Action("Выйти",()=>Application.Quit(),"main-exit"));
             var footer=updatePanel=new VisualElement {name="main-update-panel"};footer.AddToClassList("orbital-menu-footer");card.Add(footer);
@@ -85,7 +84,7 @@ namespace Spacewars.Presentation
         private void OpenSettings()
         {
             ScreenRoot.style.display=DisplayStyle.None;
-            NativeSettingsView.Open(HostRoot??GetComponent<UIDocument>().rootVisualElement,Navigation,()=>RestoreFocus(card.Q<Button>("main-settings")),LocalControls);
+            NativeSettingsView.Open(HostRoot??GetComponent<UIDocument>().rootVisualElement,Navigation,()=>RestoreFocus(card.Q<Button>("main-settings")),LocalControls,closed=>StartCoroutine(OpenHistory(closed)));
         }
         private void Update(){if(ownsNavigation)Navigation?.Tick();}
         private void LateUpdate(){if(ownsNavigation)UnityEngine.Cursor.visible=!Application.isFocused||Navigation?.UsingGamepad!=true;}
@@ -140,7 +139,7 @@ namespace Spacewars.Presentation
         }
         private IEnumerator EnterGame(Action route=null)
         {
-            if(busy)yield break;busy=true;playButton.SetEnabled(false);
+            if(busy)yield break;EntryGamepad=Navigation.UsingGamepad?Navigation.CurrentGamepad:null;busy=true;playButton.SetEnabled(false);
             bool allowed=string.IsNullOrEmpty(endpoint);if(!allowed)yield return Request("/play","POST",s=>allowed=s!=null);
             if(allowed){var action=route??Play;ScreenRoot.style.display=DisplayStyle.None;Navigation.SetScope(null);action?.Invoke();Destroy(gameObject);}else{busy=false;playButton.SetEnabled(true);}
         }
@@ -155,37 +154,31 @@ namespace Spacewars.Presentation
             bool accepted=false;yield return Request("/commit","POST",s=>accepted=s!=null);
             if(accepted)Application.Quit();else{busy=false;ShowStatus();}
         }
-        [Serializable] private sealed class History {public ReleaseNote[] releases;}
-        [Serializable] private sealed class ReleaseNote {public string version,date,ru,en;}
-        private History historyCache;
+        private NativeReleaseHistoryView.History historyCache;
+        private NativeReleaseHistoryView historyView;
+        private UnityWebRequest historyRequest;
         private IEnumerator CancelDownload()
         {
             if(busy)yield break;busy=true;
             yield return Request("/cancel","POST",s=>{if(s!=null)current=s;});busy=false;ShowStatus();
         }
-        private IEnumerator OpenHistory()
+        private IEnumerator OpenHistory(Action closed)
         {
             var root=HostRoot??GetComponent<UIDocument>().rootVisualElement;
             ScreenRoot.style.display=DisplayStyle.None;
-            var page=OrbitalTheme.Screen(root,"release-history");var box=OrbitalTheme.Card(page);box.Add(OrbitalTheme.Text("ЧТО НОВОГО","orbital-title"));
-            var list=new DropdownField("Версия"){name="history-version"};box.Add(list);
-            var scroll=OrbitalTheme.Scroll();scroll.style.minHeight=0;scroll.style.flexShrink=1;box.Add(scroll);
-            var text=OrbitalTheme.Text("Получаем историю версий…","orbital-muted");text.style.whiteSpace=WhiteSpace.Normal;scroll.Add(text);
-            Action back=()=>{page.RemoveFromHierarchy();RestoreFocus(card.Q<Button>("main-history"));};
-            var close=OrbitalTheme.Action("Назад",back,"history-back");box.Add(close);Navigation.SetScope(page,back,close);
+            var view=historyView=new NativeReleaseHistoryView(root,Navigation,()=>{historyRequest?.Abort();closed();},routine=>StartCoroutine(routine),endpoint,token);
             if(historyCache==null&&!string.IsNullOrEmpty(endpoint))
             {
                 using(var request=UnityWebRequest.Get(endpoint+"/history"))
-                {request.timeout=30;request.SetRequestHeader("Authorization","Bearer "+token);yield return request.SendWebRequest();
-                 if(request.result==UnityWebRequest.Result.Success){try{historyCache=JsonUtility.FromJson<History>(request.downloadHandler.text);}catch(ArgumentException){}}
+                {
+                    historyRequest=request;request.timeout=30;request.SetRequestHeader("Authorization","Bearer "+token);
+                    yield return request.SendWebRequest();historyRequest=null;
+                    if(request.result==UnityWebRequest.Result.Success)
+                    {try{historyCache=JsonUtility.FromJson<NativeReleaseHistoryView.History>(request.downloadHandler.text);}catch(ArgumentException){}}
                 }
             }
-            if(page.panel==null)yield break;
-            if(historyCache?.releases==null||historyCache.releases.Length==0){text.text="История версий недоступна. Можно продолжить играть; попробуйте открыть её позже.";list.SetEnabled(false);yield break;}
-            list.choices=new System.Collections.Generic.List<string>();foreach(var release in historyCache.releases)list.choices.Add(release.version+(release.version==Application.version?" · установлена":""));
-            void Show(){var note=historyCache.releases[Mathf.Max(0,list.index)];text.text="Версия "+note.version+" · "+(string.IsNullOrEmpty(note.date)?"дата не указана":note.date)+"\n\n"+(string.IsNullOrWhiteSpace(note.ru)?"Описание на русском для этого исторического релиза отсутствует.":note.ru);scroll.scrollOffset=Vector2.zero;}
-            list.RegisterValueChangedCallback(_=>Show());list.index=0;Show();Navigation.SetScope(page,back,list);
+            if(!view.IsClosed)view.SetHistory(historyCache);
         }
-        private void OnDestroy(){ScreenRoot?.RemoveFromHierarchy();if(ownsNavigation)Navigation?.Dispose();if(panel)Destroy(panel);}
+        private void OnDestroy(){historyRequest?.Abort();historyView?.Dispose();ScreenRoot?.RemoveFromHierarchy();if(ownsNavigation)Navigation?.Dispose();if(panel)Destroy(panel);}
     }
 }

@@ -89,7 +89,7 @@ namespace Spacewars.Presentation
                 }
                 Wall(0,0,2,0,Level(x,z-1));Wall(2,0,2,2,Level(x+1,z));Wall(2,2,0,2,Level(x,z+1));Wall(0,2,0,0,Level(x-1,z));
             }
-            var ridgeMesh=new Mesh{name="Eroded geological solid",indexFormat=UnityEngine.Rendering.IndexFormat.UInt32};ridgeMesh.SetVertices(ridgeVertices);ridgeMesh.SetTriangles(ridgeIndices,0);ridgeMesh.RecalculateNormals();ridgeMesh.RecalculateBounds();terrainMeshes.Add(ridgeMesh);
+            var ridgeMesh=new Mesh{name="Eroded geological solid",indexFormat=UnityEngine.Rendering.IndexFormat.UInt32};ridgeMesh.SetVertices(ridgeVertices);ridgeMesh.SetTriangles(ridgeIndices,0);ridgeMesh.RecalculateNormals();ridgeMesh.RecalculateBounds();FinalProceduralMesh.IndexOwned(ridgeMesh);terrainMeshes.Add(ridgeMesh);
             var ridgeObject=new GameObject("Moss ridge");ridgeObject.transform.SetParent(root,false);ridgeObject.AddComponent<MeshFilter>().sharedMesh=ridgeMesh;ridgeObject.AddComponent<MeshRenderer>().sharedMaterial=mossTerrainMaterial;
             foreach(var rock in map.VisualRidges)if(!double.IsNaN(rock.Top)){
                 // The ridge skin is emitted once below; unions only place bounded scatter.
@@ -106,7 +106,7 @@ namespace Spacewars.Presentation
             CreateMossBorders(map,art);
             void Prism(string name,NavObstacle shape,double bottom,double top,System.Func<NavPoint,double> height,bool ridge=false){
                 var mesh=ridge?TerrainMesh.ErodedRock(shape,bottom,top,art.ridgeErosion):TerrainMesh.Prism(shape,bottom,top,height);
-                terrainMeshes.Add(mesh);
+                FinalProceduralMesh.IndexOwned(mesh);terrainMeshes.Add(mesh);
                 var obj=new GameObject(name);obj.transform.SetParent(root,false);obj.AddComponent<MeshFilter>().sharedMesh=mesh;
                 var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=mossTerrainMaterial;
                 var properties=new MaterialPropertyBlock();properties.SetColor("_BaseColor",Color.white);properties.SetFloat("_SurfaceRole",4);properties.SetFloat("_RoadSurface",ridge?0:1);renderer.SetPropertyBlock(properties);
@@ -176,7 +176,12 @@ namespace Spacewars.Presentation
                     if(x==0&&budget.Expired){yield return null;budget.Restart();}
                 int i=z*size+x;double xx=(x+.5)*step-map.HalfExtent,zz=(z+.5)*step-map.HalfExtent;
                 float rock=art.screeReach,apron=art.apronEdgeReach;
-                foreach(var b in map.Solids)rock=Mathf.Min(rock,Distance(b,xx,zz));
+                foreach(var b in map.Solids){
+                    // The output already clamps distance to screeReach. A shape
+                    // outside this expanded box cannot lower that exact result.
+                    if(xx<b.MinX-art.screeReach||xx>b.MaxX+art.screeReach||zz<b.MinZ-art.screeReach||zz>b.MaxZ+art.screeReach)continue;
+                    rock=Mathf.Min(rock,Distance(b,xx,zz));
+                }
                 foreach(var b in aprons)apron=Mathf.Min(apron,Distance(b,xx,zz));
                 float rampPaint=0,siteRole=0;
                 foreach(var ramp in ramps){

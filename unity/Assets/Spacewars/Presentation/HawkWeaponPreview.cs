@@ -141,7 +141,8 @@ namespace Spacewars.Presentation
             {
                 double duration = Math.Max(0, Clock + dt - Math.Max(Clock, rocket.start));
                 var from = rocket.flight.Position;
-                rocket.flight.Advance(duration, Health > 0 && rocket.flight.Target == targetId ? Point(target.transform.position) : (BallisticPoint?)null);
+                var targetVelocity = dt > 0 ? Point((target.transform.position - before) / (float)dt) : default;
+                rocket.flight.Advance(duration, Health > 0 && rocket.flight.Target == targetId ? Point(target.transform.position) : (BallisticPoint?)null, targetVelocity);
                 var to = rocket.flight.Position;
                 rocket.view.transform.position = Vector(to);
                 rocket.view.transform.rotation = Quaternion.FromToRotation(Vector3.right, Vector(rocket.flight.Direction));

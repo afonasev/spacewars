@@ -9,10 +9,19 @@ namespace Spacewars.Presentation
     [Serializable] public sealed class EnvironmentArtProfile
     {
         public string id="natural-frontier-v1";
-        public int revision=12;
+        public int revision=13;
         [SurfaceSetting("Маркеры приказов","Радиус","Радиус контурного маркера в игровом поле; миникарта использует тот же относительный масштаб.","px",4,16,.5f)] public float orderMarkerRadius=8;
         [SurfaceSetting("Маркеры приказов","Толщина контура","Толщина красного/зелёного кольца без заливки.","px",.5f,3,.25f)] public float orderMarkerWidth=1.25f;
         [SurfaceSetting("Маркеры приказов","Размер номера","Размер цифры внутри контурного маркера.","px",8,18,.5f)] public float orderMarkerFontSize=11;
+        [SurfaceSetting("Подтверждение приказа","Длительность","Время от подтверждения принятого приказа до полного исчезновения.","s",0.2f,1f,0.05f)] public float orderConfirmationDuration=0.65f;
+        [SurfaceSetting("Подтверждение приказа","Объединение кликов","Близкие новые подтверждения на одной поверхности заменяют предыдущую вспышку.","m",0,3,.05f)] public float orderConfirmationMergeRadius=.75f;
+        [SurfaceSetting("Подтверждение приказа","Радиус шевронов","Размер подтверждения в поле в экранных пикселях.","px",10f,40f,1f)] public float orderConfirmationRadius=16f;
+        [SurfaceSetting("Подтверждение приказа","Схождение","Начальный вынос шевронов относительно радиуса.","ratio",0.1f,1.5f,0.05f)] public float orderConfirmationTravel=0.65f;
+        [SurfaceSetting("Подтверждение приказа","Фаза схождения","Доля анимации до схождения в точку.","ratio",0.1f,0.4f,0.05f)] public float orderConfirmationConverge=0.2f;
+        [SurfaceSetting("Подтверждение приказа","Отскок","Амплитуда единственного отскока относительно радиуса.","ratio",0f,0.3f,0.01f)] public float orderConfirmationRecoil=0.12f;
+        [SurfaceSetting("Подтверждение приказа","Начало затухания","Доля длительности до начала плавного исчезновения.","ratio",0.4f,0.7f,0.05f)] public float orderConfirmationFadeStart=0.45f;
+        [SurfaceSetting("Подтверждение приказа","Контур","Толщина контрастной обводки и перекрестия.","px",0.5f,3f,0.25f)] public float orderConfirmationWidth=1.25f;
+        [SurfaceSetting("Подтверждение приказа","Яркость","Непрозрачность шевронов в пике.","ratio",0.25f,1f,0.05f)] public float orderConfirmationOpacity=1f;
         [SurfaceSetting("Construction aprons","Запас площадки форта","Дополнительное пространство вокруг нижнего основания форта; только внешний вид.","m",.1f,2,.05f)] public float outpostApronMargin=.75f;
         [SurfaceSetting("Construction aprons","Building margin","Optional margin beyond the built-in lower foundation platform; visual only.","m",0,1.5f,.05f)] public float apronMargin=0;
         [SurfaceSetting("Construction aprons","Marking width","Width of perimeter dashes and corner brackets.","m",.03f,.2f,.01f)] public float apronMarkWidth=.07f;
@@ -75,6 +84,7 @@ namespace Spacewars.Presentation
         }
         public void Validate()
         {
+            if(orderConfirmationFadeStart<=orderConfirmationConverge)throw new ArgumentException("Confirmation fade must follow convergence");
             if(id!="natural-frontier-v1"||revision<1)throw new ArgumentException("Invalid environment art identity");
             foreach(var p in Parameters())if(float.IsNaN(p.Read())||float.IsInfinity(p.Read())||p.Read()<p.Minimum||p.Read()>p.Maximum)throw new ArgumentException("Invalid environment setting: "+p.Path);
         }

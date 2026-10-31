@@ -77,13 +77,13 @@ namespace Spacewars.Runtime
             // Transport capacity is consumed once by the coordinator, never a viewport.
             runtime.DrainReceipts();
         }
-        public PlayableCommandSubmitResult Submit(string seatId,PlayableCommandKind kind,int[] entities,NavPoint point=default(NavPoint),int targetId=0,int siteId=0,int slotId=0,int parentId=0,PlayableBuildingKind buildingKind=PlayableBuildingKind.Factory,PlayableEntityKind unitKind=PlayableEntityKind.Tank,PlayableResearchKind researchKind=PlayableResearchKind.TankChassis,PlayableOrderMode mode=PlayableOrderMode.Replace)
+        public PlayableCommandSubmitResult Submit(string seatId,PlayableCommandKind kind,int[] entities,NavPoint point=default(NavPoint),int targetId=0,int siteId=0,int slotId=0,int parentId=0,PlayableBuildingKind buildingKind=PlayableBuildingKind.Factory,PlayableEntityKind unitKind=PlayableEntityKind.Tank,PlayableResearchKind researchKind=PlayableResearchKind.TankChassis,PlayableOrderMode mode=PlayableOrderMode.Replace,long productionOrderId=0)
         {
             var seat=Seat(seatId);
             if(!started||Paused||!seat.Connected||!seat.Neutral)return new PlayableCommandSubmitResult(PlayableCommandStatus.Rejected);
             var view=Frame.Views[seat.OwnerId];
             if((entities??Array.Empty<int>()).Any(id=>!view.Entities.Any(e=>e.Id==id&&e.Owner==view.Owner)&&!view.Buildings.Any(b=>b.Id==id&&b.Owner==view.Owner)))return new PlayableCommandSubmitResult(PlayableCommandStatus.InvalidEntity);
-            var command=new PlayableCommand(Frame.Generation,++seat.Sequence,seat.OwnerId,kind,entities,point,targetId:targetId,siteId:siteId,slotId:slotId,parentId:parentId,buildingKind:buildingKind,unitKind:unitKind,researchKind:researchKind,mode:seat.DeviceId.StartsWith("gamepad:",StringComparison.Ordinal)?PlayableOrderMode.Replace:mode);
+            var command=new PlayableCommand(Frame.Generation,++seat.Sequence,seat.OwnerId,kind,entities,point,targetId:targetId,siteId:siteId,slotId:slotId,parentId:parentId,buildingKind:buildingKind,unitKind:unitKind,researchKind:researchKind,productionOrderId:productionOrderId,mode:seat.DeviceId.StartsWith("gamepad:",StringComparison.Ordinal)?PlayableOrderMode.Replace:mode);
             var result=runtime.TrySubmit(command);CommandAttempted?.Invoke(command,result);if(result.Accepted)CommandSubmitted?.Invoke(command);return result;
         }
         public void Dispose()=>runtime.RequestStop();

@@ -136,7 +136,7 @@ namespace Spacewars.Runtime
             // Bind the stable home identity as soon as the observation knows it. This
             // does not imply Q7 readiness; accepted nonhome work can establish Q4 meanwhile.
             if(m.HomeSite==0&&o.HomeSiteId>0){m.HomeSite=o.HomeSiteId;changed=true;}
-            if(!m.HomeEconomyReady&&opening!=null&&m.HomeSite>0&&m.HomeSite==o.HomeSiteId&&opening.HomeEconomyReady(o,ai))
+            if(!m.HomeEconomyReady&&opening!=null&&m.HomeSite>0&&m.HomeSite==o.HomeSiteId&&opening.CanFundIncomeCapture(o,ai))
             {m.HomeEconomyReady=true;changed=true;}
             if(m.FirstIncomeHistoryKnown&&!m.FirstIncomeReady&&m.HomeSite>0&&o.Sites.Any(s=>s.Site.Id!=m.HomeSite&&s.Owner==o.Owner&&s.Ready&&TerritoryRules.Income(p,s.Site.Kind)>0&&
                 o.Buildings.Any(b=>b.Id==s.CenterId&&b.Owner==o.Owner&&b.SiteId==s.Site.Id&&b.SlotId==0&&b.Health>0&&b.Phase==ConstructionPhase.Ready)))
@@ -215,7 +215,7 @@ namespace Spacewars.Runtime
         private static bool Legal(TerritorySiteSnapshot s,PlayableAiObservation o,PlayableProfile p)=>s!=null&&IncomeKind(s.Site.Kind)&&TerritoryRules.Income(p,s.Site.Kind)>0&&s.CenterId==0&&!s.Contested&&(!s.Owner.HasValue||s.Owner==o.Owner)&&(!s.Claimant.HasValue||s.Claimant==o.Owner);
         private static bool Witness(PlayableAiObservation o,PlayableProfile p,AiProfile ai,TerritorySiteSnapshot s,AiExpansionPlanner expansion,string caller,int requestedSiteId=0)
         {
-            if(s!=null&&!expansion.TeamAllowsSite(s.Site.Id))return false;
+            if(s!=null&&(!expansion.TeamAllowsSite(s.Site.Id)||s.Site.Kind==PlayableBuildingKind.Outpost&&!expansion.AllowOutposts))return false;
             bool legal=Legal(s,o,p);
 #if UNITY_INCLUDE_TESTS
             WitnessStageReadback(o,caller,requestedSiteId,s,null,null,"legal-site",legal);
@@ -397,6 +397,26 @@ namespace Spacewars.Runtime
 #endif
         }
         internal int ActiveSite(AiDecisionArbiter a)=>Load(a)?.Active?.Site??0;
+        internal bool ReviewClocksCurrent(AiBudgetLedger b,AiDecisionArbiter a,long tick)
+        {
+            var m=Load(a);
+            return b.Capture().Reserved.Where(IsFunding).All(e=>tick<e.ExpiresTick)&&
+                (m==null||m.Dormant.Values.All(d=>tick<d.Expires));
+        }
+        // Publication can occur after the detached observation's original deadline.
+        // Retire only elapsed finance clocks; selection and route work stay in Review.
+        internal void ReconcileReviewClocks(AiBudgetLedger b,AiDecisionArbiter a,long tick)
+        {
+            var m=Load(a);if(m==null)return;bool changed=false;
+            if(m.Active!=null){
+                var e=b.ReservationEntry(Id(m.Active));
+                AiStateWire.Require(e!=null&&IsFunding(e),"active site finance requires ledger clock");
+                if(tick>=e.ExpiresTick){Expired(m,b);changed=true;}
+            }
+            foreach(var pair in m.Dormant.Where(p=>tick>=p.Value.Expires).ToArray())
+            {m.Expired[pair.Key]=pair.Value.Target;m.Dormant.Remove(pair.Key);changed=true;}
+            if(changed)Save(a,m);
+        }
         internal bool Ready(PlayableProfile p,AiBudgetLedger b,AiDecisionArbiter a,long tick)
         {var m=Load(a);if(m?.Active==null)return false;var e=b.ReservationEntry(Id(m.Active));return e!=null&&tick<e.ExpiresTick&&e.Amount==TerritoryRules.Cost(p,(PlayableBuildingKind)m.Active.Kind);}
         internal int PreparationSite(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiBudgetLedger b,AiDecisionArbiter a,AiExpansionPlanner expansion,bool openingAllows)

@@ -91,6 +91,19 @@ namespace Spacewars.Tests.EditMode
                     }
             }
         }
+        [Test] public void MirroredBattleFireRaysKeepTheirDistinctResultsAcrossTicks()
+        {
+            var profile=PlayableProfile.ThreeCrossingsDefault;var cache=new PlayableGroundFireCache();
+            // Mirror pairs differ only in the sign of both X endpoints. They must
+            // keep separate results even when they have the same hash slot.
+            var a=new NavPoint(-3,2);var b=new NavPoint(3,2);
+            for(int tick=0;tick<100;tick++){
+                if(tick>0){Assert.True(cache.TryGet(profile,a,b,.06,out bool forward));Assert.True(forward);
+                    Assert.True(cache.TryGet(profile,b,a,.06,out bool backward));Assert.False(backward);}
+                cache.Store(profile,a,b,.06,true);cache.Store(profile,b,a,.06,false);
+            }
+            Assert.False(cache.TryGet(profile,a,b,.06000000001,out _));
+        }
         [Test] public void GroundFireReuseIsExactBoundedAndProfileScopedWithoutWireState()
         {
             var map=Map();var profile=PlayableProfile.Create(PlayableProfile.Default.CopyData(),map);var config=map.Configuration(profile,1063723763);

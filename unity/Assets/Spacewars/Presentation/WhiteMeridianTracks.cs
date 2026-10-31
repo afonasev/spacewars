@@ -96,7 +96,7 @@ namespace Spacewars.Presentation
                 }
             }
             Debug.Log("MERIDIAN_TRACK_MASK supported segments="+written+" clipped="+clipped+"; no simulation mutation");
-            var texture=new Texture2D(size,size,TextureFormat.RGBA32,false,true){name="Meridian buried service tracks",wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear,anisoLevel=4};texture.SetPixels32(colors);texture.Apply(false,true);return texture;
+            var texture=new Texture2D(size,size,TextureFormat.RGBA32,false,true){name="Meridian buried service tracks",wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear,anisoLevel=4};texture.SetPixels32(colors);PreparedMapCache.RememberPixels(texture);texture.Apply(false,true);return texture;
         }
     }
 }

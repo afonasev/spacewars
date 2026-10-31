@@ -1,0 +1,8 @@
+{
+  "id": "test-match-logs-v1",
+  "enabled": true,
+  "stateIntervalTicks": 30,
+  "queueCapacity": 4096,
+  "flushMilliseconds": 1000,
+  "segmentBytes": 16777216
+}

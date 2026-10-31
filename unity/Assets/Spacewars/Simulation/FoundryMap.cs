@@ -5,7 +5,7 @@ namespace Spacewars.Simulation
 {
     [Serializable] public sealed class FoundryProfileData
     {
-        public string id="black-foundry-greybox-v2"; public int revision=3;
+        public string id="black-foundry-greybox-v2"; public int revision=4;
         public double scale=1, flankHeight=6, rearHeight=3, directFireHeight=1;
     }
     public sealed class FoundryField
@@ -49,7 +49,7 @@ namespace Spacewars.Simulation
             // Ramp precedence is deliberate: shared seam endpoints agree exactly with decks.
             foreach(int side in new[]{-1,1})foreach(int end in new[]{-1,1})
             {
-                supports.Add(new MapSupport("flank-ramp",Box(side<0?-60:28,end<0?-44:26,side<0?-28:60,end<0?-26:44),false,0,new NavPoint(side*UpperHeight/(32*Scale),0),Point(side*28,0),surfaceId:"flank-ramp/"+side+"/"+end));
+                supports.Add(new MapSupport("flank-ramp",Box(side<0?-60:28,end<0?-44:0,side<0?-28:60,end<0?0:44),false,0,new NavPoint(side*UpperHeight/(32*Scale),0),Point(side*28,0),surfaceId:"flank-ramp/"+side+"/"+end));
             }
             foreach(int end in new[]{-1,1})supports.Add(new MapSupport("front-ramp",Box(-28,end<0?-60:44,28,end<0?-44:60),false,0,new NavPoint(0,end*RearHeight/(16*Scale)),Point(0,end*44),surfaceId:"front-ramp/"+end));
             foreach(int side in new[]{-1,1})foreach(int end in new[]{-1,1})
@@ -66,7 +66,7 @@ namespace Spacewars.Simulation
             supports.Add(new MapSupport("lower-common-field",Box(-28,-44,28,44),false,surfaceId:"lower-field"));
             foreach(int side in new[]{-1,1})
             {
-                supports.Add(new MapSupport("upper-flank",Box(side<0?-90:70,-130,side<0?-70:90,130),false,UpperHeight,surfaceId:"upper-flank/"+side));
+                supports.Add(new MapSupport("upper-flank",Polygon(new[]{Point(side*70,-130)}.Concat(BankEdge(side,-130,130)).Concat(new[]{Point(side*70,130)})),false,UpperHeight,surfaceId:"upper-flank/"+side));
                 supports.Add(new MapSupport("flank-crossbar",Box(side<0?-70:60,-44,side<0?-60:70,44),false,UpperHeight,surfaceId:"flank-crossbar/"+side));
             }
             foreach(int end in new[]{-1,1})supports.Add(new MapSupport("allied-rear",Box(-60,end<0?-130:60,60,end<0?-60:130),false,RearHeight,surfaceId:"allied-rear/"+end));
@@ -75,19 +75,19 @@ namespace Spacewars.Simulation
             var solid=new List<NavObstacle>(); var lava=new List<NavObstacle>();
             foreach(int side in new[]{-1,1})
             {
-                solid.Add(Rock(side<0?-60:28,-26,side<0?-28:60,26,UpperHeight+7));
+                // Broken shoulders are authoritative: the cap and its blocked foot use this exact ring.
+                solid.Add(Polygon(new[]{Point(side*28,-20),Point(side*35,-26),Point(side*53,-24),Point(side*60,-14),Point(side*58,3),Point(side*60,19),Point(side*51,26),Point(side*34,23),Point(side*28,13),Point(side*30,-3)},UpperHeight+7));
                 lava.Add(new NavObstacle(new NavPolygon(new[]{Point(side*42,-19),Point(side*47,-8),Point(side*44,3),Point(side*48,18),Point(side*41,11),Point(side*40,-4)})));
             }
             // Boundary and upper cliff edges are visible basalt volumes; no hidden collision fences.
-            solid.Add(Rock(-140,-140,-90,140,UpperHeight+10));solid.Add(Rock(90,-140,140,140,UpperHeight+10));
+            foreach(int side in new[]{-1,1})solid.Add(Polygon(BankEdge(side,-140,140).Concat(new[]{Point(side*140,140),Point(side*140,-140)}),UpperHeight+10));
             solid.Add(Rock(-90,130,90,140,UpperHeight+10));solid.Add(Rock(-90,-140,90,-130,UpperHeight+10));
             // Two complementary pockets, mirrored front/rear across Z. Full envelopes stay clear.
             foreach(int end in new[]{-1,1})
             {
-                solid.Add(Rock(-26,end<0?-89:58,-19,end<0?-58:89,UpperHeight+9));
-                solid.Add(Rock(-51,end<0?-89:84,-19,end<0?-84:89,UpperHeight+8));
-                solid.Add(Rock(19,end<0?-84:52,26,end<0?-52:84,UpperHeight+9));
-                solid.Add(Rock(19,end<0?-56:52,51,end<0?-52:56,UpperHeight+8));
+                // Single fractured L rims, contained by the previous protected envelopes.
+                solid.Add(Polygon(new[]{Point(-24,end*58),Point(-19,end*63),Point(-21,end*78),Point(-19,end*87),Point(-27,end*89),Point(-48,end*89),Point(-51,end*86),Point(-44,end*84),Point(-26,end*84),Point(-26,end*67)},UpperHeight+9));
+                solid.Add(Polygon(new[]{Point(19,end*52),Point(45,end*52),Point(51,end*54),Point(44,end*56),Point(26,end*56),Point(26,end*76),Point(23,end*84),Point(19,end*81),Point(20,end*65)},UpperHeight+9));
             }
             // Continuous side river lies wholly within the visible blocked eastern bank.
             lava.Add(new NavObstacle(new NavPolygon(new[]{Point(113,-140),Point(111,-108),Point(117,-71),Point(110,-32),Point(115,3),Point(109,42),Point(116,81),Point(111,113),Point(114,140),Point(133,140),Point(130,110),Point(135,80),Point(128,41),Point(134,2),Point(129,-32),Point(136,-72),Point(130,-110),Point(132,-140)})));
@@ -98,7 +98,7 @@ namespace Spacewars.Simulation
             solid.Add(Rock(-88,104,-70,126,UpperHeight+13));solid.Add(Rock(70,105,88,126,UpperHeight+9));
             solid.Add(Rock(-88,-126,-70,-105,UpperHeight+9));solid.Add(Rock(70,-126,88,-104,UpperHeight+13));
             Solids=solid.AsReadOnly();Lava=lava.AsReadOnly();
-            var roads=new List<NavObstacle>{Box(-53,99,53,113),Box(-53,-113,53,-99),Box(-10,-96,10,96),Box(-90,26,90,44),Box(-90,-44,90,-26),Box(-84,-98,-66,98),Box(66,-98,84,98)};
+            var roads=new List<NavObstacle>{Box(-53,99,53,113),Box(-53,-113,53,-99),Box(-10,-96,10,96),CrossRoad(1),CrossRoad(-1),FlankRoad(-1),FlankRoad(1)};
             foreach(int side in new[]{-1,1})foreach(int end in new[]{-1,1})roads.Add(Box(side<0?-53:35,end<0?-103:44,side<0?-35:53,end<0?-44:103));
             Roads=roads.AsReadOnly();geometry=new NavGeometry(HalfExtent,Solids.ToArray(),Revision);
             var transitions=new List<NavSurfaceTransition>();
@@ -110,13 +110,42 @@ namespace Spacewars.Simulation
                 Link(flank,cross);Link(cross,low);Link(low,high);Link(high,upper);Link(high,ramp);Link(ramp,upper);Link(ramp,home);
             }
             foreach(int end in new[]{-1,1}){Link("lower-field","front-ramp/"+end);Link("front-ramp/"+end,"allied-rear/"+end);}
-            foreach(int side in new[]{-1,1})Link("flank-crossbar/"+side,"upper-flank/"+side);
+            foreach(int side in new[]{-1,1})
+            {
+                Link("flank-crossbar/"+side,"upper-flank/"+side);
+                Link("flank-ramp/"+side+"/-1","flank-ramp/"+side+"/1");
+            }
             // Existing declaration precedence authors the ownership partition. The
             // overlapping legacy crossbars are background, not another terrain.
             locations=new TerrainLocations(geometry,Supports,transitions);
 
         }
         public NavPoint Point(double x,double z)=>new NavPoint(x*Scale,z*Scale);
+        // A shared bank line makes the raised playable flank and its visible solid meet exactly.
+        // Fixed authored knots are content, like mine coordinates; scale remains the public control.
+        private IEnumerable<NavPoint> BankEdge(int side,double start,double finish)
+        {
+            double[] zs={-140,-130,-105,-82,-60,-35,0,35,60,82,105,130,140};
+            double[] xs={90,90,90,94,98,93,96,93,98,94,90,90,90};
+            for(int i=0;i<zs.Length;i++)if(zs[i]>=start&&zs[i]<=finish)yield return Point(side*xs[i],zs[i]);
+        }
+        private NavObstacle CrossRoad(int end)
+        {
+            double[] xs={-90,-60,-28,0,28,60,90},centers={35,34,36,35,36,34,35},widths={9,9,8,9,8,9,9};
+            var ring=new List<NavPoint>();
+            for(int i=0;i<xs.Length;i++)ring.Add(Point(xs[i],end*(centers[i]-widths[i])));
+            for(int i=xs.Length-1;i>=0;i--)ring.Add(Point(xs[i],end*(centers[i]+widths[i])));
+            return Polygon(ring);
+        }
+        private NavObstacle FlankRoad(int side)
+        {
+            double[] zs={-98,-78,-60,-35,0,35,60,78,98},centers={75,77,80,75,75,75,80,77,75};
+            var ring=new List<NavPoint>();
+            for(int i=0;i<zs.Length;i++)ring.Add(Point(side*(centers[i]-9),zs[i]));
+            for(int i=zs.Length-1;i>=0;i--)ring.Add(Point(side*(centers[i]+9),zs[i]));
+            return Polygon(ring);
+        }
+        private NavObstacle Polygon(IEnumerable<NavPoint> ring,double top=0)=>new NavObstacle(new NavPolygon(ring),0,top);
         private NavObstacle Box(double x,double z,double xx,double zz)=>new NavObstacle(x*Scale,z*Scale,xx*Scale,zz*Scale);
         private NavObstacle Rock(double x,double z,double xx,double zz,double top)=>new NavObstacle(new NavPolygon(new[]{Point(x,z),Point(xx,z),Point(xx,zz),Point(x,zz)}),0,top);
         public MapSupport SupportAt(NavPoint p)

@@ -1,478 +1,1289 @@
 {
-  "version": 1,
-  "seed": 90626,
+  "version": 2,
+  "blender": "5.2.1 LTS",
+  "baseline": "78c395daf32c7486af31eb6352b4de4d59cff6b9",
   "units": "metres",
   "up": "+Y",
   "forward": "+Z",
-  "pivot": "ground-center",
-  "collision": "not-integrated; simulation-owned future footprint",
+  "pivot": "source-ground-center",
+  "collision": "none; unchanged simulation-owned footprint",
   "models": [
     {
-      "key": "wreck.tank.1",
+      "key": "wreck.tank-1",
       "kind": "tank",
       "variant": 1,
-      "label": "T1",
+      "upgraded": false,
+      "source": "unity/Assets/Spacewars/Content/StyleA/tankHybrid.glb",
+      "source_sha256": "0f98a2982baa964e953355e2d83d5a4d2bd975cf52991220feba97f9d8ab354f",
+      "intact_source": {
+        "vertices": 64190,
+        "triangles": 51612,
+        "mesh_objects": 178,
+        "renderers": 178,
+        "materials": 4
+      },
+      "before_optimization": {
+        "vertices": 56042,
+        "triangles": 44838,
+        "mesh_objects": 178,
+        "renderers": 178,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 56042,
+        "triangles": 44838,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
       "lod0": {
         "file": "tank-1.glb",
         "bounds": {
-          "width": 2.9168,
-          "height": 0.8142,
-          "depth": 2.637
+          "width": 2.069999933242798,
+          "height": 1.2370495796203613,
+          "depth": 2.784926652908325
         },
-        "groundMin": 0.0,
-        "triangles": 15624,
-        "vertices": 8468,
+        "groundMin": 0,
+        "triangles": 44838,
+        "vertices": 56042,
         "meshCount": 3,
         "materialRoles": [
           "wreck-neutral",
           "wreck-structure",
           "wreck-team"
         ],
-        "nodes": [
-          "modelRoot"
-        ],
         "uvCoverage": 1,
-        "bytes": 1645236,
-        "sha256": "8834a0ab72ac36884dd34d40f08105ba05bf454c779da557e325cdb1c81062e6"
-      },
-      "lod1": {
-        "file": "tank-1-lod1.glb",
-        "bounds": {
-          "width": 2.9168,
-          "height": 0.8364,
-          "depth": 2.632
-        },
-        "groundMin": 0.0,
-        "triangles": 5922,
-        "vertices": 3623,
-        "meshCount": 3,
-        "materialRoles": [
-          "wreck-neutral",
-          "wreck-structure",
-          "wreck-team"
-        ],
-        "nodes": [
-          "modelRoot"
-        ],
-        "uvCoverage": 1,
-        "bytes": 845868,
-        "sha256": "0f7c13702686abc2bd1b20b244fbd198f0d9559cbcd4d4c4d53abb278514de28"
+        "bytes": 2814724,
+        "sha256": "e61dde70084e94e54d185f1b5b7547882328c8bb9b7dfcad9a632159f8cb4a4f"
       }
     },
     {
-      "key": "wreck.tank.2",
+      "key": "wreck.tank-2",
       "kind": "tank",
       "variant": 2,
-      "label": "T2",
+      "upgraded": false,
+      "source": "unity/Assets/Spacewars/Content/StyleA/tankHybrid.glb",
+      "source_sha256": "0f98a2982baa964e953355e2d83d5a4d2bd975cf52991220feba97f9d8ab354f",
+      "intact_source": {
+        "vertices": 64190,
+        "triangles": 51612,
+        "mesh_objects": 178,
+        "renderers": 178,
+        "materials": 4
+      },
+      "before_optimization": {
+        "vertices": 55465,
+        "triangles": 44420,
+        "mesh_objects": 178,
+        "renderers": 178,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 55465,
+        "triangles": 44420,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
       "lod0": {
         "file": "tank-2.glb",
         "bounds": {
-          "width": 3.0283,
-          "height": 0.8599,
-          "depth": 2.637
+          "width": 2.1699999570846558,
+          "height": 1.305797815322876,
+          "depth": 2.784926652908325
         },
-        "groundMin": 0.0,
-        "triangles": 15580,
-        "vertices": 8444,
+        "groundMin": 0,
+        "triangles": 44420,
+        "vertices": 55465,
         "meshCount": 3,
         "materialRoles": [
           "wreck-neutral",
           "wreck-structure",
           "wreck-team"
         ],
-        "nodes": [
-          "modelRoot"
-        ],
         "uvCoverage": 1,
-        "bytes": 1641132,
-        "sha256": "9e0fd0ea028cb758802a91e6e260c08c3d5d81bf8775dd0a9518d4a232b83a83"
-      },
-      "lod1": {
-        "file": "tank-2-lod1.glb",
-        "bounds": {
-          "width": 3.0284,
-          "height": 0.8579,
-          "depth": 2.6806
-        },
-        "groundMin": 0.0,
-        "triangles": 5904,
-        "vertices": 3613,
-        "meshCount": 3,
-        "materialRoles": [
-          "wreck-neutral",
-          "wreck-structure",
-          "wreck-team"
-        ],
-        "nodes": [
-          "modelRoot"
-        ],
-        "uvCoverage": 1,
-        "bytes": 844960,
-        "sha256": "368fd5779215626a4d55320714b8f95e265afdb1775ccb5089817d81052edd72"
+        "bytes": 2772848,
+        "sha256": "735c3cce5a1b735fd057b25e39cbf9e80b9ccc6dee5bb02dc45adcedd674e197"
       }
     },
     {
-      "key": "wreck.tank.3",
+      "key": "wreck.tank-3",
       "kind": "tank",
       "variant": 3,
-      "label": "T3",
+      "upgraded": false,
+      "source": "unity/Assets/Spacewars/Content/StyleA/tankHybrid.glb",
+      "source_sha256": "0f98a2982baa964e953355e2d83d5a4d2bd975cf52991220feba97f9d8ab354f",
+      "intact_source": {
+        "vertices": 64190,
+        "triangles": 51612,
+        "mesh_objects": 178,
+        "renderers": 178,
+        "materials": 4
+      },
+      "before_optimization": {
+        "vertices": 58639,
+        "triangles": 46888,
+        "mesh_objects": 178,
+        "renderers": 178,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 58639,
+        "triangles": 46888,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
       "lod0": {
         "file": "tank-3.glb",
         "bounds": {
-          "width": 2.917,
-          "height": 0.8821,
-          "depth": 2.637
+          "width": 2.1699999570846558,
+          "height": 1.102893590927124,
+          "depth": 2.5870732069015503
         },
-        "groundMin": 0.0,
-        "triangles": 14364,
-        "vertices": 7792,
+        "groundMin": 0,
+        "triangles": 46888,
+        "vertices": 58639,
         "meshCount": 3,
         "materialRoles": [
           "wreck-neutral",
           "wreck-structure",
           "wreck-team"
         ],
-        "nodes": [
-          "modelRoot"
-        ],
         "uvCoverage": 1,
-        "bytes": 1531760,
-        "sha256": "f53494a455d381a6c43166489e730400deac2375ad9dd5fa4c85432f8cbcafe7"
-      },
-      "lod1": {
-        "file": "tank-3-lod1.glb",
-        "bounds": {
-          "width": 2.917,
-          "height": 0.884,
-          "depth": 2.7605
-        },
-        "groundMin": 0.0,
-        "triangles": 5525,
-        "vertices": 3378,
-        "meshCount": 3,
-        "materialRoles": [
-          "wreck-neutral",
-          "wreck-structure",
-          "wreck-team"
-        ],
-        "nodes": [
-          "modelRoot"
-        ],
-        "uvCoverage": 1,
-        "bytes": 808564,
-        "sha256": "2adb5c7c2827ce007f44af22d623d25e1aea1edcb390d488691d7dd5975f7cd7"
+        "bytes": 2931724,
+        "sha256": "5bc7414dd2c017bd3f122ddf09fc1bdec533ce846d38cc7089271def9d7117a5"
       }
     },
     {
-      "key": "wreck.explorer.1",
+      "key": "wreck.explorer-1",
       "kind": "explorer",
       "variant": 1,
-      "label": "E1",
+      "upgraded": false,
+      "source": "unity/Assets/Spacewars/Content/StyleA/explorer.glb",
+      "source_sha256": "cd2b815519424a5e4166217ff1069939641ca2376dc24ab7b1388ea1c71515ea",
+      "intact_source": {
+        "vertices": 23912,
+        "triangles": 11578,
+        "mesh_objects": 9,
+        "renderers": 9,
+        "materials": 5
+      },
+      "before_optimization": {
+        "vertices": 22236,
+        "triangles": 10750,
+        "mesh_objects": 9,
+        "renderers": 9,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 22236,
+        "triangles": 10750,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
       "lod0": {
         "file": "explorer-1.glb",
         "bounds": {
-          "width": 1.8072,
-          "height": 0.9745,
-          "depth": 2.1546
+          "width": 1.7691035866737366,
+          "height": 0.9849307537078857,
+          "depth": 2.5518780946731567
         },
-        "groundMin": 0.0,
-        "triangles": 8964,
-        "vertices": 4828,
+        "groundMin": 0,
+        "triangles": 10750,
+        "vertices": 22236,
         "meshCount": 3,
         "materialRoles": [
           "wreck-neutral",
           "wreck-structure",
           "wreck-team"
         ],
-        "nodes": [
-          "modelRoot"
-        ],
         "uvCoverage": 1,
-        "bytes": 1111188,
-        "sha256": "81fc3dbebe6d1d6b7b41364b4f52679bf41d2134d2fb048a16882d563e91ddf9"
-      },
-      "lod1": {
-        "file": "explorer-1-lod1.glb",
-        "bounds": {
-          "width": 1.8025,
-          "height": 0.9757,
-          "depth": 2.1537
-        },
-        "groundMin": 0.0,
-        "triangles": 3404,
-        "vertices": 2048,
-        "meshCount": 3,
-        "materialRoles": [
-          "wreck-neutral",
-          "wreck-structure",
-          "wreck-team"
-        ],
-        "nodes": [
-          "modelRoot"
-        ],
-        "uvCoverage": 1,
-        "bytes": 602528,
-        "sha256": "090b79378cceb8a0c5035da2bd84a3685f7e0f61281205ac4ebbffad897d26a6"
+        "bytes": 1139828,
+        "sha256": "afc647fedbb48d56d79061f3e73128675aab8fbd6ecf95939d34fbe0dfa9d7eb"
       }
     },
     {
-      "key": "wreck.explorer.2",
+      "key": "wreck.explorer-2",
       "kind": "explorer",
       "variant": 2,
-      "label": "E2",
+      "upgraded": false,
+      "source": "unity/Assets/Spacewars/Content/StyleA/explorer.glb",
+      "source_sha256": "cd2b815519424a5e4166217ff1069939641ca2376dc24ab7b1388ea1c71515ea",
+      "intact_source": {
+        "vertices": 23912,
+        "triangles": 11578,
+        "mesh_objects": 9,
+        "renderers": 9,
+        "materials": 5
+      },
+      "before_optimization": {
+        "vertices": 22214,
+        "triangles": 10741,
+        "mesh_objects": 9,
+        "renderers": 9,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 22214,
+        "triangles": 10741,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
       "lod0": {
         "file": "explorer-2.glb",
         "bounds": {
-          "width": 1.8898,
-          "height": 0.8584,
-          "depth": 2.1546
+          "width": 1.7691035866737366,
+          "height": 0.961969792842865,
+          "depth": 2.5518780946731567
         },
-        "groundMin": 0.0,
-        "triangles": 8920,
-        "vertices": 4804,
+        "groundMin": 0,
+        "triangles": 10741,
+        "vertices": 22214,
         "meshCount": 3,
         "materialRoles": [
           "wreck-neutral",
           "wreck-structure",
           "wreck-team"
         ],
-        "nodes": [
-          "modelRoot"
-        ],
         "uvCoverage": 1,
-        "bytes": 1107084,
-        "sha256": "602ce0d3c441898d485a5391335f4f2d61d30d00f69236a31836d54fc9cde9c1"
-      },
-      "lod1": {
-        "file": "explorer-2-lod1.glb",
-        "bounds": {
-          "width": 1.8856,
-          "height": 0.8602,
-          "depth": 2.1537
-        },
-        "groundMin": 0.0,
-        "triangles": 3388,
-        "vertices": 2038,
-        "meshCount": 3,
-        "materialRoles": [
-          "wreck-neutral",
-          "wreck-structure",
-          "wreck-team"
-        ],
-        "nodes": [
-          "modelRoot"
-        ],
-        "uvCoverage": 1,
-        "bytes": 600668,
-        "sha256": "fd9137cdf5c496472fe1070cedc64204a25532ecdb8fadd57a98c5c407fd0d3e"
+        "bytes": 1138416,
+        "sha256": "43165058cfc2b3b4336ec2000fbd9fbcb676c413ef8a88f7d0f29fecd5575a68"
       }
     },
     {
-      "key": "wreck.explorer.3",
+      "key": "wreck.explorer-3",
       "kind": "explorer",
       "variant": 3,
-      "label": "E3",
+      "upgraded": false,
+      "source": "unity/Assets/Spacewars/Content/StyleA/explorer.glb",
+      "source_sha256": "cd2b815519424a5e4166217ff1069939641ca2376dc24ab7b1388ea1c71515ea",
+      "intact_source": {
+        "vertices": 23912,
+        "triangles": 11578,
+        "mesh_objects": 9,
+        "renderers": 9,
+        "materials": 5
+      },
+      "before_optimization": {
+        "vertices": 19685,
+        "triangles": 9594,
+        "mesh_objects": 9,
+        "renderers": 9,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 19685,
+        "triangles": 9594,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
       "lod0": {
         "file": "explorer-3.glb",
         "bounds": {
-          "width": 1.7988,
-          "height": 0.8756,
-          "depth": 2.1546
+          "width": 1.7691035866737366,
+          "height": 1.0142098665237427,
+          "depth": 2.5518780946731567
         },
-        "groundMin": 0.0,
-        "triangles": 8612,
-        "vertices": 4636,
+        "groundMin": 0,
+        "triangles": 9594,
+        "vertices": 19685,
         "meshCount": 3,
         "materialRoles": [
           "wreck-neutral",
           "wreck-structure",
           "wreck-team"
         ],
-        "nodes": [
-          "modelRoot"
-        ],
         "uvCoverage": 1,
-        "bytes": 1078356,
-        "sha256": "4d6fc92ea6f16aba5c3c9cf4d7ae89fba5df7a4d475f84d4a9e052b7b36f927f"
-      },
-      "lod1": {
-        "file": "explorer-3-lod1.glb",
-        "bounds": {
-          "width": 1.7945,
-          "height": 0.8773,
-          "depth": 2.1543
-        },
-        "groundMin": 0.0,
-        "triangles": 3270,
-        "vertices": 1965,
-        "meshCount": 3,
-        "materialRoles": [
-          "wreck-neutral",
-          "wreck-structure",
-          "wreck-team"
-        ],
-        "nodes": [
-          "modelRoot"
-        ],
-        "uvCoverage": 1,
-        "bytes": 589720,
-        "sha256": "d9e9245d044efca59a06948961c4f491d826ff0711727abf50cc6e8d6145d257"
+        "bytes": 1007892,
+        "sha256": "c146765f03b20e129e655ed86f27248b93d9c7dbd51cc700c62a3970f36ce886"
       }
     },
     {
-      "key": "wreck.shkval.1",
+      "key": "wreck.shkval-1",
       "kind": "shkval",
       "variant": 1,
-      "label": "S1",
+      "upgraded": false,
+      "source": "unity/Assets/Spacewars/Content/StyleA/shkval.glb",
+      "source_sha256": "73925dcbc2027b4bc41ac4b170bc059b356438b8cff6556e3960f2d41e239284",
+      "intact_source": {
+        "vertices": 140688,
+        "triangles": 48892,
+        "mesh_objects": 35,
+        "renderers": 35,
+        "materials": 6
+      },
+      "before_optimization": {
+        "vertices": 135430,
+        "triangles": 47034,
+        "mesh_objects": 35,
+        "renderers": 35,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 135430,
+        "triangles": 47034,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
       "lod0": {
         "file": "shkval-1.glb",
         "bounds": {
-          "width": 1.8445,
-          "height": 1.0238,
-          "depth": 3.3742
+          "width": 2.094077706336975,
+          "height": 2.0797739028930664,
+          "depth": 6.745000123977661
         },
-        "groundMin": 0.0,
-        "triangles": 14212,
-        "vertices": 7744,
+        "groundMin": 0,
+        "triangles": 47034,
+        "vertices": 135430,
         "meshCount": 3,
         "materialRoles": [
           "wreck-neutral",
           "wreck-structure",
           "wreck-team"
         ],
-        "nodes": [
-          "modelRoot"
-        ],
         "uvCoverage": 1,
-        "bytes": 1559308,
-        "sha256": "e996e8011bd4ab366b9d256d115fd555f6ff126844d60da07aef4ab0ebcce874"
-      },
-      "lod1": {
-        "file": "shkval-1-lod1.glb",
-        "bounds": {
-          "width": 1.8444,
-          "height": 1.0244,
-          "depth": 3.3728
-        },
-        "groundMin": 0.0,
-        "triangles": 5398,
-        "vertices": 3337,
-        "meshCount": 3,
-        "materialRoles": [
-          "wreck-neutral",
-          "wreck-structure",
-          "wreck-team"
-        ],
-        "nodes": [
-          "modelRoot"
-        ],
-        "uvCoverage": 1,
-        "bytes": 796556,
-        "sha256": "10248d48c35dfde01771fdbb371ef16db3e4a640541330b5118ecb899d497055"
+        "bytes": 4946620,
+        "sha256": "56df5698de1d3a50b45de85f336f82ff747bec82176d5c2c0429ef5317f4c207"
       }
     },
     {
-      "key": "wreck.shkval.2",
+      "key": "wreck.shkval-2",
       "kind": "shkval",
       "variant": 2,
-      "label": "S2",
+      "upgraded": false,
+      "source": "unity/Assets/Spacewars/Content/StyleA/shkval.glb",
+      "source_sha256": "73925dcbc2027b4bc41ac4b170bc059b356438b8cff6556e3960f2d41e239284",
+      "intact_source": {
+        "vertices": 140688,
+        "triangles": 48892,
+        "mesh_objects": 35,
+        "renderers": 35,
+        "materials": 6
+      },
+      "before_optimization": {
+        "vertices": 136195,
+        "triangles": 47296,
+        "mesh_objects": 35,
+        "renderers": 35,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 136195,
+        "triangles": 47296,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
       "lod0": {
         "file": "shkval-2.glb",
         "bounds": {
-          "width": 1.9401,
-          "height": 1.0518,
-          "depth": 3.4419
+          "width": 2.094077706336975,
+          "height": 2.0940582752227783,
+          "depth": 6.745000123977661
         },
-        "groundMin": 0.0,
-        "triangles": 14168,
-        "vertices": 7720,
+        "groundMin": 0,
+        "triangles": 47296,
+        "vertices": 136195,
         "meshCount": 3,
         "materialRoles": [
           "wreck-neutral",
           "wreck-structure",
           "wreck-team"
         ],
-        "nodes": [
-          "modelRoot"
-        ],
         "uvCoverage": 1,
-        "bytes": 1555204,
-        "sha256": "ad8aa2844dbc47bc2b21688e75159726f7ecb20090c93802dbf5e214f564d423"
-      },
-      "lod1": {
-        "file": "shkval-2-lod1.glb",
-        "bounds": {
-          "width": 1.9401,
-          "height": 1.0513,
-          "depth": 3.4408
-        },
-        "groundMin": 0.0,
-        "triangles": 5382,
-        "vertices": 3327,
-        "meshCount": 3,
-        "materialRoles": [
-          "wreck-neutral",
-          "wreck-structure",
-          "wreck-team"
-        ],
-        "nodes": [
-          "modelRoot"
-        ],
-        "uvCoverage": 1,
-        "bytes": 795824,
-        "sha256": "1d22230f3527d8fb3651a62ab1a2214924cd74d7b3998c1109949d5d4f17f6f3"
+        "bytes": 4973136,
+        "sha256": "122333de5a35afd661c0bf1c96a37ed54a35138c5cce78ec3a6155e6690d742a"
       }
     },
     {
-      "key": "wreck.shkval.3",
+      "key": "wreck.shkval-3",
       "kind": "shkval",
       "variant": 3,
-      "label": "S3",
+      "upgraded": false,
+      "source": "unity/Assets/Spacewars/Content/StyleA/shkval.glb",
+      "source_sha256": "73925dcbc2027b4bc41ac4b170bc059b356438b8cff6556e3960f2d41e239284",
+      "intact_source": {
+        "vertices": 140688,
+        "triangles": 48892,
+        "mesh_objects": 35,
+        "renderers": 35,
+        "materials": 6
+      },
+      "before_optimization": {
+        "vertices": 136195,
+        "triangles": 47296,
+        "mesh_objects": 35,
+        "renderers": 35,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 136195,
+        "triangles": 47296,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
       "lod0": {
         "file": "shkval-3.glb",
         "bounds": {
-          "width": 1.8632,
-          "height": 0.9568,
-          "depth": 3.4113
+          "width": 2.036439299583435,
+          "height": 3.384260892868042,
+          "depth": 6.8450000286102295
         },
-        "groundMin": 0.0,
-        "triangles": 13316,
-        "vertices": 7264,
+        "groundMin": 0,
+        "triangles": 47296,
+        "vertices": 136195,
         "meshCount": 3,
         "materialRoles": [
           "wreck-neutral",
           "wreck-structure",
           "wreck-team"
         ],
-        "nodes": [
-          "modelRoot"
-        ],
         "uvCoverage": 1,
-        "bytes": 1482888,
-        "sha256": "4809442244724b1a61fac776240c8e8057f8bde50ffaa061fe90ec22835f89eb"
+        "bytes": 4974224,
+        "sha256": "11c64ddf0db3e8a2e0b50a844f2f99ba8496e958ed39a5f398f7fbf90193e6a2"
+      }
+    }
+  ],
+  "hawkModels": [
+    {
+      "key": "wreck.hawk-1",
+      "kind": "hawk",
+      "variant": 1,
+      "upgraded": false,
+      "source": "unity/Assets/Spacewars/Content/StyleA/hawk.glb",
+      "source_sha256": "b69019dec75a28cee40fef7de6ed97ebf89f545bde55f080844edbb1a0bffc23",
+      "intact_source": {
+        "vertices": 50675,
+        "triangles": 21452,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 5
       },
-      "lod1": {
-        "file": "shkval-3-lod1.glb",
+      "before_optimization": {
+        "vertices": 49229,
+        "triangles": 20914,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 49229,
+        "triangles": 20914,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "hawk-1.glb",
         "bounds": {
-          "width": 1.8632,
-          "height": 0.9582,
-          "depth": 3.4102
+          "width": 3.0901479721069336,
+          "height": 1.2952706813812256,
+          "depth": 4.059999942779541
         },
-        "groundMin": 0.0,
-        "triangles": 5056,
-        "vertices": 3134,
+        "groundMin": 0,
+        "triangles": 20914,
+        "vertices": 49229,
         "meshCount": 3,
         "materialRoles": [
           "wreck-neutral",
           "wreck-structure",
           "wreck-team"
         ],
-        "nodes": [
-          "modelRoot"
+        "uvCoverage": 1,
+        "bytes": 2043360,
+        "sha256": "cc1c0f2941eaa1120131107653fa0967d114e8fa8b26dae62ac3a8efaaa78841"
+      }
+    },
+    {
+      "key": "wreck.hawk-2",
+      "kind": "hawk",
+      "variant": 2,
+      "upgraded": false,
+      "source": "unity/Assets/Spacewars/Content/StyleA/hawk.glb",
+      "source_sha256": "b69019dec75a28cee40fef7de6ed97ebf89f545bde55f080844edbb1a0bffc23",
+      "intact_source": {
+        "vertices": 50675,
+        "triangles": 21452,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 5
+      },
+      "before_optimization": {
+        "vertices": 49132,
+        "triangles": 20875,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 49132,
+        "triangles": 20875,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "hawk-2.glb",
+        "bounds": {
+          "width": 3.0901479721069336,
+          "height": 1.2396959066390991,
+          "depth": 4.183080434799194
+        },
+        "groundMin": 0,
+        "triangles": 20875,
+        "vertices": 49132,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
         ],
         "uvCoverage": 1,
-        "bytes": 764504,
-        "sha256": "cb9eba3f6fa1c5fb8c2bd712612e05d11205128665ad22f496c3f18d58d08718"
+        "bytes": 2039912,
+        "sha256": "92156c9f5bd252f0af2413250661d9a4042dc40a4e8071ec9d2d78a217025f98"
+      }
+    },
+    {
+      "key": "wreck.hawk-3",
+      "kind": "hawk",
+      "variant": 3,
+      "upgraded": false,
+      "source": "unity/Assets/Spacewars/Content/StyleA/hawk.glb",
+      "source_sha256": "b69019dec75a28cee40fef7de6ed97ebf89f545bde55f080844edbb1a0bffc23",
+      "intact_source": {
+        "vertices": 50675,
+        "triangles": 21452,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 5
+      },
+      "before_optimization": {
+        "vertices": 49132,
+        "triangles": 20875,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 49132,
+        "triangles": 20875,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "hawk-3.glb",
+        "bounds": {
+          "width": 3.1596286296844482,
+          "height": 1.2286432981491089,
+          "depth": 4.2047812938690186
+        },
+        "groundMin": 0,
+        "triangles": 20875,
+        "vertices": 49132,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "uvCoverage": 1,
+        "bytes": 2041288,
+        "sha256": "59658a102ac4d1c34e8d493c4d222f06c16aae4909383a018a25b2b5546ec6bd"
+      }
+    },
+    {
+      "key": "wreck.hawk-4",
+      "kind": "hawk",
+      "variant": 4,
+      "upgraded": false,
+      "source": "unity/Assets/Spacewars/Content/StyleA/hawk.glb",
+      "source_sha256": "b69019dec75a28cee40fef7de6ed97ebf89f545bde55f080844edbb1a0bffc23",
+      "intact_source": {
+        "vertices": 50675,
+        "triangles": 21452,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 5
+      },
+      "before_optimization": {
+        "vertices": 49132,
+        "triangles": 20875,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 49132,
+        "triangles": 20875,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "hawk-4.glb",
+        "bounds": {
+          "width": 3.1596286296844482,
+          "height": 1.2234753370285034,
+          "depth": 4.2047812938690186
+        },
+        "groundMin": 0,
+        "triangles": 20875,
+        "vertices": 49132,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "uvCoverage": 1,
+        "bytes": 2040904,
+        "sha256": "7d1d4f765fabf8d6c3589565629f1421fbd8d6943f50c8a1ba4243d8c86cdead"
+      }
+    }
+  ],
+  "upgradedModels": [
+    {
+      "key": "wreck.tank-upgraded-1",
+      "kind": "tank",
+      "variant": 1,
+      "upgraded": true,
+      "source": "unity/Assets/Spacewars/Content/StyleA/tankHybridUpgraded.glb",
+      "source_sha256": "0e9e7748286c0586e8a0ad2b3bb83e34dabc83fa8578f23c47d85419a8b91015",
+      "intact_source": {
+        "vertices": 72566,
+        "triangles": 58100,
+        "mesh_objects": 183,
+        "renderers": 183,
+        "materials": 5
+      },
+      "before_optimization": {
+        "vertices": 64517,
+        "triangles": 51399,
+        "mesh_objects": 183,
+        "renderers": 183,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 64517,
+        "triangles": 51399,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "tank-upgraded-1.glb",
+        "bounds": {
+          "width": 2.109999895095825,
+          "height": 1.2370495796203613,
+          "depth": 2.845282196998596
+        },
+        "groundMin": 0,
+        "triangles": 51399,
+        "vertices": 64517,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "uvCoverage": 1,
+        "bytes": 3241516,
+        "sha256": "b3f1a2ba5e5634477a2aca5ca43302ddb5490f2fc23cd839eac84aa9fc733ca7"
+      }
+    },
+    {
+      "key": "wreck.tank-upgraded-2",
+      "kind": "tank",
+      "variant": 2,
+      "upgraded": true,
+      "source": "unity/Assets/Spacewars/Content/StyleA/tankHybridUpgraded.glb",
+      "source_sha256": "0e9e7748286c0586e8a0ad2b3bb83e34dabc83fa8578f23c47d85419a8b91015",
+      "intact_source": {
+        "vertices": 72566,
+        "triangles": 58100,
+        "mesh_objects": 183,
+        "renderers": 183,
+        "materials": 5
+      },
+      "before_optimization": {
+        "vertices": 63219,
+        "triangles": 50385,
+        "mesh_objects": 183,
+        "renderers": 183,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 63219,
+        "triangles": 50385,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "tank-upgraded-2.glb",
+        "bounds": {
+          "width": 2.1899999380111694,
+          "height": 1.305797815322876,
+          "depth": 2.845282196998596
+        },
+        "groundMin": 0,
+        "triangles": 50385,
+        "vertices": 63219,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "uvCoverage": 1,
+        "bytes": 3163436,
+        "sha256": "f61d8084a559037528424470b0deed0bf1fa9e0ac463f4d9f7e6551af90a6e1b"
+      }
+    },
+    {
+      "key": "wreck.tank-upgraded-3",
+      "kind": "tank",
+      "variant": 3,
+      "upgraded": true,
+      "source": "unity/Assets/Spacewars/Content/StyleA/tankHybridUpgraded.glb",
+      "source_sha256": "0e9e7748286c0586e8a0ad2b3bb83e34dabc83fa8578f23c47d85419a8b91015",
+      "intact_source": {
+        "vertices": 72566,
+        "triangles": 58100,
+        "mesh_objects": 183,
+        "renderers": 183,
+        "materials": 5
+      },
+      "before_optimization": {
+        "vertices": 66020,
+        "triangles": 52608,
+        "mesh_objects": 183,
+        "renderers": 183,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 66020,
+        "triangles": 52608,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "tank-upgraded-3.glb",
+        "bounds": {
+          "width": 2.1899999380111694,
+          "height": 1.102893590927124,
+          "depth": 2.6474287509918213
+        },
+        "groundMin": 0,
+        "triangles": 52608,
+        "vertices": 66020,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "uvCoverage": 1,
+        "bytes": 3297824,
+        "sha256": "465be57b1388310a44cded3c69b8aa14e8990b8bd28ffde75e88d9f2728d61a9"
+      }
+    },
+    {
+      "key": "wreck.explorer-upgraded-1",
+      "kind": "explorer",
+      "variant": 1,
+      "upgraded": true,
+      "source": "unity/Assets/Spacewars/Content/StyleA/explorerUpgraded.glb",
+      "source_sha256": "25cd9ed2f34de82dc3307e0e1e45cca93de3644154e7624a2eafef23856e353d",
+      "intact_source": {
+        "vertices": 24932,
+        "triangles": 11890,
+        "mesh_objects": 9,
+        "renderers": 9,
+        "materials": 5
+      },
+      "before_optimization": {
+        "vertices": 23256,
+        "triangles": 11062,
+        "mesh_objects": 9,
+        "renderers": 9,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 23256,
+        "triangles": 11062,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "explorer-upgraded-1.glb",
+        "bounds": {
+          "width": 1.7691035866737366,
+          "height": 1.0466891527175903,
+          "depth": 2.5518780946731567
+        },
+        "groundMin": 0,
+        "triangles": 11062,
+        "vertices": 23256,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1179704,
+        "sha256": "a2de2501c5d6018cbec402f710d2a93a8f273c8191bf1feb866d36784828f9b0"
+      }
+    },
+    {
+      "key": "wreck.explorer-upgraded-2",
+      "kind": "explorer",
+      "variant": 2,
+      "upgraded": true,
+      "source": "unity/Assets/Spacewars/Content/StyleA/explorerUpgraded.glb",
+      "source_sha256": "25cd9ed2f34de82dc3307e0e1e45cca93de3644154e7624a2eafef23856e353d",
+      "intact_source": {
+        "vertices": 24932,
+        "triangles": 11890,
+        "mesh_objects": 9,
+        "renderers": 9,
+        "materials": 5
+      },
+      "before_optimization": {
+        "vertices": 23234,
+        "triangles": 11053,
+        "mesh_objects": 9,
+        "renderers": 9,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 23234,
+        "triangles": 11053,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "explorer-upgraded-2.glb",
+        "bounds": {
+          "width": 1.7691035866737366,
+          "height": 1.0603652000427246,
+          "depth": 2.5518780946731567
+        },
+        "groundMin": 0,
+        "triangles": 11053,
+        "vertices": 23234,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1178692,
+        "sha256": "d9cb689db5b63ec966ff5ae7ff56681394b19f45f04213872da63873e5e92421"
+      }
+    },
+    {
+      "key": "wreck.explorer-upgraded-3",
+      "kind": "explorer",
+      "variant": 3,
+      "upgraded": true,
+      "source": "unity/Assets/Spacewars/Content/StyleA/explorerUpgraded.glb",
+      "source_sha256": "25cd9ed2f34de82dc3307e0e1e45cca93de3644154e7624a2eafef23856e353d",
+      "intact_source": {
+        "vertices": 24932,
+        "triangles": 11890,
+        "mesh_objects": 9,
+        "renderers": 9,
+        "materials": 5
+      },
+      "before_optimization": {
+        "vertices": 20705,
+        "triangles": 9906,
+        "mesh_objects": 9,
+        "renderers": 9,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 20705,
+        "triangles": 9906,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "explorer-upgraded-3.glb",
+        "bounds": {
+          "width": 1.7691035866737366,
+          "height": 1.1119061708450317,
+          "depth": 2.5518780946731567
+        },
+        "groundMin": 0,
+        "triangles": 9906,
+        "vertices": 20705,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1048764,
+        "sha256": "e4c4d973f83498d8c909fcdaa5babb48497862f837a8320843b42e60726d6e4e"
+      }
+    },
+    {
+      "key": "wreck.shkval-upgraded-1",
+      "kind": "shkval",
+      "variant": 1,
+      "upgraded": true,
+      "source": "unity/Assets/Spacewars/Content/StyleA/shkval-guidance-3.glb",
+      "source_sha256": "e97cb400dc142b4fdd0b59839eef52530110d943f61ea0cb69fd435e6ac1a501",
+      "intact_source": {
+        "vertices": 133223,
+        "triangles": 46536,
+        "mesh_objects": 35,
+        "renderers": 35,
+        "materials": 6
+      },
+      "before_optimization": {
+        "vertices": 126162,
+        "triangles": 43956,
+        "mesh_objects": 35,
+        "renderers": 35,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 126162,
+        "triangles": 43956,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "shkval-upgraded-1.glb",
+        "bounds": {
+          "width": 2.2920719385147095,
+          "height": 2.241077184677124,
+          "depth": 6.745000123977661
+        },
+        "groundMin": 0,
+        "triangles": 43956,
+        "vertices": 126162,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "uvCoverage": 1,
+        "bytes": 4618548,
+        "sha256": "b44b4341da7a832ef3d02cf4aaa08f0423e890b5f4248b8b185eb06917317519"
+      }
+    },
+    {
+      "key": "wreck.shkval-upgraded-2",
+      "kind": "shkval",
+      "variant": 2,
+      "upgraded": true,
+      "source": "unity/Assets/Spacewars/Content/StyleA/shkval-guidance-3.glb",
+      "source_sha256": "e97cb400dc142b4fdd0b59839eef52530110d943f61ea0cb69fd435e6ac1a501",
+      "intact_source": {
+        "vertices": 133223,
+        "triangles": 46536,
+        "mesh_objects": 35,
+        "renderers": 35,
+        "materials": 6
+      },
+      "before_optimization": {
+        "vertices": 126931,
+        "triangles": 44219,
+        "mesh_objects": 35,
+        "renderers": 35,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 126931,
+        "triangles": 44219,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "shkval-upgraded-2.glb",
+        "bounds": {
+          "width": 2.29207181930542,
+          "height": 2.2411882877349854,
+          "depth": 6.745000123977661
+        },
+        "groundMin": 0,
+        "triangles": 44219,
+        "vertices": 126931,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "uvCoverage": 1,
+        "bytes": 4645484,
+        "sha256": "ba563c133acba49d0fbc44dab14284ff86476de01b07379007c30343002523be"
+      }
+    },
+    {
+      "key": "wreck.shkval-upgraded-3",
+      "kind": "shkval",
+      "variant": 3,
+      "upgraded": true,
+      "source": "unity/Assets/Spacewars/Content/StyleA/shkval-guidance-3.glb",
+      "source_sha256": "e97cb400dc142b4fdd0b59839eef52530110d943f61ea0cb69fd435e6ac1a501",
+      "intact_source": {
+        "vertices": 133223,
+        "triangles": 46536,
+        "mesh_objects": 35,
+        "renderers": 35,
+        "materials": 6
+      },
+      "before_optimization": {
+        "vertices": 126931,
+        "triangles": 44219,
+        "mesh_objects": 35,
+        "renderers": 35,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 126931,
+        "triangles": 44219,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "shkval-upgraded-3.glb",
+        "bounds": {
+          "width": 2.275276303291321,
+          "height": 3.384260892868042,
+          "depth": 6.8450000286102295
+        },
+        "groundMin": 0,
+        "triangles": 44219,
+        "vertices": 126931,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "uvCoverage": 1,
+        "bytes": 4646540,
+        "sha256": "2d94281ee578a944678aea4d55107bbff1ceea7d60d55373ee075922d10c1ce7"
+      }
+    },
+    {
+      "key": "wreck.hawk-upgraded-1",
+      "kind": "hawk",
+      "variant": 1,
+      "upgraded": true,
+      "source": "unity/Assets/Spacewars/Content/StyleA/hawk.glb",
+      "source_sha256": "b69019dec75a28cee40fef7de6ed97ebf89f545bde55f080844edbb1a0bffc23",
+      "intact_source": {
+        "vertices": 52047,
+        "triangles": 21424,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 6
+      },
+      "before_optimization": {
+        "vertices": 49473,
+        "triangles": 20292,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 49473,
+        "triangles": 20292,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "hawk-upgraded-1.glb",
+        "bounds": {
+          "width": 3.0901479721069336,
+          "height": 1.4126049280166626,
+          "depth": 4.059999942779541
+        },
+        "groundMin": 0,
+        "triangles": 20292,
+        "vertices": 49473,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1988396,
+        "sha256": "32482792c53c95027de5b0810036768c608fa121b9b4ba59bca8d51fee65027a"
+      }
+    },
+    {
+      "key": "wreck.hawk-upgraded-2",
+      "kind": "hawk",
+      "variant": 2,
+      "upgraded": true,
+      "source": "unity/Assets/Spacewars/Content/StyleA/hawk.glb",
+      "source_sha256": "b69019dec75a28cee40fef7de6ed97ebf89f545bde55f080844edbb1a0bffc23",
+      "intact_source": {
+        "vertices": 52047,
+        "triangles": 21424,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 6
+      },
+      "before_optimization": {
+        "vertices": 48984,
+        "triangles": 20189,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 48984,
+        "triangles": 20189,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "hawk-upgraded-2.glb",
+        "bounds": {
+          "width": 3.0901479721069336,
+          "height": 1.416093349456787,
+          "depth": 4.183080434799194
+        },
+        "groundMin": 0,
+        "triangles": 20189,
+        "vertices": 48984,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1978800,
+        "sha256": "85608cf44abb9226e0707341906832d8a281f870f2a30cc976a08fefd3f7a127"
+      }
+    },
+    {
+      "key": "wreck.hawk-upgraded-3",
+      "kind": "hawk",
+      "variant": 3,
+      "upgraded": true,
+      "source": "unity/Assets/Spacewars/Content/StyleA/hawk.glb",
+      "source_sha256": "b69019dec75a28cee40fef7de6ed97ebf89f545bde55f080844edbb1a0bffc23",
+      "intact_source": {
+        "vertices": 52047,
+        "triangles": 21424,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 6
+      },
+      "before_optimization": {
+        "vertices": 48984,
+        "triangles": 20189,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 48984,
+        "triangles": 20189,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "hawk-upgraded-3.glb",
+        "bounds": {
+          "width": 3.1596286296844482,
+          "height": 1.4206644296646118,
+          "depth": 4.2047812938690186
+        },
+        "groundMin": 0,
+        "triangles": 20189,
+        "vertices": 48984,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1979252,
+        "sha256": "c0ffce1365fb354ea85240374fa9b6aad8a6acc7f26d5bc5e1a201b3718d9ea2"
+      }
+    },
+    {
+      "key": "wreck.hawk-upgraded-4",
+      "kind": "hawk",
+      "variant": 4,
+      "upgraded": true,
+      "source": "unity/Assets/Spacewars/Content/StyleA/hawk.glb",
+      "source_sha256": "b69019dec75a28cee40fef7de6ed97ebf89f545bde55f080844edbb1a0bffc23",
+      "intact_source": {
+        "vertices": 52047,
+        "triangles": 21424,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 6
+      },
+      "before_optimization": {
+        "vertices": 48984,
+        "triangles": 20189,
+        "mesh_objects": 26,
+        "renderers": 26,
+        "materials": 3
+      },
+      "after_optimization": {
+        "vertices": 48984,
+        "triangles": 20189,
+        "mesh_objects": 3,
+        "renderers": 3,
+        "materials": 3
+      },
+      "lod0": {
+        "file": "hawk-upgraded-4.glb",
+        "bounds": {
+          "width": 3.1596286296844482,
+          "height": 1.4149084091186523,
+          "depth": 4.2047812938690186
+        },
+        "groundMin": 0,
+        "triangles": 20189,
+        "vertices": 48984,
+        "meshCount": 3,
+        "materialRoles": [
+          "wreck-neutral",
+          "wreck-structure",
+          "wreck-team"
+        ],
+        "uvCoverage": 1,
+        "bytes": 1979060,
+        "sha256": "967e4993e06242eb5fdaf86ddb8170dc22dc39942581b3ae0cab300a05d2bf4f"
       }
     }
   ]

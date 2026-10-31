@@ -12,7 +12,7 @@ namespace Spacewars.Runtime
         public PlayableRuntimePacing(double tickSeconds,bool catchUp){this.tickSeconds=tickSeconds;this.catchUp=catchUp;}
         public double WaitSeconds(double now,double speed,bool isPaused)
         {
-            // A new spectator rate or pause state starts a fresh schedule. Old fast-rate
+            // A new realtime rate or pause state starts a fresh schedule. Old fast-rate
             // debt must never keep the game racing after selecting a slower rate/resuming.
             if(catchUp&&(speed!=rate||isPaused!=paused))next=now;
             rate=speed;paused=isPaused;
@@ -21,8 +21,8 @@ namespace Spacewars.Runtime
         public void Complete(double now)
         {
             next+=tickSeconds/rate;
-            // Spectators recover time spent in long AI ticks instead of silently losing
-            // the requested multiplier. Participant sessions retain their original pacing.
+            // Realtime matches recover transient work overruns instead of losing
+            // simulation time. Legacy fixed-mode sessions retain their original pacing.
             // Stop/pause commands are still admitted before every fixed authority tick.
             if(!catchUp||paused)next=Math.Max(next,now);
         }

@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using System.Collections;
+using System.Threading;
 using NUnit.Framework;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
@@ -37,8 +38,8 @@ namespace Spacewars.Tests.EditMode
         public void AllBranches_UsesActualEffectsAndAffectedArmy(PlayableEntityKind unit,PlayableResearchKind kind)
         {
             var p=PlayableProfile.Default;var o=View(p,unit);var planner=new AiTechnologyPlanner();var plan=planner.Plan(o,p,AiProfile.Initial,Budget(o).Capture());
-            CollectionAssert.AreEquivalent(Enum.GetValues(typeof(PlayableResearchKind)),AiResearchCatalog.All.Select(d=>d.Kind));
-            Assert.AreEqual(kind,plan.Action.ResearchKind);Assert.AreEqual(4,plan.Action.EntityIds.Single());Assert.AreEqual(Enum.GetValues(typeof(PlayableResearchKind)).Length,plan.Branches.Count);
+            CollectionAssert.AreEquivalent(Enum.GetValues(typeof(PlayableResearchKind)).Cast<PlayableResearchKind>().Where(k=>k!=PlayableResearchKind.ReinforcedConcrete),AiResearchCatalog.All.Select(d=>d.Kind));
+            Assert.AreEqual(kind,plan.Action.ResearchKind);Assert.AreEqual(4,plan.Action.EntityIds.Single());Assert.AreEqual(Enum.GetValues(typeof(PlayableResearchKind)).Length-1,plan.Branches.Count);
             foreach(var b in plan.Branches){Assert.AreEqual(b.Descriptor.Affects(unit)?PlayableUnitRules.Cost(p,unit):0,b.AffectedValue);Assert.AreEqual(!b.Descriptor.Global&&b.Descriptor.Unit==unit,b.Utility>0,"global branches stay below the army threshold in this old-branch fixture");}
             var d=AiResearchCatalog.For(kind);double expected=unit==PlayableEntityKind.Tank?p.TankChassisSpeed/p.TankSpeed-1:unit==PlayableEntityKind.Explorer?PlayableUnitRules.DamagePerSecond(p,unit,true)/PlayableUnitRules.DamagePerSecond(p,unit)-1:p.ShkvalGuidanceRange/p.ShkvalBaseRange-1;
             Assert.AreEqual(expected,d.RelativeGain(p),1e-12);
@@ -227,6 +228,8 @@ namespace Spacewars.Tests.EditMode
             object Call(string method,params object[] args)=>domain.GetType().GetMethod(method,F).Invoke(domain,args);
             PlayableAiObservation O()=>PlayableAiObservation.From(a.ParticipantView("west-owner"));
             var o=O();var home=o.Sites.Single(s=>s.Owner==o.Owner);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",home.Site.Id,home.Site.Slots.Last().Id,PlayableBuildingKind.Hangar,home.CenterId,o.Owner,null));
+            Call("AdvanceFoundations");Call("AdvanceBuildings",config.Profile.HangarBuildSeconds+1d);
             Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,1,o.OwnerId,PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:home.Site.Id,slotId:home.Site.Slots[0].Id,parentId:home.CenterId,buildingKind:PlayableBuildingKind.ScientificCenter)).Status);
             Call("AdvanceFoundations");Call("AdvanceBuildings",config.Profile.ScienceBuildSeconds+1);
             for(int i=0;i<3;i++)Call("SpawnUnit",new NavPoint(home.Site.Position.X+i*2,home.Site.Position.Z+3),o.Owner,PlayableEntityKind.Tank);
@@ -263,9 +266,10 @@ namespace Spacewars.Tests.EditMode
             object Call(string method,params object[] args)=>domain.GetType().GetMethod(method,F).Invoke(domain,args);
             PlayableAiObservation O()=>PlayableAiObservation.From(a.ParticipantView("west-owner"));
             var o=O();var home=o.Sites.Single(s=>s.Owner==o.Owner);long sequence=1;
+            Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,sequence++,o.OwnerId,PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:home.Site.Id,slotId:home.Site.Slots[1].Id,parentId:home.CenterId,buildingKind:PlayableBuildingKind.Factory)).Status);
+            Call("AdvanceFoundations");Call("AdvanceBuildings",config.Profile.FactoryBuildSeconds+1d);
             var build=new PlayableCommand(71,sequence++,o.OwnerId,PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:home.Site.Id,slotId:home.Site.Slots[0].Id,parentId:home.CenterId,buildingKind:PlayableBuildingKind.ScientificCenter);
             Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(build).Status);
-            Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,sequence++,o.OwnerId,PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:home.Site.Id,slotId:home.Site.Slots[1].Id,parentId:home.CenterId,buildingKind:PlayableBuildingKind.Factory)).Status);
             Call("AdvanceFoundations");Call("AdvanceBuildings",config.Profile.ScienceBuildSeconds+1);
             var center=O().Buildings.Single(b=>b.Kind==PlayableBuildingKind.ScientificCenter);double before=(double)Call("Balance",o.Owner);
             Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,sequence++,o.OwnerId,PlayableCommandKind.QueueResearch,new[]{center.Id},researchKind:PlayableResearchKind.TankChassis)).Status);
@@ -331,6 +335,97 @@ namespace Spacewars.Tests.EditMode
             }
             a.Stop();
         }
+        [TestCase("covered")][TestCase("member-loss")][TestCase("other-front")][TestCase("human")]
+        public void CoveredDefense_CurrentArmyDeliveryWithoutTechnologyHold(string condition)=>CoveredDefenseRun(condition,false);
+        [TestCase("deferred")][TestCase("member-loss")][TestCase("other-front")][TestCase("human")][TestCase("expiry")][TestCase("pause")][TestCase("stop")]
+        public void CoveredDefense_ParkedObservedWorkerKeepsWorldAndLifecycleLive(string condition)=>CoveredDefenseRun(condition,true);
+        [TestCase("covered",false)][TestCase("member-loss",false)][TestCase("other-front",false)]
+        [TestCase("deferred",true)][TestCase("member-loss",true)][TestCase("other-front",true)][TestCase("expiry",true)]
+        public void CoveredDefense_CurrentResearchDeliveryWithDurableNativeThreat(string condition,bool asynchronous)=>CoveredDefenseRun(condition,asynchronous,true);
+        private void CoveredDefenseRun(string condition,bool asynchronous,bool technology=false)
+        {
+            var basis=Config(researchLifecycle:true);var data=basis.Profile.CopyData();
+            // A durable native threat keeps this finite delivery branch observable.
+            // Ordinary match profiles, research clocks and order delays are unchanged.
+            data.tankHealth=10000;var profile=PlayableProfile.Create(data);
+            var extra=new TerritorySite(3,PlayableBuildingKind.Outpost,new NavPoint(24,-24),Array.Empty<TerritorySlot>());
+            var config=new OfflineMatchConfiguration(profile,"q8-covered-army-no-tech","q8-flat-two-fronts",basis.RouteProvenance,basis.Seed,basis.Roster.ToArray(),basis.Starts.ToArray(),basis.Sites.Concat(new[]{extra}).ToArray(),basis.Obstacles.ToArray(),new double[,]{{0,48},{48,0}},scenarioBuildings:new[]{new OfflineScenarioBuilding(1,PlayableBuildingKind.Outpost,3,0,extra.Position)});
+            var a=new PlayableAuthorityTick(config,71,difficulty:AiDifficulty.Veteran);var owner=Owner(a);var domain=Get(a,"domain");
+            object Call(string method,params object[] args)=>domain.GetType().GetMethod(method,F).Invoke(domain,args);
+            PlayableAiObservation O()=>PlayableAiObservation.From(a.ParticipantView("west-owner"));
+            using var entered=new ManualResetEventSlim();using var release=new ManualResetEventSlim();
+            var nativeDomain=(PlayableDomain)domain;
+            long sequence=1;var home=O().Sites.Single(s=>s.Site.Id==O().HomeSiteId);
+            var kinds=new[]{PlayableBuildingKind.ScientificCenter,PlayableBuildingKind.Factory,PlayableBuildingKind.Refinery,PlayableBuildingKind.Hangar};
+            try{
+                for(int i=0;i<kinds.Length;i++)Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,sequence++,"west-owner",PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:home.Site.Id,slotId:home.Site.Slots[i].Id,parentId:home.CenterId,buildingKind:kinds[i])).Status);
+                Call("AdvanceFoundations");Call("AdvanceBuildings",new[]{profile.ScienceBuildSeconds,profile.FactoryBuildSeconds,profile.RefineryBuildSeconds,profile.HangarBuildSeconds}.Max()+1);
+                int science=O().Buildings.Single(b=>b.Owner==O().Owner&&b.Kind==PlayableBuildingKind.ScientificCenter).Id;
+                if(!technology)foreach(PlayableResearchKind kind in Enum.GetValues(typeof(PlayableResearchKind))){
+                    Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,sequence++,"west-owner",PlayableCommandKind.QueueResearch,new[]{science},researchKind:kind)).Status,"Controlled setup research "+kind);
+                    Call("AdvanceResearch",PlayableResearchRules.Duration(profile,kind)+1);
+                }
+                int tanks=technology?(int)AiProfile.Initial.Value("openingsMidgame.specializedLiving"):4;
+                for(int i=0;i<tanks;i++)Call("SpawnUnit",new NavPoint(home.Site.Position.X+(i%4)*2,home.Site.Position.Z+3+(i/4)*3),O().Owner,PlayableEntityKind.Tank);
+                int threat=(int)Call("SpawnUnit",new NavPoint(-5,0),(PlayableOwner)Call("OwnerFor","east-owner"),PlayableEntityKind.Tank);
+                var defense=(AiDefensePlanner)Get(owner,"defense");var registry=(AiArmyRegistry)Get(owner,"armies");var ledger=(AiBudgetLedger)Get(owner,"budget");
+                PlayableAiOwnerCheckpoint Checkpoint()=>(PlayableAiOwnerCheckpoint)owner.GetType().GetProperty("Checkpoint",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic).GetValue(owner);
+                bool Hold()=>((AiTechnologyFunding)Get(owner,"technologyFunding")).HasHold(ledger);
+                object Field(object item,string name)=>item.GetType().GetField(name,F|BindingFlags.Public).GetValue(item);
+                object pending=null;PlayableAiObservation covered=null;
+                using(var host=new UnityHostRouteService()){
+                    for(int i=0;i<900&&pending==null;i++){
+                        Step(a,host);if(!technology&&Hold())continue;
+                        var item=((IEnumerable)Get(owner,"pendingItems")).Cast<object>().FirstOrDefault(x=>technology?(string)Field(x,"PolicyName")=="research":AiArmyPlanner.IsArmyPolicy((string)Field(x,"PolicyName")));
+                        if(item==null)continue;var current=O();var routes=defense.TechnologyCoverageRoutes(current,profile,registry,Checkpoint().Records);
+                        if(routes.Count==0)continue;
+                        var hydrated=PlayableAiObservation.From((PlayableSnapshot)Call("PlayerSnapshotWithRoutes",0L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,config.Seed,current.Owner,routes));
+                        if(!defense.CoversTechnologyThreats(hydrated,profile,AiProfile.Initial,registry,Checkpoint().Records))continue;
+                        pending=item;covered=hydrated;
+                    }
+                    Assert.NotNull(pending,technology?"Reach real unpaid research delivery with applied sufficient defense.":"Reach real pending spare-army delivery with applied sufficient defense and no technology hold.");if(!technology)Assert.False(Hold());else Assert.True(ledger.Capture().Unpaid.Any(x=>x.Action.Kind==PlayableCommandKind.QueueResearch&&!x.AwaitingPayment),"A real native unpaid research commitment must exist.");
+                    var action=(PlayableAiAction)Field(pending,"Action");var record=Checkpoint().Records.Last(r=>r.ActionId==action.ActionId&&r.Status==PlayableAiDeliveryStatus.Scheduled);
+                    var defenders=registry.Capture().Armies.Single(g=>g.TacticalOwner==AiDefensePlanner.Policy&&g.Phase!=AiArmyPhase.Disbanded);
+                    Assert.IsEmpty(O().RouteProofs);Assert.True(covered.Entities.Any(e=>e.Id==threat&&e.Health>0));
+                    long expires=((AiIntent)Field(pending,"Intent")).ExpiresTick;
+                    if(asynchronous){
+                        nativeDomain.BeforeObservedPathForTests=()=>{entered.Set();release.Wait();};
+                        nativeDomain.EnableAsyncObservedPaths();
+                        Step(a,host);
+                        Assert.True(entered.Wait(5000),"The real observed worker is parked on its first cold request.");
+                        Assert.True((bool)owner.GetType().GetMethod("NeedsArmyRoutes",F).Invoke(owner,new object[]{a.Tick}),"pending offense retains the full route working set");
+                    }
+                    if(condition=="member-loss")foreach(int id in defenders.Members)Call("Damage",id,checked((int)profile.TankHealth*4));
+                    if(condition=="other-front")Call("SpawnUnit",new NavPoint(24,-20),(PlayableOwner)Call("OwnerFor","east-owner"),PlayableEntityKind.Tank);
+                    if(condition=="human")Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,(long)Call("AllocateAiSequence"),"west-owner",PlayableCommandKind.Hold,action.CopyEntityIds())).Status);
+                    long before=a.Tick;
+                    if(condition=="pause")Assert.True(a.TryAdvance(true));
+                    else if(condition=="stop")a.Stop();
+                    else{
+                        long through=asynchronous&&condition=="expiry"?expires+1:record.DueTick+1;
+                        for(long t=a.Tick;t<=through;t++)Step(a,host);
+                        Assert.Greater(a.Tick,before,"Actual authority world ticks advance while the observed worker is parked.");
+                    }
+                    var terminal=a.CaptureDiagnosticCheckpoints().Single().Records.Where(r=>r.ActionId==action.ActionId&&r.Status!=PlayableAiDeliveryStatus.Scheduled).ToArray();
+                    TestContext.WriteLine("Q8_COVERED_ARMY "+Newtonsoft.Json.JsonConvert.SerializeObject(new{condition,a.Tick,record.DueTick,Action=action,Defenders=defenders,TechnologyHold=Hold(),Terminal=terminal}));
+                    if(asynchronous&&condition=="deferred"){
+                        Assert.IsEmpty(terminal,"Missing proofs defer this actual offensive action without replacing it.");
+                        Assert.True(((IEnumerable)Get(owner,"pendingItems")).Cast<object>().Any(x=>ReferenceEquals(x,pending)));
+                        Assert.AreEqual(record.DueTick,(long)Field(pending,"DueTick"));Assert.AreEqual(expires,((AiIntent)Field(pending,"Intent")).ExpiresTick);
+                        release.Set();nativeDomain.BeforeObservedPathForTests=null;nativeDomain.DrainObservedPathsForCapture(()=>false);
+                        var bytes=a.CaptureBytes();var restored=PlayableAuthorityTick.RestoreBytes(bytes,config);
+                        try{CollectionAssert.AreEqual(bytes,restored.CaptureBytes(),"Current-format exact continuation preserves deferred identity and settled observed transport.");}
+                        finally{restored.Stop();var restoredDomain=(PlayableDomain)Get(restored,"domain");restoredDomain.StopObservedPaths();Assert.True(SpinWait.SpinUntil(()=>restoredDomain.ObservedPathWorkerStopped,5000));restoredDomain.DestroyOwnedNavigation();}
+                        bool ready=(bool)owner.GetType().GetMethod("GuardDefenseReadiness",F).Invoke(owner,new[]{domain});
+                        Assert.True(ready,"The completed current coverage is available to delivery without synchronous solve.");
+                    }
+                    else if(condition=="covered"){Assert.True(O().Entities.Any(e=>e.Id==threat&&e.Health>0));Assert.True(terminal.Any(r=>r.Status==PlayableAiDeliveryStatus.Applied));Assert.False(terminal.Any(r=>r.Status==PlayableAiDeliveryStatus.Cancelled));}
+                    else{var expected=condition=="expiry"?PlayableAiDeliveryStatus.Stale:condition=="stop"?PlayableAiDeliveryStatus.Stopped:PlayableAiDeliveryStatus.Cancelled;Assert.True(terminal.Any(r=>r.Status==expected));Assert.False(terminal.Any(r=>r.Status==PlayableAiDeliveryStatus.Applied));}
+
+                }
+            }finally{release.Set();nativeDomain.BeforeObservedPathForTests=null;a.Stop();nativeDomain.StopObservedPaths();Assert.True(SpinWait.SpinUntil(()=>nativeDomain.ObservedPathWorkerStopped,5000));nativeDomain.DestroyOwnedNavigation();}
+        }
+
         [TestCase(0d)][TestCase(1d)]
         public void ProductivePrerequisite_CheapScienceCannotConsumeSoleRequiredFactorySlot(double scienceCost)
         {

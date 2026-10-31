@@ -63,13 +63,15 @@ namespace Spacewars.Simulation
         private NavNameReference terminalName;
         private NavPoint position,goal;private NavLocation location;private long incarnation,mobility;private bool applied;
         private NavPreparedUnitRoute():base(Layout){Retain();}
-        internal static NavPreparedUnitRoute PrepareOwned(NavCrowd crowd,NavUnit actor,NavPoint goal,IReadOnlyList<NavPoint> points,NavLocation? assigned,INavStorageReservation reservation)
+        internal static NavPreparedUnitRoute PrepareOwned(NavCrowd crowd,NavUnit actor,NavPoint goal,IReadOnlyList<NavPoint> points,NavLocation? assigned,INavStorageReservation reservation,NavTypedRoute physical=null)
         {
             if(actor?.StorageOwner==null)throw new ArgumentException("Ready actor has no admitted header.");NavStorageAdmission.RequireOwned(reservation,actor.StorageOwner);
             var actorRoot=actor.StorageOwner;actorRoot.Retain();var oldGlobal=actorRoot.Global;oldGlobal?.Retain();var oldLocal=actorRoot.Local;oldLocal?.Retain();NavNameReference terminalName=default;
             try{
                 var position=actor.Position;var start=actor.Location;
-                if(!crowd.ValidateRoute(actor,position,start,goal,points,assigned,out var terminal))return null;
+                NavLocation terminal;
+                if(physical!=null){if(!crowd.ValidatePhysicalTypedRoute(actor,start,goal,physical,assigned))return null;terminal=assigned.Value;}
+                else if(!crowd.ValidateRoute(actor,position,start,goal,points,assigned,out terminal))return null;
                 var location=assigned??terminal;var name=location.NameReference;
                 if(name.Owner!=null){NavStorageAdmission.RequireOwned(reservation,name.Owner);name.Owner.Retain();terminalName=name;}
                 using(var allocation=new NavStorageAllocation(reservation.TryReserve)){

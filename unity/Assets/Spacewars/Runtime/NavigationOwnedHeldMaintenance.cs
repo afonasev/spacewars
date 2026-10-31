@@ -28,7 +28,7 @@ namespace Spacewars.Runtime
         {
             using(NavStorageScratch.Reserve(scope.OwnedReservation(),checked(32L+c.GroupCount*(long)NavStorageLayout.ValueBytes(typeof(RebindGroup))))){
                 var overlays=new RebindGroup[c.GroupCount];for(int i=0;i<overlays.Length;i++)overlays[i]=new RebindGroup{Source=c.GroupSources[i],Next=c.Groups[i]};
-                return PrepareAdmissionProjection(c.SourceGroups,c.NextPending??c.Pending,c.NextSequence,checked(previous.Value.PublicationIdentity+1),c.Names.Operation,scope,previous,sourceProbes:c.NextProbes??c.Probes,rebindGroups:overlays,rebindGroupCount:overlays.Length);
+                return PrepareAdmissionProjection(c.SourceGroups,c.NextPending??c.Pending,c.ProjectedSequence(previous.Value.PublishedThroughRequestSequence),checked(previous.Value.PublicationIdentity+1),c.Names.Operation,scope,previous,sourceProbes:c.NextProbes??c.Probes,rebindGroups:overlays,rebindGroupCount:overlays.Length);
             }
         }
         private void ObserveResultHeldRows(PreparedResultBatch c)
@@ -48,7 +48,7 @@ namespace Spacewars.Runtime
                     row.Changed=true;c.HeldCount++;c.ExtraOperations=checked(c.ExtraOperations+1);if(!f.Held&&f.Mobility==long.MaxValue)return false;
                     NavLocation location=default;using(EnterTransport()){
                         if(!ResultBatchSourceCurrent(c))return false;
-                        row.Eligible=geometry.IsFree(row.Goal,f.Radius)&&Crowd.Locate(row.Goal,f.Radius,out location)&&c.RequestCount+c.ReissueCount+c.RegistrationCount<RouteRequestCapacity;
+                        row.Eligible=geometry.IsFree(row.Goal,f.Radius)&&LocateRetainedRecastGoal(row.Goal,f.Radius,f.Version,f.Id,out location)&&c.RequestCount+c.ReissueCount+c.RegistrationCount<RouteRequestCapacity;
                     }
                     for(int a=0;a<c.Actors.Length;a++)if(c.Actors[a].Id==f.Id)c.ProjectedDetached[a]=c.Installed[a]!=null;
                     if(!row.Eligible)continue;
@@ -102,7 +102,7 @@ namespace Spacewars.Runtime
                     c.Host=NavPhysicalMacro.Acquire(c,committedHostRoot);c.Pending=NavPhysicalMacro.Acquire(c,(NavigationCommandSlots<int,NavigationRequest>)pending);c.PendingRevision=c.Pending.Revision;c.Allocating=NavPhysicalMacro.Acquire(c,(NavigationCommandSlots<int,NavigationRequest>)allocating);c.AllocatingRevision=c.Allocating.Revision;
                     c.Probes=NavPhysicalMacro.Acquire(c,ownedProbes);c.ProbeRevision=c.Probes?.Revision??0;c.Ledger=NavPhysicalMacro.Acquire(c,(NavigationCommandSlots<long,NavigationArrivalReservation>)arrivalLedger);c.LedgerRevision=c.Ledger.Revision;c.Failures=NavPhysicalMacro.Acquire(c,(NavigationCommandSlots<int,NavSolveStatus>)technicalFailures);c.FailureRevision=c.Failures.Revision;
                     c.Goals=NavPhysicalMacro.Acquire(c,(NavigationCommandSlots<int,NavPoint>)retainedGoals);c.GoalRevision=c.Goals.Revision;c.Identities=NavPhysicalMacro.Acquire(c,(NavigationCommandSlots<int,string>)movementIdentities);c.IdentityRevision=c.Identities.Revision;
-                    c.Arrival=NavPhysicalMacro.Acquire(c,liveArrivalTables);c.ArrivalRevision=c.Arrival.Revision;c.RetirementSequence=arrivalRetirementSequence;c.Queue=NavPhysicalMacro.Acquire(c,liveProbeAnswers);c.QueueRevision=c.Queue?.Revision??0;c.InstalledCount=installedExecutions.Count;
+                    ObserveResultBatchLeases(c);c.Arrival=NavPhysicalMacro.Acquire(c,liveArrivalTables);c.ArrivalRevision=c.Arrival.Revision;c.RetirementSequence=arrivalRetirementSequence;c.Queue=NavPhysicalMacro.Acquire(c,liveProbeAnswers);c.QueueRevision=c.Queue?.Revision??0;c.InstalledCount=installedExecutions.Count;
                     c.SourceAnswerBytes=c.AnswerBytes=answerCorridorBytes;c.SourceCorridorBytes=c.CorridorBytes=installedCorridorBytes;c.SourceGeometryBytes=c.GeometryBytes=installedGeometryBytes;c.HostBytes=hostRetainedBytes;
                     for(int i=0;i<actors;i++){var actor=Crowd.Units[i];c.Actors[i]=new ReadyActorFact(actor);c.ActorPins[i]=NavPhysicalMacro.Acquire(c,actor.StorageOwner);c.Installed[i]=NavPhysicalMacro.Acquire(c,installedExecutions.OwnerFor(actor.Id));c.ProjectedInstalled[i]=c.Installed[i];c.Detached[i]=c.ProjectedDetached[i]=c.Installed[i]!=null&&installedExecutions.IsDetached(actor.Id);}
                     ObserveResultFailureSources(c);if(!ObserveResultBatchAttempts(c)||!ObserveResultMovementGroups(c))return null;
@@ -119,7 +119,7 @@ namespace Spacewars.Runtime
                         row.Changed=true;c.HeldCount++;if(!f.Held&&f.Mobility==long.MaxValue)return false;
                         NavLocation location=default;using(EnterTransport()){
                             if(!ResultBatchSourceCurrent(c))return false;
-                            row.Eligible=geometry.IsFree(row.Goal,f.Radius)&&Crowd.Locate(row.Goal,f.Radius,out location)&&c.RequestCount+c.ReissueCount+c.RegistrationCount<RouteRequestCapacity;
+                            row.Eligible=geometry.IsFree(row.Goal,f.Radius)&&LocateRetainedRecastGoal(row.Goal,f.Radius,f.Version,f.Id,out location)&&c.RequestCount+c.ReissueCount+c.RegistrationCount<RouteRequestCapacity;
                         }
                         if(!row.Eligible)continue;
                         NavigationLiveGroupObservation observation=default;foreach(var source in c.MarchSources)if(ReferenceEquals(source.Owner,f.Group)){observation=source;break;}if(observation.Owner==null)return null;

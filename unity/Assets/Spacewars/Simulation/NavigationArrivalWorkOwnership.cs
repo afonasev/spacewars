@@ -33,7 +33,7 @@ namespace Spacewars.Simulation
             try{
                 for(int n=0;n<values.Length;n++){
                     var member=members[n];long wire=checked(256+NavContract.StringWireBytes(member.Clearance.Id)+NavContract.StringWireBytes(member.Clearance.MobilityClass)+NavContract.StringWireBytes(input.WorkingFor(member).Provider.Binding)+NavContract.StringWireBytes(input.WorkingFor(member).Profile.ExactProfileBinding));
-                    using(NavStorageScratch.Reserve(OwnedReservation,NavContract.DigestScratchBytes(wire)))values[n]=NavOwnedText.Copy(RawWorkingKey(member),OwnedReservation);
+                    using(NavStorageScratch.Reserve(OwnedReservation,NavContract.DigestScratchBytes(wire))){values[n]=NavOwnedText.Copy(RawWorkingKey(member),OwnedReservation);NavArrivalDiagnostic.Buffer?.Key(this,values[n].Value,member.EntityId);}
                 }
                 workingKeys=NavRetainedArray<NavOwnedText>.Copy(values,rootReservation);
             }finally{for(int n=0;n<values.Length;n++)values[n]?.Release();}
@@ -43,14 +43,20 @@ namespace Spacewars.Simulation
         private void AddPrepared(string key,NavPagedList<NavRetainedArray<int>> indices,NavPagedList<NavTerminalRegion> regions)
         {
             indices.Seal();regions.Seal();var owner=KeyOwner(key);var prepared=PreparedClearance.Create(indices,regions,owner,rootReservation);
-            try{preparedClearances.Add(owner==null?new NavNameKey(key):new NavNameKey(new NavNameReference(owner,NavNameRole.Text)),prepared);}finally{prepared.ReleaseOwner();}
+            try{if(paidPagePolicy)preparedClearances.Remove(key);preparedClearances.Add(owner==null?new NavNameKey(key):new NavNameKey(new NavNameReference(owner,NavNameRole.Text)),prepared);}finally{prepared.ReleaseOwner();}
         }
         private void AddRequestRow(int candidate,NavScheduledRequest request)
         {var row=RouteRow.Create(candidate,request,default,null,rootReservation);try{pageRequests.Add(row);}finally{row.ReleaseOwner();}}
         private void AcceptCompletion(RouteRow old,NavSolveStatus status,NavTypedRoute route)
         {
             int index=0;while(index<pageRequests.Count&&!ReferenceEquals(pageRequests[index],old))index++;
-            if(index==pageRequests.Count||pageResults.ContainsKey(old.Candidate))throw new ArgumentException("Unknown or repeated arrival completion.");
+            if(index==pageRequests.Count)throw new ArgumentException("Unknown or repeated arrival completion.");
+            AcceptCompletionAt(index,status,route);
+        }
+        private void AcceptCompletionAt(int index,NavSolveStatus status,NavTypedRoute route)
+        {
+            var old=pageRequests[index];
+            if(pageResults.ContainsKey(old.Candidate))throw new ArgumentException("Unknown or repeated arrival completion.");
             var row=RouteRow.Create(old.Candidate,old.Request,status,route,rootReservation);
             try{pageRequests.Set(index,row);pageResults.Add(row.Candidate,row);}finally{row.ReleaseOwner();}
         }
@@ -72,7 +78,10 @@ namespace Spacewars.Simulation
         {
             preparationCandidateIndices?.ReleaseOwner();preparationCandidateIndices=null;preparationRegions?.ReleaseOwner();preparationRegions=null;
             preparationCandidateIndices=NavPagedList<NavRetainedArray<int>>.Create(rootReservation);preparationRegions=NavPagedList<NavTerminalRegion>.Create(rootReservation);
-            for(int n=0;n<pageStarts.Length;n++){preparationCandidateIndices.Add(null);preparationRegions.Add(null);}
+            // Copy admitted page references only. Null indices mean unprepared; a
+            // retained empty array certifies an exactly qualified empty page.
+            preparedClearances.TryGetValue(preparingClearanceKey,out var previous);
+            for(int n=0;n<pageStarts.Length;n++){preparationCandidateIndices.Add(paidPagePolicy?previous?.CandidateIndices[n]:null);preparationRegions.Add(paidPagePolicy?previous?.Regions[n]:null);}
             preparingKeyStorage?.Release();preparingKeyStorage=KeyOwner(preparingClearanceKey);preparingKeyStorage?.Retain();
         }
         private void ClearPreparation()
@@ -92,15 +101,15 @@ namespace Spacewars.Simulation
         }
         internal void SealPrepared()
         {
-            MutableRoot();historicalState?.Seal();preparedClearances.Seal();preparationValidCandidateIndices.Seal();preparationCandidateIndices?.Seal();preparationRegions?.Seal();pageRequests.Seal();pageResults.Seal();memberOutcomes.Seal();assignments.Seal();scheduler.SealPrepared();rootReservation=null;rootFrozen=true;
+            MutableRoot();spatialHeads?.Seal();spatialLinks?.Seal();historicalState?.Seal();preparedClearances.Seal();preparationValidCandidateIndices.Seal();preparationCandidateIndices?.Seal();preparationRegions?.Seal();pageRequests.Seal();pageResults.Seal();memberOutcomes.Seal();assignments.Seal();scheduler.SealPrepared();rootReservation=null;rootFrozen=true;
         }
         internal NavigationArrivalWork ForkOwned(INavStorageReservation reservation)
         {
             NavStorageAdmission.RequireOwned(reservation,this);if(!rootFrozen||rootFaulted)throw new InvalidOperationException("Seal arrival work before preparing a fork.");
             using(var allocation=new NavStorageAllocation(reservation.TryReserve)){
-                allocation.Reserve(LayoutBytes);var fork=allocation.Register(new NavigationArrivalWork(true));fork.Retain();fork.rootReservation=reservation.TryReserve;fork.queryMode=queryMode;fork.groupQueryMode=groupQueryMode;fork.demandQueryMode=demandQueryMode;fork.boundedCorridorMode=boundedCorridorMode;
+                allocation.Reserve(LayoutBytes);var fork=allocation.Register(new NavigationArrivalWork(true));fork.Retain();fork.rootReservation=reservation.TryReserve;fork.queryMode=queryMode;fork.groupQueryMode=groupQueryMode;fork.demandQueryMode=demandQueryMode;fork.boundedCorridorMode=boundedCorridorMode;fork.paidPagePolicy=paidPagePolicy;fork.preparationMember=preparationMember;
                 try{
-                    ForkHistoricalInto(fork,reservation);
+                    ForkHistoricalInto(fork,reservation);ForkSpatial(fork,reservation);
                     fork.input=input;fork.ownedInput=NavPhysicalMacro.Acquire(fork,ownedInput);fork.membersStorage=NavPhysicalMacro.Acquire(fork,membersStorage);fork.members=members;fork.pageStartsStorage=NavPhysicalMacro.Acquire(fork,pageStartsStorage);fork.pageCountsStorage=NavPhysicalMacro.Acquire(fork,pageCountsStorage);fork.pageStarts=pageStarts;fork.pageCounts=pageCounts;
                     fork.workingKeys=NavPhysicalMacro.Acquire(fork,workingKeys);fork.preparingKeyStorage=NavPhysicalMacro.Acquire(fork,preparingKeyStorage);fork.preparingClearanceKey=preparingClearanceKey;
                     fork.preparedClearances=preparedClearances.ForkOwned(reservation);fork.preparationValidCandidateIndices=preparationValidCandidateIndices.ForkOwned(reservation);fork.preparationCandidateIndices=preparationCandidateIndices?.ForkOwned(reservation);fork.preparationRegions=preparationRegions?.ForkOwned(reservation);
@@ -118,7 +127,7 @@ namespace Spacewars.Simulation
         {
             // Legacy proposals have no declaration owner; keep their original route edge.
             if(!IsRegistered&&assignments!=null)foreach(var proposal in assignments)proposal.Route?.Release();
-            historicalState?.Release();
+            ReleaseSpatial();historicalState?.Release();
             ownedInput?.Release();membersStorage?.Release();pageStartsStorage?.Release();pageCountsStorage?.Release();workingKeys?.Release();preparingKeyStorage?.Release();
             preparedClearances?.Release();preparationValidCandidateIndices?.Release();preparationCandidateIndices?.Release();preparationRegions?.Release();pageRequests?.Release();pageResults?.Release();memberOutcomes?.Release();assignments?.Release();scheduler?.Release();rootReservation=null;
         }

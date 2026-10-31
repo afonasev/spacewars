@@ -10,25 +10,20 @@ namespace Spacewars.Presentation
         {
             var budget=new LoadingFrameBudget();
             var settings=FoundrySurfaceProfile.Load();settings.Apply(material);
+            material.SetVector("_FoundryHeightLevels",new Vector4((float)map.RearHeight,(float)map.UpperHeight,0,0));
             foreach(var support in map.Supports)MapPrism(support.Id,support.Bounds,-2,support.Height,FoundryGround,support.HeightAt,support.Height>=map.UpperHeight?7:6);
             foreach(var rock in FoundryTerrainMesh.Ridges(map))
             {
                 if(budget.Expired){yield return null;budget.Restart();}
                 var obj=new GameObject("Connected layered basalt / bank");obj.transform.SetParent(root,false);
-                var mesh=FoundryTerrainMesh.Rock(rock,settings,map.Lava,map.SurfaceHeight);terrainMeshes.Add(mesh);obj.AddComponent<MeshFilter>().sharedMesh=mesh;
+                bool industrial=System.Linq.Enumerable.Contains(System.Linq.Enumerable.Skip(map.Solids,map.Solids.Count-4),rock);
+                var mesh=FoundryTerrainMesh.Rock(rock,settings,map.Lava,map.SurfaceHeight,industrial);terrainMeshes.Add(mesh);obj.AddComponent<MeshFilter>().sharedMesh=mesh;
                 var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=material;
                 var block=new MaterialPropertyBlock();block.SetColor("_BaseColor",new Color(settings.basaltValue*.92f,settings.basaltValue*.95f,settings.basaltValue));block.SetFloat("_SurfaceRole",10);
                 if(System.Linq.Enumerable.Any(map.Lava,c=>System.Linq.Enumerable.All(c.Footprint.Vertices,rock.Contains)))block.SetVector("_FoundryLavaRim",new Vector4((float)rock.Top-settings.lavaDepth,(float)rock.Top,1,0));
                 renderer.SetPropertyBlock(block);
             }
-            foreach(var rock in System.Linq.Enumerable.Skip(map.Solids,map.Solids.Count-4))
-            {
-                double x=(rock.MinX+rock.MaxX)/2,z=(rock.MinZ+rock.MaxZ)/2,w=(rock.MaxX-rock.MinX)*.33,d=(rock.MaxZ-rock.MinZ)*.35;
-                var main=new NavObstacle(x-w,z-d,x+w*.55,z+d);
-                MapPrism("Foundry grey industrial hall",main,rock.Top-settings.crownRelief,rock.Top+settings.industrialHeight,new Color(.43f,.45f,.46f),null,12);
-                var annex=new NavObstacle(x+w*.55,z-d*.75,x+w,z+d*.4);
-                MapPrism("Foundry grey industrial annex",annex,rock.Top-settings.crownRelief,rock.Top+settings.industrialHeight*.6f,new Color(.37f,.39f,.40f),null,12);
-            }
+            FoundryIndustrialLandmarks.Build(root,material,map,settings,terrainMeshes);
             foreach(var lava in map.Lava)
             {
                 if(budget.Expired){yield return null;budget.Restart();}
@@ -36,7 +31,7 @@ namespace Spacewars.Presentation
                 MapPrism("Lava river / fissure",lava,level-.04f,level,FoundryLava,null,11); // Thin presentation fluid below the exposed rim.
             }
             var sites=map.Sites(profile);
-            // The same actual outline drives both the concrete mesh and road exclusion.
+            // The same actual outline drives the foundation mesh, road exclusion and hard trail coverage.
             // Blue retains the underlying road solely for flush wear at concrete entries.
             var pads=System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(sites,site=>FoundryTerrainMesh.SitePad(site,profile,settings)));
             // Public presentation mask; sampled continuously in world space instead of tiled road meshes.
@@ -44,6 +39,7 @@ namespace Spacewars.Presentation
             foundryRoadMask=new Texture2D(resolution,resolution,TextureFormat.RGBA32,false,true){name="Foundry compacted slag mask",wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};
             var pixels=new Color[resolution*resolution];var lavaPixels=new Color[pixels.Length];var routePixels=new Color[pixels.Length];
             var connections=FoundryRouteFinish.Connections(map);
+            var rockDistances=new TerrainPolygonDistances(map.Solids);var lavaDistances=new TerrainPolygonDistances(map.Lava);
             for(int z=0;z<resolution;z++)for(int x=0;x<resolution;x++)
             {
                 if(x==0&&budget.Expired){yield return null;budget.Restart();}
@@ -56,13 +52,12 @@ namespace Spacewars.Presentation
                 approach=Mathf.Max(approach,routes.y);
                 if(onPad)amount=0;
                 routePixels[z*resolution+x]=onPad?Color.clear:new Color(routes.x,routes.y,0,1);
-                double rockDistance=double.MaxValue;foreach(var rock in map.Solids)rockDistance=System.Math.Min(rockDistance,System.Math.Sqrt(rock.Footprint.DistanceSquared(q)));
+                double rockDistance=rockDistances.Minimum(q);
                 float foot=1-Mathf.SmoothStep(0,1,(float)rockDistance/(settings.rockBlend*irregular));
                 pixels[z*resolution+x]=new Color(amount,foot,approach,1);
-                double lavaDistance=0,glowDistance=double.MaxValue;foreach(var lava in map.Lava)
+                double lavaDistance=0,glowDistance=lavaDistances.Minimum(q);foreach(var lava in map.Lava)
                 {
                     if(lava.Contains(q))lavaDistance=System.Math.Max(lavaDistance,System.Math.Sqrt(lava.BoundaryDistanceSquared(q)));
-                    glowDistance=System.Math.Min(glowDistance,System.Math.Sqrt(lava.Footprint.DistanceSquared(q)));
                 }
                 lavaPixels[z*resolution+x]=new Color(Mathf.SmoothStep(0,1,(float)lavaDistance/settings.lavaCrustWidth),1-Mathf.SmoothStep(0,1,(float)glowDistance/settings.lavaCrustWidth),0,1);
             }
@@ -76,12 +71,18 @@ namespace Spacewars.Presentation
                 double extent=FoundryTerrainMesh.SiteEnvelope(site,profile);var p=site.Position;
                 var pad=FoundryTerrainMesh.SitePad(site,profile,settings);
                 // Fixed mesh-layer offset stays below the existing live build/capture pad surfaces.
-                var obj=new GameObject((site.Kind==PlayableBuildingKind.Headquarters?"Hexagonal concrete home ":"Complete concrete site ")+site.Id);obj.transform.SetParent(root,false);
-                var mesh=TerrainMesh.Prism(pad,-.1,.05,q=>map.SurfaceHeight(q)+.006);terrainMeshes.Add(mesh);obj.AddComponent<MeshFilter>().sharedMesh=mesh;
+                var obj=new GameObject((site.Kind==PlayableBuildingKind.Headquarters?"Hexagonal steel home ":site.Kind==PlayableBuildingKind.Mine?"Steel mine work yard ":"Complete concrete site ")+site.Id);obj.transform.SetParent(root,false);
+                var mesh=site.Kind==PlayableBuildingKind.Mine?FoundryTerrainMesh.MineYardSurface(pad,map):TerrainMesh.Prism(pad,-.1,.05,q=>map.SurfaceHeight(q)+.006);terrainMeshes.Add(mesh);obj.AddComponent<MeshFilter>().sharedMesh=mesh;
                 var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=material;
                 var block=new MaterialPropertyBlock();block.SetColor("_BaseColor",new Color(settings.concreteValue,settings.concreteValue,settings.concreteValue));block.SetFloat("_SurfaceRole",8);
-                bool home=site.Kind==PlayableBuildingKind.Headquarters;
-                block.SetVector("_FoundryPadBounds",new Vector4((float)p.X,(float)p.Z,(float)(home?extent*settings.homeHexExtent:extent),home?1:0));
+                bool home=site.Kind==PlayableBuildingKind.Headquarters,mine=site.Kind==PlayableBuildingKind.Mine;
+                if(mine)
+                {
+                    p=new NavPoint((pad.MinX+pad.MaxX)/2,(pad.MinZ+pad.MaxZ)/2);
+                    float halfX=(float)(pad.MaxX-pad.MinX)/2,halfZ=(float)(pad.MaxZ-pad.MinZ)/2;
+                    block.SetVector("_FoundryYardShape",new Vector4(halfX,halfZ,Mathf.Min(halfX,halfZ)*.35f,0));
+                }
+                block.SetVector("_FoundryPadBounds",new Vector4((float)p.X,(float)p.Z,(float)(home?extent*settings.homeHexExtent:extent),home?1:mine?2:0));
                 block.SetFloat("_FoundryPadCenter",site.Kind==PlayableBuildingKind.Mine?0:1);renderer.SetPropertyBlock(block);
             }
         }

@@ -10,12 +10,15 @@ namespace Spacewars.Runtime
     public sealed class CertifiedRoutePublication
     {
         internal CertifiedRoutePublication(CertifiedRouteKernel kernel,long pumps,double elapsed,string failure=null,long allocated=0)
-        {Counters=kernel.Counters;Epoch=kernel.SolverEpoch;RetainedBytes=kernel.RetainedBytes;
+        {RecastFoundationBuilds=kernel.RecastFoundationBuilds;RecastFoundationReuses=kernel.RecastFoundationReuses;RecastPrepareCount=kernel.RecastPrepareCount;RecastGeometryDigests=kernel.RecastGeometryDigests;RecastColdBuilds=kernel.RecastColdBuilds;RecastWarmHits=kernel.RecastWarmHits;RecastLongQueries=kernel.RecastLongQueries;RecastAttachments=kernel.RecastAttachments;RecastIterations=kernel.RecastIterations;Counters=kernel.Counters;Epoch=kernel.SolverEpoch;RetainedBytes=kernel.RetainedBytes;
             PeakRetainedBytes=kernel.PeakRetainedBytes;ProjectionFailure=kernel.LastProjectionFailure;
             Pumps=pumps;PumpElapsedMilliseconds=elapsed;Failure=failure;AllocatedBytes=allocated;
             PreparationElapsedMilliseconds=kernel.PreparationElapsedMilliseconds;ProviderElapsedMilliseconds=kernel.ProviderElapsedMilliseconds;
             SolveElapsedMilliseconds=kernel.SolveElapsedMilliseconds;ProjectionElapsedMilliseconds=kernel.ProjectionElapsedMilliseconds;
             TransportWaitMilliseconds=kernel.TransportWaitMilliseconds;TransportHoldMilliseconds=kernel.TransportHoldMilliseconds;}
+        public long RecastFoundationBuilds{get;}public long RecastFoundationReuses{get;}public long RecastPrepareCount{get;}public long RecastGeometryDigests{get;}
+        public long RecastColdBuilds{get;}public long RecastWarmHits{get;}
+        public long RecastLongQueries{get;} public long RecastAttachments{get;} public long RecastIterations{get;}
         public NavSchedulerCounters Counters {get;}
         public long Epoch {get;} public long RetainedBytes {get;} public long PeakRetainedBytes {get;}
         public string ProjectionFailure {get;} public string Failure {get;}
@@ -46,6 +49,7 @@ namespace Spacewars.Runtime
             this.lane=lane??new CertifiedRouteLane();this.binding=binding;this.kernel=kernel;this.stopRequested=stopRequested;this.failed=failed;this.budget=budget;
             publication=new CertifiedRoutePublication(kernel,0,0);
             kernel.Continue=()=>!ShouldStop;
+            kernel.CapturePauseRequested=()=>binding.RoutePort.CaptureRequested;
             binding.RoutePort.Changed+=Signal;
             thread=new Thread(Loop){IsBackground=true,Name="Spacewars.CertifiedRoutes."+binding.Admission.Generation};
             thread.Start();
@@ -58,6 +62,23 @@ namespace Spacewars.Runtime
         public void SetBudget(int value){if(value<1)throw new ArgumentOutOfRangeException(nameof(value));if(Interlocked.Exchange(ref budget,value)!=value)Signal();}
         private void Signal(){try{wake.Set();}catch(ObjectDisposedException){}}
         private void WaitForChange(){Volatile.Write(ref waiting,1);try{wake.WaitOne();}finally{Volatile.Write(ref waiting,0);}}
+        private bool EnterHostOperation(bool cleanup=false)
+        {
+            while(cleanup||!ShouldStop){if(binding.RoutePort.TryBeginHostOperation(cleanup))return true;WaitForChange();}
+            return false;
+        }
+        private bool PumpOnce(ref long pumps,ref double elapsed,long initialAllocated)
+        {
+            if(binding.RoutePort.TickQuantaEnabled&&!binding.RoutePort.QuantumRunnable&&binding.RoutePort.TryPromoteAccruedCredit()!=NavigationCreditPromotion.Promoted)return true;
+            if(!binding.RoutePort.QuantumRunnable&&!kernel.HasWork&&binding.RoutePort.QueuedRequestCount==0&&binding.RoutePort.AllocationCount==0&&!binding.RoutePort.ArrivalReconstructing)return true;
+            long before=kernel.ProgressSequence,at=Stopwatch.GetTimestamp();var beforeFrontier=kernel.CapturePumpFrontier();
+            using(PerformanceProfile.Measure(ProfileStage.RouteWorker))kernel.Pump(binding,Volatile.Read(ref budget));pumps++;
+            elapsed+=(Stopwatch.GetTimestamp()-at)*1000d/Stopwatch.Frequency;
+            Volatile.Write(ref publication,new CertifiedRoutePublication(kernel,pumps,elapsed,allocated:GC.GetAllocatedBytesForCurrentThread()-initialAllocated));
+            if(ShouldStop||binding.RoutePort.CaptureRequested)return false;
+            if(kernel.ProgressSequence!=before||!kernel.CapturePumpFrontier().Same(beforeFrontier))return false;
+            return !(binding.RoutePort.TickQuantaEnabled&&!binding.RoutePort.QuantumRunnable&&binding.RoutePort.TryPromoteAccruedCredit()==NavigationCreditPromotion.Promoted);
+        }
         private void Loop()
         {
             long pumps=0,initialAllocated=GC.GetAllocatedBytesForCurrentThread();double elapsed=0;bool acquired=false;
@@ -65,36 +86,33 @@ namespace Spacewars.Runtime
                 Volatile.Write(ref waiting,1);
                 try{acquired=lane.Acquire(wake,()=>ShouldStop);}finally{Volatile.Write(ref waiting,0);}
                 if(!acquired)return;
-                kernel.Attach(binding.RoutePort);
+                if(!EnterHostOperation())return;
+                try{kernel.Attach(binding.RoutePort);kernel.PrepareRecastStartup(binding);Volatile.Write(ref publication,new CertifiedRoutePublication(kernel,pumps,elapsed,allocated:GC.GetAllocatedBytesForCurrentThread()-initialAllocated));}
+                catch(Exception ex){Volatile.Write(ref publication,new CertifiedRoutePublication(kernel,pumps,elapsed,ex.ToString()));binding.RoutePort.ReportHostFailure(ex);throw;}
+                finally{binding.RoutePort.EndHostOperation();}
                 while(!ShouldStop){
-                    if(binding.RoutePort.TickQuantaEnabled&&!binding.RoutePort.QuantumRunnable&&binding.RoutePort.TryPromoteAccruedCredit()!=NavigationCreditPromotion.Promoted){WaitForChange();continue;}
-                    if(!binding.RoutePort.QuantumRunnable&&!kernel.HasWork&&binding.RoutePort.QueuedRequestCount==0&&binding.RoutePort.AllocationCount==0&&!binding.RoutePort.ArrivalReconstructing){WaitForChange();continue;}
-                    long before=kernel.ProgressSequence,at=Stopwatch.GetTimestamp();var beforeFrontier=kernel.CapturePumpFrontier();
-                    using(PerformanceProfile.Measure(ProfileStage.RouteWorker))kernel.Pump(binding,Volatile.Read(ref budget));pumps++;
-                    elapsed+=(Stopwatch.GetTimestamp()-at)*1000d/Stopwatch.Frequency;
-                    Volatile.Write(ref publication,new CertifiedRoutePublication(kernel,pumps,elapsed,allocated:GC.GetAllocatedBytesForCurrentThread()-initialAllocated));
+                    if(!EnterHostOperation())break;
+                    bool sleep;
+                    try{sleep=PumpOnce(ref pumps,ref elapsed,initialAllocated);}
+                    catch(Exception ex){Volatile.Write(ref publication,new CertifiedRoutePublication(kernel,pumps,elapsed,ex.ToString()));binding.RoutePort.ReportHostFailure(ex);throw;}
+                    finally{binding.RoutePort.EndHostOperation();}
                     if(ShouldStop)break;
-                    if(kernel.ProgressSequence==before&&kernel.CapturePumpFrontier().Same(beforeFrontier)){
-                        // A physical quantum can complete without changing the
-                        // logical progress/frontier. Recheck saved authority
-                        // before sleeping so an already-earned credit can run.
-                        if(binding.RoutePort.TickQuantaEnabled&&!binding.RoutePort.QuantumRunnable&&
-                            binding.RoutePort.TryPromoteAccruedCredit()==NavigationCreditPromotion.Promoted){Thread.Yield();continue;}
-                        WaitForChange();
-                    }else Thread.Yield();
+                    if(sleep)WaitForChange();else Thread.Yield();
                 }
-            }catch(Exception ex){
-                Volatile.Write(ref publication,new CertifiedRoutePublication(kernel,pumps,elapsed,ex.ToString()));ReportFailure(ex);
-            }finally{
+            }catch(Exception ex){binding.RoutePort.ReportHostFailure(ex);ReportFailure(ex);}
+            finally{
                 PerformanceProfile.Flush();
-                binding.RoutePort.Changed-=Signal;
-                // Owner drains/releases resources; Dispose on render only requests stop.
                 Exception cleanupFailure=null;
-                try{kernel.Clear();}catch(Exception ex){cleanupFailure=ex;ReportFailure(ex);
+                binding.RoutePort.CancelResultPreparation();
+                binding.RoutePort.CancelCommandPreparation();
+                // Cleanup also mutates the host and must wait for capture's finally release.
+                EnterHostOperation(cleanup:true);
+                try{kernel.Clear();}catch(Exception ex){cleanupFailure=ex;binding.RoutePort.ReportHostFailure(ex);ReportFailure(ex);
                     Volatile.Write(ref publication,new CertifiedRoutePublication(kernel,pumps,elapsed,ex.ToString()));}
                 finally{
+                    binding.RoutePort.EndHostOperation();binding.RoutePort.Changed-=Signal;
                     if(acquired)lane.Release(cleanupFailure);
-                    kernel.Continue=null;binding=null;stopRequested=null;failed=null;
+                    kernel.Continue=null;kernel.CapturePauseRequested=null;binding=null;stopRequested=null;failed=null;
                     Volatile.Write(ref stopped,1);wake.Dispose();
                 }
             }

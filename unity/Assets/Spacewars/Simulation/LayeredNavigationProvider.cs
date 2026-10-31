@@ -63,6 +63,12 @@ namespace Spacewars.Simulation
             }
             return true;
         }
+        // Declaration validity is independent of current blockers. Those are
+        // evaluated by qualification, so an overlay can close an existing link.
+        internal bool DeclarationSweep(NavPoint from,NavPoint to){
+            if(!Boundary.Contains(from)||!Boundary.Contains(to))return false;if(from.Equals(to))return true;
+            var vertices=Boundary.Vertices;for(int i=0;i<vertices.Count;i++)if(SegmentDistance2(from,to,vertices[i],vertices[(i+1)%vertices.Count])<=1e-18)return false;return true;
+        }
         internal void Write(BinaryWriter w)
         {
             NavContract.Polygon(w, Boundary); w.Write(HalfExtent); w.Write(Blockers.Count);
@@ -158,8 +164,8 @@ namespace Spacewars.Simulation
             surfaces = layers.ToDictionary(s => s.Id, StringComparer.Ordinal); portals = links.ToDictionary(p => p.Id, StringComparer.Ordinal);
             foreach (var portal in links) {
                 if (!surfaces.ContainsKey(portal.Entry.SurfaceId) || !surfaces.ContainsKey(portal.Exit.SurfaceId) ||
-                    !surfaces[portal.Entry.SurfaceId].Area.Contains(portal.Entry.Position, 0) || !surfaces[portal.Exit.SurfaceId].Area.Contains(portal.Exit.Position, 0) ||
-                    !portal.Corridor.Sweep(portal.Entry.Position, portal.Exit.Position, 0)) throw new ArgumentException("Malformed portal geometry or surface metadata.");
+                    !surfaces[portal.Entry.SurfaceId].Area.Boundary.Contains(portal.Entry.Position) || !surfaces[portal.Exit.SurfaceId].Area.Boundary.Contains(portal.Exit.Position) ||
+                    !portal.Corridor.DeclarationSweep(portal.Entry.Position, portal.Exit.Position)) throw new ArgumentException("Malformed portal geometry or surface metadata.");
             }
             Surfaces = Array.AsReadOnly(layers); Portals = Array.AsReadOnly(links);
             long estimate = 4096;

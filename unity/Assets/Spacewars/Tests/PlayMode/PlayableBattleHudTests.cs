@@ -48,6 +48,10 @@ public sealed class PlayableBattleHudTests
         Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>("armyComposition").style.display.value);
         var counts=Get<Label[]>("armyCounts");Assert.AreEqual("1",counts[0].text);Assert.AreEqual("1",counts[1].text);Assert.AreEqual(DisplayStyle.None,counts[2].style.display.value);
         Assert.AreEqual("4 / 100",button.text);Assert.AreEqual(1,Get<VisualElement>("selectionRoster").childCount);
+        Set("view",Snapshot(new[]{new PlayableEntitySnapshot(4,PlayableOwner.Player,PlayableEntityKind.Hawk,default,100,false,0,0,0)}));Call("UpdateHud");
+        CollectionAssert.AreEqual(new[]{"0","0","0","1"},counts.Select(label=>label.text));
+        CollectionAssert.AreEqual(new[]{DisplayStyle.None,DisplayStyle.None,DisplayStyle.None,DisplayStyle.Flex},counts.Select(label=>label.style.display.value));
+        Set("view",Snapshot(Array.Empty<PlayableEntitySnapshot>()));Call("UpdateHud");Assert.True(counts.All(label=>label.style.display.value==DisplayStyle.None),"No army leaves no icon slots.");
         Get<VisualElement>("root").Focus();Assert.AreEqual(DisplayStyle.None,Get<VisualElement>("armyComposition").style.display.value);
     }
     [Test] public void TacticalCompositionStaysVisibleWithoutHoverThenRestoresPopover()
@@ -55,7 +59,7 @@ public sealed class PlayableBattleHudTests
         Set("view",Snapshot(new[]{new PlayableEntitySnapshot(1,PlayableOwner.Player,PlayableEntityKind.Tank,default,100,false,0,0,0),new PlayableEntitySnapshot(2,PlayableOwner.Enemy,PlayableEntityKind.Explorer,default,100,false,0,0,0)}));
         var layerOrder=Get<VisualElement>("root").Children().ToArray();
         Call("ToggleMap");Call("ShowArmyComposition",false);Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>("armyComposition").style.display.value);
-        var counts=Get<Label[]>("armyCounts");CollectionAssert.AreEqual(new[]{"0","1","0"},counts.Select(label=>label.text));Assert.True(counts.All(label=>label.style.display.value==DisplayStyle.Flex));
+        var counts=Get<Label[]>("armyCounts");CollectionAssert.AreEqual(new[]{"0","1","0","0"},counts.Select(label=>label.text));CollectionAssert.AreEqual(new[]{DisplayStyle.None,DisplayStyle.Flex,DisplayStyle.None,DisplayStyle.None},counts.Select(label=>label.style.display.value));
         Call("CloseMap");CollectionAssert.AreEqual(layerOrder,Get<VisualElement>("root").Children().ToArray(),"Closing restores the ordinary HUD/modal layer order.");Assert.AreEqual(DisplayStyle.None,Get<VisualElement>("armyComposition").style.display.value);Assert.AreEqual(DisplayStyle.None,counts[0].style.display.value);
         Get<Button>("hudFocusButton").Focus();Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>("armyComposition").style.display.value);Get<VisualElement>("root").Focus();Assert.AreEqual(DisplayStyle.None,Get<VisualElement>("armyComposition").style.display.value);
     }
@@ -101,6 +105,35 @@ public sealed class PlayableBattleHudTests
             Assert.False(OrbitalBattleRing.SectorContains(Vector2.zero,size,0,count),"Square corners are outside the disc.");
         }
     }
+    [UnityTest] public IEnumerator RoundedRingSeamsAreOpaqueAndKeepConstantPointerGaps()
+    {
+        var root=Get<VisualElement>("root");root.Clear();root.style.width=800;root.style.height=600;root.style.backgroundColor=Color.magenta;
+        var panel=host.GetComponent<UIDocument>().panelSettings;panel.scale=1;var image=new RenderTexture(800,600,24);image.Create();panel.targetTexture=image;
+        var ring=new OrbitalBattleRing();root.Add(ring);ring.Resize(280);ring.ConfigureInput(true,null,"groupWheel");ring.style.left=ring.style.top=20;
+        ring.Set(Enumerable.Range(1,3).Select(i=>new OfflinePadAction(i.ToString(),"Группа "+i,true){Presentation=new RadialActionPresentation{Title="Группа "+i,Count=i}}).ToArray(),"Группы","1",contextGlyph:"army");ring.style.display=DisplayStyle.Flex;
+        try
+        {
+            yield return null;yield return null;yield return null;
+            var art=ring.Q("radial-centre-artwork");var label=ring.Q<Label>("radial-centre-label");Assert.AreEqual(ring.worldBound.center.x,art.worldBound.center.x,.5f);Assert.AreEqual(ring.worldBound.center.y,(art.worldBound.yMin+label.worldBound.yMax)/2,.5f);
+            var previous=RenderTexture.active;RenderTexture.active=image;var pixels=new Texture2D(800,600,TextureFormat.RGBA32,false);
+            try
+            {
+                pixels.ReadPixels(new Rect(0,0,800,600),0,0);pixels.Apply();
+                foreach(float radius in new[]{65f,95f,125f})
+                {
+                    // Boundary between the upper and right petals: bright backdrop must never leak.
+                    float angle=-Mathf.PI/6;var point=new Vector2(140+Mathf.Cos(angle)*radius,140+Mathf.Sin(angle)*radius);
+                    var color=pixels.GetPixel(Mathf.RoundToInt(point.x+20),599-Mathf.RoundToInt(point.y+20));Assert.Less(color.r,.2f,"opaque seam at radius "+radius);Assert.Less(color.b,.25f,"opaque seam at radius "+radius);
+                    Assert.False(ring.Q<Button>("radial-1").ContainsPoint(point));Assert.False(ring.Q<Button>("radial-2").ContainsPoint(point));
+                    var tangent=new Vector2(-Mathf.Sin(angle),Mathf.Cos(angle));Assert.True(ring.Q<Button>("radial-1").ContainsPoint(point-tangent*4));Assert.True(ring.Q<Button>("radial-2").ContainsPoint(point+tangent*4));
+                }
+                var centreSeam=pixels.GetPixel(160,599-210);Assert.Less(centreSeam.r,.2f,"opaque inner-disc seam");Assert.Less(centreSeam.b,.25f);
+                string folder=Environment.GetEnvironmentVariable("ORDINARY_PAD_EVIDENCE");if(!string.IsNullOrEmpty(folder)){System.IO.Directory.CreateDirectory(folder);System.IO.File.WriteAllBytes(System.IO.Path.Combine(folder,"rounded-ring-seam-proof.png"),pixels.EncodeToPNG());}
+            }
+            finally{RenderTexture.active=previous;UnityEngine.Object.DestroyImmediate(pixels);}
+        }
+        finally{panel.targetTexture=null;image.Release();UnityEngine.Object.DestroyImmediate(image);}
+    }
     [Test] public void ApprovedIconsKeepSemanticMappingsAndQueueStates()
     {
         var names=new[]{"tank","explorer","shkval","headquarters","outpost","mine","factory","refinery","science","rally","repair","sale","upgrade","chassis","assault","guidance","army"};
@@ -123,7 +156,7 @@ public sealed class PlayableBattleHudTests
             Assert.False(string.IsNullOrEmpty(Get<Label>("selectionLabel").text));
             var ring=Get<OrbitalBattleRing>("battleRing");
             ring.Set(Array.Empty<OfflinePadAction>(),"localized title",contextGlyph:glyph);
-            Assert.AreEqual(glyph,ring.Children().OfType<OrbitalGlyph>().Single().Kind);
+            Assert.AreSame(DockArtwork.TextureFor(glyph),ring.Q<RadialArtwork>("radial-centre-artwork").Q<Image>("model-portrait").image);
         }
         var actions=new[]{"rally","7:sale","7:repair","7:upgrade","7:tank","7:explorer","7:shkval","7:tank-chassis","7:explorer-assault-guns","7:shkval-guidance"};
         var expected=new[]{"rally","sale","repair","upgrade","tank","explorer","shkval","chassis","assault","guidance"};
@@ -338,7 +371,8 @@ public sealed class PlayableBattleHudTests
                 Assert.AreEqual(phase==2?DisplayStyle.Flex:DisplayStyle.None,Get<ProgressBar>("progress").style.display.value);
                 Assert.AreEqual(6,root.Q("production-slots").childCount);
                 Assert.True(root.Q<Button>("production-slot-0").enabledSelf);Assert.True(root.Q<Button>("production-slot-1").enabledSelf);
-                Assert.AreEqual(hangar?"hawk":"tank",root.Q<Button>("production-slot-0").Q<OrbitalGlyph>().Kind);
+                Assert.AreEqual(hangar?"hawk":"tankHybrid",root.Q<Button>("production-slot-0").Q<OrbitalGlyph>().Kind);
+                Assert.AreSame(DockArtwork.TextureFor((hangar?"hawk":"tankHybrid")+"-outline"),root.Q<Button>("production-slot-0").Q<Image>("portrait-outline").image);
                 Assert.NotNull(root.Q<Button>("production-slot-0").Q<Image>("order-portrait").image);
                 Assert.AreEqual(DisplayStyle.Flex,root.Q<Button>("production-slot-1").Q<Image>("order-portrait").style.display.value);
                 if(phase==2)Assert.AreEqual("Подъём платформы",Get<ProgressBar>("progress").title);
@@ -414,7 +448,7 @@ public sealed class PlayableBattleHudTests
                 foreach(bool pause in new[]{false,true})
                 {
                     Set("paused",pause);Call("UpdateHud");yield return null;yield return null;
-                    if(pause)CollectionAssert.AreEqual(new[]{"Продолжить","Управление","Настройки","Начать заново","Завершить матч"},Get<VisualElement>("modalCard").Query<Button>().ToList().Where(b=>b.style.display.value!=DisplayStyle.None).Select(b=>b.text).ToArray());
+                    if(pause)CollectionAssert.AreEqual(new[]{"Продолжить","Начать заново","Настройки","Завершить матч"},Get<VisualElement>("modalCard").Query<Button>().ToList().Where(b=>b.style.display.value!=DisplayStyle.None).Select(b=>b.text).ToArray());
                     var previous=RenderTexture.active;RenderTexture.active=texture;var pixels=new Texture2D(size.x,size.y,TextureFormat.RGBA32,false);pixels.ReadPixels(new Rect(0,0,size.x,size.y),0,0);pixels.Apply();RenderTexture.active=previous;
                     System.IO.File.WriteAllBytes(System.IO.Path.Combine(folder,(pause?"pause-":"unit-")+size.x+".png"),pixels.EncodeToPNG());UnityEngine.Object.DestroyImmediate(pixels);
                 }

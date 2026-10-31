@@ -119,18 +119,80 @@ namespace Spacewars.Tests.EditMode
                 var victim=Units(world)[enemy];victim.GetType().GetField("Velocity").SetValue(victim,new NavPoint(.5,0));Call(world,"RefreshVision");
                 Assert.AreEqual(0,(int)Call(world,"ArtilleryTarget",actor,new NavPoint(-13,-5)),"Automatic friendly-fire penalty must apply before explicit Attack");
                 Assert.AreEqual(PlayableCommandStatus.Applied,world.Apply(new PlayableCommand(91,1,c.Roster[0].Id,PlayableCommandKind.Attack,new[]{gun},targetId:enemy),out _));
+                Call(world,"AdvanceIndexedCombat",1d/30);
+                var preparation=world.CaptureWorldBytes(seed,source);var preparing=PlayableDomain.RestoreConfiguredWorldBytes(preparation,profile,seed,source,config);
+                try{CollectionAssert.AreEqual(preparation,preparing.CaptureWorldBytes(seed,source));for(int tick=0;tick<55;tick++){Call(preparing,"AdvanceIndexedCombat",1d/30);Call(world,"AdvanceIndexedCombat",1d/30);CollectionAssert.AreEqual(world.CaptureWorldBytes(seed,source),preparing.CaptureWorldBytes(seed,source),"Exact pre-first-shot elevation continuation");}}
+                finally{preparing.Navigation.ReleaseCommittedHostRoot();preparing.DestroyOwnedNavigation();}
                 for(int tick=0;tick<60&&Shots(world).Count==0;tick++)Call(world,"AdvanceIndexedCombat",1d/30);
                 Assert.AreEqual(1,Shots(world).Count,"Explicit Attack must override the automatic penalty and launch");
                 var rocket=Shots(world)[0].GetType().GetField("Rocket").GetValue(Shots(world)[0]);var flight=(BallisticFlight)rocket.GetType().GetField("Flight").GetValue(rocket);
                 var expected=guided?PlayableBallistics.Aim(new NavPoint(-13,-5),new NavPoint(-4,-5),new NavPoint(.5,0),profile.ShkvalLaunchHeight,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed,true,profile.ShkvalLeadSpeedThreshold,profile.ShkvalLeadFalloff,profile.ShkvalMaxLeadTimeSec):new BallisticFlight(new BallisticPoint(-13,profile.ShkvalLaunchHeight,-5),new BallisticPoint(-4,0,-5),profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed);
-                Assert.AreEqual(expected.Start,flight.Start);Assert.AreEqual(expected.End,flight.End);Assert.AreEqual(expected.Duration,flight.Duration);
+                var launchBinding=(ShkvalLaunchSnapshot)rocket.GetType().GetField("Launch").GetValue(rocket);
+                var physical=ShkvalLaunchGeometry.At(launchBinding.Ground,launchBinding.Hull,launchBinding.Turret,launchBinding.Pitch,guided,launchBinding.Barrel,profile.ShkvalModelRadius*profile.ShkvalModelScale/2.05,profile.ShkvalProjectileLength).Center;
+                Assert.AreEqual(physical,flight.Start);Assert.AreEqual(expected.End,flight.End);Assert.AreEqual(new BallisticFlight(physical,expected.End,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed).Duration,flight.Duration);
                 byte[] bytes=world.CaptureWorldBytes(seed,source);restored=PlayableDomain.RestoreConfiguredWorldBytes(bytes,profile,seed,source,config);
-                CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(seed,source));Assert.AreEqual(PlayableWorldRestoreTests.Facts(world,true),PlayableWorldRestoreTests.Facts(restored,true));
+                CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(seed,source));
+                foreach(var d in new[]{world,restored}){Call(d,"RefreshVision");Call(d,"ReconcileWreckRoutes");}
+                string Difference(object a,object b,string path,int depth){
+                    if(depth>7||a==null||b==null||a.GetType()!=b.GetType())return path;
+                    var t=a.GetType();if(t.IsPrimitive||t.IsEnum||a is string)return path+"="+a+"/"+b;
+                    if(a is IEnumerable)return path+"[collection]";
+                    return string.Join(";",t.GetFields(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic).Where(f=>!(bool)typeof(PlayableWorldRestoreTests).GetMethod("ExcludeField",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{f})).Where(f=>PlayableWorldRestoreTests.Facts(f.GetValue(a),true)!=PlayableWorldRestoreTests.Facts(f.GetValue(b),true)).Select(f=>Difference(f.GetValue(a),f.GetValue(b),path+"."+f.Name,depth+1)));
+                }
+                Assert.AreEqual(PlayableWorldRestoreTests.Facts(world,true),PlayableWorldRestoreTests.Facts(restored,true),Difference(world,restored,"domain",0));
                 for(int tick=0;tick<40;tick++){
-                    foreach(var d in new[]{world,restored}){Call(d,"AdvanceIndexedCombat",1d/30);Call(d,"AdvanceProjectiles",1d/30);}
+                    foreach(var d in new[]{world,restored}){Call(d,"AdvanceIndexedCombat",1d/30);Call(d,"AdvanceProjectiles",1d/30);Call(d,"RefreshVision");Call(d,"ReconcileWreckRoutes");}
                     Assert.AreEqual(PlayableWorldRestoreTests.Facts(world,true),PlayableWorldRestoreTests.Facts(restored,true),"Current Shkval authority suffix "+tick);
                 }
                 CollectionAssert.AreEqual(world.CaptureWorldBytes(seed,source),restored.CaptureWorldBytes(seed,source));
+            }finally{foreach(var d in new[]{world,restored})if(d!=null){d.Navigation.ReleaseCommittedHostRoot();d.DestroyOwnedNavigation();}}
+        }
+        [TestCase(false)][TestCase(true)] public void MuzzleBindingAndFlightContinueExactlyAfterCurrentCapture(bool guided)
+        {
+            var profile=PlayableProfile.Default;const int seed=19261019;const string source="native-shkval-target-oracle-v1";
+            var c=OfflineParticipantAuthorityTests.Config(2,false,seed);var costs=new double[c.Starts.Count,c.Starts.Count];for(int i=0;i<c.Starts.Count;i++)for(int j=0;j<c.Starts.Count;j++)costs[i,j]=c.RouteCost(i,j);
+            var config=new OfflineMatchConfiguration(profile,source,c.MapIdentity,"native-current-shkval-capture",seed,c.Roster.ToArray(),c.Starts.ToArray(),c.Sites.ToArray(),c.Obstacles.ToArray(),costs,
+                scenario:new[]{new OfflineScenarioUnit(1,PlayableEntityKind.Shkval,new NavPoint(-13,-5),upgraded:guided),new OfflineScenarioUnit(2,PlayableEntityKind.Tank,new NavPoint(-4,-5)),new OfflineScenarioUnit(1,PlayableEntityKind.Tank,new NavPoint(-4,-3.5))});
+            var world=new PlayableDomain(profile,91,config);PlayableDomain restored=null;
+            object Call(PlayableDomain d,string name,params object[] args)=>typeof(PlayableDomain).GetMethod(name,Hidden).Invoke(d,args);
+            IDictionary Units(PlayableDomain d)=>(IDictionary)typeof(PlayableDomain).GetField("units",Hidden).GetValue(d);
+            IList Shots(PlayableDomain d)=>(IList)typeof(PlayableDomain).GetField("projectiles",Hidden).GetValue(d);
+            try{
+                int Id(int scenario){var unit=Units(world).Values.Cast<object>().Single(u=>(int)u.GetType().GetField("ScenarioIndex").GetValue(u)==scenario);return (int)unit.GetType().GetField("Id").GetValue(unit);}
+                int gun=Id(0),enemy=Id(1);
+                foreach(object unit in Units(world).Values)unit.GetType().GetField("Reload").SetValue(unit,999d);
+                var actor=Units(world)[gun];actor.GetType().GetField("Reload").SetValue(actor,0d);
+                var victim=Units(world)[enemy];victim.GetType().GetField("Velocity").SetValue(victim,new NavPoint(.5,0));Call(world,"RefreshVision");
+                Assert.AreEqual(0,(int)Call(world,"ArtilleryTarget",actor,new NavPoint(-13,-5)),"Automatic friendly-fire penalty must apply before explicit Attack");
+                Assert.AreEqual(PlayableCommandStatus.Applied,world.Apply(new PlayableCommand(91,1,c.Roster[0].Id,PlayableCommandKind.Attack,new[]{gun},targetId:enemy),out _));
+                for(int tick=0;tick<60&&Shots(world).Count==0;tick++)Call(world,"AdvanceIndexedCombat",1d/30);
+                Assert.AreEqual(1,Shots(world).Count,"Explicit Attack must override the automatic penalty and launch");
+                var rocket=Shots(world)[0].GetType().GetField("Rocket").GetValue(Shots(world)[0]);var flight=(BallisticFlight)rocket.GetType().GetField("Flight").GetValue(rocket);
+                var expected=guided?PlayableBallistics.Aim(new NavPoint(-13,-5),new NavPoint(-4,-5),new NavPoint(.5,0),profile.ShkvalLaunchHeight,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed,true,profile.ShkvalLeadSpeedThreshold,profile.ShkvalLeadFalloff,profile.ShkvalMaxLeadTimeSec):new BallisticFlight(new BallisticPoint(-13,profile.ShkvalLaunchHeight,-5),new BallisticPoint(-4,0,-5),profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed);
+                var launchBinding=(ShkvalLaunchSnapshot)rocket.GetType().GetField("Launch").GetValue(rocket);
+                var physical=ShkvalLaunchGeometry.At(launchBinding.Ground,launchBinding.Hull,launchBinding.Turret,launchBinding.Pitch,guided,launchBinding.Barrel,profile.ShkvalModelRadius*profile.ShkvalModelScale/2.05,profile.ShkvalProjectileLength).Center;
+                Assert.AreEqual(physical,flight.Start);Assert.AreEqual(expected.End,flight.End);Assert.AreEqual(new BallisticFlight(physical,expected.End,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed).Duration,flight.Duration);
+                byte[] bytes=world.CaptureWorldBytes(seed,source);restored=PlayableDomain.RestoreConfiguredWorldBytes(bytes,profile,seed,source,config);
+                CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(seed,source));
+                var launch=(ShkvalLaunchSnapshot)rocket.GetType().GetField("Launch").GetValue(rocket);Assert.NotNull(launch);Assert.AreEqual(0,launch.Barrel);Assert.AreEqual(guided,launch.Upgraded);
+                CollectionAssert.AreEqual((double[])actor.GetType().GetField("ShkvalCells").GetValue(actor),(double[])Units(restored)[gun].GetType().GetField("ShkvalCells").GetValue(Units(restored)[gun]),"Per-cell feed state survives capture");
+                Assert.AreEqual(1,(int)Units(restored)[gun].GetType().GetField("BurstSequence").GetValue(Units(restored)[gun]));
+Assert.AreEqual(PlayableWorldRestoreTests.Facts(Shots(world),true),PlayableWorldRestoreTests.Facts(Shots(restored),true));
+                for(int tick=0;tick<40;tick++){
+                    foreach(var d in new[]{world,restored}){Call(d,"AdvanceIndexedCombat",1d/30);Call(d,"AdvanceProjectiles",1d/30);Call(d,"RefreshVision");Call(d,"ReconcileWreckRoutes");}
+                    Assert.AreEqual(PlayableWorldRestoreTests.Facts(Shots(world),true),PlayableWorldRestoreTests.Facts(Shots(restored),true),"Current Shkval authority suffix "+tick);
+                }
+                CollectionAssert.AreEqual(world.CaptureWorldBytes(seed,source),restored.CaptureWorldBytes(seed,source));
+                foreach(var d in new[]{world,restored}){var u=Units(d)[gun];u.GetType().GetField("Reload").SetValue(u,0d);u.GetType().GetField("StoppedSeconds").SetValue(u,10d);Call(d,"AdvanceIndexedCombat",1d/30);}
+                var next=Shots(restored).Cast<object>().Last();var nextRocket=next.GetType().GetField("Rocket").GetValue(next);Assert.AreEqual(1,((ShkvalLaunchSnapshot)nextRocket.GetType().GetField("Launch").GetValue(nextRocket)).Barrel);
+                CollectionAssert.AreEqual(world.CaptureWorldBytes(seed,source),restored.CaptureWorldBytes(seed,source));
+                // Magazine-only tail must survive after all in-flight projectiles are gone.
+                Shots(world).Clear();Shots(restored).Clear();
+                var magazineBytes=world.CaptureWorldBytes(seed,source);
+                var magazineOnly=PlayableDomain.RestoreConfiguredWorldBytes(magazineBytes,profile,seed,source,config);
+                try{CollectionAssert.AreEqual(magazineBytes,magazineOnly.CaptureWorldBytes(seed,source));}
+                finally{magazineOnly.Navigation.ReleaseCommittedHostRoot();magazineOnly.DestroyOwnedNavigation();}
+
             }finally{foreach(var d in new[]{world,restored})if(d!=null){d.Navigation.ReleaseCommittedHostRoot();d.DestroyOwnedNavigation();}}
         }
         [Test,Timeout(120000)] public void TwoOrdinaryShkvalsMoveChooseLaunchAndResumeAfterTargetLoss()

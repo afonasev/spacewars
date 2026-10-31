@@ -125,7 +125,7 @@ namespace Spacewars.Presentation
         private bool HeavyDamage(PlayableSnapshot view,PlayableSoundEvent e)
         {
             var p=view.ActiveProfile??PlayableProfile.Default;
-            return e.Building?view.Buildings.Any(b=>Distance(b.Position,e.Position)<1&&b.Health>0&&b.Health<=TerritoryRules.Health(p,b.Kind)*profile.heavyDamageRatio):view.Entities.Any(u=>Distance(u.Position,e.Position)<3&&u.Kind==e.Weapon&&u.Health>0&&u.Health<=PlayableUnitRules.MaximumHealth(p,u)*profile.heavyDamageRatio);
+            return e.Building?view.Buildings.Any(b=>Distance(b.Position,e.Position)<1&&b.Health>0&&b.Health<=TerritoryRules.MaximumHealth(p,b)*profile.heavyDamageRatio):view.Entities.Any(u=>Distance(u.Position,e.Position)<3&&u.Kind==e.Weapon&&u.Health>0&&u.Health<=PlayableUnitRules.MaximumHealth(p,u)*profile.heavyDamageRatio);
         }
         private float BaseGain(PlayableSoundEvent e)=>e.Kind==PlayableSoundKind.HeavyDamage?profile.damageGain:e.Kind==PlayableSoundKind.MovementStarted||e.Kind==PlayableSoundKind.MovementStopped?profile.motionAccentGain:(int)e.Kind>2?profile.baseGain:e.Kind==PlayableSoundKind.Destroyed||e.Kind==PlayableSoundKind.Impact&&e.Weapon==PlayableEntityKind.Shkval?profile.explosionGain:e.Kind==PlayableSoundKind.Impact?(e.Weapon==PlayableEntityKind.Explorer?profile.explorerImpactGain:profile.impactGain):profile.shotGain;
         private static string Clip(PlayableSoundEvent e)
@@ -144,6 +144,7 @@ namespace Spacewars.Presentation
                 case PlayableSoundKind.MovementStarted:return "motion-start";
                 case PlayableSoundKind.MovementStopped:return "motion-stop";
             }
+            if(e.Kind==PlayableSoundKind.Destroyed&&e.Building)return "building-collapse";
             if(e.Kind==PlayableSoundKind.Destroyed||e.Kind==PlayableSoundKind.Impact&&e.Weapon==PlayableEntityKind.Shkval)return "explosion";
             if(e.Kind==PlayableSoundKind.Impact)return "impact";
             return e.Weapon==PlayableEntityKind.Explorer?"burst-shot":"tank-shot";

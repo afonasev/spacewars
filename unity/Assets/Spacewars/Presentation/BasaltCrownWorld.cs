@@ -31,13 +31,13 @@ namespace Spacewars.Presentation
             foreach(var rock in map.Solids)if(!double.IsNaN(rock.Top))Prism("Basalt ridge",rock,rock.Bottom,rock.Top,null,true);
             var details=BasaltCrownDetails.Plan(map,profile,art);
             foreach(var group in details.GroupBy(p=>p.Type)){
-                var mesh=BasaltCrownDetails.Build(group,map);terrainMeshes.Add(mesh);
+                var mesh=BasaltCrownDetails.Build(group,map);FinalProceduralMesh.IndexOwned(mesh);terrainMeshes.Add(mesh);
                 var obj=new GameObject("Basalt details — "+group.Key);obj.transform.SetParent(root,false);
                 obj.AddComponent<MeshFilter>().sharedMesh=mesh;var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=basaltTerrainMaterial;
                 var properties=new MaterialPropertyBlock();properties.SetFloat("_RoadSurface",0);properties.SetFloat("_DetailKind",(int)group.Key);renderer.SetPropertyBlock(properties);
             }
             void Prism(string name,NavObstacle shape,double bottom,double top,System.Func<NavPoint,double> height,bool ridge=false){
-                var mesh=ridge?TerrainMesh.ErodedRock(shape,bottom,top,art.ridgeErosion):TerrainMesh.Prism(shape,bottom,top,height);terrainMeshes.Add(mesh);
+                var mesh=ridge?TerrainMesh.ErodedRock(shape,bottom,top,art.ridgeErosion):TerrainMesh.Prism(shape,bottom,top,height);FinalProceduralMesh.IndexOwned(mesh);terrainMeshes.Add(mesh);
                 var obj=new GameObject(name);obj.transform.SetParent(root,false);obj.AddComponent<MeshFilter>().sharedMesh=mesh;
                 var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=basaltTerrainMaterial;
                 var properties=new MaterialPropertyBlock();properties.SetColor("_BaseColor",Color.white);properties.SetFloat("_SurfaceRole",4);properties.SetFloat("_RoadSurface",ridge?0:1);renderer.SetPropertyBlock(properties);

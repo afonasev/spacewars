@@ -18,6 +18,7 @@ namespace Spacewars.Presentation
         private static T Raw<T>(string name){var asset=Resources.Load<TextAsset>(name);if(!asset)throw new InvalidOperationException("Missing graphics defaults: "+name);return JsonUtility.FromJson<T>(asset.text);}
         public static IReadOnlyList<SurfaceParameter> Parameters=>catalog??(catalog=Raw<CameraAntialiasingProfile>("CameraAntialiasingProfile").Parameters()
             .Concat(Raw<ContactOcclusionProfile>("ContactOcclusionProfile").Parameters()).Concat(Raw<ActorMaterialProfile>("ActorMaterialProfile").Parameters())
+            .Concat(Raw<TankMechanismProfile>("TankMechanismProfile").Parameters().Where(p=>p.Path=="visual.tankMechanism.modelScale"))
             .Concat(Raw<IndustrialLightingProfile>("IndustrialLightingProfile").Parameters()).Concat(Raw<IndustrialLightingProfile>("ThreeCrossingsLightingProfile").Parameters()).ToArray());
         public static IEnumerable<string> PreferenceKeys=>Parameters.Select(p=>Key(p.Path)).Concat(new[]{Key("bloomEnabled"),Key("occlusionEnabled"),Key("groundTrailsEnabled")});
         public static bool GroundTrailsEnabled{get=>PlayerPrefs.GetInt(Key("groundTrailsEnabled"),1)!=0;set{NativePreferenceWriter.SetInt(Key("groundTrailsEnabled"),value?1:0);Changed?.Invoke("visual.groundTrails.enabled");}}
@@ -42,6 +43,7 @@ namespace Spacewars.Presentation
         public static void Reset(){NativePreferenceWriter.Apply(()=>{foreach(var key in PreferenceKeys)PlayerPrefs.DeleteKey(key);});Refresh();}
         public static string Group(SurfaceParameter p)
         {
+            if(p.Group=="Wrecks")return "Остовы · обгоревший металл";
             if(p.Path==AaPath)return "Сглаживание";
             if(p.Path.StartsWith("visual.threeCrossings.lighting."))return "Освещение · Three Crossings";
             if(p.Path.StartsWith("visual.lighting."))return "Освещение · остальные карты";
@@ -50,6 +52,7 @@ namespace Spacewars.Presentation
         }
         public static string Label(SurfaceParameter p)
         {
+            if(p.Group=="Wrecks")return p.Label;
             string key=p.Path.Substring(p.Path.LastIndexOf('.')+1);
             switch(key){
                 case "mode":return "Сглаживание";

@@ -69,11 +69,13 @@ namespace Spacewars.Runtime
             if(dt>0&&c.MarchConfigured)foreach(var observation in c.MarchSources){
                 int group=-1;for(int i=0;i<c.GroupCount;i++)if(ReferenceEquals(c.GroupSources[i].Owner,observation.Owner)){group=i;break;}
                 var previous=group<0?observation.Version:c.Groups[group];
-                var next=GroupMarch.PrepareOwned(c.Frame,previous,c.ProjectedInstalled,c.ProjectedDetached,c.SourceMembers,c.MarchStretch,c.MarchRevision,dt,scope.OwnedReservation());
+                var next=GroupMarch.PrepareOwned(c.Frame,previous,c.ProjectedInstalled,c.ProjectedDetached,c.SourceMembers,c.MarchStretch,c.MarchRevision,dt,scope.OwnedReservation(),UsesRecastGroundRoutes);
                 if(next==null)continue;if(group<0){group=c.GroupCount++;c.GroupSources[group]=observation;}else c.PreMarchGroups[group]=c.Groups[group];c.Groups[group]=next;c.MarchWrites[group]=true;
             }
             c.Traffic=NavigationTrafficAuthority.Prepare(c.SourceTraffic,c.Frame,c.ProjectedInstalled,c.ProjectedDetached,c.SourceMembers,terrain,scope.OwnedReservation());
-            if(dt>0)using(NavStorageScratch.Reserve(scope.OwnedReservation(),RebindStagingScratchBound(c.Actors.Length,c.Operations.Length,navigationGeometry.Obstacles.Count))){MarkTerminalContactComponents(c.Frame,c.MarchSources,c.MarchSources.Length,c.ProjectedInstalled,c.ProjectedDetached,c.NextPending??c.Pending,c.Allocating);c.Frame.Compute(dt);CaptureMovementDelay(2,c.Frame.Motion,c.Frame.Proposals,c.Frame.Preferred);}
+            if(dt>0)using(NavStorageScratch.Reserve(scope.OwnedReservation(),RebindStagingScratchBound(c.Actors.Length,c.Operations.Length,navigationGeometry.Obstacles.Count))){MarkTerminalContactComponents(c.Frame,c.MarchSources,c.MarchSources.Length,c.ProjectedInstalled,c.ProjectedDetached,c.NextPending??c.Pending,c.Allocating);c.Frame.Compute(dt);
+                if(UsesRecastGroundRoutes)foreach(var observation in c.MarchSources){int group=-1;for(int j=0;j<c.GroupCount;j++)if(ReferenceEquals(c.GroupSources[j].Owner,observation.Owner)){group=j;break;}var current=group<0?observation.Version:c.Groups[group];var completed=GroupMarch.CompleteRecastOwned(c.Frame,current,scope.OwnedReservation());if(completed!=null){if(group<0){group=c.GroupCount++;c.GroupSources[group]=observation;}else c.Groups[group]?.ReleaseStorage();c.Groups[group]=completed;c.MarchWrites[group]=true;}}
+                CaptureMovementDelay(2,c.Frame.Motion,c.Frame.Proposals,c.Frame.Preferred);}
             // Destination roles only; the source Detached snapshot remains
             // untouched for final SourceCurrent validation. Ready reset Cleared.
             for(int i=0;i<c.Frame.Cleared.Length;i++)if(c.Frame.Cleared[i])c.ProjectedDetached[i]=c.ProjectedInstalled[i]!=null;

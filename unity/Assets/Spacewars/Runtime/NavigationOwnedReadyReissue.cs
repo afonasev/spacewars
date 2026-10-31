@@ -36,7 +36,7 @@ namespace Spacewars.Runtime
             using(EnterTransport()){
                 if(!ResultBatchSourceCurrent(c)||!Crowd.TryGet(request.Entity,out var actor))return false;
                 c.ExtraOperations=checked(c.ExtraOperations+1);
-                eligible=geometry.IsFree(request.Goal,actor.Radius)&&Crowd.Locate(request.Goal,actor.Radius,out location)&&c.RequestCount+c.ReissueCount+c.RegistrationCount<RouteRequestCapacity;
+                eligible=geometry.IsFree(request.Goal,actor.Radius)&&LocateRetainedRecastGoal(request.Goal,actor.Radius,c.Names.GroupObservations[at].Version,request.Entity,out location)&&c.RequestCount+c.ReissueCount+c.RegistrationCount<RouteRequestCapacity;
                 if(eligible)ObserveResultFailureActor(c,actor,ref op.FailureSource);
             }
             if(!eligible)return PrepareFailureIntoResultBatch(c,at,scope,NavSolveStatus.Ready,true);

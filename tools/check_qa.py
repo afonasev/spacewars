@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import time
 import xml.etree.ElementTree as ET
+from qa_project_settings import ProjectSettingsGuard
 
 ROOT = Path(__file__).resolve().parents[1]
 # Expected case multiplicities are a gate contract, not inferred from a possibly
@@ -174,6 +175,7 @@ def run():
     (evidence / 'runner.py').write_bytes(Path(__file__).read_bytes())
     (evidence / 'tracked.diff').write_bytes(subprocess.check_output(['git', '-C', str(ROOT), 'diff', 'HEAD']))
     started = time.monotonic()
+    settings = ProjectSettingsGuard(ROOT, evidence / 'project-settings')
     try:
         for platform, fixtures in selection:
             stem = platform.lower()
@@ -197,8 +199,11 @@ def run():
                 process.stdout.close()
                 exit_code = process.wait()
             check.update(exit_code=exit_code, wall_seconds=time.monotonic() - tick)
+            record['project_settings'] = settings.finish()
             if exit_code: raise ValueError(f'{platform} launcher exit {exit_code}')
             check.update(validate_results(xml, fixtures, args.scope == 'ui'))
+            if not record['project_settings']['unchanged']:
+                raise ValueError('ProjectSettings changed during QA; inspect preserved evidence')
             # This includes Editor startup/import/shutdown; it is not pure startup.
             admission = check.get('host_admission_seconds')
             check['editor_wall_seconds'] = None if admission is None else check['wall_seconds'] - admission
@@ -209,6 +214,9 @@ def run():
         record['error'] = str(error)
         print('QA FAILED: ' + str(error), flush=True)
     finally:
+        record['project_settings'] = settings.finish()
+        if not record['project_settings']['unchanged']:
+            record['result'] = 'Failed'
         record['wall_seconds'] = time.monotonic() - started
         (evidence / 'result.json').write_text(json.dumps(record, indent=2) + '\n')
         print('QA evidence: ' + str(evidence), flush=True)

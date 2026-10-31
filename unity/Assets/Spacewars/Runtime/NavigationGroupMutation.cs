@@ -137,8 +137,79 @@ namespace Spacewars.Runtime
         // Prepared value/path mutation of the actual live group. Publication
         // never assigns an externally mutable member DTO into the owner.
         private bool? TryOwnedFormationContact(int entity,bool visibleContact,long tick)=>TryOwnedMemberState(entity,visibleContact,tick);
+        // Group order is its first appearance in the original domain traversal.
+        // Phase scratch is a separate admitted lane and never enters a publication scope.
+        internal bool RefreshFormationGroupContacts(System.Collections.Generic.IEnumerable<int> entities,int count,Func<int,bool?> detect,long tick,Action<int,bool> afterPublish=null)
+        {
+            if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,Generation,admissionPublicationIdentity,out var scratchScope))return false;
+            try{using(scratchScope)using(NavStorageScratch.Reserve(scratchScope.OwnedReservation(),checked(512L+8L*count))){
+                var seen=new long[count];int used=0;bool complete=true;
+                foreach(int entity in entities){
+                    long group;using(EnterTransport()){if(!memberGroups.TryGetValue(entity,out group))continue;}
+                    bool visited=false;for(int i=0;i<used;i++)if(seen[i]==group){visited=true;break;}if(visited)continue;
+                    seen[used++]=group;using(PerformanceProfile.Measure(ProfileStage.ContactPublish))if(!TryOwnedGroupContacts(group,detect,tick,afterPublish))complete=false;
+                }
+                return complete;
+            }}catch(NavigationRetentionBudget.CapacityRefused){return false;}
+        }
+        internal bool TryOwnedGroupContacts(long groupId,Func<int,bool?> detect,long tick,Action<int,bool> afterPublish=null)
+        {
+            NavigationLiveGroupObservation observation;NavigationHostRoot host;NavigationAuthorityOwners authority;NavigationAdmissionStorage observedAdmission;
+            long operation,publication;GroupOrderState record;
+            using(EnterTransport()){
+                if(!groups.TryGetValue(groupId,out record))return false;
+                if(!(groups is NavigationCommandSlots<long,GroupOrderState> slots)||!(slots.OwnerFor(groupId)is NavigationLiveGroup owner))return false;
+                // Compatibility ingress is still raw until host registration.
+                // Defer this owned write; never admit an unowned pending edge.
+                if(!CanOwnAdmissionProjection())return false;
+                observation=owner.ObserveForCopy(ObserveLiveWriteToken());host=committedHostRoot;authority=authorityOwners;host?.Retain();authority?.Retain();
+                operation=authorityOperationIdentity;publication=admissionPublicationIdentity;observedAdmission=admissionOwner;observedAdmission?.Retain();
+            }
+            try{
+                if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,Generation,publication,out var scope))return false;
+                using(scope){NavigationAuthorityGroup version=null;NavigationPreparedGroupWrite write=null;bool published=false,admissionPublished=false;
+                    try{
+                        using(NavStorageScratch.Reserve(scope.OwnedReservation(),checked(512L+NavStorageLayout.ObjectBytesBound(typeof(GroupOrderState))+32L+(8L+NavStorageLayout.ObjectBytesBound(typeof(GroupMemberState)))*observation.Version.Members.Count))){
+                            GroupOrderState values;
+                            using(EnterTransport()){
+                                if(operation!=authorityOperationIdentity||publication!=admissionPublicationIdentity||!observation.Owner.MatchesObservation(observation))return false;
+                                values=record.Copy();
+                            }
+                            for(int i=0;i<values.Members.Length;i++){
+                                var value=values.Members[i];bool? contact=detect(value.Entity);
+                                if(!contact.HasValue)continue;
+                                if(value.FormationReleased!=contact.Value){values.MarchAnchor=0;values.MarchInitialized=false;}
+                                value.FormationReleased=contact.Value;value.ContactTick=tick;value.ContactPhase="PostMovementVisibility";
+                                using(EnterTransport()){
+                                    if(operation!=authorityOperationIdentity||!observation.Owner.MatchesObservation(observation)||!Crowd.TryGet(value.Entity,out var actor)||actor.Incarnation!=value.Incarnation)return false;
+                                    value.MobilityRevision=actor.MobilityRevision;
+                                    if(allocating.ContainsKey(value.Entity))value.Phase=GroupMemberPhase.Allocating;
+                                    else{value.Reservation=reservations.ContainsKey(value.Entity)?value.Entity:0;value.Phase=CurrentMemberPhase(value.Entity,actor,value);}
+                                }
+                            }
+                            version=NavigationAuthorityGroup.CopyWithContactBatchOwned(observation.Version,new NavigationAuthorityGroup.Values(values),i=>NavigationAuthorityMember.CopyOwned(values.Members[i],scope.OwnedReservation()),scope.OwnedReservation());
+                        }
+                        write=NavigationPreparedGroupWrite.CreateOwned(observation,version,-2,scope);
+                        bool reuse;using(EnterTransport())reuse=operation==authorityOperationIdentity&&ReferenceEquals(observedAdmission,admissionOwner)&&admissionBatchDepth==0&&commandGroup==null&&observedAdmission!=null&&observedAdmission.Value.PublishedThroughRequestSequence==requestSequence&&observedAdmission.Groups.Count==groups.Count&&observedAdmission.Requests.Count==pending.Count+probes.Count&&observedAdmission.MatchesGroupReplacement(version);
+                        if(reuse){observedAdmission.Retain();write.Admission=observedAdmission;}
+                        else write.Admission=PrepareAdmissionProjection(groups,pending,requestSequence,checked(publication+1),operation,scope,observedAdmission,version);
+                        write.RequireEdge(write.Admission);scope.Attach(write);
+                        scope.Publish(write,_=>{using(EnterTransport()){
+                            if(operation!=authorityOperationIdentity||publication!=admissionPublicationIdentity||!ReferenceEquals(observedAdmission,admissionOwner)||!ReferenceEquals(host,committedHostRoot)||!ReferenceEquals(authority,authorityOwners)||scope.IsCancelled)throw new InvalidOperationException("Contact batch lost observed authority.");
+                            write.ValidateInstall(scope,ObserveLiveWriteToken());write.ApplyNoThrow();admissionPublished=PublishAdmissionOwnerNoThrow(write.Admission);if(admissionPublished)write.Admission=null;authorityOperationIdentity=operation+1;published=true;
+                        }});
+                        scope.ResolveCommitted();write.ReleaseRetired();if(admissionPublished)SignalHost();
+                        if(afterPublish!=null)foreach(NavigationAuthorityMember member in version.Members)afterPublish(member.Data.Entity,member.Data.FormationReleased);return true;
+                    }catch(OperationCanceledException){if(published)throw;return false;}catch(InvalidOperationException){if(published)throw;return false;}
+                    finally{write?.ReleaseStorage();version?.ReleaseStorage();}
+                }
+            }finally{observation.ReleasePins();host?.Release();authority?.Release();observedAdmission?.Release();}
+        }
         private bool? TryOwnedMemberState(int entity,bool? visibleContact,long tick)
         {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if(ContactPublishProfile.Enabled)return TryOwnedMemberStateProfiled(entity,visibleContact,tick);
+#endif
             NavigationLiveGroupObservation observation;NavigationHostRoot host;NavigationAuthorityOwners authority;
             NavigationAdmissionStorage observedAdmission;
             long operation,publication;int index;GroupOrderState metadata;GroupMemberState value;
@@ -146,6 +217,9 @@ namespace Spacewars.Runtime
                 if(!memberGroups.TryGetValue(entity,out var groupId))return true;
                 if(!(groups is NavigationCommandSlots<long,GroupOrderState> slots)||!(slots.OwnerFor(groupId)is NavigationLiveGroup owner))return null;
                 var record=groups[groupId];index=Array.FindIndex(record.Members,m=>m.Entity==entity);if(index<0)throw new InvalidOperationException("Owned group lost member index.");
+                // Compatibility ingress is still raw until host registration.
+                // Defer this owned write; never admit an unowned pending edge.
+                if(!CanOwnAdmissionProjection())return false;
                 observation=owner.ObserveForCopy(ObserveLiveWriteToken());host=committedHostRoot;authority=authorityOwners;host?.Retain();authority?.Retain();operation=authorityOperationIdentity;publication=admissionPublicationIdentity;
                 metadata=record;value=record.Members[index];observedAdmission=admissionOwner;observedAdmission?.Retain();
             }

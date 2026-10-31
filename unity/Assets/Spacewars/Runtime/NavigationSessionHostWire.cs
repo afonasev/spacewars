@@ -230,6 +230,16 @@ namespace Spacewars.Runtime
             // Compare the complete wire descriptor, including group sections.
             return a.StableKey==b.StableKey;
         }
+        // DTO descriptors carry their seal. Recast coordination is hydrated only
+        // from an exact admitted BODY role, never inferred from section labels.
+        private static NavCorridorDescriptor RestoredRecastCorridor(NavCorridorDescriptor dto,NavigationAuthorityOwners body,NavigationHostRoot root)
+        {
+            NavCorridorDescriptor Match(NavCorridorDescriptor candidate)=>candidate?.RecastPlan!=null&&SameHostCorridor(candidate,dto)?candidate:null;
+            if(body?.InstalledCatalog!=null)foreach(var entry in body.InstalledCatalog){var found=Match((entry as NavigationInstalledExecutionOwner)?.Corridor.Corridor);if(found!=null)return found;}
+            foreach(var catalog in new[]{body?.MailboxAnswerCatalog,body?.BarrierAnswerCatalog,body?.ProbeAnswerCatalog})if(catalog!=null)foreach(var entry in catalog){var found=Match((entry as NavigationHostAnswer)?.CorridorOwner?.Corridor);if(found!=null)return found;}
+            if(root!=null)foreach(var entry in root.Rows.Concat(root.Delivered)){var found=Match((entry.Value as NavigationHostRow)?.AnswerOwner?.CorridorOwner?.Corridor);if(found!=null)return found;}
+            throw new ArgumentException("Recast Ready descriptor has no exact owned coordination BODY.");
+        }
         private static NavigationAnswer ResolveRestoredAnswerRole(NavRetainedArray<NavOwnedStorage> catalog,int index,NavigationHostRoot root,NavigationRequest request,NavigationAnswerState saved)
         {
             if(catalog==null)return ResolveRestoredHostAnswer(root,request,saved);

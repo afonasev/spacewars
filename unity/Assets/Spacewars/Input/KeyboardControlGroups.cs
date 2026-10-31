@@ -33,6 +33,9 @@ namespace Spacewars.Input
         { var next=new HashSet<int>(selection); if(!observed.SetEquals(next))Active=null; observed=next; }
         public void Prune(IReadOnlyList<KeyboardSelectable> entities)
         { foreach(var index in groups.Keys.ToArray())groups[index]=Normalize(groups[index],entities); }
+        // Inspect a wheel sector without recalling it or changing active-group/focus state.
+        public int[] Members(int index,IReadOnlyList<KeyboardSelectable> entities)
+        { return groups.TryGetValue(index,out var ids)?Normalize(ids,entities):Array.Empty<int>(); }
         public int[] Apply(int index, bool assign, double time, IEnumerable<int> selection, IReadOnlyList<KeyboardSelectable> entities, double doubleTapMs, out bool focus)
         {
             focus=false;
@@ -44,12 +47,21 @@ namespace Spacewars.Input
             lastIndex=assign?0:index; lastTime=assign?double.NegativeInfinity:time;
             Active=index; observed=new HashSet<int>(result); return result;
         }
-        public int SlotCount(IReadOnlyList<KeyboardSelectable> entities)
-        { Prune(entities);return Math.Min(9,Math.Max(3,groups.Where(g=>g.Value.Length>0).Select(g=>g.Key).DefaultIfEmpty(0).Max()+1)); }
-        public OfflinePadSector[] PadActions(IEnumerable<int> selection,IReadOnlyList<KeyboardSelectable> entities,bool assign,int slots)
+        public int[] VisibleSlots(IReadOnlyList<KeyboardSelectable> entities,int minimum,int spare)
+        {
+            Prune(entities);var occupied=groups.Where(g=>g.Value.Length>0).Select(g=>g.Key).ToArray();
+            // Nine is the existing keyboard slot identity limit, not a visual tuning parameter.
+            int count=Math.Min(9,Math.Max(minimum,occupied.Length+spare));
+            return occupied.Concat(Enumerable.Range(1,9).Except(occupied).Take(count-occupied.Length)).OrderBy(i=>i).ToArray();
+        }
+        public OfflinePadSector[] PadActions(IEnumerable<int> selection,IReadOnlyList<KeyboardSelectable> entities,bool assign,IReadOnlyList<int> slots)
         {
             Prune(entities);bool canAssign=Normalize(selection,entities).Any(id=>entities.Any(e=>e.Id==id&&!e.Building));
-            return Enumerable.Range(1,slots).Select(index=>new OfflinePadSector(index.ToString(),assign?canAssign:groups.TryGetValue(index,out var ids)&&ids.Length>0)).ToArray();
+            return slots.Select(index=>
+            {
+                bool occupied=groups.TryGetValue(index,out var ids)&&ids.Length>0;
+                return new OfflinePadSector(index.ToString(),canAssign||occupied){RecallEnabled=occupied,CanAssign=canAssign,CanAdd=canAssign&&occupied};
+            }).ToArray();
         }
         public int[] RecallPad(int index,IReadOnlyList<KeyboardSelectable> entities)
         {

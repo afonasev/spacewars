@@ -8,8 +8,8 @@ namespace Spacewars.Presentation
     {
         public string id="native-unit-wreck-v1";
         public int revision=1;
-        [SurfaceSetting("Unit wrecks","Visible lifetime","Game time after the destruction flash. Existing wrecks keep their captured duration.","s",.1f,10,.1f)]
-        public float lifetimeSeconds=1;
+        [SurfaceSetting("Unit wrecks","Visible lifetime","Game time after the destruction flash. Existing wrecks keep their captured duration.","s",.1f,120,.1f)]
+        public float lifetimeSeconds=30;
         public IEnumerable<SurfaceParameter> Parameters()
         {
             foreach(var field in GetType().GetFields())

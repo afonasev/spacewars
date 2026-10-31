@@ -27,6 +27,40 @@ namespace Spacewars.Tests.EditMode
             worker.Start();for(int i=0;i<100;i++){var data=AiRosterCatalog.Initial.CopyData();data.Single(d=>d.kind==PlayableEntityKind.Tank).lineWeight=.5;var custom=new AiRosterCatalog(data);Assert.AreNotEqual(hash,custom.Hash);Assert.AreEqual(.5,custom.For(PlayableEntityKind.Tank).lineWeight);}
             Assert.True(worker.Join(5000));Assert.Null(failure);Assert.AreEqual(1,AiRosterCatalog.Initial.For(PlayableEntityKind.Tank).lineWeight);Assert.AreEqual(1,AiRosterCatalog.Initial.For(PlayableEntityKind.Shkval).supportWeight);
         }
+        [Test] public void ScalarQueriesPreserveCustomValuesAndDetachedOwnership()
+        {
+            var data=AiRosterCatalog.Initial.CopyData();
+            foreach(var row in data){row.lineWeight=.25;row.supportWeight=.5;row.reconWeight=.75;}
+            var custom=new AiRosterCatalog(data);
+            foreach(var catalog in new[]{AiRosterCatalog.Initial,custom})foreach(PlayableEntityKind kind in Enum.GetValues(typeof(PlayableEntityKind))){
+                var descriptor=catalog.For(kind);
+                Assert.AreEqual(descriptor.lineWeight,catalog.LineWeight(kind));
+                Assert.AreEqual(descriptor.supportWeight,catalog.SupportWeight(kind));
+                Assert.AreEqual(descriptor.reconWeight,catalog.ReconWeight(kind));
+                foreach(var tag in new[]{"air","ground","building","absent",null})Assert.AreEqual(descriptor.targetTags.Contains(tag),catalog.Targets(kind,tag));
+                descriptor.lineWeight=99;descriptor.targetTags[0]="mutated";
+                Assert.AreNotEqual(99,catalog.LineWeight(kind));Assert.False(catalog.Targets(kind,"mutated"));
+            }
+            Assert.Throws<InvalidOperationException>(()=>custom.For((PlayableEntityKind)999));
+            Assert.Throws<InvalidOperationException>(()=>custom.LineWeight((PlayableEntityKind)999));
+        }
+        [Test] public void MeasureScalarArmyQueriesAgainstDetachedDescriptors()
+        {
+            const int repeats=1000,count=400;
+            double Run(bool scalar,out double sum){
+                sum=0;var watch=Stopwatch.StartNew();
+                for(int repeat=0;repeat<repeats;repeat++)for(int row=0;row<count;row++){
+                    var kind=(PlayableEntityKind)(row%4);var catalog=AiRosterCatalog.Initial;
+                    sum+=scalar?catalog.LineWeight(kind)+catalog.SupportWeight(kind)+(catalog.Targets(kind,"ground")?1:0):
+                        catalog.For(kind).lineWeight+catalog.For(kind).supportWeight+(catalog.For(kind).targetTags.Contains("ground")?1:0);
+                }
+                watch.Stop();return watch.Elapsed.TotalMilliseconds;
+            }
+            Run(false,out _);Run(true,out _);
+            double a=Run(false,out double first),b=Run(true,out double candidate),c=Run(false,out double last);
+            Assert.AreEqual(first,candidate);Assert.AreEqual(first,last);
+            TestContext.WriteLine(string.Format(CultureInfo.InvariantCulture,"ROSTER_SCALAR_ABA count={0} repeats={1} original_ms={2:R} scalar_ms={3:R} original2_ms={4:R} sum={5:R}",count,repeats,a,b,c,candidate));
+        }
         [Test] public void MeasureRepeatedInitialLookupAgainstValidatedConstruction()
         {
             var data=AiRosterCatalog.Initial.CopyData();double expected=0,actual=0;const int count=1000;

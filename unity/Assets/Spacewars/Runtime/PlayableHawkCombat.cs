@@ -51,7 +51,7 @@ namespace Spacewars.Runtime
         }
         private void AdvanceHawkCombat(Unit u,double dt)
         {
-            var air=u.Air;var self=air.Actor;
+            var air=u.Air;var self=air.Actor;bool defaultCombat=u.DefaultCombat!=null;
             u.Reload=Math.Max(0,u.Reload-dt);u.BurstDelay=Math.Max(0,u.BurstDelay-dt);u.Repath=Math.Max(0,u.Repath-dt);
             bool horizontal=Math.Abs(u.Velocity.X)>1e-5||Math.Abs(u.Velocity.Z)>1e-5||self.Moving&&!air.Departing||air.Yielding;
             bool turning=Math.Abs(air.YawVelocity)>profile.HawkPreparationYawSpeed;
@@ -60,7 +60,7 @@ namespace Spacewars.Runtime
             if(u.BurstRemaining>0&&(horizontal||turning||!Valid(u.BurstTarget)))InterruptBurst(u);
             if(u.Target!=0&&!VisibleTarget(u.Owner,u.Target))
             {if(u.BurstRemaining>0)InterruptBurst(u);u.Target=0;u.ExplicitTarget=false;if(u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Attack)u.CurrentOrder=null;}
-            if(!u.ExplicitTarget&&(!self.Moving||air.Departing||u.HasAttackMove)&&u.BurstRemaining==0)u.Target=HawkTarget(u);
+            if(!defaultCombat&&!u.ExplicitTarget&&(!self.Moving||air.Departing||u.HasAttackMove)&&u.BurstRemaining==0)u.Target=HawkTarget(u);
             if(!Target(u.Target,out var target,out _))
             {
                 if(u.HasAttackMove&&!self.Held&&!self.Moving&&Distance(self.Position,u.AttackMove)>profile.Navigation.ArrivalTolerance){self.Goal=u.AttackMove;self.Moving=true;self.Outcome=NavigationOutcome.Moving;}
@@ -73,7 +73,7 @@ namespace Spacewars.Runtime
                 {self.Goal=approach;self.Moving=true;self.Outcome=NavigationOutcome.Moving;air.Short=false;u.Repath=profile.AttackRepathSeconds;}
                 return;
             }
-            if(!self.Held&&!air.Departing&&(u.ExplicitTarget||u.HasAttackMove)&&self.Moving)
+            if(!self.Held&&!air.Departing&&(u.ExplicitTarget||u.HasAttackMove||defaultCombat)&&self.Moving)
             {self.Moving=false;self.Goal=self.Position;air.Short=false;return;}
             if(horizontal||turning||u.StoppedSeconds<HawkPreparation(u)||u.Reload>0)return;
             double desired=distance<1e-9?self.Heading:Math.Atan2(target.Z-self.Position.Z,target.X-self.Position.X);
@@ -94,14 +94,15 @@ namespace Spacewars.Runtime
         {
             if(!Target(target,out var goal,out _))return;
             var n=u.Air.Actor;
-            // Exact authored muzzleLeft/muzzleRight coordinates in the committed Unity prefab.
-            double lateral=(side==0?.99:-.99)*profile.HawkModelScale,forward=.74*profile.HawkModelScale;
-            var start=new BallisticPoint(n.Position.X+Math.Cos(n.Heading)*forward+Math.Sin(n.Heading)*lateral,u.Air.Height+.56*profile.HawkModelScale,n.Position.Z+Math.Sin(n.Heading)*forward-Math.Cos(n.Heading)*lateral);
+            var start=HawkWeaponGeometry.Muzzle(n.Position,u.Air.Height,n.Heading,u.Air.Pitch,u.Air.Roll,profile.HawkModelScale,side);
             var end=new BallisticPoint(goal.X,TargetHeight(target,goal),goal.Z);var direction=HawkRocketFlight.Sub(end,start);var normalized=HawkRocketFlight.Normal(direction);
-            double lifetime=(HawkRocketFlight.Length(direction)+profile.HawkRange*profile.ProjectileExtraRangePercent/100)/profile.HawkMissileSpeed;
+            var origin=new BallisticPoint(n.Position.X,u.Air.Height+HawkBodyHeight/2,n.Position.Z);
+            double muzzleOffset=HawkRocketFlight.Length(HawkRocketFlight.Sub(start,origin));
+            double lifetime=Math.Max(0,profile.HawkRange*(1+profile.ProjectileExtraRangePercent/100)-muzzleOffset)/profile.HawkMissileSpeed;
+            if(lifetime<=0)return;
             projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=u.Id,Target=target,Faction=u.Owner,Kind=PlayableEntityKind.Hawk,Damage=profile.HawkDamage*WeaponMultiplier(u.Owner),Radius=profile.HawkMissileRadius,Speed=profile.HawkMissileSpeed,Position=start.Ground,Height=start.Y,Spatial=true,DirectionX=normalized.X,DirectionY=normalized.Y,DirectionZ=normalized.Z,
-                Hawk=new HawkRocketFlight(target,start,direction,profile.HawkMissileSpeed,profile.HawkMissileTurn,lifetime)});
-            Sound(PlayableSoundKind.Shot,n.Position,u.Kind,u.Owner);
+                Hawk=new HawkRocketFlight(target,start,direction,profile.HawkMissileSpeed,HawkSalvo(u.Owner)?profile.HawkMissileTurn:0,lifetime)});
+            RememberDefaultShot(u);Sound(PlayableSoundKind.Shot,n.Position,u.Kind,u.Owner,unitId:u.Id,altitude:u.Air.Height,shotSide:side);
         }
         private void FireAirTracer(Unit u,NavPoint from,NavPoint target)
         {
@@ -117,7 +118,7 @@ namespace Spacewars.Runtime
             direction=HawkRocketFlight.Add(HawkRocketFlight.Scale(direction,Math.Cos(spread)),HawkRocketFlight.Scale(tangent,Math.Sin(spread)));
             double offset=profile.ExplorerMuzzleOffset;start=HawkRocketFlight.Add(start,HawkRocketFlight.Scale(direction,offset));
             projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=u.Id,Target=u.Target,Faction=u.Owner,Kind=u.Kind,Damage=profile.ExplorerDamage*WeaponMultiplier(u.Owner),Radius=0,Speed=profile.ExplorerProjectileSpeed,Position=start.Ground,Height=start.Y,Spatial=true,DirectionX=direction.X,DirectionY=direction.Y,DirectionZ=direction.Z,
-                Remaining=HawkRocketFlight.Length(HawkRocketFlight.Sub(end,start))+profile.ExplorerRange*profile.ProjectileExtraRangePercent/100});
+                Remaining=Math.Max(0,profile.ExplorerRange*(1+profile.ProjectileExtraRangePercent/100)-offset)});
             Sound(PlayableSoundKind.Shot,from,u.Kind,u.Owner);
         }
         private bool AdvanceAirProjectile(Projectile p,double dt)
@@ -128,13 +129,19 @@ namespace Spacewars.Runtime
             {
                 oldDirection=before.Direction;oldLife=before.RemainingLife;
                 BallisticPoint? target=Target(p.Target,out var point,out _)?new BallisticPoint(point.X,TargetHeight(p.Target,point),point.Z):(BallisticPoint?)null;
-                before.Advance(dt,target);to=before.Position;
+                var velocity=default(BallisticPoint);
+                if(units.TryGetValue(p.Target,out var victim))
+                {
+                    double vertical=dt>0&&victim.Air!=null?(victim.Air.Height-victim.Air.PreviousHeight)/dt:0;
+                    velocity=new BallisticPoint(victim.Velocity.X,vertical,victim.Velocity.Z);
+                }
+                before.Advance(dt,target,velocity);to=before.Position;
             }
             else{move=Math.Min(p.Speed*dt,p.Remaining);to=new BallisticPoint(from.X+p.DirectionX*move,from.Y+p.DirectionY*move,from.Z+p.DirectionZ*move);}
-            if(AirContact(from,to,p.Radius,p.Owner,null,true,out int hit,out var contact,out _))
+            if(AirContact(from,to,p.Radius,p.Owner,null,true,out int hit,out var contact,out _,p.Target))
             {
                 bool hostile=hit!=0&&(units.TryGetValue(hit,out var unit)?Hostile(unit.Owner,p.Faction):buildings.TryGetValue(hit,out var building)&&Hostile(building.Owner,p.Faction));
-                if(hostile&&!TryDamageWithOwner(hit,p.Damage,p.Owner,p.Faction))
+                if((hostile||wrecks.ContainsKey(hit))&&!TryDamageWithOwner(hit,p.Damage,p.Owner,p.Faction))
                 {if(before!=null)p.Hawk=HawkRocketFlight.Restore(p.Target,from,oldDirection,before.Speed,before.TurnSpeed,oldLife);return false;}
                 var fact=new PlayableDirectContact(p.Id,hit,from,contact);
                 PublishSound(new PlayableSoundEvent(++nextSoundEvent,Tick,PlayableSoundKind.Impact,contact.Ground,p.Kind,buildings.ContainsKey(hit),contact:fact),null);return true;
@@ -145,7 +152,7 @@ namespace Spacewars.Runtime
         }
         // Earliest contact wins: a wall behind a unit cannot consume its hit. Motion is
         // relative to the same authority step, never a renderer collider or target teleport.
-        private bool AirContact(BallisticPoint from,BallisticPoint to,double radius,int source,PlayableOwner? observer,bool moving,out int hit,out BallisticPoint point,out double fraction)
+        private bool AirContact(BallisticPoint from,BallisticPoint to,double radius,int source,PlayableOwner? observer,bool moving,out int hit,out BallisticPoint point,out double fraction,int explicitWreck=0)
         {
             hit=0;fraction=double.PositiveInfinity;point=to;
             bool TerrainClear(BallisticPoint end)=>PlayableBallistics.TerrainLineClear(from,end,radius,SolidObstacles(),profile.BallisticWallHeight,AirSurface);
@@ -169,11 +176,11 @@ namespace Spacewars.Runtime
             foreach(var b in buildings.Values)
             {
                 if(b.Id==source||b.Phase==ConstructionPhase.Pending||observer.HasValue&&b.Owner!=observer&&!Vision(observer.Value).IsVisible(b.Position))continue;
-                double height=BuildingHeightForAir(b.Kind);
-                double t=AirCylinderContact(from,to,b.Position,BuildingRadius(b.Kind)+radius,GroundHeight(b.Position)-radius,GroundHeight(b.Position)+height+radius);
+                BuildingCombat(b).Segment(from,to,radius,out double t,out _);
                 if(t<fraction){fraction=t;hit=b.Id;}
             }
-            if(double.IsPositiveInfinity(fraction))return false;point=LerpAir(from,to,fraction);return true;
+            if(wrecks.TryGetValue(explicitWreck,out var wreck)&&wreck.Blocks(Tick)){double t=AirCylinderContact(from,to,wreck.Position,wreck.Radius+radius,GroundHeight(wreck.Position),GroundHeight(wreck.Position)+Math.Max(DirectFireHeight*2,wreck.Radius*2));if(t<fraction){fraction=t;hit=wreck.Id;}}
+            if(double.IsPositiveInfinity(fraction))return false;point=LerpAir(from,to,fraction);if(buildings.TryGetValue(hit,out var contactedBuilding))point=BuildingCombat(contactedBuilding).Closest(point);return true;
         }
         private static BallisticPoint LerpAir(BallisticPoint a,BallisticPoint b,double t)=>new BallisticPoint(a.X+(b.X-a.X)*t,a.Y+(b.Y-a.Y)*t,a.Z+(b.Z-a.Z)*t);
         private static double AirCylinderContact(BallisticPoint a,BallisticPoint b,NavPoint center,double radius,double bottom,double top)

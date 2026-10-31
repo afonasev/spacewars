@@ -27,11 +27,16 @@ namespace Spacewars.Simulation.Ai
     public static class AiOpeningCatalog
     {
         public static IReadOnlyList<AiOpeningDefinition> All{get;}=Array.AsReadOnly(new[]{
-            new AiOpeningDefinition("safe",PlayableAiOpening.Safe,"opening.weights.safe",new[]{new AiOpeningMilestone("factory",AiOpeningGoal.Factory),new AiOpeningMilestone("income",AiOpeningGoal.Income),new AiOpeningMilestone("force",AiOpeningGoal.Force,"factory","income")}),
-            new AiOpeningDefinition("greedy",PlayableAiOpening.GreedySafe,"opening.weights.greedy",new[]{new AiOpeningMilestone("income",AiOpeningGoal.Income),new AiOpeningMilestone("factory",AiOpeningGoal.Factory,"income"),new AiOpeningMilestone("force",AiOpeningGoal.Force,"factory")}),
-            new AiOpeningDefinition("expansion",PlayableAiOpening.GreedyMine,"opening.weights.expansion",new[]{new AiOpeningMilestone("expansion",AiOpeningGoal.Expansion),new AiOpeningMilestone("factory",AiOpeningGoal.Factory),new AiOpeningMilestone("force",AiOpeningGoal.Force,"factory","expansion")}),
-            new AiOpeningDefinition("blind-rush",PlayableAiOpening.BlindRush,"opening.weights.blindRush",new[]{new AiOpeningMilestone("factory",AiOpeningGoal.Factory),new AiOpeningMilestone("force",AiOpeningGoal.Force,"factory"),new AiOpeningMilestone("pressure",AiOpeningGoal.Pressure,"force")}),
-            new AiOpeningDefinition("scout-led",PlayableAiOpening.ExplorerAllIn,"opening.weights.scoutPressure",new[]{new AiOpeningMilestone("factory",AiOpeningGoal.Factory),new AiOpeningMilestone("intel",AiOpeningGoal.Intel),new AiOpeningMilestone("force",AiOpeningGoal.Force,"factory"),new AiOpeningMilestone("pressure",AiOpeningGoal.Pressure,"force","intel")})});
-        public static AiOpeningDefinition For(PlayableAiOpening opening)=>All.Single(d=>d.Opening==(opening==PlayableAiOpening.DoubleMineExplorerRush?PlayableAiOpening.GreedyMine:opening));
+            Plan("double-income",PlayableAiOpening.Safe,"doubleIncome"),
+            Plan("greedy-ground",PlayableAiOpening.GreedySafe,"greedy"),
+            Plan("aggressive",PlayableAiOpening.BlindRush,"aggressive"),
+            Plan("all-in",PlayableAiOpening.ExplorerAllIn,"allIn"),
+            Plan("air",PlayableAiOpening.Air,"air")});
+        private static AiOpeningDefinition Plan(string id,PlayableAiOpening opening,string weight)=>new AiOpeningDefinition(id,opening,"openingsMidgame.opening."+weight,new[]{
+            new AiOpeningMilestone("income",AiOpeningGoal.Income),new AiOpeningMilestone("factory",AiOpeningGoal.Factory,"income"),
+            new AiOpeningMilestone("force",AiOpeningGoal.Force,"factory"),new AiOpeningMilestone("pressure",AiOpeningGoal.Pressure,"force")});
+        // Historical enum names remain decodable, but cannot select retired expansion/scout behavior.
+        public static AiOpeningDefinition For(PlayableAiOpening opening)=>All.Single(d=>d.Opening==
+            (opening==PlayableAiOpening.GreedyMine||opening==PlayableAiOpening.DoubleMineExplorerRush?PlayableAiOpening.GreedySafe:opening));
     }
 }

@@ -1,0 +1,8 @@
+{
+  "id": "foundry-industrial-landmarks-v1",
+  "revision": 1,
+  "ribSpacing": 0.95,
+  "roofGap": 1.2,
+  "chimneyHeight": 4.2,
+  "craneReach": 5.2
+}

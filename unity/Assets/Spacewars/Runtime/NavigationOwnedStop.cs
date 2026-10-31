@@ -32,7 +32,7 @@ namespace Spacewars.Runtime
             {
                 bool allocationMatches=allocationThread==s.hostAllocationThread;
                 if(!allocationMatches&&!single&&inputs!=null&&context!=null&&(context.Kind==PlayableCommandKind.Move||context.Kind==PlayableCommandKind.AttackMove)&&
-                    (s.SameQuantumAllocationCompleted(budget,observedHost,worker,attachment,allocationThread)||s.SameEnvelopeAllocationStarted(budget,observedHost,worker,attachment,allocationThread))&&inputs.Current(s,budget))allocationMatches=true;
+                    (s.SameQuantumAllocationCompleted(budget,observedHost,worker,attachment,allocationThread)||s.SameEnvelopeAllocationStarted(budget,observedHost,worker,attachment,allocationThread)||s.RemainingMovementHostProgress(budget,observedHost,worker,attachment,allocationThread))&&inputs.Current(s,budget))allocationMatches=true;
                 return CurrentWithAllocation(s,allocationMatches);
             }
             private bool CurrentWithAllocation(NavigationSession s,bool allocationMatches)=>ReferenceEquals(geometry,s.geometry)&&ReferenceEquals(baseGeometry,s.navigationGeometry)&&ReferenceEquals(profile,s.profile)&&ReferenceEquals(terrain,s.terrain)&&ReferenceEquals(terrainNames,s.terrainNameOwners)&&geometryRevision==s.geometry.Revision&&baseRevision==s.navigationGeometry.Revision&&ReferenceEquals(context,s.commandGroup)&&activation==s.commandActivationRevision&&
@@ -118,9 +118,21 @@ namespace Spacewars.Runtime
                                 }
                                 var next=context.CopyHeader();next.Members=new GroupMemberState[ids.Length];if(marchConfigured){next.MarchVersion=2;next.MarchProfileRevision=marchProfileRevision;next.MarchStretch=marchStretch;}
                                 for(int i=0;i<ids.Length;i++){var actor=candidate.Actors[i];next.Members[i]=new GroupMemberState{ProgressVersion=next.MarchVersion==2?2:0,Entity=actor.Id,Incarnation=actor.Incarnation,MobilityRevision=checked(actor.MobilityRevision+1),OrderRevision=commandActivationRevision,Phase=hold?GroupMemberPhase.Held:GroupMemberPhase.Stopped};}
-                                int slot=0;foreach(var member in SpatialSlotOrder(next.Members,next.OriginalGoal))member.Slot=slot++;
-                                var live=CopyCommandGroup(next,scope);try{ng.SetPreparing(next.GroupId,live.PreparedRecord(scope),live);candidate.Births[candidate.BirthCount++]=live;}finally{live.ReleaseStorage();}
-                                foreach(int entity in ids)nm.SetPreparing(entity,next.GroupId);
+                                // Internal per-actor parking reuses the original issuance.
+                                // Keep its unselected peers when rebinding this subset.
+                                ng.TryGetValue(next.GroupId,out var remaining);
+                                if(remaining!=null&&(remaining.CommandSequence!=next.CommandSequence||remaining.OrderRevision!=next.OrderRevision))throw new InvalidOperationException("Issuance collision.");
+                                // Keep projection scratch admitted through the concrete owned copy.
+                                using(var membershipScratch=remaining==null?null:NavStorageScratch.Reserve(scope.OwnedReservation(),checked(256L+128L*(remaining.Members.Length+(long)next.Members.Length)))){
+                                    if(remaining!=null){
+                                        next.MarchVersion=remaining.MarchVersion;next.MarchProfileRevision=remaining.MarchProfileRevision;next.MarchStretch=remaining.MarchStretch;next.MarchAnchor=0;next.MarchInitialized=false;
+                                        int slot=remaining.Members.Max(m=>m.Slot)+1;foreach(var member in SpatialSlotOrder(next.Members,next.OriginalGoal))member.Slot=slot++;
+                                        foreach(var member in next.Members){member.ProgressVersion=next.MarchVersion==2?2:0;if(next.MarchVersion==2)member.Progress=member.ProgressOffset=Math.Max(0,remaining.MarchAnchor);}
+                                        next.Members=remaining.Members.Concat(next.Members).OrderBy(m=>m.Entity).ToArray();next.MembershipRevision=remaining.MembershipRevision+1;
+                                    }else{int slot=0;foreach(var member in SpatialSlotOrder(next.Members,next.OriginalGoal))member.Slot=slot++;}
+                                    var live=CopyCommandGroup(next,scope);try{ng.SetPreparing(next.GroupId,live.PreparedRecord(scope),live);candidate.Births[candidate.BirthCount++]=live;}finally{live.ReleaseStorage();}
+                                    foreach(int entity in ids)nm.SetPreparing(entity,next.GroupId);
+                                }
                             }
                             var seen=new System.Collections.Generic.HashSet<NavGeometry>();foreach(var row in installedExecutions.Values)if(Array.BinarySearch(ids,row.Entity)<0){corridors=checked(corridors+row.Corridor.EstimatedRetainedBytes+16L*row.InstalledRoute.Length);if(seen.Add(row.MovementGeometry))geometryBytes+=GeometryRetention(row.MovementGeometry);if(seen.Add(row.BaseGeometry))geometryBytes+=GeometryRetention(row.BaseGeometry);}
                             candidate.AdmissionOwner=PrepareAdmissionProjection(ng,np,requestSequence,checked(publication+1),operation,scope,admissionOwner);

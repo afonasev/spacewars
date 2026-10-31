@@ -90,6 +90,7 @@ namespace Spacewars.Runtime
     }
     public sealed class NavigationAdmission
     {
+        internal static bool SupportsAuthoredTerrain(IPlayableTerrain terrain)=>PartitionNavigationProvider.SupportsTerrain(terrain)||terrain is StackedRampQualificationMap;
         // Shared exact flat provider factory for host admission and authority
         // qualification; both sides must derive the same binding from geometry.
         public static LayeredNavigationProvider CertifiedFlatProvider(NavGeometry geometry)
@@ -136,7 +137,7 @@ namespace Spacewars.Runtime
             SurfaceProviderId = providerId; SurfaceSemanticsVersion = surfaceVersion;
             // Only sealed, immutable authored maps may cross the worker boundary.
             // Their geometry is still bound and checked per scheduled request.
-            AuthoredTerrain = PartitionNavigationProvider.SupportsTerrain(authoredTerrain)
+            AuthoredTerrain = SupportsAuthoredTerrain(authoredTerrain)
                 ? authoredTerrain : null;
             if(AuthoredTerrain!=null&&(AuthoredTerrain.Id!=providerId||
                 AuthoredTerrain.SurfaceSemanticsVersion!=surfaceVersion||
@@ -154,7 +155,7 @@ namespace Spacewars.Runtime
             if(publicationIdentity<0)throw new ArgumentException("Invalid admission publication identity.");
             PublicationIdentity=publicationIdentity;Generation=generation;PublishedThroughRequestSequence=sequence;
             SurfaceProviderId=providerId;SurfaceSemanticsVersion=surfaceVersion;
-            AuthoredTerrain=PartitionNavigationProvider.SupportsTerrain(terrain)?terrain:null;
+            AuthoredTerrain=SupportsAuthoredTerrain(terrain)?terrain:null;
             if(AuthoredTerrain!=null&&(AuthoredTerrain.Id!=providerId||AuthoredTerrain.SurfaceSemanticsVersion!=surfaceVersion||AuthoredTerrain.HalfExtent!=geometry.HalfExtent))throw new ArgumentException("Authored provider publication differs from authority geometry.");
             Geometry=geometry;Profile=profile;Groups=groups;Requests=requests;requestLookup=requests;
         }

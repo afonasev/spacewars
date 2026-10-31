@@ -90,11 +90,12 @@ namespace Spacewars.Runtime
         }
         private bool TryRegisterPhysicalArrival(PlayableRouteBinding binding)
         {
-            var port=binding.RoutePort;NavigationHostRoot source=null,next=null;NavigationRetentionBudget.Scope scope=null;
+            var port=binding.RoutePort;NavigationHostRoot source=null,next=null;NavigationRetentionBudget.Scope scope=null;OriginalGroupRecord diagnostic=default;bool observedDiagnostic=false;
             try{
                 if(!port.TryOpenPhysicalHostScope(NavigationPreparationKind.Admission,epoch,port.Admission.PublicationIdentity,out scope))return false;
                 if(!port.TryObservePhysicalArrivalIngress(out var ingress,out var admissionPin,out var input,out var proposal,out var token,out var attempt))return false;
                 using var observedPin=admissionPin;var observed=observedPin.Value;
+                if(OriginalGroupDiagnostics.Active){diagnostic=new OriginalGroupRecord{Kind=OriginalGroupEvent.ChildRegistered,Sequence=proposal.Member.CommandSequence,Group=proposal.Member.GroupId,Entity=ingress.Entity,Request=ingress.Request,Attempt=attempt};observedDiagnostic=true;}
                 source=port.PinCommittedHostRoot();next=source.ForkOwned(scope.OwnedReservation());
                 NavNameKey key;
                 using(NavStorageScratch.Reserve(scope.OwnedReservation(),16384)){
@@ -104,10 +105,11 @@ namespace Spacewars.Runtime
                 }
                 var f=CapturePumpFrontier();next.SetFrontier(WithCounters(f,transfers:f.TransfersUsed+1),epoch,checked(ProgressSequence+1));
                 next.SetOperation(new NavigationHostRoot.OperationDescriptor(PumpStage.Transfer,f.TransfersUsed,true,true,key.Reference));
-                next.SealPrepared();port.PublishRegisteredPhysicalArrival(scope,source,next,observed,ingress,key,attempt);AdoptPhysicalFrontier(next);return true;
-            }catch(NavigationSession.PhysicalIngressRefused){return false;}finally{next?.ReleaseStorage();scope?.Discard();source?.Release();}
+                next.SealPrepared();port.PublishRegisteredPhysicalArrival(scope,source,next,observed,ingress,key,attempt);diagnostic.Committed=1;AdoptPhysicalFrontier(next);return true;
+            }catch(NavigationSession.PhysicalIngressRefused){diagnostic.Reason=3;return false;}catch{diagnostic.Committed=-1;diagnostic.Reason=5;throw;}finally{if(observedDiagnostic){diagnostic.Quantum=source?.QuantumSerial??0;OriginalGroupTrace.Append(diagnostic);}next?.ReleaseStorage();scope?.Discard();source?.Release();}
         }
         internal Func<bool> PauseAtPhysicalBoundary;
+        internal Func<bool> CapturePauseRequested;
         internal int PhysicalOperationsPerPump=int.MaxValue;
         private int pumpExecutions;
         internal bool PumpExecuting=>System.Threading.Volatile.Read(ref pumpExecutions)!=0;
@@ -120,7 +122,7 @@ namespace Spacewars.Runtime
         {
             if(budget<0||budget>int.MaxValue/WorkUnitsPerRequestBudget)throw new ArgumentOutOfRangeException(nameof(budget));
             var port=binding.RoutePort??throw new ArgumentException("Missing route authority facade.");
-            Attach(port);if(port.UseLegacyHost){PumpLegacy(binding,budget);return;}RefreshPhysicalFrontier(port);
+            Attach(port);if(port.UsesRecastGroundRoutes){PrepareRecastStartup(binding);using var nativePin=port.PinAdmission();recastPreparation?.Prune(nativePin.Value);}if(port.UseLegacyHost){PumpLegacy(binding,budget);return;}RefreshPhysicalFrontier(port);
             if(port.TickQuantaEnabled&&!port.QuantumRunnable){if(port.TryPromoteAccruedCredit()!=NavigationCreditPromotion.Promoted)return;RefreshPhysicalFrontier(port);}
             if(pumpStage==PumpStage.Idle){
                 var quantum=port.PinCommittedHostRoot();try{if(quantum?.TickQuantum==true)budget=quantum.QuantumBudget;}finally{quantum?.Release();}
@@ -136,7 +138,7 @@ namespace Spacewars.Runtime
             int operations=PhysicalOperationsPerPump;
             try{while(true){
                 if(operations--<=0)return;
-                if(PauseAtPhysicalBoundary?.Invoke()==true)return;
+                if(CapturePauseRequested?.Invoke()==true||PauseAtPhysicalBoundary?.Invoke()==true)return;
                 var f=CapturePumpFrontier();int grant=f.OriginalBudget;
                 switch(f.Stage){
                     case PumpStage.Retirement:

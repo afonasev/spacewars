@@ -156,6 +156,7 @@ namespace Spacewars.Runtime
                         using(NavStorageScratch.Reserve(scope.OwnedReservation(),NavStorageLayout.ObjectBytesBound(typeof(GroupOrderState))+NavStorageLayout.ObjectBytesBound(typeof(GroupMemberState)))){
                             using(EnterTransport()){if(!ReadySourceCurrent(candidate,names))return false;metadata=groups[answer.Corridor.Group].CopyHeader();var members=groups[answer.Corridor.Group].Members;for(int i=0;i<members.Length;i++)if(members[i].Entity==request.Entity){index=i;break;}if(index<0)return false;changed=members[index].Copy();}
                             if(metadata.MarchVersion==1){changed.Progress=0;changed.ProgressRequest=0;metadata.MarchAnchor=0;metadata.MarchInitialized=false;}
+                            else if(metadata.MarchVersion==2&&changed.ProgressRequest!=request.Request){changed.ProgressOffset=changed.Progress;changed.ProgressRequest=0;}
                             changed.Phase=changed.FormationReleased?GroupMemberPhase.Combat:GroupMemberPhase.March;
                             member=NavigationAuthorityMember.CopyWithValuesOwned((NavigationAuthorityMember)observation.Version.Members[index],new NavigationAuthorityMember.Values(changed),scope.OwnedReservation());
                             version=NavigationAuthorityGroup.CopyWithMemberAndMarchOwned(observation.Version,index,member,new NavigationAuthorityGroup.Values(metadata),scope.OwnedReservation());

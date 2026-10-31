@@ -1,0 +1,69 @@
+{
+  "Participants": [
+    {
+      "Name": "\u0418\u0433\u0440\u043e\u043a 1",
+      "Team": 1,
+      "Color": 0,
+      "Human": false,
+      "DeviceId": 0,
+      "Difficulty": 1
+    },
+    {
+      "Name": "\u0418\u0418",
+      "Team": 1,
+      "Color": 1,
+      "Human": false,
+      "DeviceId": 0,
+      "Difficulty": 1
+    },
+    {
+      "Name": "\u0418\u0418",
+      "Team": 1,
+      "Color": 2,
+      "Human": false,
+      "DeviceId": 0,
+      "Difficulty": 1
+    },
+    {
+      "Name": "\u0418\u0418",
+      "Team": 2,
+      "Color": 3,
+      "Human": false,
+      "DeviceId": 0,
+      "Difficulty": 1
+    },
+    {
+      "Name": "\u0418\u0418",
+      "Team": 2,
+      "Color": 4,
+      "Human": false,
+      "DeviceId": 0,
+      "Difficulty": 1
+    },
+    {
+      "Name": "\u0418\u0418",
+      "Team": 2,
+      "Color": 5,
+      "Human": false,
+      "DeviceId": 0,
+      "Difficulty": 1
+    }
+  ],
+  "Foundry": true,
+  "AiTestMap": false,
+  "CrimsonGrove": false,
+  "BasaltCrown": false,
+  "MossHighland": false,
+  "WhiteMeridian": false,
+  "HumanName": "\u0418\u0433\u0440\u043e\u043a 1",
+  "AiName": "\u0418\u0418",
+  "HumanTeam": 1,
+  "AiTeam": 2,
+  "HumanColor": 0,
+  "AiColor": 1,
+  "HumanPresent": true,
+  "AiPresent": true,
+  "Difficulty": 1,
+  "HasExplicitSeed": true,
+  "ExplicitSeed": 7
+}

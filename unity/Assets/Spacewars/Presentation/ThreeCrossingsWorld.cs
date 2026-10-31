@@ -20,17 +20,11 @@ namespace Spacewars.Presentation
             {
                 if(budget.Expired){yield return null;budget.Restart();}
                 double depth=support.IsBridge?map.DeckThickness*.18:map.WaterDepth;
-                MapPrism(support.Id,support.Bounds,-depth,support.Height,support.IsBridge||support.Id.StartsWith("platform-")?BridgeColor:BankColor,support.HeightAt,support.IsBridge||support.Id.StartsWith("platform-")?3:1);
+                MapPrism(support.Id,support.Bounds,-depth,support.Height,support.IsBridge||support.Id.StartsWith("platform-")?BridgeColor:BankColor,support.HeightAt,support.IsBridge?3:support.Id.StartsWith("platform-")?2:1);
                 if(support.IsBridge)
                 {
                     MapPrism("River below bridge",support.Bounds,-map.WaterDepth-map.DeckThickness,-map.WaterDepth,WaterColor,null,5);
-                    foreach(int side in new[]{-1,1})
-                    {
-                    var steel=CorporateOutpostModules.BridgeSteelwork(support,map,side,surfaceMaterials.Profile);terrainMeshes.Add(steel);
-                    var railing=new GameObject("Bridge metal lattice");railing.transform.SetParent(root,false);
-                    railing.AddComponent<MeshFilter>().sharedMesh=steel;var renderer=railing.AddComponent<MeshRenderer>();renderer.sharedMaterial=material;
-                    var block=new MaterialPropertyBlock();block.SetFloat("_SurfaceRole",3);block.SetFloat("_Dressing",4);block.SetColor("_BaseColor",Color.white);renderer.SetPropertyBlock(block);
-                    }
+
                 }
             }
             foreach(var water in map.Water)MapPrism("River — no support",water,-map.WaterDepth-map.DeckThickness,-map.WaterDepth,WaterColor,null,5);
@@ -39,19 +33,27 @@ namespace Spacewars.Presentation
                 if(budget.Expired){yield return null;budget.Restart();}
                 if(IsPlatformFence(rock))
                 {
-                    float deck=(float)map.Supports.First(s=>s.Id.StartsWith("platform-")&&!s.Id.EndsWith("-ramp")).Height;
-                    MapPrism("Platform steel foundation",rock,rock.Bottom,deck,BridgeColor,null,3);
-                    var mesh=PlatformFence(rock,deck,surfaceMaterials.Profile);terrainMeshes.Add(mesh);
-                    var fence=new GameObject("Platform steel fence");fence.transform.SetParent(root,false);
-                    fence.AddComponent<MeshFilter>().sharedMesh=mesh;fence.AddComponent<MeshRenderer>().sharedMaterial=material;
-                    var block=new MaterialPropertyBlock();block.SetFloat("_SurfaceRole",3);block.SetFloat("_Dressing",4);block.SetColor("_BaseColor",Color.white);
-                    fence.GetComponent<Renderer>().SetPropertyBlock(block);
+                    // Selected steel curb B keeps the exact authoritative blocker envelope.
+                    // A twelve-triangle prism is already minimal; no removable close detail.
+                    MapPrism("Yard retaining curb",rock,rock.Bottom,rock.Top,new Color(.59f,.57f,.51f),null,3);
                     continue;
                 }
                 MapPrism("Solid rock / platform edge",rock,rock.Bottom,rock.Top,double.IsNaN(rock.Top)?RockColor:rock.Top<map.WaterDepth?BridgeColor:rock.Bottom>0?Color.Lerp(RockColor,BridgeColor,.2f):RockColor,null,rock.Top<map.WaterDepth?2:4);
             }
+            var hydro=surfaceMaterials.Profile;
+            material.SetVector("_CrossingsHydro",new Vector4(1,-(float)map.CentralBridgeWidth/2-hydro.hydroEdgeOffset-.45f,hydro.hydroFoam,hydro.hydroFlow));
+            material.SetVector("_CrossingsHydroExtent",new Vector4((float)map.CentralBridgeHalfSpan,hydro.hydroSpillReach,0,0));
+            foreach(var part in ThreeCrossingsHydroworks.Build(map,hydro))
+            {
+                if(budget.Expired){yield return null;budget.Restart();}
+                terrainMeshes.Add(part.Mesh);
+                var obj=new GameObject(part.Name);obj.transform.SetParent(root,false);
+                obj.AddComponent<MeshFilter>().sharedMesh=part.Mesh;
+                var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=material;
+                var block=new MaterialPropertyBlock();block.SetFloat("_SurfaceRole",part.Role);block.SetFloat("_Dressing",part.Role==3?3:part.Role==5?2:1);block.SetColor("_BaseColor",Color.white);renderer.SetPropertyBlock(block);
+            }
             var details=ThreeCrossingsDetails.Plan(map,profile,surfaceMaterials);
-            var serviceMesh=ServiceEquipmentKit.Build();terrainMeshes.Add(serviceMesh);
+            var serviceMesh=ServiceEquipmentKit.Build();FinalProceduralMesh.IndexOwned(serviceMesh);terrainMeshes.Add(serviceMesh);
             var servicePlacements=ThreeCrossingsServiceScenery.Plan(map,profile,surfaceMaterials,details.FindAll(p=>p.Kind!="Boulder"),serviceMesh.bounds);
             details=ThreeCrossingsServiceScenery.ReserveServicePockets(details,servicePlacements,serviceMesh.bounds,profile,surfaceMaterials);
             foreach(var placement in servicePlacements)
@@ -63,15 +65,29 @@ namespace Spacewars.Presentation
             }
             yield return surfaceMaterials.PrepareHangarAccesses(map,material);
             yield return surfaceMaterials.PrepareWeathering(map,details,material);
-            foreach(int group in new[]{0,1,2,3,4})
+            var stones=ThreeCrossingsDetails.Build(details,surfaceMaterials.Art,true);
+            FinalProceduralMesh.IndexOwned(stones);terrainMeshes.Add(stones);
+            var debris=new GameObject("Detail — geological debris");debris.transform.SetParent(root,false);
+            debris.AddComponent<MeshFilter>().sharedMesh=stones;var debrisRenderer=debris.AddComponent<MeshRenderer>();debrisRenderer.sharedMaterial=material;
+            var stoneProperties=new MaterialPropertyBlock();stoneProperties.SetFloat("_SurfaceRole",4);stoneProperties.SetFloat("_Dressing",1);stoneProperties.SetColor("_BaseColor",Color.white);debrisRenderer.SetPropertyBlock(stoneProperties);
+            var kits=new System.Collections.Generic.Dictionary<string,Mesh[]>();
+            foreach(var placement in details.Where(p=>p.Kind!="Boulder"))
             {
                 if(budget.Expired){yield return null;budget.Restart();}
-                bool stones=group==0;
-                var mesh=ThreeCrossingsDetails.Build(details,surfaceMaterials.Art,stones,group==2,surfaceMaterials.Profile.tractorScale,group==3,surfaceMaterials.Profile.industrialScale,group==4,surfaceMaterials.Profile.mineUtilityScale);terrainMeshes.Add(mesh);
-                var obj=new GameObject(stones?"Detail — geological debris":group==2?"Detail — heavy tractor wrecks":group==3?"Detail — corporate extraction scenery":group==4?"Detail — perimeter building compounds":"Detail — service infrastructure");obj.transform.SetParent(root,false);
-                obj.AddComponent<MeshFilter>().sharedMesh=mesh;obj.AddComponent<MeshRenderer>().sharedMaterial=material;
-                var properties=new MaterialPropertyBlock();properties.SetFloat("_SurfaceRole",stones?4:3);properties.SetFloat("_Dressing",group+1);
-                properties.SetColor("_BaseColor",Color.white);obj.GetComponent<Renderer>().SetPropertyBlock(properties);
+                if(!kits.TryGetValue(placement.Kind,out var tiers))
+                {
+                    tiers=Enumerable.Range(0,3).Select(t=>CrossingStartYardKit.Build(placement.Kind,t)).ToArray();
+                    foreach(var mesh in tiers){mesh.bounds=tiers[0].bounds;terrainMeshes.Add(mesh);}kits.Add(placement.Kind,tiers);
+                }
+                var obj=new GameObject("Yard — "+placement.Kind);obj.transform.SetParent(root,false);
+                obj.transform.localPosition=placement.Position;obj.transform.localRotation=Quaternion.Euler(0,placement.Rotation,0);
+                float scale=CrossingIndustrialFleet.IsVehicle(placement.Kind)?placement.Scale:placement.Kind.StartsWith("Perimeter")?placement.Scale:CorporateOutpostModules.IsModule(placement.Kind)?surfaceMaterials.Profile.industrialScale:surfaceMaterials.Art.serviceScale;
+                obj.transform.localScale=Vector3.one*scale;
+                obj.AddComponent<MeshFilter>().sharedMesh=tiers[0];var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=material;
+                var properties=new MaterialPropertyBlock();properties.SetFloat("_SurfaceRole",3);properties.SetFloat("_Dressing",3);if(CrossingIndustrialFleet.IsVehicle(placement.Kind))properties.SetFloat("_YardObject",3);properties.SetColor("_BaseColor",Color.white);renderer.SetPropertyBlock(properties);
+                var lod=obj.AddComponent<ModelDetailLod>();lod.Configure(new Renderer[]{renderer},new[]{tiers[0]},new[]{tiers[1]},new[]{tiers[2]},tiers[0].bounds);
+                sceneryDetail.Add(lod); // The ordinary runtime camera selects procedural tiers too.
+                obj.AddComponent<CrossingSceneryDetail>().Bind(lod);
             }
         }
         // The authored contour builder uses ground-based quads for platform/ramp walls;
@@ -102,12 +118,14 @@ namespace Spacewars.Presentation
         // Surface role IDs are a fixed shader contract: 0 unchanged, 1 earth, 2 concrete, 3 steel, 4 rock, 5 water.
         private void MapPrism(string name,NavObstacle shape,double bottom,double top,Color color,System.Func<NavPoint,double> height=null,int surfaceRole=0)
         {
-            var obj=new GameObject(name);obj.transform.SetParent(root,false);var mesh=surfaceRole==4?ReadableRock(shape,bottom,top):TerrainMesh.Prism(shape,bottom,top,height);terrainMeshes.Add(mesh);obj.AddComponent<MeshFilter>().sharedMesh=mesh;obj.AddComponent<MeshRenderer>().sharedMaterial=material;var properties=new MaterialPropertyBlock();properties.SetColor("_BaseColor",color);properties.SetFloat("_SurfaceRole",surfaceRole);
+            var obj=new GameObject(name);obj.transform.SetParent(root,false);var mesh=surfaceRole==4?ReadableRock(shape,bottom,top):TerrainMesh.Prism(shape,bottom,top,height);FinalProceduralMesh.IndexOwned(mesh);terrainMeshes.Add(mesh);obj.AddComponent<MeshFilter>().sharedMesh=mesh;obj.AddComponent<MeshRenderer>().sharedMaterial=material;var properties=new MaterialPropertyBlock();properties.SetColor("_BaseColor",color);properties.SetFloat("_SurfaceRole",surfaceRole);
             // Hard-normal rock facets separate under URP normal bias. Include their
-            // reverse faces in the shadow map to keep the solid opaque across seams;
+            // reverse faces in the shadow map to keep the solid opaque across seams.
+            // Thin closed yard curbs need the same protection from biased face gaps;
             // this changes neither visible-face culling nor terrain/navigation geometry.
-            if(surfaceRole==4)obj.GetComponent<Renderer>().shadowCastingMode=ShadowCastingMode.TwoSided;
-            if(name.StartsWith("platform-")){var p=surfaceMaterials.Profile;properties.SetVector("_PlatformSteel",new Vector4(1,p.platformSteelLanePanels,p.platformSteelContrast,p.platformSteelTread));properties.SetVector("_PlatformBounds",new Vector4((float)shape.MinX,(float)shape.MinZ,(float)shape.MaxX,(float)shape.MaxZ));}
+            if(surfaceRole==4||name=="Yard retaining curb")obj.GetComponent<Renderer>().shadowCastingMode=ShadowCastingMode.TwoSided;
+            if(name.StartsWith("platform-")){var p=surfaceMaterials.Profile;properties.SetVector("_CrossingsYard",new Vector4(1,p.yardGravelReach,p.yardSteelWidth,p.yardSteelContrast));properties.SetVector("_PlatformBounds",new Vector4((float)shape.MinX,(float)shape.MinZ,(float)shape.MaxX,(float)shape.MaxZ));}
+            if(name=="Yard retaining curb")properties.SetFloat("_YardObject",1);
             obj.GetComponent<Renderer>().SetPropertyBlock(properties);
         }
         private Mesh ReadableRock(NavObstacle shape,double bottom,double top)
@@ -120,8 +138,10 @@ namespace Spacewars.Presentation
             var direction=new Vector2(-(float)(profile.CameraOffsetX/profile.CameraHeight),-(float)(profile.CameraOffsetZ/profile.CameraHeight));
             float projection=direction.magnitude;if(projection<.001f)return mesh;direction/=projection;
             float Cross(Vector2 a,Vector2 b)=>a.x*b.y-a.y*b.x;
+            var scaleCache=new System.Collections.Generic.Dictionary<Vector2,float>();
             float Scale(Vector3 p)
             {
+                var key=new Vector2(p.x,p.z);if(scaleCache.TryGetValue(key,out float cached))return cached;
                 var point=new NavPoint(p.x,p.z);float distance=0;
                 foreach(var mass in masses)
                 {
@@ -138,7 +158,8 @@ namespace Spacewars.Presentation
                     }
                     if(!float.IsPositiveInfinity(exit))distance=Mathf.Max(distance,exit);
                 }
-                return Mathf.Lerp(1,Mathf.Clamp01((distance-settings.rockRevealMargin)/(projection*fullHeight)),settings.rockPassageReveal);
+                float scale=Mathf.Lerp(1,Mathf.Clamp01((distance-settings.rockRevealMargin)/(projection*fullHeight)),settings.rockPassageReveal);
+                scaleCache.Add(key,scale);return scale;
             }
             var vertices=mesh.vertices;
             for(int i=0;i<vertices.Length;i++)if(vertices[i].y>0)vertices[i].y*=Scale(vertices[i]);
@@ -167,10 +188,11 @@ namespace Spacewars.Presentation
                 foreach(var slot in site.Slots){var pad=Part("Reserved slot",root,Point(slot.Position)+Vector3.up*(profile.AuthoredMap is FoundryMap?.14f:.02f),new Vector3((float)profile.OrdinaryPadRadius*2,.04f,(float)profile.OrdinaryPadRadius*2),color);pad.transform.rotation=Quaternion.Euler(0,-(float)slot.Heading*Mathf.Rad2Deg,0);}
             }
         }
-        public void InspectionHide(){if(groveMaterial)groveMaterial.SetTexture("_FogMask",Texture2D.whiteTexture);material.SetTexture("_FogMask",Texture2D.whiteTexture);if(meridianMaterial)meridianMaterial.SetTexture("_FogMask",Texture2D.whiteTexture);}
+        public void InspectionHide(){if(dockMaterial)dockMaterial.SetTexture("_FogMask",Texture2D.whiteTexture);if(groveMaterial)groveMaterial.SetTexture("_FogMask",Texture2D.whiteTexture);material.SetTexture("_FogMask",Texture2D.whiteTexture);if(meridianMaterial)meridianMaterial.SetTexture("_FogMask",Texture2D.whiteTexture);}
         public void InspectionReveal()
         {
             // Explicit diagnostic material override; gameplay fog/domain are unchanged.
+            if(dockMaterial)dockMaterial.SetTexture("_FogMask",Texture2D.blackTexture);
             material.SetTexture("_FogMask",Texture2D.blackTexture);
             if(groveMaterial)groveMaterial.SetTexture("_FogMask",Texture2D.blackTexture);
             if(meridianMaterial)meridianMaterial.SetTexture("_FogMask",Texture2D.blackTexture);

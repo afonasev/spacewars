@@ -11,7 +11,7 @@ namespace Spacewars.Presentation
         private VisualElement childMenu;
         private Button pauseSettings,pauseMain;
         private bool returningToMain;
-        private bool MenuOwnsInput=>inLobby||preparing||paused||childMenu!=null||ModalVisible()||ResultsVisible;
+        private bool MenuOwnsInput=>inLobby||preparing||menuPaused||paused&&!ProvingPreparation||childMenu!=null||ModalVisible()||ResultsVisible;
         // The coordinator alone owns the OS cursor across all split-screen seats.
         private bool MouseCursorVisible
         {
@@ -37,11 +37,6 @@ namespace Spacewars.Presentation
         {
             if(root!=null)SyncSystemCursor();
         }
-        private void OpenPauseHelp()
-        {
-            if(!paused)return;modal.style.display=DisplayStyle.None;
-            childMenu=NativeControlsHelp.Open(root,menuNavigation,()=>{childMenu=null;modal.style.display=DisplayStyle.Flex;menuNavigation.SetScope(modalCard,()=>Pause(false),modalCard.Q<Button>("pause-controls"));});
-        }
         private void OpenPauseSettings()
         {
             if(!paused)return;modal.style.display=DisplayStyle.None;
@@ -59,13 +54,19 @@ namespace Spacewars.Presentation
         private void TickMenuInput()
         {
             bool owned=MenuOwnsInput;var owner=localPauseOwner??this;owner.menuNavigation?.Tick();
-            if(!owned&&!MenuOwnsInput){var pressed=localPresentations.FirstOrDefault(seat=>seat.SeatPad?.startButton.wasPressedThisFrame==true);if(pressed!=null){PauseFrom(pressed,true);pressed.menuNavigation?.UseGamepad();}else if(localPresentations.Count==0&&Gamepad.current?.startButton.wasPressedThisFrame==true){Pause(true);menuNavigation?.UseGamepad();}}
+            if(!owned&&!MenuOwnsInput&&!SeatUsesKeyboard&&localInputFocused&&Keyboard.current?.escapeKey.wasPressedThisFrame==true){PauseFrom(this,true);menuNavigation?.UseKeyboardMouse();return;}
+            if(!owned&&!MenuOwnsInput){var pressed=localPresentations.FirstOrDefault(seat=>seat==this&&seat.SeatPad?.startButton.wasPressedThisFrame==true);if(pressed!=null){PauseFrom(pressed,true);pressed.menuNavigation?.UseGamepad();}else if(localPresentations.Count==0&&MenuPad?.startButton.wasPressedThisFrame==true){Pause(true);menuNavigation?.UseGamepad();}}
         }
         private NativeBalanceStore balanceStore;
         private void EnsureBalanceStore(){if(balanceStore!=null)return;string path=null;
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
+            var detailArgs=System.Environment.GetCommandLineArgs();int detailIndex=System.Array.IndexOf(detailArgs,"-mapModelDetailEvidence");
+            int yardIndex=System.Array.IndexOf(detailArgs,"-crossingYardEvidence");
+            if(yardIndex>=0&&yardIndex+1<detailArgs.Length)path=System.IO.Path.Combine(detailArgs[yardIndex+1],"native-balance.json");
+            if(detailIndex>=0&&detailIndex+1<detailArgs.Length)path=System.IO.Path.Combine(detailArgs[detailIndex+1],"native-balance.json");
             if(evidence!=null&&System.Array.IndexOf(System.Environment.GetCommandLineArgs(),"-hawkFlightEvidence")>=0)path=System.IO.Path.Combine(evidence,"native-balance.json");
             if(evidence!=null&&System.Array.IndexOf(System.Environment.GetCommandLineArgs(),"-provingGroundEvidence")>=0)path=System.IO.Path.Combine(evidence,"native-balance.json");
+            if(evidence!=null&&System.Array.IndexOf(System.Environment.GetCommandLineArgs(),"-fleetFinishEvidence")>=0)path=System.IO.Path.Combine(evidence,"native-balance.json");
             if(orbitalEvidence!=null)path=System.IO.Path.Combine(orbitalEvidence,"native-balance.json");
             if(routePerformanceEvidence&&evidence!=null&&System.Array.IndexOf(System.Environment.GetCommandLineArgs(),"-sixPlayerPerformanceEvidence")>=0)path=System.IO.Path.Combine(evidence,"native-balance.json");
 #endif
@@ -84,7 +85,7 @@ namespace Spacewars.Presentation
         private void RebindPresentation()
         {
             if(view?.ActiveProfile==null||ReferenceEquals(profile,view.ActiveProfile))return;
-            profile=view.ActiveProfile;world.Rebind(profile); // Shared route service rebinds its solver cache from authority publication.
+            profile=view.ActiveProfile;world.Rebind(profile);SharedChat?.Rebind(profile); // Shared route service rebinds its solver cache from authority publication.
         }
         private void CloseChildMenu()
         {childMenu?.RemoveFromHierarchy();childMenu=null;}

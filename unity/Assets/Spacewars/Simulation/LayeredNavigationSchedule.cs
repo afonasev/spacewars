@@ -924,7 +924,7 @@ namespace Spacewars.Simulation
                     else if(!ReferenceEquals(job.Connector.PreparedField,job.Field))job.Connector.RebindPreparedField(job.Field);
                     job.Field.AdvanceOne(job.Connector);job.FieldWork++;physicalField++;logicalField++;fieldQuota--;used++;job.Phase=JobPhase.Connectors;
                     peakLabels=Math.Max(peakLabels,job.Field.LabelCount);peakFrontier=Math.Max(peakFrontier,job.Field.FrontierCount);
-                    if(job.Field.Status!=NavSolveStatus.Pending&&job.FieldWork>0){fieldBuilds++;StoreField(job);}
+                    if(job.Field.Status!=NavSolveStatus.Pending&&job.FieldWork>0){StoreField(job);}
                     UpdatePeak();continue;
                 }
                 if (job.Phase == JobPhase.Direct) {
@@ -1067,7 +1067,12 @@ namespace Spacewars.Simulation
                         if (cachedFields.TryGetValue(job.Request.ArtifactKey, out var cached)) {
                             job.Field = lru[cached].Field; job.FieldDebt = lru[cached].Work;
                             lru.MoveLast(cached); cacheHits++;
-                        } else job.AdoptField(rootReservation==null?new NavSharedTerminalField(job.Graph, job.Request.Region, job.Request.MaxLabels):NavSharedTerminalField.CreateOwned(job.Graph,job.Request.Region,job.Request.MaxLabels,OwnedRootReservation));
+                        } else {
+                            job.AdoptField(rootReservation==null?new NavSharedTerminalField(job.Graph, job.Request.Region, job.Request.MaxLabels):NavSharedTerminalField.CreateOwned(job.Graph,job.Request.Region,job.Request.MaxLabels,OwnedRootReservation));
+                            // A partial field is already a real shared build. Count its
+                            // creation once, not each continuation or only exhaustion.
+                            if(job.Field.Status==NavSolveStatus.Pending)fieldBuilds++;
+                        }
                     }
                     if (job.FieldDebt == 0 && job.Field.Status != NavSolveStatus.Pending) {
                         fieldQuota--; logicalField++; physicalField++; used++;
@@ -1081,7 +1086,7 @@ namespace Spacewars.Simulation
                         peakFrontier = Math.Max(peakFrontier, job.Field.FrontierCount);
                     }
                     if (job.FieldDebt == 0 && job.Field.Status != NavSolveStatus.Pending) {
-                        if (job.FieldWork > 0) { fieldBuilds++; StoreField(job); }
+                        if (job.FieldWork > 0) { StoreField(job); }
                         job.Phase = JobPhase.Connectors;
                     }
                     UpdatePeak();

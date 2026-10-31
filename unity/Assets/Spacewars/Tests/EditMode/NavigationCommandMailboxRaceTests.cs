@@ -27,12 +27,15 @@ namespace Spacewars.Tests.EditMode
         public void MoveRejectsWorkerDriftAndPreservesInvariantIdentity(bool group,bool invariant)
         {
             var geometry=new NavGeometry(20,Array.Empty<NavObstacle>(),1);var s=new NavigationSession(1,geometry,PlayableProfile.Default.Navigation);var kernel=new CertifiedRouteKernel();
-            var fault=new InvalidOperationException("unrelated move preparation fault");byte[] expected=null;int hits=0;
+            var fault=new InvalidOperationException("unrelated move preparation fault");byte[] expected=null;int hits=0;s.CommandAdmissionDiagnosticsForQa=true;s.BeginCommandAdmissionForQa(123);
             bool Move()=>group?s.MoveGroup(new[]{1,2},new[]{new NavPoint(6,-3),new NavPoint(6,3)}):s.Move(1,new NavPoint(6,-3));
             try{
                 s.Crowd.Add(1,new NavPoint(-5,-3));s.Crowd.Add(2,new NavPoint(-5,3));Assert.True(s.MoveGroup(new[]{1,2},new[]{new NavPoint(5,-3),new NavPoint(5,3)}));expected=Bytes(s);
                 s.BeforeCommandMailboxSnapshotForQa=kind=>{Assert.AreEqual(NavigationSession.CommandMailboxKind.Movement,kind);hits++;s.BeforeCommandMailboxSnapshotForQa=null;if(invariant)throw fault;Transfer(s,kernel,geometry,PlayableProfile.Default);expected=Bytes(s);};
-                if(invariant)Assert.AreSame(fault,Assert.Throws<InvalidOperationException>(()=>Move()));else Assert.False(Move());
+                if(invariant)Assert.AreSame(fault,Assert.Throws<InvalidOperationException>(()=>Move()));else {
+                    Assert.False(Move());StringAssert.Contains("Command mailbox changed before prepared snapshot.",s.CommandAdmissionForQa(123));
+                    Assert.IsNull(s.CommandAdmissionForQa(124),"Never attach stale admission evidence to another sequence");
+                }
                 Assert.AreEqual(1,hits);CollectionAssert.AreEqual(expected,Bytes(s));Assert.Zero(s.PhysicalHostBudget.HeldBytes);Assert.Zero(s.PhysicalHostBudget.ActiveScopes);
                 Assert.True(Move());var prefix=Bytes(s);var cold=new NavigationSession(1,geometry,PlayableProfile.Default.Navigation);var coldKernel=new CertifiedRouteKernel();
                 try{cold.RestoreState(WorldWire.Unpack(prefix,WorldWire.ReadNavigationSessionState));CollectionAssert.AreEqual(prefix,Bytes(cold));

@@ -51,6 +51,7 @@ namespace Spacewars.Runtime
                 !recipe.Subscription.AssignedEndpoint.Position.Equals(request.Request.Goal)||
                 !ReferenceEquals(request.Request.Geometry,provider.Geometry))
                 throw new ArgumentException("Ready corridor differs from its registered row.");
+            route.RecastPlan?.ValidateBindings(recipe.GraphKey,provider.Provider.Binding,recipe.Profile.ExactProfileBinding,request.Request.HeldIdentity,recipe.Clearance.Radius,request.Request.Geometry.Revision);
             NavTypedLeg previous=null;
             foreach(var leg in route.Legs){
                 if(leg==null||previous!=null&&!previous.To.Equals(leg.From))
@@ -66,15 +67,17 @@ namespace Spacewars.Runtime
         {
             ValidateBinding(request,provider,recipe,route);
             var id=recipe.Subscription;
-            return new NavCorridorDescriptor(NavCorridorDescriptor.CurrentVersion,recipe.GraphKey,
+            var descriptor=new NavCorridorDescriptor(NavCorridorDescriptor.CurrentVersion,recipe.GraphKey,
                 provider.Provider.Binding,recipe.Profile.ExactProfileBinding,provider.SurfaceProviderId,
                 request.Request.HeldIdentity,topology,recipe.Clearance.Radius,recipe.Profile.GridCell,
                 id.Provenance,id.WorldGeneration,id.GroupId,id.RootOrderRevision,id.CommandSequence,
                 id.IssuedTick,id.ActivationRevision,id.EntityId,id.Incarnation,id.MobilityRevision,
                 id.RequestSequence,request.Request.Order,id.Origin,id.AssignedEndpoint,
-                route.Legs.Select(leg=>new NavCorridorLeg(leg.From,leg.To,leg.Kind,leg.PortalId,
-                    leg.Cost,NavCorridorSection.IndividualConnector,0,0)));
+                route.Legs.Select((leg,index)=>new NavCorridorLeg(leg.From,leg.To,leg.Kind,leg.PortalId,
+                    leg.Cost,Section(route,index),0,0)));
+            descriptor.RecastPlan=route.RecastPlan;route.RecastPlan?.Validate(route);return descriptor;
         }
+        private static NavCorridorSection Section(NavTypedRoute route,int index)=>route.RecastPlan==null?NavCorridorSection.IndividualConnector:index<route.RecastPlan.OriginLegs?NavCorridorSection.IndividualConnector:index<route.RecastPlan.TerminalLeg?NavCorridorSection.SharedTrunk:NavCorridorSection.TerminalConnector;
         private void Own(NavigationHostRequest request,NavigationHostProvider provider,
             NavDeclarationStorage recipe,NavTypedRoute route)
         {
@@ -120,7 +123,7 @@ namespace Spacewars.Runtime
                 var actual=routeRoot.Legs[n];var facade=legs[n];
                 if(!facade.From.Equals(actual.From)||!facade.To.Equals(actual.To)||
                     facade.Kind!=actual.Kind||facade.PortalId!=actual.PortalId||
-                    facade.Cost!=actual.Cost||facade.Section!=NavCorridorSection.IndividualConnector||
+                    facade.Cost!=actual.Cost||facade.Section!=Section(routeRoot,n)||
                     facade.Branch!=0||facade.DownstreamMergeLeg!=0)
                     throw new ArgumentException("Physical Ready corridor leg changed.");
             }

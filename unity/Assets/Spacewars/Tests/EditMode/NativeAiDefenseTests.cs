@@ -58,6 +58,17 @@ namespace Spacewars.Tests.EditMode
             var noRoute=PlayableAiObservation.From(DefenseView(61,true,proof:false));Assert.IsNull(new AiDefensePlanner("player-1",71).Propose(noRoute,P,AiProfile.Initial,Registry()));
             Assert.Throws<ArgumentException>(()=>d.Propose(Observation(62),P,AiProfile.Initial,new AiArmyRegistry("other",71,AiProfile.Initial,AiDifficulty.Fighter)),"Foreign registry cannot be used for defense");
         }
+        [Test] public void DefenseRecovery_ThreatGoneReleasesPendingReinforcement()
+        {
+            var o=PlayableAiObservation.From(DefenseView(60,true));var r=Registry();var d=new AiDefensePlanner(o.OwnerId,o.Generation);
+            var action=d.Propose(o,P,AiProfile.Initial,r);Assert.NotNull(action);d.Commit(o,action,r);
+            d.ObserveReceipt(Receipt(action,PlayableAiDeliveryStatus.Applied,61));
+            int reinforcement=o.Entities.First(u=>u.Owner==o.Owner&&u.Kind==PlayableEntityKind.Tank&&!action.EntityIds.Contains(u.Id)).Id;
+            Assert.True(r.TryReinforce(o,d.ArmyId,AiDefensePlanner.Policy,new[]{reinforcement}));
+            d.Observe(PlayableAiObservation.From(DefenseView(62,false)),r,P);
+            Assert.False(d.Active,"An ended base threat cannot hold the whole force in emergency waiting for one reinforcement");
+            Assert.Zero(r.ArmyFor(reinforcement));Assert.True(action.EntityIds.All(id=>r.ArmyFor(id)==0));r.AssertInvariants();
+        }
         [TestCase("ai-move-unsafe")][TestCase("ai-follow-unsafe")][TestCase("human-move")][TestCase("human-follow")]
         [TestCase("other-policy-move")][TestCase("unapplied-move")][TestCase("safe-current-move")]
         [TestCase("safe-current-follow")][TestCase("safe-core-fallback")]

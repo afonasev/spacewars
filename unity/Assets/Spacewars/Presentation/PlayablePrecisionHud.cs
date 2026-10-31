@@ -51,7 +51,7 @@ namespace Spacewars.Presentation
         }
         private void UpdatePrecisionContext(PlayableBuildingSnapshot building)
         {
-            bool visible=building!=null||selection.Count>0||selectedSite!=0||spectatorMode&&inspectionEntityId!=0;
+            bool visible=building!=null||selection.Count>0||spectatorMode&&inspectionEntityId!=0;
             armyRegion.style.display=visible?DisplayStyle.Flex:DisplayStyle.None;
             var ownSelected=view.Entities.Where(e=>spectatorMode?e.Id==inspectionEntityId:selection.Contains(e.Id)&&e.Owner==view.Owner).ToArray();
             var entity=ownSelected.FirstOrDefault(e=>e.Id==primarySelection)??ownSelected.FirstOrDefault();
@@ -59,11 +59,12 @@ namespace Spacewars.Presentation
             contextStats.text=entity==null?"":"Скорость "+PlayableUnitRules.Speed(profile,entity.Kind,entity.Upgraded).ToString("0.#")+" · Обзор "+PlayableUnitRules.Vision(profile,entity.Kind).ToString("0.#")+" · Дальность "+PlayableUnitRules.Range(profile,entity.Kind,entity.Upgraded).ToString("0.#")+(ownSelected.Length>1?" · Выбрано "+ownSelected.Length:"")+(entity.Held?" · HOLD":"");
             contextIcon.Set(building!=null?OrbitalPrecision.BuildingGlyph(building.Kind):entity==null?"building":entity.Kind==PlayableEntityKind.Hawk?"hawk":entity.Kind==PlayableEntityKind.Explorer?"explorer":entity.Kind==PlayableEntityKind.Shkval?"shkval":"tank",Ink);
             var healthRow=armyRegion.Q("context-health");healthRow.style.display=building!=null||entity!=null?DisplayStyle.Flex:DisplayStyle.None;
-            if(building!=null){contextHealth.style.width=Length.Percent((float)(100*building.Health/(double)TerritoryRules.Health(profile,building.Kind)));selectionLabel.text=BuildingName(building.Kind).ToUpperInvariant();contextHealthText.text=building.Health+" / "+TerritoryRules.Health(profile,building.Kind);}
+            if(building!=null){contextHealth.style.width=Length.Percent((float)(100*building.Health/(double)TerritoryRules.MaximumHealth(profile,building)));selectionLabel.text=BuildingName(building.Kind).ToUpperInvariant();contextHealthText.text=building.Health+" / "+TerritoryRules.MaximumHealth(profile,building);}
             else if(entity!=null){selectionLabel.text=UnitName(entity.Kind);contextHealth.style.width=Length.Percent((float)(100*PlayableUnitRules.HealthRatio(profile,entity)));contextHealthText.text=entity.Health+" / "+PlayableUnitRules.MaximumHealth(profile,entity).ToString("0.#");}
             // Production progress belongs to its active card; preserve construction/upgrade bars.
             if(building!=null&&building.Progress>=1&&(building.Kind==PlayableBuildingKind.Factory||building.Kind==PlayableBuildingKind.Hangar&&building.LaunchPhase==0))progress.style.display=DisplayStyle.None;
             if(building?.PrivateState?.Lifecycle!=null){var s=building.PrivateState.Lifecycle;lifecycleLabel.style.display=s.Selling||s.Repairing?DisplayStyle.Flex:DisplayStyle.None;}
+            RefreshSelectionDock(building,ownSelected);
             UpdateBuildingDock(building,entity);
             armyRegion.MarkDirtyRepaint();
         }

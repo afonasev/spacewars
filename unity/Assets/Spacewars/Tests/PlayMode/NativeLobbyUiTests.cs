@@ -224,7 +224,7 @@ public sealed class NativeLobbyUiTests
         CollectionAssert.AreEqual(new[]{"Кадет","Боец","Ветеран"},lobby.Q<DropdownField>("lobby-ai-difficulty").choices);
         Assert.AreEqual(5,lobby.Query<DropdownField>().ToList().Count);
         Assert.AreEqual(2,lobby.Query<LobbyColorField>().ToList().Count);
-        var launch=lobby.Q<Button>("lobby-launch");Assert.IsNotNull(launch);StringAssert.Contains("Start",launch.Children().OfType<Label>().Single().text);
+        var launch=lobby.Q<Button>("lobby-launch");Assert.IsNotNull(launch);Assert.AreEqual("Start",launch.Q<Label>("controller-glyph-symbol").text);
         Assert.AreEqual(2,launch.style.borderLeftWidth.value);Assert.AreEqual(FontStyle.Bold,launch.style.unityFontStyleAndWeight.value);
         Assert.Zero(lobby.Query<Label>().ToList().Count(label=>label.text=="Настройки"));
         Assert.IsNotNull(lobby.Q<Label>("lobby-title"));
@@ -370,6 +370,7 @@ public sealed class NativeLobbyUiTests
         var lobby=Get<VisualElement>("lobbyScreen");
         foreach(var glyph in lobby.Query<NativeControllerGlyph>().ToList())
         {
+            glyph.SetMenuVisibility(true,null);
             var label=glyph.Q<Label>("controller-glyph-symbol");Assert.IsNotNull(label);
             Assert.LessOrEqual(Vector2.Distance(label.worldBound.center,glyph.worldBound.center),.5f,glyph.name);
         }

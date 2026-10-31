@@ -229,6 +229,22 @@ namespace Spacewars.Tests.EditMode
                 TestContext.WriteLine("A23_NON_DIRECT_400 "+Newtonsoft.Json.JsonConvert.SerializeObject(scheduler.Counters));
             }finally{foreach(var result in results)result.ReleaseOwner();scheduler.ClearWorld();Assert.Zero(scheduler.RetainedBytes);}
         }
+        [Test] public void PartialFieldBuildCountSurvivesContinuationRestoreAndWarmReuse()
+        {
+            var provider=FieldCacheProvider();var request=Request(provider,0,0);var scheduler=new LayeredNavigationScheduler();
+            Assert.True(scheduler.Submit(request));Assert.Zero(scheduler.Counters.FieldBuilds);
+            scheduler.Advance(0,new NavEpochQuota(10000,0,10000),_=>true);Assert.Zero(scheduler.Counters.FieldBuilds);
+            scheduler.Advance(1,new NavEpochQuota(10000,1,10000),_=>true);Assert.AreEqual(1,scheduler.Counters.FieldBuilds);
+            var restored=LayeredNavigationScheduler.Restore(scheduler.Save(),new[]{request});scheduler.ClearWorld();scheduler=restored;
+            Assert.AreEqual(1,scheduler.Counters.FieldBuilds);
+            NavScheduledCompletion answer=null;
+            for(int epoch=2;epoch<100&&answer==null;epoch++){scheduler.Advance(epoch,new NavEpochQuota(10000,10000,10000),_=>true);scheduler.TryTake(_=>true,out answer);Assert.AreEqual(1,scheduler.Counters.FieldBuilds);}
+            Assert.NotNull(answer);Assert.AreEqual(NavSolveStatus.Ready,answer.Status);answer.ReleaseOwner();
+            var warm=Request(provider,0,1);Assert.True(scheduler.Submit(warm));answer=null;
+            for(int epoch=100;epoch<200&&answer==null;epoch++){scheduler.Advance(epoch,new NavEpochQuota(10000,10000,10000),_=>true);scheduler.TryTake(_=>true,out answer);Assert.AreEqual(1,scheduler.Counters.FieldBuilds);}
+            Assert.NotNull(answer);Assert.AreEqual(NavSolveStatus.Ready,answer.Status);Assert.Greater(scheduler.Counters.CacheHits,0);answer.ReleaseOwner();scheduler.ClearWorld();
+        }
+
         [Test] public void NonDirectSubsetCancellationAndCurrentCheckpointKeepOneSharedField()
         {
             var provider=FieldCacheProvider();var requests=Enumerable.Range(0,5).Select(i=>Request(provider,0,i)).ToArray();var scheduler=new LayeredNavigationScheduler();var results=new List<NavScheduledCompletion>();

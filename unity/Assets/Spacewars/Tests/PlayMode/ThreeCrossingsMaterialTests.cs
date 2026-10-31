@@ -80,7 +80,7 @@ namespace Spacewars.Tests.PlayMode
                 Assert.AreEqual(surfaceProfile.minePadContactStrength,shared.GetVector("_CrossingsMinePad").y);
                 Assert.AreEqual(surfaceProfile.minePadContactWidth,shared.GetVector("_CrossingsMinePad").z);
                 Assert.Less(surfaceProfile.roadFeather,1,"Road shoulders must preserve a compacted center.");
-                Assert.AreEqual("natural-frontier-v1@11",world.EnvironmentRevision);
+                Assert.AreEqual("natural-frontier-v1@12",world.EnvironmentRevision);
             }}finally{UnityEngine.Object.DestroyImmediate(root);}
         }
         [Test] public void ExpandedRoadPaintStopsAtSolidsAndFillsBridgeContacts()
@@ -198,19 +198,22 @@ namespace Spacewars.Tests.PlayMode
                 }
             }}finally{UnityEngine.Object.DestroyImmediate(material);}
         }
-        [Test] public void TwoHeavyWrecksKeepTheirFullGeometryOutsideProtectedEnvelopes()
+        [Test] public void SixFleetMachinesKeepTheirFullGeometryOutsideProtectedEnvelopes()
         {
             var map=Map();var gameplay=Gameplay(map);var material=new Material(Resources.Load<Shader>("TerritoryFog"));
             try{using(var surfaces=new ThreeCrossingsMaterials(ThreeCrossingsSurfaceProfile.Load(),map,material,gameplay))
             {
-                var plan=ThreeCrossingsDetails.Plan(map,gameplay,surfaces).Where(p=>p.Kind=="HeavyTractorWreck").ToArray();Assert.AreEqual(2,plan.Length);
+                var plan=ThreeCrossingsDetails.Plan(map,gameplay,surfaces).Where(p=>CrossingIndustrialFleet.IsVehicle(p.Kind)).ToArray();Assert.AreEqual(6,plan.Length);
                 foreach(var wreck in plan)
                 {
                     var mesh=ThreeCrossingsDetails.Build(new[]{wreck},surfaces.Art,false,true,surfaces.Profile.tractorScale);
                     try
                     {
-                        Assert.Greater(mesh.vertexCount,4000,"Heavy machine must have real wheels and machinery");
-                        Assert.Greater(mesh.bounds.size.z,8,"Industrial tractor is much larger than combat units");
+                        // The approved three-model fleet supersedes the old oversized wreck.
+                        // Check the complete authored source, without an arbitrary old vertex budget.
+                        var source=CrossingIndustrialFleet.Build(wreck.Kind,0);
+                        try{Assert.AreEqual(source.triangles.Length,mesh.triangles.Length,"Complete close model retained");}
+                        finally{UnityEngine.Object.DestroyImmediate(source);}
                         foreach(var v in mesh.vertices)
                         {
                             Assert.IsTrue(map.SupportsFootprint(new NavPoint(v.x,v.z),surfaces.Art.detailClearance),"Full wreck footprint must be supported with clearance");
@@ -402,13 +405,13 @@ namespace Spacewars.Tests.PlayMode
                 {
                     if(p.Kind.StartsWith("Perimeter"))continue; // Full ground building footprints are checked separately.
                     var point=new NavPoint(p.Position.x,p.Position.z);
-                    if(p.Kind!="HeavyTractorWreck")Assert.IsTrue(map.SupportsFootprint(point,p.Radius+surfaces.Art.detailClearance));
+                    if(!CrossingIndustrialFleet.IsVehicle(p.Kind))Assert.IsTrue(map.SupportsFootprint(point,p.Radius+surfaces.Art.detailClearance));
                     foreach(var site in TerritoryRules.Sites(gameplay))
                         Assert.Greater(Math.Sqrt(Math.Pow(point.X-site.Position.X,2)+Math.Pow(point.Z-site.Position.Z,2)),TerritoryRules.Radius(gameplay,site.Kind)+p.Radius);
                     foreach(bool stones in new[]{true,false})
                     {
                         if((p.Kind=="Boulder")!=stones)continue;
-                        var mesh=ThreeCrossingsDetails.Build(new[]{p},surfaces.Art,stones,p.Kind=="HeavyTractorWreck",surfaces.Profile.tractorScale,CorporateOutpostModules.IsModule(p.Kind),surfaces.Profile.industrialScale);
+                        var mesh=ThreeCrossingsDetails.Build(new[]{p},surfaces.Art,stones,CrossingIndustrialFleet.IsVehicle(p.Kind),surfaces.Profile.tractorScale,CorporateOutpostModules.IsModule(p.Kind),surfaces.Profile.industrialScale);
                         foreach(var v in mesh.vertices)
                         {
                             Assert.IsTrue(map.SupportsFootprint(new NavPoint(v.x,v.z),0),"Module overhangs solid or water");

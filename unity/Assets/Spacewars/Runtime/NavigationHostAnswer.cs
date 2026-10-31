@@ -19,7 +19,7 @@ namespace Spacewars.Runtime
         private bool released;
         internal override bool IsImmutableCaptureRoot=>Answer!=null;
         private bool LegacyReady=>Answer?.Status==NavSolveStatus.Ready&&routeRoot!=null&&corridorRoot==null;
-        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(LegacyReady?NavPhysicalStorageKind.LegacyProbeAnswer:NavPhysicalStorageKind.HostAnswer);
+        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(LegacyReady?NavPhysicalStorageKind.LegacyProbeAnswer:NavPhysicalStorageKind.HostAnswer,value:Answer?.Status==NavSolveStatus.Partial?NavPhysicalValueKind.HostPartialAnswerV1:NavPhysicalValueKind.None);
         private static long Charge(int count)=>checked(LayoutBase+16L*count);
         private NavigationHostAnswer(int count,bool ownerReference):base(Charge(count))
         {if(ownerReference)Retain();}
@@ -100,13 +100,14 @@ namespace Spacewars.Runtime
             NavPhysicalMacro.WriteEdge(writer,this,routeRoot,true);
             NavPhysicalMacro.WriteEdge(writer,this,corridorRoot,true);
         }
-        internal static NavigationHostAnswer ReadPhysicalBody(NavPhysicalBodyReader reader,bool legacyProbe=false)
+        internal static NavigationHostAnswer ReadPhysicalBody(NavPhysicalBodyReader reader,bool legacyProbe=false,bool partial=false)
         {
             var status=(NavSolveStatus)reader.Input.ReadInt32();
             var request=NavPhysicalMacro.ReadEdge<NavigationHostRequest>(reader);
             var route=NavPhysicalMacro.ReadEdge<NavRetainedArray<NavPoint>>(reader,true);
             var corridor=NavPhysicalMacro.ReadEdge<NavigationHostCorridor>(reader,true);
             if(!Enum.IsDefined(typeof(NavSolveStatus),status)||status==NavSolveStatus.Pending||
+                (status==NavSolveStatus.Partial)!=partial||
                 legacyProbe&&(status!=NavSolveStatus.Ready||route==null||corridor!=null||request.Request.Entity>=0||request.Request.CertifiedProviderBinding!=null)||
                 !legacyProbe&&((status==NavSolveStatus.Ready)!=(route!=null&&corridor!=null)||route!=null&&(route.Count==0||!ReferenceEquals(corridor.RequestOwner,request))))
                 throw new ArgumentException("Invalid physical answer status or roots.");

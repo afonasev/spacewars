@@ -41,7 +41,7 @@ namespace Spacewars.Presentation
             if(voices!=null)return;
             profile=NativeGameplayAudioProfile.Current;profile.Validate();
             plan=new GameplayAudioPlan(profile);
-            foreach(var key in new[]{"tank-shot","burst-shot","impact","explosion","order","reject","movement-loop","construction","demolition","repair","motion-start","motion-stop","damage","queued","work-start","ready","cancel","warning","select","ui","match-start","pause","result"})
+            foreach(var key in new[]{"tank-shot","burst-shot","impact","explosion","building-collapse","order","reject","movement-loop","construction","demolition","repair","motion-start","motion-stop","damage","queued","work-start","ready","cancel","warning","select","ui","match-start","pause","result"})
             {
                 int n=key=="tank-shot"||key=="burst-shot"||key=="impact"||key=="explosion"||key=="construction"||key=="demolition"||key=="repair"||key=="damage"?3:1;
                 clips[key]=Enumerable.Range(1,n).Select(i=>Resources.Load<AudioClip>("Sfx/Hybrid/"+key+"-"+i)).ToArray();
@@ -70,7 +70,7 @@ namespace Spacewars.Presentation
         public void Command(PlayableCommand command,bool accepted)
         {
             if(NativeSilentStartup.IsSilent)return;
-            Initialize();if(command==null||command.Origin==PlayableOrderOrigin.Ai||command.Kind==PlayableCommandKind.Restart)return;
+            Initialize();if(command==null||command.Origin==PlayableOrderOrigin.Ai||command.Kind==PlayableCommandKind.Restart||command.Kind==PlayableCommandKind.SignalAttack||command.Kind==PlayableCommandKind.SignalDefend||command.Kind==PlayableCommandKind.SignalRecon)return;
             string key=command.Generation+":"+command.PlayerId+":"+command.Sequence;
             double now=Time.unscaledTimeAsDouble;
             if(commandKeys.ContainsKey(key))return;commandKeys[key]=now;if(accepted)pendingCommands.Add(key);
@@ -86,6 +86,7 @@ namespace Spacewars.Presentation
             if(receipt.Status!=PlayableCommandStatus.Applied&&receipt.Status!=PlayableCommandStatus.Cancelled&&commandKeys.TryGetValue(key,out var at)&&Time.unscaledTimeAsDouble-at<2)
                 Signal(false,Time.unscaledTimeAsDouble);
         }
+        public void TeamSignal(){if(NativeSilentStartup.IsSilent)return;Initialize();SignalClip("order",Time.unscaledTimeAsDouble,1);}
         private void Signal(bool accepted,double now)
         {
             SignalClip(accepted?"order":"reject",now,1);

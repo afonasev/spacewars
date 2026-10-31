@@ -33,6 +33,8 @@ namespace Spacewars.Presentation
             return true;
         }
         public static string Rejection(ThreeCrossingsMap map,PlayableProfile gameplay,ThreeCrossingsMaterials surfaces,Bounds bounds,Vector3 position,float heading,IEnumerable<ThreeCrossingsDetails.Placement> existing,IEnumerable<NavPolygon> occupied)
+            =>Rejection(map,gameplay,surfaces,bounds,position,heading,existing,occupied,new ThreeCrossingsDetails.Clearance(map,gameplay,surfaces));
+        private static string Rejection(ThreeCrossingsMap map,PlayableProfile gameplay,ThreeCrossingsMaterials surfaces,Bounds bounds,Vector3 position,float heading,IEnumerable<ThreeCrossingsDetails.Placement> existing,IEnumerable<NavPolygon> occupied,ThreeCrossingsDetails.Clearance clearance)
         {
             float scale=surfaces.Profile.serviceEquipmentScale;
             var envelope=Envelope(bounds,position,scale,surfaces.Art.detailClearance,gameplay,heading);
@@ -43,7 +45,7 @@ namespace Spacewars.Presentation
             // profile clearance is applied once, not twice.
             var protectedEnvelope=Envelope(bounds,position,scale,0,gameplay,heading);
             var protectedBounds=new Bounds(new Vector3((float)((protectedEnvelope.MinX+protectedEnvelope.MaxX)/2-position.x),bounds.center.y*scale,(float)((protectedEnvelope.MinZ+protectedEnvelope.MaxZ)/2-position.z)),new Vector3((float)(protectedEnvelope.MaxX-protectedEnvelope.MinX),bounds.size.y*scale,(float)(protectedEnvelope.MaxZ-protectedEnvelope.MinZ)));
-            if(!ThreeCrossingsDetails.CompoundClear(map,gameplay,surfaces,protectedBounds,position,1,0))return "protected-support-projection";
+            if(!clearance.CompoundClear(protectedBounds,position,1,0,centerFirst:true))return "protected-support-projection";
             // Complete rectangle sampling against access strips; an enclosing circle
             // would reject narrow clear pockets even when every part is outside access.
             int nx=Mathf.CeilToInt(protectedBounds.size.x/.4f),nz=Mathf.CeilToInt(protectedBounds.size.z/.4f);
@@ -66,6 +68,7 @@ namespace Spacewars.Presentation
         public static List<ThreeCrossingsDetails.Placement> Plan(ThreeCrossingsMap map,PlayableProfile gameplay,ThreeCrossingsMaterials surfaces,IEnumerable<ThreeCrossingsDetails.Placement> existing,Bounds bounds)
         {
             var all=existing.ToArray();var result=new List<ThreeCrossingsDetails.Placement>();var occupied=new List<NavPolygon>();var art=surfaces.Profile;
+            var clearance=new ThreeCrossingsDetails.Clearance(map,gameplay,surfaces);
             foreach(var hangar in all.Where(p=>p.Kind=="PerimeterHangar"))
             {
                 if(result.Count>=art.serviceBayCount)break;
@@ -75,11 +78,11 @@ namespace Spacewars.Presentation
                     position.y=(float)map.SurfaceHeight(new NavPoint(position.x,position.z));
                     // Cheap necessary center checks precede full rectangles/rays; they
                     // reject only candidates whose actual body center is protected.
-                    if(!surfaces.ProtectedGround(map,gameplay,new Vector2(position.x,position.z),0))return false;
+                    if(!surfaces.ProtectedGround(map,gameplay,new Vector2(position.x,position.z),0,clearance.Sites))return false;
                     if(surfaces.RoadMask.GetPixelBilinear(position.x/(float)(map.HalfExtent*2)+.5f,position.z/(float)(map.HalfExtent*2)+.5f).r>.015f)return false;
                     foreach(float heading in new[]{0f,90f,180f,270f})
                     {
-                        if(!Clear(map,gameplay,surfaces,bounds,position,heading,all,occupied))continue;
+                        if(Rejection(map,gameplay,surfaces,bounds,position,heading,all,occupied,clearance)!=null)continue;
                         float radius=Mathf.Sqrt(Mathf.Pow(Mathf.Max(Mathf.Abs(bounds.min.x),Mathf.Abs(bounds.max.x)),2)+Mathf.Pow(Mathf.Max(Mathf.Abs(bounds.min.z),Mathf.Abs(bounds.max.z)),2))*art.serviceEquipmentScale;
                         result.Add(new ThreeCrossingsDetails.Placement(position,radius,"ServiceEquipment",heading,hangar.SiteId,art.serviceEquipmentScale));
                         occupied.Add(Envelope(bounds,position,art.serviceEquipmentScale,surfaces.Art.detailClearance,gameplay,heading));return true;

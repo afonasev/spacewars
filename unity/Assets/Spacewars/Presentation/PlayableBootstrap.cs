@@ -24,7 +24,7 @@ namespace Spacewars.Presentation
         private PlayableInput input;
         private readonly PlayableOrderMarkers orderMarkers=new PlayableOrderMarkers();
         private PlayableOrderMarkerLayer orderMarkerLayer;
-        private void SelectionMarkerEvent(){orderMarkers.Selected(view,selection,Time.unscaledTimeAsDouble);if(view!=null&&!paused&&!inLobby)SharedAudio?.Selection(view.OwnerId,string.Join(",",selection.OrderBy(id=>id))+":"+selectedSite+":"+selectedSlot+":"+primarySelection);}
+        private void SelectionMarkerEvent(){selectionRosterExpanded=false;EndSelectionRosterFocus();orderMarkers.Selected(view,selection,Time.unscaledTimeAsDouble);if(view!=null&&!paused&&!inLobby)SharedAudio?.Selection(view.OwnerId,string.Join(",",selection.OrderBy(id=>id))+":"+selectedSite+":"+selectedSlot+":"+primarySelection);}
         private void UpdateOrderMarkers(PlayableCommandReceipt[] receipts){orderMarkers.Observe(view,receipts,Time.unscaledTimeAsDouble);var marks=orderMarkers.Visible(view,selection,Time.unscaledTimeAsDouble);orderMarkerLayer?.Set(marks);compactMap?.SetOrderMarkers(marks);tacticalMap?.SetOrderMarkers(marks);}
         private PlayableWorld world;
         private Camera cameraView;
@@ -35,7 +35,7 @@ namespace Spacewars.Presentation
         private VisualElement hudRow,buildRegion,armyRegion,commandRegion,buildActions,modalCard;
         private Label creditsLabel,selectionLabel,noticeLabel,queueLabel,modalTitle,modalCaption,objective;
         private ProgressBar progress;
-        private Button hawkButton,shkvalButton,explorerButton,tankButton,resumeButton,modalRestartButton,modalExitButton,hudFocusButton,buildHangar,buildFactory,buildRefinery,buildScience,buildCenter,cancelBuilding;
+        private Button hawkButton,shkvalButton,explorerButton,tankButton,resumeButton,modalRestartButton,modalExitButton,provingStartButton,provingLabButton,hudFocusButton,buildGauss,buildRepairTower,buildTurret,buildHangar,buildFactory,buildRefinery,buildScience,buildCenter,cancelBuilding;
         private Label siteLabel;
         private int selectedSite,selectedSlot;
         private long generation,sequence,noticeSequence,lastTick=-1;
@@ -63,6 +63,13 @@ namespace Spacewars.Presentation
         private bool initializingMenu;
         private System.Collections.IEnumerator Start()
         {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            InitializeQaDeadline();
+#endif
+            Runtime.NavigationArrivalDiagnostics.StartIfRequested();Runtime.OriginalGroupDiagnostics.StartIfRequested();
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if(Array.IndexOf(Environment.GetCommandLineArgs(),"-tankDistantLodEvidence")>=0){gameObject.AddComponent<TankDistantEvidence>();enabled=false;yield break;}
+#endif
             initializingMenu=true;nativeMainMenuEnabled=true;
 #if !UNITY_EDITOR && !DEVELOPMENT_BUILD
             nativeMainMenuEnabled=true;
@@ -76,7 +83,11 @@ namespace Spacewars.Presentation
             // Let UI Toolkit lay out and paint before synchronous resource initialization.
             yield return null;yield return null;
             bool failed=false;
-            yield return LoadingPreparation.Run(InitializeGame(loading),ex=>{Debug.LogException(ex);failed=true;loading.Q<Label>("loading-status").text="Не удалось загрузить меню. Перезапустите игру.";});
+            yield return LoadingPreparation.Run(InitializeGame(loading),ex=>{Debug.LogException(ex);
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if(qaDeadlinePath!=null)BeginQaFinish("FAIL initialization "+ex,true);
+#endif
+            failed=true;loading.Q<Label>("loading-status").text="Не удалось загрузить меню. Перезапустите игру.";});
             if(failed)yield break;
             initializingMenu=false;
             yield return null;yield return null;
@@ -88,6 +99,9 @@ namespace Spacewars.Presentation
         {
                 localInputFocused=Application.isFocused;var commandLine=Environment.GetCommandLineArgs();
                 #if DEVELOPMENT_BUILD || UNITY_EDITOR
+                if(Array.IndexOf(commandLine,"-repairReview")>=0){gameObject.AddComponent<RepairTowerReviewCapture>();enabled=false;yield break;}
+                if(Array.IndexOf(commandLine,"-sentryReview")>=0){gameObject.AddComponent<SentryTurretReviewCapture>();enabled=false;yield break;}
+                if(Array.IndexOf(commandLine,"-tankComparison")>=0){gameObject.AddComponent<TankComparisonEvidence>();enabled=false;yield break;}
                 if(Array.IndexOf(commandLine,"-groundTrailVideo")>=0){gameObject.AddComponent<GroundTrailVideoEvidence>();enabled=false;yield break;}
 #endif
                 if(Array.IndexOf(commandLine,"-foundryGreybox")>=0){gameObject.AddComponent<FoundryGreybox>();enabled=false;yield break;}
@@ -110,7 +124,7 @@ namespace Spacewars.Presentation
                 var args=Environment.GetCommandLineArgs();for(int i=0;i+1<args.Length;i++)if(args[i]=="-playableEvidence")evidence=args[i+1];
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
                 responsiveUiEvidence=Array.IndexOf(args,"-responsiveUiEvidence")>=0;
-                battleHudUnattended=Array.IndexOf(args,"-provingGroundEvidence")>=0||Array.IndexOf(args,"-battleHudEvidence")>=0||Array.IndexOf(args,"-hawkFlightEvidence")>=0||Array.IndexOf(args,"-hawkCombatEvidence")>=0;
+                battleHudUnattended=Array.IndexOf(args,"-provingGroundEvidence")>=0||Array.IndexOf(args,"-fleetFinishEvidence")>=0||Array.IndexOf(args,"-battleHudEvidence")>=0||Array.IndexOf(args,"-hawkFlightEvidence")>=0||Array.IndexOf(args,"-hawkCombatEvidence")>=0;
                 for(int i=0;i+1<args.Length;i++)if(args[i]=="-resultUiEvidence")resultUiEvidence=args[i+1];
                 for(int i=0;i+1<args.Length;i++)if(args[i]=="-resultActionEvidence")resultActionEvidence=args[i+1];
                 styleASceneEvidence=Array.IndexOf(args,"-styleASceneEvidence")>=0;
@@ -118,7 +132,7 @@ namespace Spacewars.Presentation
                 if(routePerformanceEvidence&&evidence==null)throw new ArgumentException("Route performance evidence requires -playableEvidence directory.");
                 if(resultActionEvidence!=null&&resultActionEvidence!="restart"&&resultActionEvidence!="exit"&&resultActionEvidence!="manual")throw new ArgumentException("Unsupported result action evidence mode.");
 #endif
-                if(evidence!=null){Directory.CreateDirectory(evidence);metrics=new StreamWriter(Path.Combine(evidence,"native-live.csv"));metrics.WriteLine("elapsed,generation,tick,tick_cpu_ms,tick_interval_ms,command_ms,command_backlog,nav_requests,nav_answers,frame_ms,units,credits,paused,outcome,errors,heap_bytes,nav_pending,missed_deadlines,max_tick_cpu_ms,main_update_ms,max_main_update_ms,max_steady_frame_ms,long_steady_frames,gc0_count,render_frame,buildings,pending_buildings,ready_outposts,ready_mines,income_per_second,fog_targets,fog_uploads,fog_scans,map_uploads,memory_models,own_science,active_refinery_upgrades,upgraded_refineries");actions=new StreamWriter(Path.Combine(evidence,"native-input.txt"));routeFrames=new NativeRouteFrameTelemetry(Path.Combine(evidence,"native-route-frames.csv"));if(PerformanceProfile.Enabled)preciseFrames=new NativeFrameTimingProbe(evidence);}
+                if(evidence!=null){Directory.CreateDirectory(evidence);metrics=new StreamWriter(Path.Combine(evidence,"native-live.csv"));metrics.WriteLine("elapsed,generation,tick,tick_cpu_ms,tick_interval_ms,command_ms,command_backlog,nav_requests,nav_answers,frame_ms,units,credits,paused,outcome,errors,heap_bytes,nav_pending,missed_deadlines,max_tick_cpu_ms,main_update_ms,max_main_update_ms,max_steady_frame_ms,long_steady_frames,gc0_count,render_frame,buildings,pending_buildings,ready_outposts,ready_mines,income_per_second,fog_targets,fog_uploads,fog_scans,map_uploads,memory_models,own_science,active_refinery_upgrades,upgraded_refineries");actions=new StreamWriter(Path.Combine(evidence,"native-input.txt"));routeFrames=new NativeRouteFrameTelemetry(Path.Combine(evidence,"native-route-frames.csv"));if(PerformanceProfile.Enabled||Environment.GetEnvironmentVariable("SPACEWARS_FRAME_TIMING_ONLY")=="1"||Environment.GetEnvironmentVariable("SPACEWARS_FRAME_TIMING_LIGHT")=="1")preciseFrames=new NativeFrameTimingProbe(evidence,Environment.GetEnvironmentVariable("SPACEWARS_FRAME_TIMING_LIGHT")=="1");}
                 started=Time.realtimeSinceStartup;
                 InitializeMusic();InitializeGameplayAudio();
                 // The menu is opaque: do not build an invisible battlefield only to discard it at launch.
@@ -129,11 +143,11 @@ namespace Spacewars.Presentation
                 input=gameObject.AddComponent<PlayableInput>();
                 input.Capture=()=>{if(evidence!=null){CaptureProductionSnapshot(++captures);ScreenCapture.CaptureScreenshot(Path.Combine(evidence,"native-"+captures.ToString("D2")+".png"));Record("capture "+captures);}};
                 input.Select=Select;input.Order=Order;input.Stop=()=>Submit(PlayableCommandKind.Stop);input.Hold=()=>Submit(PlayableCommandKind.Hold);
-                input.CancelContext=()=>{if(mapOpen){CloseMap();return true;}return CloseBattleContext();};input.TogglePause=()=>Pause(!menuPaused);input.Restart=Restart;input.FocusLost=()=>{if(!battleHudUnattended&&!routePerformanceEvidence)Pause(true);};
-                input.IsPointerOverUi=OverUi;input.IsKeyboardInUi=()=>MenuOwnsInput||spectatorMode&&root?.focusController?.focusedElement is VisualElement focus&&focus!=root||root?.focusController?.focusedElement is Button||root?.focusController?.focusedElement is TextField;
+                input.CancelContext=()=>{if(CancelTeamSignal())return true;if(mapOpen){CloseMap();return true;}return CloseBattleContext();};input.TogglePause=()=>Pause(!menuPaused);input.Restart=Restart;input.FocusLost=()=>{if(!battleHudUnattended&&!routePerformanceEvidence)Pause(true);};
+                input.IsPointerOverUi=OverUi;input.IsKeyboardInUi=()=>MenuOwnsInput||spectatorMode&&root?.focusController?.focusedElement is VisualElement focus&&focus!=root||!ProvingPreparation&&(root?.focusController?.focusedElement is Button||root?.focusController?.focusedElement is TextField);
                 input.MapAt=MapAt;input.MapSelect=MapSelect;input.MapPan=PanMap;input.MapOrder=MapOrder;input.ToggleMap=ToggleMap;input.CloseMap=CloseMap;
                 input.Pan=Pan;input.Zoom=Zoom;input.Drag=DrawDrag;
-                BindKeyboardCommands();
+                BindKeyboardCommands();BindChatInput();
                 input.AttackModeChanged=active=>{commandCursor?.Set(false);notice="";};
                 for(int i=0;i+1<args.Length;i++)if(args[i]=="-lobbyEvidence")lobbyEvidence=args[i+1];
                 for(int i=0;i+1<args.Length;i++)if(args[i]=="-matchSeed"){lobbySetup.ExplicitSeed=int.Parse(args[i+1],System.Globalization.CultureInfo.InvariantCulture);lobbySetup.HasExplicitSeed=true;}
@@ -144,8 +158,9 @@ namespace Spacewars.Presentation
                 if(orbitalEvidence!=null)StartCoroutine(CaptureOrbitalUiEvidence());
 #endif
                 // Evidence must enter through the current menu/lobby lifecycle too.
-                if(evidence!=null&&lobbyEvidence==null&&Array.IndexOf(args,"-provingGroundEvidence")<0)StartCoroutine(StartEvidenceMatch());
+                if(evidence!=null&&lobbyEvidence==null&&Array.IndexOf(args,"-provingGroundEvidence")<0&&Array.IndexOf(args,"-fleetFinishEvidence")<0)StartCoroutine(StartEvidenceMatch());
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
+                if(evidence!=null&&Array.IndexOf(args,"-fleetFinishEvidence")>=0)StartCoroutine(LoadingPreparation.Run(CaptureFleetFinishEvidence(),e=>{File.WriteAllText(Path.Combine(evidence,"fleet-result.txt"),"FAIL "+e);Debug.LogException(e);runtime?.RequestStop();Flush();Application.Quit(1);}));
                 if(evidence!=null&&Array.IndexOf(args,"-provingGroundEvidence")>=0)StartCoroutine(LoadingPreparation.Run(CaptureProvingGroundEvidence(),e=>{File.WriteAllText(Path.Combine(evidence,"proving-result.txt"),"FAIL "+e);Debug.LogException(e);runtime?.RequestStop();Flush();Application.Quit();}));
                 if(lobbyEvidence!=null&&Array.IndexOf(args,"-lobbyManual")<0)StartCoroutine(CaptureLobbyEvidence());
                 if(evidence!=null&&Array.IndexOf(args,"-battleHudEvidence")>=0)StartCoroutine(CaptureBattleHudEvidence());
@@ -177,7 +192,7 @@ namespace Spacewars.Presentation
         {
             var panel=ScriptableObject.CreateInstance<PanelSettings>();panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");panel.scaleMode=PanelScaleMode.ConstantPixelSize;
             var doc=localCoordinator==null?gameObject.AddComponent<UIDocument>():localCoordinator.GetComponent<UIDocument>();if(localCoordinator==null){doc.panelSettings=panel;ownedPanelSettings=panel;}else{Destroy(panel);panel=doc.panelSettings;}
-            panelRoot=doc.rootVisualElement;root=new VisualElement{name="local-seat-hud"};root.style.position=Position.Absolute;root.style.left=root.style.right=root.style.top=root.style.bottom=0;panelRoot.Add(root);if(localCoordinator==null)OrbitalTheme.ConfigurePanel(panel,panelRoot);root.pickingMode=PickingMode.Ignore;root.focusable=true;root.tabIndex=-1;OrbitalTheme.Install(root);menuNavigation=new NativeMenuNavigation(root,()=>SeatPad,()=>WorldPadOwnsToolkit||WorldKeyboardOwnsToolkit,()=>SeatUsesKeyboard){Focused=()=>localInputFocused,WorldOwnsNavigation=()=>WorldCameraOwnsToolkit};
+            panelRoot=doc.rootVisualElement;root=new VisualElement{name="local-seat-hud"};root.style.position=Position.Absolute;root.style.left=root.style.right=root.style.top=root.style.bottom=0;panelRoot.Add(root);if(localCoordinator==null)OrbitalTheme.ConfigurePanel(panel,panelRoot);root.pickingMode=PickingMode.Ignore;root.focusable=true;root.tabIndex=-1;OrbitalTheme.Install(root);menuNavigation=new NativeMenuNavigation(root,()=>MenuPad,()=>WorldPadOwnsToolkit||WorldKeyboardOwnsToolkit,()=>MenuOwnsInput||SeatUsesKeyboard){Focused=()=>localInputFocused,WorldOwnsNavigation=()=>WorldCameraOwnsToolkit,ShowGamepadHints=()=>MenuPadHints};
             orderMarkerLayer=new PlayableOrderMarkerLayer(location=>PlayableOrderMarkerLayer.WorldPoint(root,cameraView,profile,location));root.Insert(0,orderMarkerLayer);
             root.style.unityFont=Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");root.style.fontSize=16;root.style.color=Ink;
             top=Panel();top.name="match-header";top.style.right=20;top.style.top=16;top.style.minHeight=48;top.style.flexDirection=FlexDirection.Row;top.style.flexWrap=Wrap.Wrap;top.style.alignItems=Align.Center;StyleRegion(top);root.Add(top);
@@ -191,6 +206,9 @@ namespace Spacewars.Presentation
             buildRegion=new VisualElement();buildRegion.style.width=220;buildRegion.style.display=DisplayStyle.None;hudRow.Add(buildRegion);
             siteLabel=new Label("Выберите свободную площадку");siteLabel.style.whiteSpace=WhiteSpace.Normal;buildRegion.Add(siteLabel);
             buildActions=new VisualElement();buildRegion.Add(buildActions);
+            buildGauss=Button("Гаусс-башня",()=>BuildSelected(PlayableBuildingKind.GaussTower));buildActions.Add(buildGauss);
+            buildRepairTower=Button("Ремонтная вышка",()=>BuildSelected(PlayableBuildingKind.RepairTower));buildActions.Add(buildRepairTower);
+            buildTurret=Button("Пулемётная турель",()=>BuildSelected(PlayableBuildingKind.SentryTurret));buildActions.Add(buildTurret);
             buildHangar=Button("Ангар",()=>BuildSelected(PlayableBuildingKind.Hangar));buildActions.Add(buildHangar);
             buildFactory=Button("⬡ Фабрика",()=>BuildSelected(PlayableBuildingKind.Factory));buildActions.Add(buildFactory);
             buildRefinery=Button("⬡ Переработка",()=>BuildSelected(PlayableBuildingKind.Refinery));buildActions.Add(buildRefinery);
@@ -217,22 +235,22 @@ namespace Spacewars.Presentation
             modalCard=new VisualElement{name="match-menu-card"};modalCard.AddToClassList("orbital-match-menu");modalCard.style.width=540;modalCard.style.maxWidth=Length.Percent(100);modalCard.style.paddingLeft=30;modalCard.style.paddingRight=30;modalCard.style.paddingTop=28;modalCard.style.paddingBottom=28;StyleRegion(modalCard);modal.Add(modalCard);
             var modalEyebrow=Section("SPACEWARS  /  КОМАНДОВАНИЕ");modalEyebrow.name="match-menu-eyebrow";modalCard.Add(modalEyebrow);modalTitle=new Label();modalTitle.style.fontSize=32;modalTitle.style.unityFontStyleAndWeight=FontStyle.Bold;modalTitle.style.color=Cyan;modalTitle.style.unityTextAlign=TextAnchor.MiddleCenter;modalTitle.style.marginTop=16;modalTitle.style.marginBottom=8;modalCard.Add(modalTitle);
             modalCaption=new Label("Бой приостановлен");modalCaption.style.unityTextAlign=TextAnchor.MiddleCenter;modalCaption.style.color=Muted;modalCaption.style.marginBottom=20;modalCard.Add(modalCaption);
-            var labIdentity=OrbitalTheme.Text("","orbital-muted");labIdentity.name="match-lab-identity";modalCard.Add(labIdentity);
             resumeButton=Button("Продолжить",()=>Pause(false));modalCard.Add(resumeButton);
-            modalCard.Add(OrbitalTheme.Action("Управление",OpenPauseHelp,"pause-controls"));
-            modalCard.Add(pauseSettings=OrbitalTheme.Action("Настройки",OpenPauseSettings,"pause-settings"));
+            provingStartButton=Button("Начать бой",StartProvingGround);provingStartButton.name="proving-start";provingStartButton.style.display=DisplayStyle.None;modalCard.Add(provingStartButton);
             modalRestartButton=Button("Начать заново",Restart);modalCard.Add(modalRestartButton);
+            modalCard.Add(pauseSettings=OrbitalTheme.Action("Настройки",OpenPauseSettings,"pause-settings"));
+            provingLabButton=Button("Выйти в лабораторию",ExitProvingGround);provingLabButton.name="proving-exit";provingLabButton.style.display=DisplayStyle.None;modalCard.Add(provingLabButton);
             modalCard.Add(pauseMain=OrbitalTheme.Action("В главное меню",ReturnToMainMenu,"pause-main"));
             modalExitButton=Button("Выйти",Quit);modalCard.Add(modalExitButton);modalLobbyButton=Button("В лобби",ReturnToLobby);modalLobbyButton.style.display=DisplayStyle.None;CreatePostMatchActions();CreateCampaignHud();
             foreach(var action in modalCard.Query<Button>().ToList()){action.style.marginRight=0;action.style.height=44;action.style.minHeight=44;action.style.fontSize=18;action.style.marginBottom=7;}
-            OrbitalTheme.Footer(modalCard,true);
             resumeButton.AddToClassList("orbital-primary");modalRestartButton.AddToClassList("orbital-primary");
-            dragBox=new VisualElement();dragBox.pickingMode=PickingMode.Ignore;dragBox.style.position=Position.Absolute;dragBox.style.backgroundColor=new Color(.15f,.85f,.75f,.12f);dragBox.style.borderLeftWidth=1;dragBox.style.borderRightWidth=1;dragBox.style.borderTopWidth=1;dragBox.style.borderBottomWidth=1;dragBox.style.borderLeftColor=Color.cyan;dragBox.style.borderRightColor=Color.cyan;dragBox.style.borderTopColor=Color.cyan;dragBox.style.borderBottomColor=Color.cyan;dragBox.style.display=DisplayStyle.None;root.Add(dragBox);
+            CreateDragFrame();
             root.RegisterCallback<GeometryChangedEvent>(_=>ApplyResponsiveHud());
             root.RegisterCallback<KeyDownEvent>(evt=>
             {
-                if(menuNavigation.Active)return;
+                if(menuNavigation.Active||!SeatUsesKeyboard&&!MenuOwnsInput)return;
                 if(spectatorMode&&evt.keyCode==KeyCode.Tab&&!ModalVisible()&&root.focusController?.focusedElement!=root){ToggleMap();}
+                else if(ProvingPreparation&&!menuPaused)return;
                 else if(evt.keyCode==KeyCode.F6)ToggleHudFocus();
                 else if(evt.keyCode==KeyCode.Tab&&(ModalVisible()||root.focusController?.focusedElement is Button))MoveHudFocus(evt.shiftKey);
                 else if((evt.keyCode==KeyCode.Return||evt.keyCode==KeyCode.KeypadEnter||evt.keyCode==KeyCode.Space)&&root.focusController?.focusedElement is Button focused&&HudActionVisible(focused)){menuNavigation.ActivateElement(focused);}
@@ -244,6 +262,7 @@ namespace Spacewars.Presentation
                 else return;
                 evt.StopImmediatePropagation();
             });
+            CreateChatHud();
             root.Focus();
         }
         private static void StyleProgress(ProgressBar bar)
@@ -256,17 +275,17 @@ namespace Spacewars.Presentation
         }
         private VisualElement Panel(){var p=new VisualElement();p.style.position=Position.Absolute;p.style.backgroundColor=PanelColor;p.style.paddingLeft=16;p.style.paddingRight=16;p.style.paddingTop=10;p.style.paddingBottom=10;return p;}
         private Button Button(string text,Action action){var b=new Button(()=>{action();if(ModalVisible())SyncModalFocus();else root.Focus();}){text=text,focusable=true};StyleAction(b);return b;}
-        private bool OverUi(Vector2 p){if(cameraView!=null&&!cameraView.pixelRect.Contains(p))return true;if(root?.panel==null)return false;var q=RuntimePanelUtils.ScreenToPanel(root.panel,new Vector2(p.x,Screen.height-p.y));return ProvingGroundOverUi(q)||(spectatorMode&&spectatorPanel!=null&&spectatorPanel.worldBound.Contains(q))||top.worldBound.Contains(q)||compactMap.parent.worldBound.Contains(q)||armyRegion.worldBound.Contains(q)||(armyComposition.style.display.value==DisplayStyle.Flex&&armyComposition.worldBound.Contains(q))||(battleRing.style.display.value==DisplayStyle.Flex&&battleRing.ContainsPanelPoint(q))||(ResultsVisible&&postMatch.Root.worldBound.Contains(q))||(modal.style.display==DisplayStyle.Flex&&modal.worldBound.Contains(q));}
-        private void DrawDrag(Vector2 a,Vector2 b,bool active){if(root?.panel==null)return;dragBox.style.display=active?DisplayStyle.Flex:DisplayStyle.None;var x=PanelPoint(a);var y=PanelPoint(b);dragBox.style.left=Mathf.Min(x.x,y.x);dragBox.style.top=Mathf.Min(x.y,y.y);dragBox.style.width=Mathf.Abs(x.x-y.x);dragBox.style.height=Mathf.Abs(x.y-y.y);}
+        private bool OverUi(Vector2 p){if(cameraView!=null&&!cameraView.pixelRect.Contains(p))return true;if(root?.panel==null)return false;var q=RuntimePanelUtils.ScreenToPanel(root.panel,new Vector2(p.x,Screen.height-p.y));return ChatMessageAtPanel(q)||ProvingGroundOverUi(q)||(spectatorMode&&spectatorPanel!=null&&spectatorPanel.worldBound.Contains(q))||top.worldBound.Contains(q)||compactMap.parent.worldBound.Contains(q)||armyRegion.worldBound.Contains(q)||(armyComposition.style.display.value==DisplayStyle.Flex&&armyComposition.worldBound.Contains(q))||(battleRing.style.display.value==DisplayStyle.Flex&&battleRing.ContainsPanelPoint(q))||(ResultsVisible&&postMatch.Root.worldBound.Contains(q))||(modal.style.display==DisplayStyle.Flex&&modal.worldBound.Contains(q));}
+
         private void StartSession()=>StartSessionCore(true);
-        private void StartSessionCore(bool initializeLocal){ResetSpectatorPresentation();gameplayAudio?.ResetAudio();keyboardGroups.Reset();ResetKeyboardCamera();ResetPostMatch();ClearArtilleryEffects();confirmSaleBuilding=0;menuPaused=paused=false;routeService?.Dispose();routeService=new UnityHostRouteService(routeLane);world.Clear();CloseMap();input?.ClearMode();foreach(var shell in shells.Values)Destroy(shell);shells.Clear();runtime=CreateSessionRuntime(++generation);BindMatchLighting(true);if(matchSetup!=null)matchSetup=runtime.LobbyConfiguration;generation=runtime.Generation;sequence=runtime.HumanSequenceWatermark;noticeSequence=0;selection.Clear();selectedSite=selectedSlot=0;restarting=false;modalWasVisible=false;root.Focus();notice="";if(initializeLocal)ConfigureLocalPresentations();Record("start");}
-        private void Select(Vector2 from,Vector2 to,bool shift){if(provingGround!=null&&!provingGroundBattle){PlaceProvingGround(Ground(to));return;}if(spectatorMode){inspectionEntityId=Pick(to,false);ValidateInspection();return;}try{SelectCore(from,to,shift);}finally{SelectionMarkerEvent();}}
+        private void StartSessionCore(bool initializeLocal){CloseChat();ResetSpectatorPresentation();gameplayAudio?.ResetAudio();keyboardGroups.Reset();ResetKeyboardCamera();ResetPostMatch();ClearArtilleryEffects();confirmSaleBuilding=0;menuPaused=paused=false;routeService?.Dispose();routeService=new UnityHostRouteService(routeLane);world.Clear();CloseMap();input?.ClearMode();foreach(var shell in shells.Values)Destroy(shell);shells.Clear();runtime=CreateSessionRuntime(++generation);BindMatchLighting(true);if(matchSetup!=null)matchSetup=runtime.LobbyConfiguration;ResetChat();generation=runtime.Generation;sequence=runtime.HumanSequenceWatermark;noticeSequence=0;selection.Clear();selectedSite=selectedSlot=0;restarting=false;modalWasVisible=false;root.Focus();notice="";if(initializeLocal)ConfigureLocalPresentations();Record("start");}
+        private void Select(Vector2 from,Vector2 to,bool shift){if(ProvingPreparation&&(provingUnit.HasValue||(to-from).magnitude<input.SelectionDragPixels&&OpenProvingConstruction(Ground(to)))){if(provingUnit.HasValue)PlaceProvingGround(Ground(to));return;}if(spectatorMode){inspectionEntityId=Pick(to,false);ValidateInspection();return;}try{SelectCore(from,to,shift);}finally{SelectionMarkerEvent();}}
         private void SelectCore(Vector2 from,Vector2 to,bool shift)
         {
             if(view==null)return;runtime?.RecordHumanAction(LocalOwnerId);battleDismissed=false;battleRally=false;confirmSaleBuilding=0;root.Focus();selectedSite=selectedSlot=0;bool box=(to-from).magnitude>profile.SelectionDragPixels;
             if(box)
             {
-                var ids=view.Entities.Where(e=>e.Owner==view.Owner&&e.Health>0).Where(e=>{var p=cameraView.WorldToScreenPoint(world.EntityPoint(e));return p.z>0&&p.x>=Mathf.Min(from.x,to.x)&&p.x<=Mathf.Max(from.x,to.x)&&p.y>=Mathf.Min(from.y,to.y)&&p.y<=Mathf.Max(from.y,to.y);}).Select(e=>e.Id).ToArray();
+                var ids=BoxSelectionUnits(from,to).ToArray();
                 if(!shift)selection.Clear();else selection.RemoveWhere(id=>!view.Entities.Any(e=>e.Id==id&&e.Owner==view.Owner));
                 foreach(int id in ids)selection.Add(id);
             }
@@ -299,6 +318,17 @@ namespace Spacewars.Presentation
             }
             return picked;
         }
+        private int PickWreck(Vector2 point)
+        {
+            int picked=0;float best=float.MaxValue;
+            foreach(var wreck in view.Wrecks){
+                if(!wreck.Blocks(view.Tick))continue;var center=cameraView.WorldToScreenPoint(world.Point(wreck.Position));
+                var rim=cameraView.WorldToScreenPoint(world.Point(wreck.Position)+Vector3.right*(float)(wreck.Radius*profile.TargetPickRadiusMultiplier));float distance=Vector2.Distance(point,center);
+                if(center.z>0&&distance<Vector2.Distance(center,rim)&&distance<best){best=distance;picked=wreck.Id;}
+            }
+            return picked;
+        }
+        private bool IsWreckAt(Vector2 point)=>view!=null&&world!=null&&cameraView!=null&&Pick(point,false)==0&&PickWreck(point)!=0;
         private NavPoint Ground(Vector2 p)
         {
             var ray=cameraView.ScreenPointToRay(p);if(profile.AuthoredMap==null){if(new Plane(Vector3.up,Vector3.zero).Raycast(ray,out float distance)){var v=ray.GetPoint(distance);return new NavPoint(v.x,v.z);}}
@@ -312,6 +342,9 @@ namespace Spacewars.Presentation
             if(matchSetup?.Spectator==true)return;
             if(battleRally){CompleteRallyPlacement(Ground(p),battleController);return;}
             var target=Ground(p);int id=Pick(p,false);bool enemy=HostileAt(p);
+            var selectedTurret=view.Buildings.FirstOrDefault(b=>TerritoryRules.ArmedDefense(b.Kind)&&b.Owner==LocalOwner&&selection.Contains(b.Id));
+            if(selectedTurret!=null){if(enemy)Submit(PlayableCommandKind.Attack,new[]{selectedTurret.Id},target,id);return;}
+            if(id==0&&SelectedRallyProducer()==null){int wreckId=PickWreck(p);if(wreckId!=0){var wreck=view.Wrecks.Single(w=>w.Id==wreckId);Submit(PlayableCommandKind.Attack,null,wreck.Position,wreck.Id,mode:append?PlayableOrderMode.Append:PlayableOrderMode.Replace);return;}}
             if(SelectedRallyProducer()!=null)Submit(PlayableCommandKind.SetRally,new[]{SelectedRallyProducer().Id},target);
             else if(!attackMode && view.Entities.Any(e=>e.Id==id&&!IsOpponent(e.Owner))) { if(!append)Submit(PlayableCommandKind.Follow,null,target,id); }
             else if(!enemy&&view.Buildings.Any(b=>b.Id==id&&!IsOpponent(b.Owner)))return;
@@ -320,19 +353,30 @@ namespace Spacewars.Presentation
         private void Submit(PlayableCommandKind kind,int[] ids=null,NavPoint target=default(NavPoint),int targetId=0,long productionOrderId=0,PlayableEntityKind unitKind=PlayableEntityKind.Tank,PlayableResearchKind researchKind=PlayableResearchKind.TankChassis,PlayableOrderMode mode=PlayableOrderMode.Replace)
         {
             if(runtime==null||paused||restarting||quitting||matchSetup?.Spectator==true)return;
-            var command=new PlayableCommand(generation,++sequence,LocalOwnerId,kind,ids??selection.ToArray(),target,targetId:targetId,productionOrderId:productionOrderId,unitKind:unitKind,researchKind:researchKind,mode:mode);
-            var result=runtime.TrySubmit(command);AudioCommand(command,result.Accepted);if(result.Accepted)orderMarkers.Submitted(view,command);
-            if(mode!=PlayableOrderMode.Append||!result.Accepted){noticeSequence=sequence;notice=result.Accepted?"":"Не удалось отправить приказ: "+Friendly(result.Status);}
-            Record(kind+" ids="+string.Join(",",ids??selection.ToArray())+" target="+target.X+","+target.Z+" order="+productionOrderId+" admission="+result.Status);
+            var recipients=ids??selection.ToArray();
+            var destinations=kind==PlayableCommandKind.Move||kind==PlayableCommandKind.AttackMove?HumanMoveDestination.Resolve(view.ActiveProfile??profile,view,recipients,target):new[]{new HumanMoveDestination.Group(recipients,target)};
+            foreach(var destination in destinations){
+                var command=new PlayableCommand(generation,++sequence,LocalOwnerId,kind,destination.Entities,destination.Target,targetId:targetId,productionOrderId:productionOrderId,unitKind:unitKind,researchKind:researchKind,mode:mode);
+                var result=runtime.TrySubmit(command);AudioCommand(command,result.Accepted);if(result.Accepted)orderMarkers.Submitted(view,command);
+                if(mode!=PlayableOrderMode.Append||!result.Accepted){noticeSequence=sequence;notice=result.Accepted?"":"Не удалось отправить приказ: "+Friendly(result.Status);}
+                Record(kind+" ids="+string.Join(",",destination.Entities)+" target="+destination.Target.X+","+destination.Target.Z+" order="+productionOrderId+" admission="+result.Status);
+            }
         }
         private string Friendly(PlayableCommandStatus status){switch(status){case PlayableCommandStatus.Accepted:return "";case PlayableCommandStatus.Cancelled:return "";case PlayableCommandStatus.Applied:return "";case PlayableCommandStatus.InsufficientCredits:return "Недостаточно кредитов";case PlayableCommandStatus.OccupiedPad:return "Площадка занята";case PlayableCommandStatus.InvalidEntity:return "Недоступный объект для приказа";case PlayableCommandStatus.InvalidTarget:return "Недоступная цель";case PlayableCommandStatus.Overflow:return "Слишком много приказов, повторите";default:return "Приказ отклонён";}}
-        private void Pause(bool value){if(provingGround!=null&&!provingGroundBattle)return;if(localCoordinator!=null){localCoordinator.PauseFrom(this,value);return;}if(runtime==null||restarting||quitting||(!value&&matchSetup!=null&&!matchSetup.Spectator&&localPresentations.Any(seat=>!seat.SeatReady)))return;if(runtime.Result!=null){resultOverview=false;ShowPostMatch();return;}confirmSaleBuilding=0;finishConfirmation=false;if(finishMatch!=null)finishMatch.text="Завершить матч";menuPaused=value;paused=value||view?.Mission?.TutorialPauseHeld==true;BroadcastPause(value);if(!value){CloseChildMenu();menuNavigation?.SetScope(null);}runtime.RequestPause(value);input?.ClearMode();CloseMap();Record("pause="+value);}
+        private void Pause(bool value){if(ProvingPreparation){provingUnit=null;CloseProvingConstruction();}if(localCoordinator!=null){localCoordinator.PauseFrom(this,value);return;}if(runtime==null||restarting||quitting||(!value&&matchSetup!=null&&!matchSetup.Spectator&&localPresentations.Any(seat=>!seat.SeatReady)))return;if(runtime.Result!=null){resultOverview=false;ShowPostMatch();return;}confirmSaleBuilding=0;finishConfirmation=false;if(finishMatch!=null)finishMatch.text="Завершить матч";menuPaused=value;paused=value||view?.Mission?.TutorialPauseHeld==true;BroadcastPause(value);if(!value){CloseChildMenu();menuNavigation?.SetScope(null);}runtime.RequestPause(value);input?.ClearMode();CloseMap();Record("pause="+value);}
         private void Restart(){if(provingGround!=null){ResetProvingGround();return;}if(localCoordinator!=null){localCoordinator.Restart();return;}if(runtime==null||restarting||quitting)return;Record("restart requested");restarting=true;runtime.RequestStop();}
-        private void Quit(){if(localCoordinator!=null){localCoordinator.Quit();return;}if(quitting)return;Record("exit requested");quitting=true;runtime?.RequestStop();}
+        private void Quit(){
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if(qaDeadlinePath!=null){BeginQaFinish(routePerformanceStarted<0?"FAIL entry did not reach match":"route harness requested exit",routePerformanceStarted<0);return;}
+#endif
+            if(localCoordinator!=null){localCoordinator.Quit();return;}if(quitting)return;Record("exit requested");quitting=true;runtime?.RequestStop();}
         private void Pan(Vector2 axis){cameraView.transform.position+=NativeCameraScrollSettings.Displacement(cameraView.transform,axis,NativeCameraScrollSettings.ArrowSpeed(profile.CameraPanSpeed),Time.unscaledDeltaTime);Record("camera pan");}
         private void Zoom(float delta){cameraView.orthographicSize=Mathf.Clamp(cameraView.orthographicSize-delta*(float)profile.CameraZoomSpeed,(float)profile.CameraMinZoom,provingGround!=null?Mathf.Max(keyboardHomeZoom,(float)profile.CameraMaxZoom):(float)profile.CameraMaxZoom);Record("camera zoom");}
         private void Update()
         {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if(ServiceQaCompletion())return;
+#endif
             if(root==null||initializingMenu)return;
             long begin=System.Diagnostics.Stopwatch.GetTimestamp();
             routeServiceFrameMs=renderFrameMs=hudFrameMs=mapsFrameMs=audioFrameMs=0;
@@ -350,7 +394,6 @@ namespace Spacewars.Presentation
         private void UpdateFrameState()
         {
             LogRuntimeFailure();
-            TickProvingGround();
             TickMenuInput();UpdateLobby();
             if(preparingPresentation){if(runtime!=null)ServiceRoutes();return;} // Host preparation still needs its route pump; presentation remains covered.
             if(returningToLobby&&(runtime==null||runtime.IsStopped)){DisposeLocalChildren();ResetLocalViewport();ResetPostMatch();returningToLobby=false;runtime=null;view=null;world.Clear();selection.Clear();CloseMap();if(returningToMain){returningToMain=false;ShowMainMenu();}else ShowLobby();return;}
@@ -362,16 +405,17 @@ namespace Spacewars.Presentation
                 return;
             }
             if(runtime==null)return;
-            if(runtime.IsStopped){if(quitting){Flush();Application.Quit();return;}if(restarting)StartSession();}
+            if(runtime.IsStopped){if(quitting){if(Runtime.OriginalGroupDiagnostics.Active){if(!routeService.StopDiagnosticWorker())return;Runtime.OriginalGroupDiagnostics.Save(Path.Combine(evidence,"original-group-disposition.bin"));Runtime.OriginalGroupDiagnostics.Stop();}if(Runtime.NavigationArrivalDiagnostics.Active){if(!routeService.StopDiagnosticWorker())return;Runtime.NavigationArrivalDiagnostics.Save(Path.Combine(evidence,"arrival-diagnostic.bin"));Record("arrival-diagnostic FLUSH dropped="+Runtime.NavigationArrivalDiagnostics.Dropped);Runtime.NavigationArrivalDiagnostics.Stop();}Flush();Application.Quit();return;}if(restarting)StartSession();}
             ReadPresentationFrame();var captured=ownerFrame;if(view==null)return;
-            RefreshLocalKeyboardBinding();input.WorldInputEnabled=childMenu==null&&!inLobby&&!preparing&&!returningToLobby&&SeatReady&&!paused&&!restarting&&!quitting&&(view.Outcome==PlayableMatchOutcome.Playing||resultOverview)&&!ResultsVisible&&string.IsNullOrEmpty(view.Failure);input.CommandInputEnabled=input.WorldInputEnabled&&matchSetup?.Spectator!=true;
+            RefreshLocalKeyboardBinding();input.WorldInputEnabled=childMenu==null&&!inLobby&&!preparing&&!returningToLobby&&SeatReady&&!menuPaused&&(!paused||ProvingPreparation)&&!restarting&&!quitting&&(view.Outcome==PlayableMatchOutcome.Playing||resultOverview)&&!ResultsVisible&&string.IsNullOrEmpty(view.Failure);input.CommandInputEnabled=input.WorldInputEnabled&&matchSetup?.Spectator!=true;
+            input.PlacementInputEnabled=ProvingPreparation&&provingUnit.HasValue;
             RebindPresentation();
             long phase=routeFrames==null?0:System.Diagnostics.Stopwatch.GetTimestamp();
             using(RouteServiceMarker.Auto())ServiceRoutes();routeServiceFrameMs=RouteStageElapsed(ref phase);
             using(RenderMarker.Auto())Render();renderFrameMs=RouteStageElapsed(ref phase);
             using(HudMarker.Auto())UpdateHud();hudFrameMs=RouteStageElapsed(ref phase);
             using(MapsMarker.Auto())UpdateMaps();mapsFrameMs=RouteStageElapsed(ref phase);
-            UpdateLifecycleMarkers();UpdateIncomeMarkers();PollBattleController();UpdateKeyboardPresentation();
+            UpdateLifecycleMarkers();UpdateIncomeMarkers();UpdateTeamSignalPresentation();UpdateMatchNotifications();PollBattleController();UpdateKeyboardPresentation();
             var allReceipts=runtime.DrainReceipts().ToArray();var markerReceipts=allReceipts.Where(r=>r.OwnerId==LocalOwnerId).ToArray();foreach(var receipt in markerReceipts){if(receipt.Sequence>=noticeSequence&&!(receipt.Status==PlayableCommandStatus.Applied&&receipt.Message==null)){noticeSequence=receipt.Sequence;notice=Friendly(receipt.Status);}Record("receipt "+receipt.Sequence+" "+receipt.Status+" latency_ms="+receipt.LatencyMilliseconds);}
             UpdateOrderMarkers(markerReceipts);PresentLocalChildren(captured,allReceipts);foreach(var receipt in allReceipts)gameplayAudio?.Receipt(receipt,generation);
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -395,6 +439,9 @@ namespace Spacewars.Presentation
         private void RecordRouteFrame()
         {
             if(routeFrames==null||runtime==null||view==null)return;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if(qaFinishing)return;
+#endif
             var host=routeService?.CertifiedPublication;var counters=host?.Counters;
             int motionActor=0;NavPoint authorityPosition=default;Vector3 displayPosition=default;
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -418,28 +465,38 @@ namespace Spacewars.Presentation
         }
         private void ServiceRoutes()=>routeService.Service(runtime,profile.NavigationRequestsPerFrame);
         private readonly PlayableUnitMotion unitMotion=new PlayableUnitMotion();
+        private readonly HashSet<int> renderedAlive=new HashSet<int>();
+        private readonly List<int> renderedRemoved=new List<int>();
         private void Render()
         {
-            using(FogMarker.Auto())world.Fog.Update(view.Vision,Time.unscaledDeltaTime);world.RenderMemories(view,cameraView);world.RenderSites(view,cameraView);
-            unitMotion.BeginFrame(view,paused||preparing||restarting||inLobby,spectatorMode?spectatorRate:1,spectatorMode?spectatorFrame?.PreviousPerspective(spectatorPerspective):ownerFrame?.PreviousView(LocalOwnerId),spectatorMode?(spectatorFrame?.AgeSeconds??0):(ownerFrame?.AgeSeconds??0));
+            RefreshDragSelection();
+            using var measuredPresentation=PerformanceProfile.Measure(ProfileStage.Presentation);
+            using(PerformanceProfile.Measure(ProfileStage.WorldFog))using(FogMarker.Auto())world.Fog.Update(view.Vision,Time.unscaledDeltaTime);using(PerformanceProfile.Measure(ProfileStage.WorldMemories))world.RenderMemories(view,cameraView);using(PerformanceProfile.Measure(ProfileStage.WorldSites))world.RenderSites(view,cameraView);
+            using(PerformanceProfile.Measure(ProfileStage.UnitMotion))unitMotion.BeginFrame(view,paused||preparing||restarting||inLobby,spectatorMode?spectatorRate:1,spectatorMode?spectatorFrame?.PreviousPerspective(spectatorPerspective):ownerFrame?.PreviousView(LocalOwnerId),spectatorMode?(spectatorFrame?.AgeSeconds??0):(ownerFrame?.AgeSeconds??0));
             double poseTime=Time.realtimeSinceStartupAsDouble;
-            world.AdvanceAircraftAnimation(view,poseTime,spectatorMode?spectatorRate:1);
-            var alive=new HashSet<int>();
-            foreach(var e in view.Entities){alive.Add(e.Id);if(!world.Actors.TryGetValue(e.Id,out var a))a=world.Tank(e.Id,e.Owner==LocalOwner,e.Kind);world.UpdateResearchModel(a,e);var pose=unitMotion.Sample(e,poseTime);a.Root.position=e.Kind==PlayableEntityKind.Hawk?world.AirGroundPoint(pose.Position):world.Point(pose.Position);var slope=e.Kind==PlayableEntityKind.Hawk?default(NavPoint):profile.AuthoredMap?.SurfaceGradient(pose.Position)??default(NavPoint);a.Root.rotation=Quaternion.FromToRotation(Vector3.up,new Vector3((float)-slope.X,1,(float)-slope.Z).normalized);a.Hull.localRotation=Quaternion.Euler(0,90-(float)pose.Hull*Mathf.Rad2Deg,0);a.Turret.localRotation=Quaternion.Euler(0,(float)(pose.Hull-pose.Turret)*Mathf.Rad2Deg,0);a.Selection.SetActive(selection.Contains(e.Id));if(matchSetup!=null||campaignConfiguration!=null)PlayableWorld.PaintOwner(a,LobbyPaint(e.Owner));PlayableWorld.UpdateHealth(a,cameraView,(float)PlayableUnitRules.HealthRatio(profile,e),selection.Contains(e.Id));world.UpdateAircraft(a,e,view,selection.Contains(e.Id),pose);world.AimExplorer(a,e);}
-            foreach(var b in view.Buildings){alive.Add(b.Id);if(b.Phase==ConstructionPhase.Pending)continue;if(!world.Actors.TryGetValue(b.Id,out var a))a=world.Building(b.Id,b.Kind.ToString(),b.Owner==LocalOwner,b.RefineryUpgraded);world.UpdateRefineryModel(a,b,view.Tick);world.UpdateFactoryModel(a,b,view);a.Root.position=world.Point(b.Position);a.Root.rotation=Quaternion.Euler(0,-(float)b.Heading*Mathf.Rad2Deg,0);world.FaceBuilding(a,cameraView);a.Root.localScale=new Vector3(1,Mathf.Lerp(.2f,1,(float)b.Progress),1);a.Selection.SetActive(selection.Contains(b.Id));if(matchSetup!=null||campaignConfiguration!=null)PlayableWorld.PaintOwner(a,LobbyPaint(b.Owner));int max=TerritoryRules.Health(profile,b.Kind);PlayableWorld.UpdateHealth(a,cameraView,(float)b.Health/max);}
-            foreach(var hangar in view.Buildings.Where(b=>b.Kind==PlayableBuildingKind.Hangar))if(world.Actors.TryGetValue(hangar.Id,out var hangarActor))world.UpdateHangar(hangarActor,hangar,view.Tick);
-            RenderDirectContacts();
-            foreach(var id in world.Actors.Keys.ToArray())if(!alive.Contains(id)){world.Remove(id);selection.Remove(id);}
-            unitMotion.KeepVisible(alive);
-            world.RenderUnitWrecks(view);world.RenderGroundTrails(view);
-            world.RenderRallyFlags(view,selection,matchSetup?.Spectator==true);
-            RenderProjectiles();
+            using(PerformanceProfile.Measure(ProfileStage.WorldAnimation))world.AdvanceAircraftAnimation(view,poseTime,spectatorMode?spectatorRate:1);
+            var alive=renderedAlive;alive.Clear();
+            using(PerformanceProfile.Measure(ProfileStage.WorldUnits))foreach(var e in view.Entities){alive.Add(e.Id);if(!world.Actors.TryGetValue(e.Id,out var a))a=world.Tank(e.Id,e.Owner==LocalOwner,e.Kind);world.UpdateResearchModel(a,e);var pose=unitMotion.Sample(e,poseTime);if(a.TankMechanism)a.TankMechanism.Drive(pose,view,e.Id);a.Root.position=e.Kind==PlayableEntityKind.Hawk?world.AirGroundPoint(pose.Position):world.Point(pose.Position);var slope=e.Kind==PlayableEntityKind.Hawk?default(NavPoint):profile.AuthoredMap?.SurfaceGradient(pose.Position)??default(NavPoint);a.Root.rotation=Quaternion.FromToRotation(Vector3.up,new Vector3((float)-slope.X,1,(float)-slope.Z).normalized);a.Hull.localRotation=Quaternion.Euler(0,90-(float)pose.Hull*Mathf.Rad2Deg,0);a.Turret.localRotation=Quaternion.Euler(0,(float)(pose.Hull-pose.Turret)*Mathf.Rad2Deg,0);a.Selection.SetActive(DisplayedSelection(e.Id));if(matchSetup!=null||campaignConfiguration!=null)PlayableWorld.PaintOwner(a,LobbyPaint(e.Owner));PlayableWorld.UpdateHealth(a,cameraView,(float)PlayableUnitRules.HealthRatio(profile,e),selection.Contains(e.Id));world.UpdateAircraft(a,e,view,DisplayedSelection(e.Id),pose);world.AimExplorer(a,e);}
+            using(PerformanceProfile.Measure(ProfileStage.WorldBuildings))foreach(var b in view.Buildings){alive.Add(b.Id);if(b.Phase==ConstructionPhase.Pending)continue;if(!world.Actors.TryGetValue(b.Id,out var a))a=world.Building(b.Id,b.Kind.ToString(),b.Owner==LocalOwner,b.ModelUpgraded);world.UpdateRefineryModel(a,b,view.Tick);world.UpdateFactoryModel(a,b,view);a.Root.position=world.Point(b.Position);a.Root.rotation=Quaternion.Euler(0,-(float)b.Heading*Mathf.Rad2Deg,0);world.FaceBuilding(a,cameraView);a.Root.localScale=new Vector3(1,(float)BuildingCombatGeometry.ConstructionHeight(b.Progress),1);a.Sentry?.Drive(b,view,profile);a.Gauss?.Drive(b,profile);a.Healing?.Drive(b,view,profile);a.Selection.SetActive(DisplayedSelection(b.Id));if(matchSetup!=null||campaignConfiguration!=null)PlayableWorld.PaintOwner(a,LobbyPaint(b.Owner));double max=TerritoryRules.MaximumHealth(profile,b);PlayableWorld.UpdateHealth(a,cameraView,(float)(b.Health/max));}
+            using(PerformanceProfile.Measure(ProfileStage.WorldBuildings))foreach(var hangar in view.Buildings.Where(b=>b.Kind==PlayableBuildingKind.Hangar))if(world.Actors.TryGetValue(hangar.Id,out var hangarActor))world.UpdateHangar(hangarActor,hangar,view.Tick);
+            using(PerformanceProfile.Measure(ProfileStage.WorldContacts))RenderDirectContacts();using(PerformanceProfile.Measure(ProfileStage.WorldDestruction))world.RenderBuildingDestructions(view);
+            using(PerformanceProfile.Measure(ProfileStage.WorldRemoval)){
+                renderedRemoved.Clear();foreach(var id in world.Actors.Keys)if(!alive.Contains(id))renderedRemoved.Add(id);
+                foreach(var id in renderedRemoved){world.Remove(id);selection.Remove(id);}
+            }
+            using(PerformanceProfile.Measure(ProfileStage.WorldRemoval))unitMotion.KeepVisible(alive);
+            using(PerformanceProfile.Measure(ProfileStage.WorldWrecks))world.RenderUnitWrecks(view);world.SelectEnvironmentDetail(cameraView);using(PerformanceProfile.Measure(ProfileStage.WorldTrails))world.RenderGroundTrails(view,cameraView);
+            world.RenderTowerRange(view,selection,primarySelection,!inLobby&&!preparing&&!restarting&&!quitting);
+            using(PerformanceProfile.Measure(ProfileStage.WorldRally))world.RenderRallyFlags(view,selection,matchSetup?.Spectator==true);
+            using(PerformanceProfile.Measure(ProfileStage.WorldProjectiles))RenderProjectiles();
         }
         private void UpdateHud()
         {
+            UpdateChatHud();
             bool spectator=matchSetup?.Spectator==true;
             if(spectator)objective.text="ЗРИТЕЛЬ";
             else if(matchSetup?.Foundry==true)objective.text="ЧЁРНАЯ ПЛАВИЛЬНЯ · A1–A3 против B1–B3";else if(matchSetup!=null)objective.text=matchSetup.MatchHumanName+" · Команда "+matchSetup.HumanTeam+"  /  "+matchSetup.MatchAiName+" · Команда "+matchSetup.AiTeam;
+            UpdateProvingGroundUi();creditsLabel.style.display=provingGround==null?DisplayStyle.Flex:DisplayStyle.None;
             creditsLabel.text=view.Credits+" <color=#A9BCC3>+"+view.IncomePerSecond.ToString("0.#")+"/с</color>";
             UpdateSiteHud();
             var factory=view.Buildings.FirstOrDefault(b=>(spectatorMode?b.Id==inspectionEntityId:selection.Contains(b.Id)&&b.Owner==LocalOwner)&&(b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar));
@@ -456,20 +513,21 @@ namespace Spacewars.Presentation
             commandRegion.style.display=DisplayStyle.None;
             UpdateBattleHud(building);
             noticeLabel.text=notice;modal.style.display=(!campaignTutorialShowing||menuPaused)&&childMenu==null&&LocalMenuVisible&&(menuPaused&&runtime?.Result==null||view.Outcome!=PlayableMatchOutcome.Playing&&(campaignConfiguration!=null||runtime?.Result==null)||restarting||!string.IsNullOrEmpty(view.Failure))?DisplayStyle.Flex:DisplayStyle.None;
-            modalCard.Q("pause-controls").style.display=view.Outcome==PlayableMatchOutcome.Playing&&!restarting?DisplayStyle.Flex:DisplayStyle.None;pauseSettings.style.display=view.Outcome==PlayableMatchOutcome.Playing&&!restarting?DisplayStyle.Flex:DisplayStyle.None;pauseMain.style.display=campaignConfiguration!=null?DisplayStyle.Flex:DisplayStyle.None;
+            pauseSettings.style.display=view.Outcome==PlayableMatchOutcome.Playing&&!restarting?DisplayStyle.Flex:DisplayStyle.None;pauseMain.style.display=campaignConfiguration!=null?DisplayStyle.Flex:DisplayStyle.None;
             modalExitButton.style.display=view.Outcome==PlayableMatchOutcome.Playing?DisplayStyle.None:DisplayStyle.Flex;
             resumeButton.style.display=view.Outcome==PlayableMatchOutcome.Playing&&!restarting?DisplayStyle.Flex:DisplayStyle.None;
             bool plainPause=menuPaused&&view.Outcome==PlayableMatchOutcome.Playing&&!restarting&&string.IsNullOrEmpty(view.Failure);
             modalCard.Q("match-menu-eyebrow").style.display=plainPause?DisplayStyle.None:DisplayStyle.Flex;
             modalCaption.style.display=plainPause?DisplayStyle.None:DisplayStyle.Flex;modalTitle.style.marginBottom=plainPause?20:8;
             modalTitle.text=!string.IsNullOrEmpty(view.Failure)?"ОШИБКА СИМУЛЯЦИИ":restarting?"НОВЫЙ БОЙ…":view.Outcome==PlayableMatchOutcome.PlayerWon||view.Outcome==PlayableMatchOutcome.TeamWon?"ПОБЕДА":view.Outcome==PlayableMatchOutcome.PlayerLost?(campaignConfiguration!=null?"АРМИЯ ПОТЕРЯНА":"ЦЕНТРЫ ПОТЕРЯНЫ"):"Пауза";
-            if(root.Q<Label>("match-lab-identity") is Label labIdentity)labIdentity.text="Конфигурация: "+view.ActiveProfile.DisplayName;
-            modalCaption.text=plainPause?"":(!string.IsNullOrEmpty(view.Failure)?"Матч остановлен":restarting?"Подготовка нового матча":view.Outcome==PlayableMatchOutcome.PlayerWon?"Противник побеждён":view.Outcome==PlayableMatchOutcome.PlayerLost?(campaignConfiguration!=null?"Вся боевая армия уничтожена":"Ваши центры уничтожены"):"Бой приостановлен")+"\nПрофиль: "+profile.DisplayName+" · "+view.ProfileRevision;modalCaption.style.whiteSpace=WhiteSpace.Normal;
-            if(!plainPause&&!string.IsNullOrEmpty(runtime?.BalanceApplyStatus))modalCaption.text+="\n"+runtime.BalanceApplyStatus;
+            modalCaption.text=plainPause?"":(!string.IsNullOrEmpty(view.Failure)?"Матч остановлен":restarting?"Подготовка нового матча":view.Outcome==PlayableMatchOutcome.PlayerWon?"Противник побеждён":view.Outcome==PlayableMatchOutcome.PlayerLost?(campaignConfiguration!=null?"Вся боевая армия уничтожена":"Ваши центры уничтожены"):"Бой приостановлен");modalCaption.style.whiteSpace=WhiteSpace.Normal;
             if(!plainPause&&matchSetup!=null)modalCaption.text+="\n"+matchSetup.MatchHumanName+"  /  "+matchSetup.MatchAiName;
             modalTitle.style.color=!string.IsNullOrEmpty(view.Failure)||view.Outcome==PlayableMatchOutcome.PlayerLost?Danger:view.Outcome==PlayableMatchOutcome.PlayerWon?Cyan:Ink;
+            UpdateProvingMenu();
+            if(menuPaused&&provingGround!=null)modal.BringToFront();
             SyncModalFocus();
             UpdatePostMatch();
+            if(provingGround!=null)finishMatch.style.display=DisplayStyle.None;
             UpdateResponsiveVisibility();UpdateCampaignHud();
             if(spectator)
             {
@@ -480,9 +538,17 @@ namespace Spacewars.Presentation
             }
             else UpdateSpectatorHud();
         }
-        private void Record(string message){actions?.WriteLine((Time.realtimeSinceStartup-started).ToString("F3")+" generation="+generation+" tick="+(view?.Tick??0)+" "+message);actions?.Flush();}
+        private void Record(string message){
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if(qaDeadlinePath!=null&&message.Contains(" FAIL "))qaFailed=true;
+#endif
+            actions?.WriteLine((Time.realtimeSinceStartup-started).ToString("F3")+" generation="+generation+" tick="+(view?.Tick??0)+" "+message);actions?.Flush();}
         private void Flush(){metrics?.Flush();actions?.Flush();}
-        private void OnApplicationQuit(){runtime?.RequestStop();Flush();}
-        private void OnDestroy(){StopAllCoroutines();SetSystemCursorHidden(false);if(startupLoadingHost)Destroy(startupLoadingHost);if(startupLoadingPanel)Destroy(startupLoadingPanel);DisposeLocalChildren();if(ownedPanelSettings)Destroy(ownedPanelSettings);if(localCoordinator!=null){runtime=null;root?.RemoveFromHierarchy();}if(cameraView!=null)Destroy(cameraView.gameObject);if(padWhiteArrow)Destroy(padWhiteArrow);if(padRedArrow)Destroy(padRedArrow);commandCursor?.Dispose();menuNavigation?.Dispose();if(nativeMainMenu!=null)Destroy(nativeMainMenu.gameObject);ClearArtilleryEffects();if(artilleryTransparent)Destroy(artilleryTransparent);projectileVisuals.Dispose();lobbyTerrain?.Dispose();mapTerrain?.Dispose();world?.Dispose();runtime?.RequestStop();routeService?.Dispose();routeFrames?.Dispose();preciseFrames?.Dispose();metrics?.Dispose();actions?.Dispose();}
+        private void OnApplicationQuit(){runtime?.RequestStop();
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if(sixPlayerMotion!=null)FlushSixPlayerMotion();
+#endif
+            Flush();}
+        private void OnDestroy(){battleCursorVisual?.RemoveFromHierarchy();StopAllCoroutines();SetSystemCursorHidden(false);if(startupLoadingHost)Destroy(startupLoadingHost);if(startupLoadingPanel)Destroy(startupLoadingPanel);DisposeLocalChildren();if(ownedPanelSettings)Destroy(ownedPanelSettings);if(localCoordinator!=null){runtime=null;root?.RemoveFromHierarchy();}if(cameraView!=null)Destroy(cameraView.gameObject);if(padWhiteArrow)Destroy(padWhiteArrow);if(padRedArrow)Destroy(padRedArrow);commandCursor?.Dispose();menuNavigation?.Dispose();if(nativeMainMenu!=null)Destroy(nativeMainMenu.gameObject);ClearArtilleryEffects();if(artilleryTransparent)Destroy(artilleryTransparent);projectileVisuals.Dispose();lobbyTerrain?.Dispose();mapTerrain?.Dispose();world?.Dispose();runtime?.RequestStop();routeService?.Dispose();routeFrames?.Dispose();preciseFrames?.Dispose();metrics?.Dispose();actions?.Dispose();}
     }
 }

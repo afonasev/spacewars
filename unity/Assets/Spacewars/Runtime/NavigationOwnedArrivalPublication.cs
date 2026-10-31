@@ -48,7 +48,7 @@ namespace Spacewars.Runtime
             if(!physicalArrivalEnabled)return false;
             ArrivalAttempt ready=null;
             using(EnterTransport())foreach(var pair in arrivalAttempts){var a=pair.Value;if(!a.Retiring&&!a.Working&&!a.Reconstructing&&!a.Published&&(a.SnapshotStatus!=NavArrivalStatus.Pending&&a.SnapshotStatus!=NavArrivalStatus.BudgetExhausted)){ready=a;break;}}
-            if(ready!=null){var retry=TryRetryOwnedArrival(ready);if(!retry.HasValue)TryPublishOwnedArrival(ready);return true;}return false;
+            if(ready!=null){var retry=TryRetryOwnedArrival(ready);if(!retry.HasValue)TryPublishOwnedArrivalObserved(ready);return true;}return false;
         }
         private bool TryPublishOwnedArrival(ArrivalAttempt attempt)
         {

@@ -25,6 +25,7 @@ namespace Spacewars.Runtime
     public sealed class AiScoutPlanner
     {
         public const string Policy="scout";
+        internal double RevisitScale{get;set;}=1;
 #if UNITY_INCLUDE_TESTS
         internal static Action<AiScoutPlanReadbackForTests> PlanReadbackForTests;
         internal static string PlanReadbackOwnerFilterForTests;
@@ -34,8 +35,11 @@ namespace Spacewars.Runtime
             int cap=(int)ai.DifficultyValue(difficulty,"scoutAssignments");
             if(plan==AiScoutPlan.BlindRush)return (int)Math.Floor(cap*ai.Value("scouting.blindRushBudgetScale"));
             if(plan==AiScoutPlan.ScoutLed)return cap;
-            return Math.Min(cap,1+(int)Math.Floor(cap*(personality/(double)uint.MaxValue)));
+            return cap;
         }
+        internal int ProtectedUnit{get;set;}
+        private bool SafeCapturerObjective(PlayableAiObservation o,PlayableProfile p,PlayableEntitySnapshot u,PlayablePublicScoutObjective t)=>
+            u.Id!=ProtectedUnit||o.Sites.Any(s=>s.Site.Id==t.SiteId&&s.Site.Kind==PlayableBuildingKind.Mine)&&!o.Entities.Any(e=>o.IsHostile(e.Owner)&&e.Health>0&&Distance(e.Position,t.Approach)<=PlayableUnitRules.Vision(p,e.Kind));
         public bool BaseSearchSuccess(AiKnowledgeState knowledge)=>knowledge.Contacts.Any(c=>c.Building&&
             (c.Kind==(int)PlayableBuildingKind.Headquarters||c.Kind==(int)PlayableBuildingKind.Factory||c.Kind==(int)PlayableBuildingKind.Mine||c.Kind==(int)PlayableBuildingKind.Outpost));
         private static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
@@ -83,14 +87,14 @@ namespace Spacewars.Runtime
         public bool UsefulProductionDemand(PlayableAiObservation o,AiKnowledgeState knowledge,AiProfile ai,int budget)
         {
             if(budget<=0)return false;
-            long revisit=AiProfile.SecondsToTicks(ai.Value("scouting.revisitSeconds"),30);
+            long revisit=AiProfile.SecondsToTicks((ai.Value("scouting.revisitSeconds")*RevisitScale),30);
             return o.PublicScoutObjectives.Any(t=>t.Reachable&&(knowledge.Areas.All(a=>a.AreaId!=t.SiteId)||
                 knowledge.Areas.Any(a=>a.AreaId==t.SiteId&&o.Tick-a.ActuallyCoveredTick>=revisit)));
         }
         public PlayableAiAction Plan(PlayableAiObservation o,AiKnowledgeState knowledge,AiArmyRegistry registry,PlayableProfile gameplay,AiProfile ai,int budget,int preparationSite=0,int reservedActor=0)
         {
             Binding(o,knowledge,registry);var claims=Claims(registry).ToArray();
-            var revisit=AiProfile.SecondsToTicks(ai.Value("scouting.revisitSeconds"),30);
+            var revisit=AiProfile.SecondsToTicks((ai.Value("scouting.revisitSeconds")*RevisitScale),30);
 #if UNITY_INCLUDE_TESTS
             var readback=PlanReadbackForTests;
             bool capture=readback!=null&&PlanReadbackOwnerFilterForTests==o.OwnerId;
@@ -103,7 +107,7 @@ namespace Spacewars.Runtime
             var candidates=from u in o.Entities.Where(u=>Guard("unit.owner",u.Id,0,u.Owner==o.Owner)&&Guard("unit.alive",u.Id,0,u.Health>0)&&
                     Guard("unit.explorer",u.Id,0,u.Kind==PlayableEntityKind.Explorer)&&Guard("unit.stationary",u.Id,0,!u.Moving)&&Guard("unit.expansion-reserved",u.Id,0,u.Id!=reservedActor))
                 where Guard("unit.unclaimed",u.Id,0,registry.ArmyFor(u.Id)==0)&&Guard("budget.available",u.Id,0,claims.Length<budget)
-                from target in o.PublicScoutObjectives.Where(t=>Guard("target.reachable",u.Id,t.SiteId,t.Reachable))
+                from target in o.PublicScoutObjectives.Where(t=>Guard("target.reachable",u.Id,t.SiteId,t.Reachable)&&SafeCapturerObjective(o,gameplay,u,t))
                 where Guard("target.unclaimed",u.Id,target.SiteId,!claims.Any(a=>Guard("claim.matchesObjective",u.Id,target.SiteId,a.Objective==Objective(target.SiteId)||a.Objective==PreparationObjective(target.SiteId))))
                 let area=Value("area",u.Id,target.SiteId,knowledge.Areas.SingleOrDefault(a=>Guard("area.matchesSite",u.Id,target.SiteId,a.AreaId==target.SiteId)))
                 let gain=Value("gain",u.Id,target.SiteId,area==null?1:Math.Min(1,(o.Tick-area.ActuallyCoveredTick)/(double)revisit))
@@ -111,7 +115,7 @@ namespace Spacewars.Runtime
                 let route=Value("route",u.Id,target.SiteId,o.RouteProofs.SingleOrDefault(r=>Guard("route.matchesUnit",u.Id,target.SiteId,r.UnitId==u.Id)&&
                     Guard("route.publicObjective",u.Id,target.SiteId,r.Kind==PlayableRouteTargetKind.PublicObjective)&&Guard("route.matchesSite",u.Id,target.SiteId,r.TargetId==target.SiteId)))
                 where Guard("route.exists",u.Id,target.SiteId,route!=null)&&Guard("route.path.nonempty",u.Id,target.SiteId,route.Path.Count>0)
-                let travel=Value("travel",u.Id,target.SiteId,RouteLength(route)/(RouteLength(route)+gameplay.ExplorerSpeed*ai.Value("scouting.revisitSeconds")))
+                let travel=Value("travel",u.Id,target.SiteId,RouteLength(route)/(RouteLength(route)+gameplay.ExplorerSpeed*(ai.Value("scouting.revisitSeconds")*RevisitScale)))
                 let danger=Value("danger",u.Id,target.SiteId,knowledge.Contacts.Where(c=>Guard("danger.contact.withinVision",u.Id,target.SiteId,Distance(c.Position,target.Approach)<=gameplay.ExplorerVision))
                     .Select(c=>Value("danger.contact.confidence",u.Id,target.SiteId,c.Confidence)).DefaultIfEmpty(0).Max())
                 let score=Value("score",u.Id,target.SiteId,ai.Value("utility.scout.informationGain")*gain-ai.Value("utility.scout.travelCost")*travel-ai.Value("utility.scout.riskCost")*danger)
@@ -120,14 +124,14 @@ namespace Spacewars.Runtime
 #else
             var candidates=from u in o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==PlayableEntityKind.Explorer&&!u.Moving)
                 where u.Id!=reservedActor&&registry.ArmyFor(u.Id)==0&&claims.Length<budget
-                from target in o.PublicScoutObjectives.Where(t=>t.Reachable)
+                from target in o.PublicScoutObjectives.Where(t=>t.Reachable&&SafeCapturerObjective(o,gameplay,u,t))
                 where !claims.Any(a=>a.Objective==Objective(target.SiteId)||a.Objective==PreparationObjective(target.SiteId))
                 let area=knowledge.Areas.SingleOrDefault(a=>a.AreaId==target.SiteId)
                 let gain=area==null?1:Math.Min(1,(o.Tick-area.ActuallyCoveredTick)/(double)revisit)
                 where target.SiteId==preparationSite||gain>=1
                 let route=o.RouteProofs.SingleOrDefault(r=>r.UnitId==u.Id&&r.Kind==PlayableRouteTargetKind.PublicObjective&&r.TargetId==target.SiteId)
                 where route!=null&&route.Path.Count>0
-                let travel=RouteLength(route)/(RouteLength(route)+gameplay.ExplorerSpeed*ai.Value("scouting.revisitSeconds"))
+                let travel=RouteLength(route)/(RouteLength(route)+gameplay.ExplorerSpeed*(ai.Value("scouting.revisitSeconds")*RevisitScale))
                 let danger=knowledge.Contacts.Where(c=>Distance(c.Position,target.Approach)<=gameplay.ExplorerVision).Select(c=>c.Confidence).DefaultIfEmpty(0).Max()
                 let score=ai.Value("utility.scout.informationGain")*gain-ai.Value("utility.scout.travelCost")*travel-ai.Value("utility.scout.riskCost")*danger
                 orderby (target.SiteId==preparationSite?0:1),score descending,target.SiteId,u.Id

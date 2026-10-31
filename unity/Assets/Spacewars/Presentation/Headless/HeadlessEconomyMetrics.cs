@@ -116,18 +116,18 @@ namespace Spacewars.Headless
                 var local=v.Sites.FirstOrDefault(site=>site.Site.Id==v.HomeSiteId);
                 if(local!=null&&local.Site.Slots.Count>0&&local.Site.Slots.All(slot=>v.Buildings.Any(b=>b.SiteId==local.Site.Id&&b.SlotId==slot.Id)))r.FullLocalSlotsTicks++;
                 if(!v.Buildings.Any(b=>b.Owner==v.Owner&&b.Kind==PlayableBuildingKind.Headquarters&&b.Health>0))r.LostHeadquartersTicks++;
-                // World settles once per second, AFTER construction/lifecycle/upgrades. Attribute
+                // World settles at the active profile cadence, AFTER construction/lifecycle/upgrades. Attribute
                 // only an observed positive settlement, to the actual ready income sources.
                 double delta=v.SettledIncome-s.Income;
                 if(delta>0)
                 {
                     var ready=v.Buildings.Where(b=>b.Owner==v.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true).ToArray();
                     double Rate(PlayableBuildingSnapshot b)=>(b.RefineryUpgraded?p.RefineryUpgradedIncome:TerritoryRules.Income(p,b.Kind))/p.IncomePeriodSeconds;
-                    double total=ready.Sum(Rate);
+                    double total=ready.Sum(Rate)*p.IncomeSettlementSeconds;
                     if(Math.Abs(delta-total)>1e-7)throw new InvalidOperationException("Actual settled income/source attribution mismatch.");
                     foreach(var site in ready.Where(b=>!s.Centers.Contains(b.SiteId)).GroupBy(b=>b.SiteId))
                     {
-                        double amount=site.Sum(Rate);r.RealizedExpansionIncome+=amount;
+                        double amount=site.Sum(Rate)*p.IncomeSettlementSeconds;r.RealizedExpansionIncome+=amount;
                         if(amount>0&&r.ExpansionSettlementExamples.Count<32)r.ExpansionSettlementExamples.Add(new Settlement{Tick=v.Tick,SiteId=site.Key,Amount=amount,OwnerSettledDelta=delta});
                     }
                 }

@@ -11,17 +11,18 @@ namespace Spacewars.Presentation
         private Button upgradeRefinery;
         private ProgressBar upgradeProgress;
         private Label upgradeReason;
-        private readonly Button[] researchButtons=new Button[6];
+        private readonly Button[] researchButtons=new Button[8];
         private readonly ResearchSlot[] researchSlots=new ResearchSlot[6];
         private sealed class ResearchSlot { public Button Button; public int Center; public long Order; }
         private int scienceRefinery;
+        private bool scienceProducer;private long scienceUpgradeOrder;
         private bool scienceActionAllowed,scienceCancelling;
         private void CreateScienceHud(VisualElement parent)
         {
             scienceControls=new VisualElement{name="science-controls"};scienceControls.style.minWidth=0;parent.Add(scienceControls);
             upgradeRefinery=Button("Улучшить завод",()=>
             {
-                if(scienceActionAllowed&&scienceRefinery!=0)Submit(scienceCancelling?PlayableCommandKind.CancelRefineryUpgrade:PlayableCommandKind.UpgradeRefinery,new[]{scienceRefinery});
+                if(scienceActionAllowed&&scienceRefinery!=0)Submit(scienceProducer?(scienceUpgradeOrder!=0?PlayableCommandKind.CancelProductionOrder:PlayableCommandKind.UpgradeProducer):scienceCancelling?PlayableCommandKind.CancelRefineryUpgrade:PlayableCommandKind.UpgradeRefinery,new[]{scienceRefinery},productionOrderId:scienceProducer?scienceUpgradeOrder:0);
             });upgradeRefinery.name="upgrade-refinery";scienceControls.Add(upgradeRefinery);
             upgradeProgress=new ProgressBar{lowValue=0,highValue=100,name="refinery-upgrade-progress"};scienceControls.Add(upgradeProgress);StyleProgress(upgradeProgress);
             upgradeReason=new Label{name="refinery-upgrade-reason"};upgradeReason.style.whiteSpace=WhiteSpace.Normal;scienceControls.Add(upgradeReason);
@@ -40,41 +41,55 @@ namespace Spacewars.Presentation
         {
             var state=building?.PrivateState?.Upgrade;
             bool science=building?.Kind==PlayableBuildingKind.ScientificCenter;
+            scienceProducer=building?.Kind==PlayableBuildingKind.Factory||building?.Kind==PlayableBuildingKind.Hangar;
+            scienceUpgradeOrder=scienceProducer?building.PrivateState?.Orders.FirstOrDefault(o=>o.IsUpgrade)?.Id??0:0;
             bool show=building?.PrivateState!=null&&(spectatorMode||building.Owner==LocalOwner)&&(state!=null||science);
             scienceControls.style.display=show?DisplayStyle.Flex:DisplayStyle.None;
-            scienceRefinery=show?building.Id:0;scienceCancelling=!science&&state?.Active==true;
-            scienceActionAllowed=!spectatorMode&&show&&!paused&&!restarting&&!quitting&&view.Outcome==PlayableMatchOutcome.Playing&&building.PrivateState.Lifecycle?.Selling!=true&&(science||state.Active||state.BlockedReason==null);
+            scienceRefinery=show?building.Id:0;scienceCancelling=!science&&(state?.Active==true||scienceUpgradeOrder!=0);
+            scienceActionAllowed=!spectatorMode&&show&&!paused&&!restarting&&!quitting&&view.Outcome==PlayableMatchOutcome.Playing&&building.PrivateState.Lifecycle?.Selling!=true&&(science||scienceCancelling||state.BlockedReason==null);
             // Keep blocked actions focusable so keyboard users can discover the reason.
             upgradeRefinery.style.opacity=scienceActionAllowed?1:.45f;
-            upgradeRefinery.text=scienceCancelling?"Отменить улучшение · +"+state.PaidCost.ToString("0"):state?.Complete==true?"Завод улучшен":"Улучшить завод · "+profile.RefineryUpgradeCost.ToString("0");
+            upgradeRefinery.text=scienceCancelling?(provingGround!=null?"Отменить улучшение":"Отменить улучшение · +"+state.PaidCost.ToString("0")):state?.Complete==true?"Завод улучшен":(provingGround!=null?"Улучшить завод · бесплатно":"Улучшить завод · "+profile.RefineryUpgradeCost.ToString("0"));
+            if(scienceProducer)upgradeRefinery.text=scienceCancelling?"Отменить улучшение":state?.Complete==true?"Здание улучшено":"Улучшить · "+(provingGround!=null?"бесплатно":profile.ProducerUpgradeCost(building.Kind).ToString());
             string reason=paused?"Матч на паузе":state?.BlockedReason;
-            upgradeRefinery.tooltip="Цена: "+profile.RefineryUpgradeCost.ToString("0")+" · Время: "+profile.RefineryUpgradeSeconds.ToString("0.#")+" с"+(scienceCancelling?" · Возврат оплаченной суммы":reason==null?"":" · "+reason);
-            upgradeReason.text=state==null?"":state.Active?"Доход пока обычный · "+(state.Duration-state.Elapsed).ToString("0.0")+" с":state.Complete?"Доход: "+profile.RefineryUpgradedIncome.ToString("0")+" за "+profile.IncomePeriodSeconds+" с":reason??"Научный центр готов";
+            upgradeRefinery.tooltip=(provingGround!=null?"Бесплатно":"Цена: "+profile.RefineryUpgradeCost.ToString("0"))+" · Время: "+(provingGround!=null?profile.ProvingGroundActionSeconds:profile.RefineryUpgradeSeconds).ToString("0.#")+" с"+(scienceCancelling?(provingGround!=null?"":" · Возврат оплаченной суммы"):reason==null?"":" · "+reason);
+            upgradeReason.text=state==null?"":state.Active?"Доход пока обычный · "+(state.Duration-state.Elapsed).ToString("0.0")+" с":state.Complete?PlayableResearchRules.RefineryDescription(profile):reason??"Научный центр готов";
             upgradeProgress.style.display=state?.Active==true?DisplayStyle.Flex:DisplayStyle.None;
             upgradeProgress.value=(float)((state?.Progress??0)*100);upgradeProgress.title="Улучшение · "+upgradeProgress.value.ToString("0")+"%";
+            if(scienceProducer)
+            {
+                upgradeRefinery.tooltip="Скорость производства ×"+profile.UpgradedProducerSpeedMultiplier.ToString("0.##")+" · "+profile.ProducerUpgradeSeconds(building.Kind).ToString("0.#")+" с · оплата при старте"+(reason==null?"":" · "+reason);
+                upgradeReason.text=state?.Complete==true?"Производство ×"+profile.UpgradedProducerSpeedMultiplier.ToString("0.##"):scienceCancelling?"Улучшение в общей очереди производства":reason??"Научный центр готов";
+                // Progress belongs to the shared production queue, never a second parallel lane.
+                upgradeProgress.style.display=DisplayStyle.None;
+            }
             upgradeRefinery.style.display=science?DisplayStyle.None:DisplayStyle.Flex;upgradeReason.style.display=science?DisplayStyle.None:DisplayStyle.Flex;upgradeProgress.style.display=science?DisplayStyle.None:upgradeProgress.style.display;
-            var research=building?.PrivateState?.Research?.Where(order=>!order.Complete).ToArray();
+            var research=building?.PrivateState?.Research?.Where(order=>!order.Complete&&order.CenterId==building.Id).ToArray();
             var all=building?.PrivateState?.Research??System.Array.Empty<PlayableResearchOrderSnapshot>();
             for(int i=0;i<researchButtons.Length;i++){
-                var kind=ResearchButtonKind(i,all);var order=all.FirstOrDefault(o=>o.Kind==kind);var button=researchButtons[i];button.userData=kind;button.name="research-"+kind;
+                var kind=ResearchButtonKind(i,all);var order=all.FirstOrDefault(o=>o.Kind==kind&&(!PlayableResearchRules.Local(kind)||o.CenterId==scienceRefinery));var button=researchButtons[i];button.userData=kind;button.name="research-"+kind;
                 var availability=view.ResearchAvailability.FirstOrDefault(a=>a.Kind==kind);
-                bool prerequisite=PlayableResearchRules.Prerequisite(kind,all)&&(availability?.BlockedReason==null),canCancel=order?.Active==true&&order.CenterId==scienceRefinery;
+                string centerReason=PlayableResearchRules.CenterRequirement(kind,building?.ScientificCenterUpgraded==true);
+                bool prerequisite=PlayableResearchRules.Prerequisite(kind,all)&&centerReason==null&&(availability?.BlockedReason==null),canCancel=order?.Active==true&&order.CenterId==scienceRefinery;
                 button.style.display=science?DisplayStyle.Flex:DisplayStyle.None;button.SetEnabled(science&&scienceActionAllowed&&(canCancel||order==null&&prerequisite));
-                double cost=PlayableResearchRules.Cost(profile,kind),duration=PlayableResearchRules.Duration(profile,kind);
-                button.text=ResearchName(kind)+(order==null?" · "+cost.ToString("0"):order.Complete?" · готово":order.Active?" · "+(canCancel?"отменить ":"")+(int)(order.Progress*100)+"%":" · ждёт");
-                button.tooltip=ResearchName(kind)+" · "+cost.ToString("0")+" кредитов · "+duration.ToString("0.#")+" с\n"+PlayableResearchRules.Description(profile,kind)+(!prerequisite?"\n"+(availability?.BlockedReason??"Сначала завершите первый уровень"):"");
+                double cost=PlayableResearchRules.Cost(profile,kind),duration=provingGround!=null?profile.ProvingGroundActionSeconds:PlayableResearchRules.Duration(profile,kind);
+                button.text=ResearchName(kind)+(order==null?(provingGround!=null?" · бесплатно":" · "+cost.ToString("0")):order.Complete?" · готово":order.Active?" · "+(canCancel?"отменить ":"")+(int)(order.Progress*100)+"%":" · ждёт");
+                button.tooltip=ResearchName(kind)+(provingGround!=null?" · бесплатно":" · "+cost.ToString("0")+" кредитов")+" · "+duration.ToString("0.#")+" с\n"+PlayableResearchRules.Description(profile,kind)+(!prerequisite?"\n"+(centerReason??availability?.BlockedReason??"Сначала завершите предыдущий уровень"):"");
                 button.Q<OrbitalGlyph>().Set(OrbitalPrecision.ResearchGlyph(kind),Ink,order?.Active==true?order.Progress:-1);
             }
-            for(int i=0;i<researchSlots.Length;i++){var slot=researchSlots[i];var order=research!=null&&i<research.Length?research[i]:null;slot.Center=science?order?.CenterId??scienceRefinery:0;slot.Order=order?.Id??0;slot.Button.style.display=science?DisplayStyle.Flex:DisplayStyle.None;slot.Button.SetEnabled(science&&scienceActionAllowed&&order?.Active==true&&order.CenterId==scienceRefinery);slot.Button.text=order==null?"—":order.Active?(int)(order.Progress*100)+"%\n"+System.Math.Ceiling(order.Duration-order.Elapsed)+"с":order.Complete?"готово":"ждёт";OrbitalPrecision.QueueCard(slot.Button,order==null?"science":OrbitalPrecision.ResearchGlyph(order.Kind),order?.Active==true?order.Progress:-1,order!=null,title:order==null?null:ResearchName(order.Kind),status:order?.Active==true?System.Math.Ceiling(order.Duration-order.Elapsed)+" с · "+(int)(order.Progress*100)+"%":null);slot.Button.tooltip=order==null?"Свободный слот":ResearchName(order.Kind)+(order.Active?" · осталось "+System.Math.Ceiling(order.Duration-order.Elapsed)+" с"+(!spectatorMode&&order.CenterId==scienceRefinery?" · отменить: вернуть "+order.PaidCost:order.CenterId!=scienceRefinery?" · другой центр":""):" · ожидает");}
+            for(int i=0;i<researchSlots.Length;i++){var slot=researchSlots[i];var order=research!=null&&i<research.Length?research[i]:null;slot.Center=science?order?.CenterId??scienceRefinery:0;slot.Order=order?.Id??0;slot.Button.style.display=science?DisplayStyle.Flex:DisplayStyle.None;slot.Button.SetEnabled(science&&scienceActionAllowed&&order?.Active==true&&order.CenterId==scienceRefinery);slot.Button.text=order==null?"—":order.Active?(int)(order.Progress*100)+"%\n"+System.Math.Ceiling(order.Duration-order.Elapsed)+"с":order.Complete?"готово":"ждёт";OrbitalPrecision.QueueCard(slot.Button,order==null?"science":RadialActionPresentation.ResearchArtwork(order.Kind),order?.Active==true?order.Progress:-1,order!=null,title:order==null?null:ResearchName(order.Kind),status:order?.Active==true?System.Math.Ceiling(order.Duration-order.Elapsed)+" с · "+(int)(order.Progress*100)+"%":null);slot.Button.tooltip=order==null?"Свободный слот":ResearchName(order.Kind)+(order.Active?" · осталось "+System.Math.Ceiling(order.Duration-order.Elapsed)+" с"+(!spectatorMode&&order.CenterId==scienceRefinery?(provingGround!=null?" · отменить":" · отменить: вернуть "+order.PaidCost):order.CenterId!=scienceRefinery?" · другой центр":""):" · ожидает");}
         }
-        private void ResearchClick(PlayableResearchKind kind){if(spectatorMode)return;var b=view?.Buildings.FirstOrDefault(x=>x.Id==scienceRefinery);var order=b?.PrivateState?.Research==null?null:System.Linq.Enumerable.FirstOrDefault(b.PrivateState.Research,x=>x.Kind==kind);if(order?.Active==true)Submit(PlayableCommandKind.CancelResearch,new[]{scienceRefinery},productionOrderId:order.Id);else Submit(PlayableCommandKind.QueueResearch,new[]{scienceRefinery},researchKind:kind);}
+        private void ResearchClick(PlayableResearchKind kind){if(spectatorMode)return;var b=view?.Buildings.FirstOrDefault(x=>x.Id==scienceRefinery);var order=b?.PrivateState?.Research==null?null:System.Linq.Enumerable.FirstOrDefault(b.PrivateState.Research,x=>x.Kind==kind&&(!PlayableResearchRules.Local(kind)||x.CenterId==scienceRefinery));if(order?.Active==true)Submit(PlayableCommandKind.CancelResearch,new[]{scienceRefinery},productionOrderId:order.Id);else Submit(PlayableCommandKind.QueueResearch,new[]{scienceRefinery},researchKind:kind);}
         private void CancelResearchSlot(ResearchSlot slot){if(!spectatorMode&&slot.Center!=0&&slot.Order!=0)Submit(PlayableCommandKind.CancelResearch,new[]{slot.Center},productionOrderId:slot.Order);}
         private static PlayableResearchKind ResearchButtonKind(int index,System.Collections.Generic.IEnumerable<PlayableResearchOrderSnapshot> orders)
         {
+            if(index==7)return PlayableResearchKind.ScientificCenterUpgrade;
+            if(index==6)return orders.Any(o=>o.Kind==PlayableResearchKind.ReinforcedConcrete&&o.Complete)?PlayableResearchKind.AdvancedReinforcedConcrete:PlayableResearchKind.ReinforcedConcrete;
             if(index==5)return PlayableResearchKind.HawkSalvoSystems;
             if(index<3)return (PlayableResearchKind)index;
             var first=index==3?PlayableResearchKind.ImprovedWeaponSystems:PlayableResearchKind.ImprovedDefensiveSystems;
-            return orders.Any(o=>o.Kind==first&&o.Complete)?index==3?PlayableResearchKind.AdvancedWeaponSystems:PlayableResearchKind.AdvancedDefensiveSystems:first;
+            var second=index==3?PlayableResearchKind.AdvancedWeaponSystems:PlayableResearchKind.AdvancedDefensiveSystems;
+            return orders.Any(o=>o.Kind==second&&o.Complete)?index==3?PlayableResearchKind.UltimateWeaponSystems:PlayableResearchKind.UltimateDefensiveSystems:orders.Any(o=>o.Kind==first&&o.Complete)?second:first;
         }
         private static string ResearchName(PlayableResearchKind kind)=>PlayableResearchRules.Name(kind);
     }

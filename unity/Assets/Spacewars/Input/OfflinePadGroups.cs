@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEngine;
 
 namespace Spacewars.Input
 {
@@ -44,6 +45,28 @@ namespace Spacewars.Input
             double Distance(double ax,double az,double bx,double bz)=>(ax-bx)*(ax-bx)+(az-bz)*(az-bz);
             int bestCount=0;double bestDistance=double.PositiveInfinity;OfflinePadBase? result=null;
             foreach(var anchor in selected){var nearby=selected.Where(u=>Distance(u.X,u.Z,anchor.X,anchor.Z)<=radius*radius).ToArray();if(nearby.Length<bestCount)continue;double x=nearby.Average(u=>u.X),z=nearby.Average(u=>u.Z),cameraDistance=Distance(x,z,cameraX,cameraZ);if(nearby.Length==bestCount&&cameraDistance>=bestDistance)continue;var nearest=nearby[0];foreach(var u in nearby)if(Distance(u.X,u.Z,x,z)<Distance(nearest.X,nearest.Z,x,z))nearest=u;bestCount=nearby.Length;bestDistance=cameraDistance;result=new OfflinePadBase(nearest.Id,nearest.X,nearest.Z);}
+            return result;
+        }
+        // Positions are camera-projected pixels, including units outside the viewport.
+        // Sliding windows find the most populous rectangle at the current zoom.
+        public static OfflinePadBase? FocusViewport(IReadOnlyList<OfflinePadSelectable> units,Rect viewport)
+        {
+            var own=units.Where(u=>u.Own&&u.Visible).OrderBy(u=>u.X).ThenBy(u=>u.Id).ToArray();
+            int bestCount=0,bestId=int.MaxValue;double bestDistance=double.PositiveInfinity;OfflinePadBase? result=null;
+            foreach(double left in own.Select(u=>u.X).Distinct()){
+                var column=own.Where(u=>u.X>=left&&u.X<=left+viewport.width).OrderBy(u=>u.Z).ThenBy(u=>u.Id).ToArray();
+                int end=0;
+                for(int begin=0;begin<column.Length;begin++){
+                    if(end<begin)end=begin;while(end<column.Length&&column[end].Z-column[begin].Z<=viewport.height)end++;
+                    int count=end-begin;if(count<bestCount)continue;
+                    double minX=double.PositiveInfinity,maxX=double.NegativeInfinity;int id=int.MaxValue;
+                    for(int i=begin;i<end;i++){minX=Math.Min(minX,column[i].X);maxX=Math.Max(maxX,column[i].X);id=Math.Min(id,column[i].Id);}
+                    double x=(minX+maxX)/2,z=(column[begin].Z+column[end-1].Z)/2;
+                    double distance=(x-viewport.center.x)*(x-viewport.center.x)+(z-viewport.center.y)*(z-viewport.center.y);
+                    if(count==bestCount&&(distance>bestDistance||distance==bestDistance&&id>=bestId))continue;
+                    bestCount=count;bestDistance=distance;bestId=id;result=new OfflinePadBase(id,x,z);
+                }
+            }
             return result;
         }
         public static OfflinePadSector[] Bases(IReadOnlyList<OfflinePadBase> bases,int originalId,int page,int pageSize,out int pages)

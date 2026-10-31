@@ -190,7 +190,11 @@ namespace Spacewars.Runtime
         private NavigationLiveArrivalProvider DetachRetiredArrivalProvidersNoThrow(){var result=retiredArrivalProviders;retiredArrivalProviders=null;return result;}
         private NavigationLiveArrivalAttempt DetachRetiredArrivalAttemptsNoThrow(){var result=retiredArrivalAttempts;retiredArrivalAttempts=null;return result;}
         private void RetireArrivalProviderNoThrow(NavigationLiveArrivalProvider owner){owner.RetiredNext=retiredArrivalProviders;retiredArrivalProviders=owner;}
-        private void RetireArrivalAttemptNoThrow(NavigationLiveArrivalAttempt owner){owner.RetiredNext=retiredArrivalAttempts;retiredArrivalAttempts=owner;}
+        private void RetireArrivalAttemptNoThrow(NavigationLiveArrivalAttempt owner){
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if(QaArrivalLifecycle.Enabled)QaArrivalLifecycle.Retire(Generation,owner.Record.Id,owner.Record.Work,owner.Record.RetirementReason);
+#endif
+            owner.RetiredNext=retiredArrivalAttempts;retiredArrivalAttempts=owner;}
         internal static void ReleaseRetiredArrivalProviders(NavigationLiveArrivalProvider owner)
         {
             while(owner!=null){var next=owner.RetiredNext;owner.RetiredNext=null;var references=owner.RetiredReferenceMap;var ids=owner.RetiredIdMap;owner.RetiredReferenceMap=null;owner.RetiredIdMap=null;int count=owner.RetiredIndexReferences;owner.RetiredIndexReferences=0;references?.Release();ids?.Release();for(int i=0;i<count;i++)owner.Release();owner=next;}

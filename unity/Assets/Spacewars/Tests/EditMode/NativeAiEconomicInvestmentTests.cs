@@ -8,13 +8,14 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class NativeAiEconomicInvestmentTests
     {
-        private static PlayableAiObservation View(int bank=150,double income=6,bool pending=false,bool full=false,long tick=900)
+        private static PlayableAiObservation View(int bank=150,double income=6,bool pending=false,bool full=false,long tick=900,bool factory=true)
         {
             var p=PlayableProfile.Default;var site=TerritoryRules.Sites(p).First(x=>x.Kind==PlayableBuildingKind.Headquarters);
             var buildings=new[]{new PlayableBuildingSnapshot(1,PlayableOwner.Player,PlayableBuildingKind.Headquarters,site.Position,p.HeadquartersHealth,1,0,0,default,siteId:site.Id),
                 new PlayableBuildingSnapshot(2,PlayableOwner.Player,PlayableBuildingKind.Factory,site.Slots[0].Position,p.FactoryHealth,1,0,0,default,siteId:site.Id,slotId:site.Slots[0].Id,parentId:1)}.ToList();
             if(pending)buildings.Add(new PlayableBuildingSnapshot(3,PlayableOwner.Player,PlayableBuildingKind.Refinery,site.Slots[1].Position,100,.5,0,0,default,siteId:site.Id,slotId:site.Slots[1].Id,parentId:1,phase:ConstructionPhase.Constructing));
             if(full)foreach(var slot in site.Slots.Skip(1))buildings.Add(new PlayableBuildingSnapshot(10+slot.Id,PlayableOwner.Player,PlayableBuildingKind.Refinery,slot.Position,p.RefineryHealth,1,0,0,default,siteId:site.Id,slotId:slot.Id,parentId:1));
+            if(!factory)buildings.RemoveAll(b=>b.Kind==PlayableBuildingKind.Factory);
             return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,7,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,bank,null,Array.Empty<PlayableEntitySnapshot>(),buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,
                 sites:new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,1,true)},population:new PlayablePopulationSnapshot(0,0,p.ArmyCapacity),incomePerSecond:income));
         }
@@ -93,5 +94,39 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void OccupiedSlotsDoNotCreateAnUnfundableSavingGoal()
         {Assert.IsNull(AiEconomicInvestmentPlanner.Plan(View(full:true),PlayableProfile.Default,AiProfile.Initial,Capacity(),true,false));}
+        [Test] public void QualifiedDemandWaitsForBlockedExitThenFundsIdleLineWithoutRenewingExpiry()
+        {
+            var p=PlayableProfile.Default;var o=View(400,13);var b=new AiBudgetLedger(o.OwnerId,o.Generation);b.ObserveBank(o.Credits);
+            var initial=AiEconomicInvestmentPlanner.Plan(o,p,AiProfile.Initial,Capacity("factory startup fund unavailable"),true,false);
+            AiEconomicInvestmentPlanner.RememberDemand(o,p,b,initial);var witness=AiEconomicInvestmentPlanner.Demand(b);
+            var blocked=new AiProductionCapacity(13,0,.8,900,1,0,600,"producer exit blocked");
+            var waiting=AiEconomicInvestmentPlanner.Plan(o,p,AiProfile.Initial,blocked,true,false,witness);
+            Assert.NotNull(waiting);Assert.AreEqual(initial.Credits,waiting.Credits);Assert.False(waiting.Candidate.Legal);
+            AiEconomicInvestmentPlanner.RememberDemand(o,p,b,waiting);Assert.AreEqual(witness.ExpiresTick,AiEconomicInvestmentPlanner.Demand(b).ExpiresTick);
+            var funded=View(600,13,tick:945);b.ObserveBank(funded.Credits);
+            var resumed=AiEconomicInvestmentPlanner.Plan(funded,p,AiProfile.Initial,Capacity("fill existing idle line"),true,false,AiEconomicInvestmentPlanner.Demand(b));
+            Assert.True(resumed.Candidate.Legal);Assert.AreEqual(600,resumed.Credits);
+            AiEconomicInvestmentPlanner.RememberDemand(funded,p,b,resumed);Assert.AreEqual(witness.ExpiresTick,AiEconomicInvestmentPlanner.Demand(b).ExpiresTick);
+            AiEconomicInvestmentPlanner.ValidateDemand(b,p,funded.Tick);
+        }
+        [Test] public void BlockedExitCannotInventDemandAndLostIncomeDoesNotKeepFactoryQuote()
+        {
+            var p=PlayableProfile.Default;var o=View(400,13);var b=new AiBudgetLedger(o.OwnerId,o.Generation);b.ObserveBank(o.Credits);
+            var blocked=new AiProductionCapacity(13,0,.8,900,1,0,600,"producer exit blocked");
+            Assert.IsNull(AiEconomicInvestmentPlanner.Plan(o,p,AiProfile.Initial,blocked,true,false));
+            AiEconomicInvestmentPlanner.RememberDemand(o,p,b,AiEconomicInvestmentPlanner.Plan(o,p,AiProfile.Initial,Capacity(null),true,false));
+            var changed=View(400,6,tick:945);var plan=AiEconomicInvestmentPlanner.Plan(changed,p,AiProfile.Initial,Capacity(),true,false,AiEconomicInvestmentPlanner.Demand(b));
+            Assert.AreEqual(PlayableBuildingKind.Refinery,plan.Candidate.Action.BuildingKind);
+            AiEconomicInvestmentPlanner.RememberDemand(changed,p,b,plan);Assert.IsNull(AiEconomicInvestmentPlanner.Demand(b));
+        }
+        [Test] public void LostLastProducerCannotUseAnOldDemandWitness()
+        {
+            var p=PlayableProfile.Default;var o=View(400,13);var b=new AiBudgetLedger(o.OwnerId,o.Generation);b.ObserveBank(o.Credits);
+            AiEconomicInvestmentPlanner.RememberDemand(o,p,b,AiEconomicInvestmentPlanner.Plan(o,p,AiProfile.Initial,Capacity(null),true,false));
+            var lost=View(400,13,tick:945,factory:false);var history=new AiProductionDemand();history.Observe(lost,AiProfile.Initial);
+            var capacity=history.Assess(lost,p,AiProfile.Initial,400);Assert.AreEqual("no existing live line",capacity.ScalingReason);
+            var plan=AiEconomicInvestmentPlanner.Plan(lost,p,AiProfile.Initial,capacity,true,false,AiEconomicInvestmentPlanner.Demand(b));Assert.IsNull(plan);
+            AiEconomicInvestmentPlanner.RememberDemand(lost,p,b,plan);Assert.IsNull(AiEconomicInvestmentPlanner.Demand(b));
+        }
     }
 }

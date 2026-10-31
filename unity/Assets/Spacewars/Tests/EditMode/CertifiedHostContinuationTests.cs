@@ -434,6 +434,117 @@ namespace Spacewars.Tests.EditMode
             Restore(prefix);Assert.Zero(budget.PhysicalBytes);CollectionAssert.AreEqual(prefix,Bytes());kernel.Attach(session.RoutePort);typeof(CertifiedRouteKernel).GetMethod("RefreshPhysicalFrontier",F).Invoke(kernel,new object[]{session.RoutePort});session.Step(1d/30);Assert.AreEqual(1,session.OwnedResultBatchPublications);Assert.Zero(session.LastOwnedResultBatchPublicationAllocatedBytes);CollectionAssert.AreEqual(published,Bytes());Call("AdvanceRally");CollectionAssert.AreEqual(suffix,Bytes());Assert.AreEqual(facts,HostFacts());Pump(1);CollectionAssert.AreEqual(next,Bytes());Assert.AreEqual(nextFacts,HostFacts());Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
         }
 
+        [Test]
+        public void ApplyResultsMovedReadyKeepsOwnedReplacementThroughNextStep()
+        {
+            kernel.Clear();session.ReleaseCommittedHostRoot();Call("DestroyOwnedNavigation");
+            session=new NavigationSession(1,new NavGeometry(30,new[]{new NavObstacle(-3,-3,3,3)},1),activeProfile.Navigation);
+            Domain.GetField("navigation",F).SetValue(domain,session);kernel=new CertifiedRouteKernel();
+            var actor=session.Crowd.Add(1,new NavPoint(-10,-6));session.CancelProbe(7);
+            void AwaitAnswer(){for(int i=0;i<20000&&session.Answers.Count==0;i++)PumpProbe(64);Assert.AreEqual(1,session.Answers.Count);}
+            Assert.True(session.Move(1,new NavPoint(10,-6)));AwaitAnswer();session.ApplyResults();Assert.True(actor.Moving);
+            var start=actor.Position;session.Step(1d/30);Assert.AreNotEqual(start,actor.Position);
+            Assert.True(session.Move(1,new NavPoint(-10,6)));AwaitAnswer();
+            Assert.True(session.Answers.TryDequeue(out var answer));
+            ((NavigationTransportOwner)typeof(NavigationSession).GetField("transportOwner",F).GetValue(session)).Consume(answer.Request);
+            Assert.AreEqual(NavSolveStatus.Ready,answer.Status);
+            for(int i=0;i<1000&&actor.Moving&&answer.Request.Geometry.SegmentFree(actor.Position,answer.ReadOnlyRouteBacking[0],actor.Radius);i++)session.Step(1d/30);
+            Assert.True(actor.Moving);Assert.False(answer.Request.Geometry.SegmentFree(actor.Position,answer.ReadOnlyRouteBacking[0],actor.Radius));
+            Assert.True(session.Answers.TryEnqueue(answer));
+            var position=actor.Position;session.ApplyResults();
+            // This Step reproduced the reported admission exception before the fix.
+            Assert.DoesNotThrow(()=>session.Step(1d/30));
+            var replacement=session.PendingRequestFor(1);Assert.NotNull(replacement);Assert.NotNull(replacement.StorageOwner);
+            Assert.AreNotSame(answer.Request,replacement);Assert.AreEqual(position,replacement.Start);
+            Assert.AreEqual(answer.Request.Goal,replacement.Goal);Assert.AreEqual(answer.Request.Order+1,replacement.Order);
+            var prefix=ProbeBytes();RestoreProbeBytes(prefix);CollectionAssert.AreEqual(prefix,ProbeBytes());
+            actor=session.Crowd.Units.Single(u=>u.Id==1);
+            AwaitAnswer();session.ApplyResults();
+            for(int i=0;i<1200&&actor.Moving;i++)session.Step(1d/30);
+            Assert.Zero(session.PendingCount);Assert.AreEqual(NavigationOutcome.Arrived,actor.Outcome);
+            Assert.Less(Math.Sqrt(Math.Pow(actor.Position.X-replacement.Goal.X,2)+Math.Pow(actor.Position.Z-replacement.Goal.Z,2)),.5);
+            Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+        }
+
+        [Test] public void Oct29WitnessProfileIncludesFreshMainFactoryAssemblyGap()
+        {
+            var source=Newtonsoft.Json.Linq.JObject.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(),"Tests/Fixtures/Oct29AiMatches.json")));
+            Assert.AreEqual(PlayableProfile.Default.FactoryAssemblyGap,(double)source["Profile"]["factoryAssemblyGap"]);
+            var scenario=source["Scenarios"].Single(x=>(int)x["Number"]==4);
+            Assert.AreEqual(-2047375901,(int)scenario["Seed"]);Assert.AreEqual(10944,(int)scenario["EndTick"]);
+        }
+
+        [TestCase(false)][TestCase(true)] public void ArrivalIngressWithOwnedLeasesAndRawNeighborKeepsAtomicHostHandoff(bool refuse)
+        {
+            int first=Spawn(-18,-14);Arrival(first,new NavPoint(-10,-14));
+            for(int i=0;i<20000&&session.PendingCount>0;i++){Pump(4);session.ApplyResults();}
+            Assert.Zero(session.PendingCount);Assert.Greater(session.OwnedIngressPublications,0);
+            Assert.NotNull(typeof(NavigationSession).GetField("liveArrivalLeaseTable",F).GetValue(session));
+            int next=Spawn(-18,-6);Arrival(next,new NavPoint(-10,-6));
+            bool AtArrivalHead()=>session.Requests.Count>0&&kernel.CapturePumpFrontier().Stage==CertifiedRouteKernel.PumpStage.Transfer;
+            kernel.PauseAtPhysicalBoundary=AtArrivalHead;
+            try{for(int i=0;i<20000&&!AtArrivalHead();i++){Pump(4);session.ApplyResults();}}
+            finally{kernel.PauseAtPhysicalBoundary=null;}
+            Assert.NotNull(session.PendingRequestFor(next));Assert.True(session.Requests.TryPeek(out var head));Assert.AreEqual(next,head.Entity);
+            int neighbor=Spawn(-18,6);Assert.True(session.MoveGroup(new[]{neighbor},new[]{new NavPoint(-10,6)}));
+            var batch=typeof(NavigationSession).GetMethod("AdmissionBatch",F,null,new[]{typeof(Action)},null);
+            batch.Invoke(session,new object[]{(Action)(()=>Assert.True(session.Move(neighbor,new NavPoint(-8,6))))});
+            var raw=session.PendingRequestFor(neighbor);Assert.NotNull(raw);Assert.Null(raw.StorageOwner);
+            Assert.Null(typeof(NavigationSession).GetField("admissionOwner",F).GetValue(session));
+            if(refuse){
+                // A direct capture of raw ingress intentionally rejects before
+                // the runtime capture barrier canonicalizes queued requests.
+                var captureRefusal=Assert.Throws<TargetInvocationException>(()=>Bytes());Assert.IsInstanceOf<InvalidOperationException>(captureRefusal.InnerException);
+                StringAssert.Contains("Captured request has no physical owner",captureRefusal.InnerException.Message);
+                var originalAdmission=session.Admission;var originalQueue=session.Requests.CopyItems();
+                var groupsBefore=Newtonsoft.Json.JsonConvert.SerializeObject(session.GroupOrders);long operationBefore=(long)typeof(NavigationSession).GetField("authorityOperationIdentity",F).GetValue(session);
+                var originalLeases=typeof(NavigationSession).GetField("liveArrivalLeaseTable",F).GetValue(session);
+                var budget=session.PhysicalHostBudget;long physical=budget.PhysicalBytes;int denied=0;
+                Assert.True(session.TryObservePhysicalArrivalIngress(out var ingress,out var pin,out var input,out var proposal,out var token,out var attempt));
+                using(pin){var source=session.PinCommittedHostRoot();NavigationHostRoot candidate=null;NavigationRetentionBudget.Scope scope=null;
+                    try{
+                        Assert.True(session.TryOpenPhysicalHostScope(NavigationPreparationKind.Admission,1,pin.Value.PublicationIdentity,out scope));
+                        candidate=source.ForkOwned(scope.OwnedReservation());var key=candidate.RegisterArrival(ingress,proposal.Proof.PhysicalRecipe,proposal.Route,token,pin.Value.SurfaceProviderId,scope.OwnedReservation());candidate.SealPrepared();
+                        budget.AllocationAdmission=_=>{if(new System.Diagnostics.StackTrace().GetFrames().Any(f=>f.GetMethod().Name=="PrepareIngressLegacyAdmission")){denied++;return false;}return true;};
+                        var refusal=Assert.Throws<InvalidOperationException>(()=>session.PublishRegisteredPhysicalArrival(scope,source,candidate,pin.Value,ingress,key,attempt));StringAssert.Contains("Scratch exceeds prepared reservation",refusal.Message);
+                    }finally{budget.AllocationAdmission=null;candidate?.Release();scope?.Discard();source.Release();}
+                }
+                Assert.AreEqual(1,denied);Assert.AreSame(originalLeases,typeof(NavigationSession).GetField("liveArrivalLeaseTable",F).GetValue(session));
+                Assert.AreSame(raw,session.PendingRequestFor(neighbor));Assert.True(session.Requests.TryPeek(out var unchanged));Assert.AreSame(head,unchanged);
+                Assert.AreEqual(physical,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
+                Assert.AreSame(originalAdmission,session.Admission);CollectionAssert.AreEqual(originalQueue,session.Requests.CopyItems());
+                Assert.AreEqual(groupsBefore,Newtonsoft.Json.JsonConvert.SerializeObject(session.GroupOrders));Assert.AreEqual(operationBefore,(long)typeof(NavigationSession).GetField("authorityOperationIdentity",F).GetValue(session));
+            }
+            for(int i=0;i<20000&&session.PendingCount>0;i++){Pump(4);session.ApplyResults();}
+            Assert.Zero(session.PendingCount);Assert.Null(raw.StorageOwner,"Do not forge the raw ingress owner");
+            var actor=session.Crowd.Units.Single(u=>u.Id==next);var start=actor.Position;
+            var handoff=Bytes();session.Step(1d/30);Assert.AreNotEqual(start,actor.Position);var stepped=Bytes();
+            Restore(handoff);CollectionAssert.AreEqual(handoff,Bytes());session.Step(1d/30);CollectionAssert.AreEqual(stepped,Bytes());
+            actor=session.Crowd.Units.Single(u=>u.Id==next);
+            for(int i=0;i<1200&&actor.Moving;i++)session.Step(1d/30);
+            Assert.AreEqual(NavigationOutcome.Arrived,actor.Outcome);
+            Assert.Zero(session.PhysicalHostBudget.HeldBytes);Assert.Zero(session.PhysicalHostBudget.ActiveScopes);
+        }
+
+        [Test]
+        public void NativeMoveThroughRealWorkerReachesFirstMotionAndArrival()
+        {
+            int id=Spawn(-18,-14);var goal=new NavPoint(-10,-14);Arrival(id,goal);
+            CertifiedRouteWorker worker=null;
+            try{
+                worker=new CertifiedRouteWorker(Binding(),64);
+                Assert.True(SpinWait.SpinUntil(()=>{
+                    if(session.HasReadyArrival||session.Answers.Count>0)session.ApplyResults();
+                    return session.PendingCount==0;
+                },5000),worker.Publication.Failure??"native command did not receive its threaded route");
+                var actor=session.Crowd.Units.Single(u=>u.Id==id);Assert.True(actor.Moving);
+                var start=actor.Position;session.Step(1d/30);Assert.AreNotEqual(start,actor.Position);
+                for(int i=0;i<1200&&actor.Moving;i++)session.Step(1d/30);
+                Assert.AreEqual(NavigationOutcome.Arrived,actor.Outcome);Assert.Zero(session.PendingCount);
+                Assert.Greater(worker.Publication.Pumps,0);Assert.Null(worker.Publication.Failure);
+            }finally{worker?.Dispose();if(worker!=null)Assert.True(SpinWait.SpinUntil(()=>worker.IsStopped,5000));}
+        }
+
         [TestCase("request")][TestCase("admission")][TestCase("remove")][TestCase("fifo")][TestCase("mixed")][TestCase("capacity")][TestCase("speed")] public void MovedSessionReadyReissuesFromCurrentPositionWithoutDiscardingOldMotionCold(string site)
         {
             // Public Session contract. AuthorityTick deliberately freezes at its
@@ -1318,6 +1429,96 @@ namespace Spacewars.Tests.EditMode
             byte[] Finish(){for(int i=0;i<20000&&!session.DeliveryBarrierReady;i++)Pump(4);Assert.True(session.DeliveryBarrierReady);Assert.Zero((int)allocation.GetValue(session));Assert.AreEqual(capacity+1,session.RejectedResults);session.ApplyResults();Assert.AreEqual(1,session.AppliedResults);Assert.True(session.Crowd.TryGet(entity,out var current));Assert.True(current.Moving);Assert.AreEqual(position,current.Position);return Bytes();}
             Drain();var drained=Bytes();var suffix=Finish();Pump(4);var next=Bytes();var facts=HostFacts();
             Restore(prefix);CollectionAssert.AreEqual(prefix,Bytes());kernel.PauseAtPhysicalBoundary=()=>kernel.CapturePumpFrontier().Stage==CertifiedRouteKernel.PumpStage.Transfer;try{Pump(0);}finally{kernel.PauseAtPhysicalBoundary=null;}CollectionAssert.AreEqual(prefix,Bytes());Drain();CollectionAssert.AreEqual(drained,Bytes());CollectionAssert.AreEqual(suffix,Finish());Pump(4);CollectionAssert.AreEqual(next,Bytes());Assert.AreEqual(facts,HostFacts());Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+        }
+
+        [TestCase(false)][TestCase(true)][Timeout(180000)]
+        public void RealWorkerAnswerAppendDuringResultPreparationPreservesEntireFifo(bool duringMovement)
+        {
+            int[] ids={Spawn(-18,-14),Spawn(-18,-10),Spawn(-18,-6)};
+            foreach(int id in ids)Assert.True(session.Move(id,new NavPoint(-10,session.Crowd.Units.Single(a=>a.Id==id).Position.Z)));
+            var authority=new PlayableAuthorityTick((PlayableDomain)domain,new AiAuthorityScheduler(Array.Empty<PlayableAiOwnerLoop>()),7,asynchronousRoutes:true);authority.EnableAccruedCredits();
+            for(int i=0;i<600;i++)Assert.True(authority.TryAdvance());
+            var gate=typeof(NavigationSession).GetField("transportGate",F).GetValue(session);
+            var firstPark=new ManualResetEventSlim(false);var releaseFirst=new ManualResetEventSlim(false);
+            var appendedPark=new ManualResetEventSlim(false);var releaseAppended=new ManualResetEventSlim(false);
+            CertifiedRouteWorker worker=null;var budget=session.PhysicalHostBudget;bool injected=false;
+            NavigationAnswer[] Snapshot(){lock(gate)return session.Answers.CopyItems();}
+            object Batch(string name)=>typeof(NavigationSession).GetProperty(name,F)?.GetValue(session)??typeof(NavigationSession).GetField(name,F)?.GetValue(session);
+            try{
+                kernel.PauseAtPhysicalBoundary=()=>{
+                    int count=Snapshot().Length;
+                    if(!releaseFirst.IsSet&&count==2){firstPark.Set();if(!releaseFirst.Wait(10000))throw new TimeoutException("First answer park was not released.");}
+                    if(releaseFirst.IsSet&&!releaseAppended.IsSet&&Snapshot().Length==3){appendedPark.Set();if(!releaseAppended.Wait(10000))throw new TimeoutException("Appended answer park was not released.");}
+                    return false;
+                };
+                worker=new CertifiedRouteWorker(Binding(),4,kernel);
+                Assert.True(firstPark.Wait(60000),worker.Publication.Failure??"Two actual Ready answers were not reached.");
+                var prefix=Snapshot();Assert.AreEqual(2,prefix.Length);Assert.True(prefix.All(a=>a.Status==NavSolveStatus.Ready));
+                var before=ids.ToDictionary(id=>id,id=>session.Crowd.Units.Single(a=>a.Id==id).Position);
+                int applied=session.AppliedResults,batches=session.OwnedResultBatchPublications,movements=session.OwnedMovementPublications;
+                try{
+                    session.ResultBatchPreparationBoundary=boundary=>{
+                        if(injected||boundary!=(duringMovement?2:1))return;
+                        Assert.False(Monitor.IsEntered(gate),"Worker rendezvous must never wait while transport is held.");injected=true;releaseFirst.Set();
+                        Assert.True(appendedPark.Wait(10000),worker.Publication.Failure??"Third real answer was not appended.");
+                    };
+                    session.Step(1d/30);
+                }finally{session.ResultBatchPreparationBoundary=null;}
+                Assert.True(injected,"The selected real preparation boundary must be reached.");
+                Assert.Null(worker.Publication.Failure);var after=Snapshot();Assert.AreEqual(3,after.Length);
+                Assert.AreSame(prefix[0],after[0]);Assert.AreSame(prefix[1],after[1]);Assert.True(after.All(a=>a.Status==NavSolveStatus.Ready));
+                Assert.AreEqual(applied,session.AppliedResults);Assert.AreEqual(batches,session.OwnedResultBatchPublications);Assert.AreEqual(movements,session.OwnedMovementPublications);
+                foreach(int id in ids){Assert.AreEqual(before[id],session.Crowd.Units.Single(a=>a.Id==id).Position);Assert.Null(session.InstalledExecutionFor(id));}
+                Assert.AreEqual(duringMovement?108:111,Batch("LastResultBatchStage"));
+                if(duringMovement)Assert.AreEqual(5,Batch("LastResultBatchSourceReason"));
+                else Assert.AreEqual("Result batch copy lost source.",Batch("LastResultBatchFailure"));
+                TestContext.WriteLine("append-counterfactual movement="+duringMovement+", stage="+Batch("LastResultBatchStage")+", source="+Batch("LastResultBatchSourceReason")+", message="+Batch("LastResultBatchFailure"));
+                // With the actual worker parked again, the same FIFO must be
+                // consumable without any grant, identity, or capacity change.
+                session.Step(1d/30);
+                Assert.AreEqual(applied+3,session.AppliedResults);Assert.AreEqual(batches+1,session.OwnedResultBatchPublications);Assert.Zero(session.Answers.Count);
+                foreach(int id in ids)Assert.NotNull(session.InstalledExecutionFor(id));
+                Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);
+            }finally{
+                session.ResultBatchPreparationBoundary=null;releaseFirst.Set();releaseAppended.Set();kernel.PauseAtPhysicalBoundary=null;
+                worker?.Dispose();if(worker!=null)Assert.True(SpinWait.SpinUntil(()=>worker.IsStopped,5000),"Worker stop ACK");
+                firstPark.Dispose();releaseFirst.Dispose();appendedPark.Dispose();releaseAppended.Dispose();
+            }
+        }
+
+        [Test,Timeout(180000)] public void OrdinaryDomainResultTurnDrainsExactReadyPrefixThenResumesRealWorkerAndColdSuffix()
+        {
+            int[] ids={Spawn(-18,-14),Spawn(-18,-10),Spawn(-18,-6)};
+            foreach(int id in ids)Assert.True(session.Move(id,new NavPoint(-10,session.Crowd.Units.Single(a=>a.Id==id).Position.Z)));
+            var authority=new PlayableAuthorityTick((PlayableDomain)domain,new AiAuthorityScheduler(Array.Empty<PlayableAiOwnerLoop>()),7,asynchronousRoutes:true);authority.EnableAccruedCredits();
+            for(int i=0;i<600;i++)Assert.True(authority.TryAdvance());
+            var gate=typeof(NavigationSession).GetField("transportGate",F).GetValue(session);
+            using var entered=new ManualResetEventSlim();using var release=new ManualResetEventSlim();CertifiedRouteWorker worker=null;
+            System.Threading.Tasks.Task unblock=null;
+            try{
+                kernel.PauseAtPhysicalBoundary=()=>{if(!release.IsSet&&session.Answers.Count==2){entered.Set();if(!release.Wait(10000))throw new TimeoutException("Result turn park was not released.");}return session.RoutePort.CaptureRequested;};
+                worker=new CertifiedRouteWorker(Binding(),4,kernel);Assert.True(entered.Wait(60000),worker.Publication.Failure??"Two actual Ready answers were not reached.");
+                var answers=session.Answers.CopyItems();Assert.AreEqual(2,answers.Length);var prefix=Bytes();
+                var positions=answers.ToDictionary(a=>a.Request.Entity,a=>session.Crowd.Units.Single(u=>u.Id==a.Request.Entity).Position);
+                int applied=session.AppliedResults,batches=session.OwnedResultBatchPublications;bool observed=false;
+                unblock=System.Threading.Tasks.Task.Run(()=>{Assert.True(SpinWait.SpinUntil(()=>session.RoutePort.CaptureRequested,5000));release.Set();});
+                session.ResultBatchPreparationBoundary=_=>{
+                    observed=true;Assert.False(Monitor.IsEntered(gate));Assert.True(session.RoutePort.CaptureRequested);Assert.False(session.RoutePort.TryBeginHostOperation());
+                    CollectionAssert.AreEqual(answers,session.Answers.CopyItems(),"The prepared source stays exact while the real worker has acknowledged exclusion.");
+                };
+                try{Call("StepNavigationWithStableAnswers",1d/30);}finally{session.ResultBatchPreparationBoundary=null;}
+                Assert.True(unblock.Wait(5000));Assert.True(observed);Assert.AreEqual(applied+2,session.AppliedResults);Assert.AreEqual(batches+1,session.OwnedResultBatchPublications);Assert.False(session.RoutePort.CaptureRequested);
+                foreach(var answer in answers){int id=answer.Request.Entity;Assert.NotNull(session.InstalledExecutionFor(id));Assert.Greater(session.Crowd.Units.Single(a=>a.Id==id).Position.X,positions[id].X);}
+                Assert.True(SpinWait.SpinUntil(()=>session.Answers.Count==1||worker.Publication.Failure!=null,60000),"Worker must resume its real remaining quantum after the result turn.");Assert.Null(worker.Publication.Failure);
+                Call("StepNavigationWithStableAnswers",1d/30);Assert.AreEqual(applied+3,session.AppliedResults);foreach(int id in ids)Assert.NotNull(session.InstalledExecutionFor(id));
+                worker.Dispose();Assert.True(SpinWait.SpinUntil(()=>worker.IsStopped,5000));worker=null;
+                // The exclusion is coordination only: the parked current-format
+                // state still cold-restores byte exactly and consumes its same FIFO.
+                Restore(prefix);CollectionAssert.AreEqual(prefix,Bytes());kernel.Attach(session.RoutePort);typeof(CertifiedRouteKernel).GetMethod("RefreshPhysicalFrontier",F).Invoke(kernel,new object[]{session.RoutePort});
+                Call("StepNavigationWithStableAnswers",1d/30);Assert.AreEqual(applied+2,session.AppliedResults);Assert.False(session.RoutePort.CaptureRequested);
+                foreach(var answer in answers)Assert.NotNull(session.InstalledExecutionFor(answer.Request.Entity));
+                Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+            }finally{release.Set();session.ResultBatchPreparationBoundary=null;kernel.PauseAtPhysicalBoundary=null;worker?.Dispose();if(worker!=null)Assert.True(SpinWait.SpinUntil(()=>worker.IsStopped,5000));if(unblock!=null)Assert.True(unblock.Wait(5000));}
         }
 
         [Test] public void TwoOrdinaryReadyAnswersDrainAndMoveAtomicallyDuringSavedPhysicalAllocationCold()

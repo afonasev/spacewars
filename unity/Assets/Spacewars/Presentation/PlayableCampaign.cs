@@ -28,9 +28,25 @@ namespace Spacewars.Presentation
         private PlayableRuntime CreateSessionRuntime(long nextGeneration)
         {
             if(provingGround!=null)return new PlayableRuntime(provingGround.Configuration(),nextGeneration,startPaused:true);
-            if(campaignConfiguration==null)return matchSetup==null?PlayableRuntime.CreateHumanMatch(profile,nextGeneration,19092026):PlayableRuntime.CreateLobbyMatch(profile,nextGeneration,matchSetup,startPaused:preparing);
+            if(campaignConfiguration==null)return matchSetup==null?PlayableRuntime.CreateHumanMatch(profile,nextGeneration,19092026):CreateLobbyRuntime(nextGeneration);
             if(campaignRetryRequested&&campaignRetryBytes!=null){campaignRetryRequested=false;return PlayableRuntime.RestoreBytes(campaignRetryBytes,campaignConfiguration);}
             campaignRetryBytes=null;return new PlayableRuntime(campaignConfiguration,nextGeneration,startPaused:preparing);
+        }
+        private PlayableRuntime CreateLobbyRuntime(long nextGeneration)
+        {
+            EnsureBalanceStore();
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if(Array.IndexOf(Environment.GetCommandLineArgs(),"-splitScreenPerformanceEvidence")>=0)
+                return PlayableRuntime.CreateSplitScreenPerformanceMatch(profile,nextGeneration,matchSetup,startPaused:preparing,aiProfile:balanceStore.ActiveAiProfile);
+            if(Array.IndexOf(Environment.GetCommandLineArgs(),"-smallFivePerformanceEvidence")>=0)
+                return PlayableRuntime.CreateSmallFivePerformanceMatch(profile,nextGeneration,matchSetup,startPaused:preparing,aiProfile:balanceStore.ActiveAiProfile);
+            if(Array.IndexOf(Environment.GetCommandLineArgs(),"-eightPlayerPerformanceEvidence")>=0)
+                return PlayableRuntime.CreateEightPlayerPerformanceMatch(profile,nextGeneration,matchSetup,startPaused:preparing,aiProfile:balanceStore.ActiveAiProfile);
+#endif
+            var next=PlayableRuntime.CreateLobbyMatch(profile,nextGeneration,matchSetup,startPaused:preparing,aiProfile:balanceStore.ActiveAiProfile);
+            // Restart repeats this match's resolved corner layout; a new lobby launch may draw a new seed.
+            if(profile.AuthoredMap is ThreeCrossingsMap)matchSetup=next.LobbyConfiguration;
+            return next;
         }
         private void LaunchCampaign()
         {
@@ -56,7 +72,7 @@ namespace Spacewars.Presentation
             campaignGoal=OrbitalTheme.Text("","orbital-body");campaignGoal.name="campaign-current-goal";campaignGoal.style.position=Position.Absolute;campaignGoal.style.left=20;campaignGoal.style.top=72;campaignGoal.style.maxWidth=360;campaignGoal.style.paddingLeft=12;campaignGoal.style.paddingRight=12;campaignGoal.style.paddingTop=10;campaignGoal.style.paddingBottom=10;campaignGoal.style.backgroundColor=PanelColor;campaignGoal.style.whiteSpace=WhiteSpace.Normal;campaignGoal.style.display=DisplayStyle.None;root.Add(campaignGoal);
             campaignRadio=new ScrollView(ScrollViewMode.Vertical){name="campaign-radio"};campaignRadio.style.position=Position.Absolute;campaignRadio.style.left=20;campaignRadio.style.bottom=110;campaignRadio.style.width=540;campaignRadio.style.maxWidth=Length.Percent(48);campaignRadio.style.maxHeight=136;campaignRadio.style.backgroundColor=PanelColor;campaignRadio.style.paddingLeft=12;campaignRadio.style.paddingRight=12;campaignRadio.style.display=DisplayStyle.None;root.Add(campaignRadio);
             campaignRadioText=OrbitalTheme.Text("","orbital-body");campaignRadioText.name="campaign-radio-history";campaignRadioText.style.whiteSpace=WhiteSpace.Normal;campaignRadio.Add(campaignRadioText);
-            campaignHistory=OrbitalTheme.Text("","orbital-body");campaignHistory.name="campaign-revealed-goals";campaignHistory.style.width=280;campaignHistory.style.flexShrink=0;campaignHistory.style.marginRight=20;campaignHistory.style.whiteSpace=WhiteSpace.Normal;campaignHistory.style.display=DisplayStyle.None;tacticalOverlay.Insert(0,campaignHistory);
+            campaignHistory=OrbitalTheme.Text("","orbital-body");campaignHistory.name="campaign-revealed-goals";campaignHistory.style.width=280;campaignHistory.style.flexShrink=0;campaignHistory.style.marginRight=20;campaignHistory.style.whiteSpace=WhiteSpace.Normal;campaignHistory.style.display=DisplayStyle.None;
             campaignRetry=Button("С контрольной точки",RetryCampaign);campaignRetry.name="campaign-retry-checkpoint";campaignRetry.style.display=DisplayStyle.None;modalCard.Insert(modalCard.IndexOf(modalRestartButton),campaignRetry);
             campaignTutorialLayer=new VisualElement{name="campaign-tutorial-layer"};campaignTutorialLayer.style.position=Position.Absolute;campaignTutorialLayer.style.left=0;campaignTutorialLayer.style.right=0;campaignTutorialLayer.style.top=0;campaignTutorialLayer.style.bottom=0;campaignTutorialLayer.style.alignItems=Align.Center;campaignTutorialLayer.style.justifyContent=Justify.Center;campaignTutorialLayer.style.backgroundColor=new Color(0,0,0,.52f);campaignTutorialLayer.style.display=DisplayStyle.None;campaignTutorialLayer.pickingMode=PickingMode.Position;root.Add(campaignTutorialLayer);
             campaignTutorialCard=OrbitalTheme.Card(campaignTutorialLayer,"campaign-tutorial-card");campaignTutorialCard.style.width=520;campaignTutorialCard.style.maxWidth=Length.Percent(90);campaignTutorialCard.style.paddingTop=22;campaignTutorialCard.style.paddingBottom=18;campaignTutorialCard.style.paddingLeft=24;campaignTutorialCard.style.paddingRight=24;
@@ -74,13 +90,17 @@ namespace Spacewars.Presentation
         {
             var mission=view?.Mission;bool active=mission!=null&&!inLobby&&!preparing;
             campaignGoal.style.display=active&&!mapOpen?DisplayStyle.Flex:DisplayStyle.None;
+            // Ordinary tactical maps have no campaign UI. Keep the history element
+            // attached only while it can actually be shown, including after leaving a mission.
+            if(active&&mapOpen){if(campaignHistory.parent!=tacticalOverlay)tacticalOverlay.Insert(0,campaignHistory);}
+            else campaignHistory.RemoveFromHierarchy();
             campaignHistory.style.display=active&&mapOpen?DisplayStyle.Flex:DisplayStyle.None;
             campaignRetry.style.display=active&&(runtime.HasCampaignCheckpoint||campaignRetryBytes!=null)?DisplayStyle.Flex:DisplayStyle.None;
             // Modal results, pause and tutorial cards own the foreground; retain radio history underneath.
             bool radioVisible=active&&!mapOpen&&view.Outcome==PlayableMatchOutcome.Playing&&!menuPaused&&!restarting&&string.IsNullOrEmpty(view.Failure)&&!mission.TutorialPauseHeld;
             campaignRadio.style.display=radioVisible?DisplayStyle.Flex:DisplayStyle.None;
             float mapHeight=compactMap.parent.resolvedStyle.height;if(!float.IsNaN(mapHeight))campaignRadio.style.bottom=mapHeight+20;
-            if(!active){world?.SetCampaignGate(false);tacticalOverlay.style.flexDirection=FlexDirection.Column;if(mission==null&&!spectatorMode)creditsLabel.style.display=DisplayStyle.Flex;return;}
+            if(!active){world?.SetCampaignGate(false);tacticalOverlay.style.flexDirection=FlexDirection.Column;if(mission==null&&!spectatorMode)creditsLabel.style.display=provingGround==null?DisplayStyle.Flex:DisplayStyle.None;return;}
             paused=menuPaused||mission.TutorialPauseHeld;
             if((mission.TutorialSeen&0x80)==0&&input!=null)input.WorldInputEnabled=input.CommandInputEnabled=false;
             tacticalOverlay.style.flexDirection=FlexDirection.Row;
@@ -133,8 +153,8 @@ namespace Spacewars.Presentation
         private static string TutorialCopy(int i,Gamepad pad)
         {
             string A=NativeControllerGlyph.Symbol("A",pad),B=NativeControllerGlyph.Symbol("B",pad),Y=NativeControllerGlyph.Symbol("Y",pad);
-            string family=(pad?.layout+" "+pad?.description.manufacturer).ToLowerInvariant();bool sony=family.Contains("dual")||family.Contains("sony"),nintendo=family.Contains("switch")||family.Contains("nintendo");string shoulder=sony?"R1":nintendo?"R":"RB",trigger=sony?"R2":nintendo?"ZR":"RT";
-            return new[]{A+" — выбрать машину; удерживайте для выделения области.",B+" — отправить выбранных к указателю.","Удерживайте "+shoulder+" и выберите сектор, чтобы переключиться на отряд.",B+" на видимом противнике — атаковать.",Y+" — двигаться в атаке к точке.","Удерживайте "+trigger+", выберите сектор отряда и отпустите, чтобы назначить группу.","Быстро нажмите "+shoulder+" дважды, чтобы выбрать всю боевую армию."}[i];
+            string family=(pad?.layout+" "+pad?.description.manufacturer).ToLowerInvariant();bool sony=family.Contains("dual")||family.Contains("sony"),nintendo=family.Contains("switch")||family.Contains("nintendo");string shoulder=sony?"R1":nintendo?"R":"RB";
+            return new[]{A+" — выбрать машину; удерживайте для выделения области.",B+" — отправить выбранных к указателю.","Нажмите "+shoulder+", выберите сектор и отпустите для выбора отряда.",B+" на видимом противнике — атаковать.",Y+" — двигаться в атаке к точке.","Нажмите "+shoulder+", выберите сектор отряда и удерживайте, чтобы назначить выделенных.","Быстро нажмите "+shoulder+" дважды, чтобы выбрать всю боевую армию."}[i];
         }
         private bool NonPadInputChanged()
         {

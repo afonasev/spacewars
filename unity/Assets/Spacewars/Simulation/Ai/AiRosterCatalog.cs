@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace Spacewars.Simulation.Ai
 {
-    public enum AiMobilityClass { GroundVehicle, SmallGroundVehicle }
+    public enum AiMobilityClass { GroundVehicle, SmallGroundVehicle, Aircraft }
     [Serializable] public sealed class AiRosterDescriptorData
     {
         public PlayableEntityKind kind;
@@ -29,17 +29,17 @@ namespace Spacewars.Simulation.Ai
             internal static readonly AiRosterCatalog Value=CreateInitial();
         }
         private static AiRosterCatalog CreateInitial()=>new AiRosterCatalog(new[]{
-            Descriptor(PlayableEntityKind.Explorer,1,0,0,1,AiMobilityClass.SmallGroundVehicle,PlayableCommandKind.QueueExplorer),
+            Descriptor(PlayableEntityKind.Explorer,1,1,0,1,AiMobilityClass.SmallGroundVehicle,PlayableCommandKind.QueueExplorer),
             Descriptor(PlayableEntityKind.Tank,0,1,0,0,AiMobilityClass.GroundVehicle,PlayableCommandKind.QueueTank),
             Descriptor(PlayableEntityKind.Shkval,0,0,1,0,AiMobilityClass.GroundVehicle,PlayableCommandKind.QueueShkval),
-            new AiRosterDescriptorData{kind=PlayableEntityKind.Hawk,producer=PlayableBuildingKind.Hangar,productionCommand=PlayableCommandKind.QueueHawk,mobility=AiMobilityClass.GroundVehicle,targetTags=new[]{"air"},unlockDependencies=Array.Empty<PlayableResearchKind>(),exclusionReason="User excludes aircraft construction, production and strategic use by bots (2026-10-23)."}});
+            new AiRosterDescriptorData{kind=PlayableEntityKind.Hawk,lineWeight=1,producer=PlayableBuildingKind.Hangar,productionCommand=PlayableCommandKind.QueueHawk,mobility=AiMobilityClass.Aircraft,targetTags=new[]{"air","ground","building"},unlockDependencies=Array.Empty<PlayableResearchKind>()}});
         private static AiRosterDescriptorData Descriptor(PlayableEntityKind kind,double recon,double line,double support,double scouting,AiMobilityClass mobility,PlayableCommandKind command)=>new AiRosterDescriptorData{
             kind=kind,reconWeight=recon,lineWeight=line,supportWeight=support,scoutingUtility=scouting,mobility=mobility,producer=PlayableBuildingKind.Factory,
-            productionCommand=command,targetTags=new[]{"ground","building"},unlockDependencies=new PlayableResearchKind[0]};
+            productionCommand=command,targetTags=kind==PlayableEntityKind.Explorer?new[]{"air","ground","building"}:new[]{"ground","building"},unlockDependencies=new PlayableResearchKind[0]};
         public static IReadOnlyList<AiProfileField> Metadata {get;}=Array.AsReadOnly(Enum.GetValues(typeof(PlayableEntityKind)).Cast<PlayableEntityKind>().SelectMany(kind=>
             new[]{"reconWeight","lineWeight","supportWeight","scoutingUtility"}.Select(role=>new AiProfileField("roster."+kind+"."+role,"ИИ / Роли",kind+" / "+role,
                 "Относительный вес роли; игровые характеристики берутся из gameplay catalog.","ratio",0,1,.05,InitialWeight(kind,role),false))).ToArray());
-        private static double InitialWeight(PlayableEntityKind kind,string role)=>kind==PlayableEntityKind.Hawk?0:kind==PlayableEntityKind.Explorer?(role=="reconWeight"||role=="scoutingUtility"?1:0):kind==PlayableEntityKind.Tank?(role=="lineWeight"?1:0):(role=="supportWeight"?1:0);
+        private static double InitialWeight(PlayableEntityKind kind,string role)=>kind==PlayableEntityKind.Hawk?(role=="lineWeight"?1:0):kind==PlayableEntityKind.Explorer?(role=="reconWeight"||role=="lineWeight"||role=="scoutingUtility"?1:0):kind==PlayableEntityKind.Tank?(role=="lineWeight"?1:0):(role=="supportWeight"?1:0);
         public AiRosterCatalog(IEnumerable<AiRosterDescriptorData> input)
         {
             using var measured=PerformanceProfile.Measure(ProfileStage.RosterBuild);
@@ -50,12 +50,22 @@ namespace Spacewars.Simulation.Ai
                 if(!Enum.IsDefined(typeof(AiMobilityClass),d.mobility)||d.targetTags==null||d.targetTags.Length==0||d.targetTags.Any(string.IsNullOrWhiteSpace)||d.targetTags.Distinct().Count()!=d.targetTags.Length||d.unlockDependencies==null||d.unlockDependencies.Distinct().Count()!=d.unlockDependencies.Length||d.unlockDependencies.Any(r=>!Enum.IsDefined(typeof(PlayableResearchKind),r)))throw new ArgumentException("Invalid roster metadata.");
                 var weights=new[]{d.reconWeight,d.lineWeight,d.supportWeight,d.scoutingUtility};
                 int i=0;foreach(var field in Metadata.Where(f=>f.Path.StartsWith("roster."+d.kind+".")))field.Validate(weights[i++]);
-                if(string.IsNullOrWhiteSpace(d.exclusionReason)&&(!PlayableUnitRules.Supported(d.kind)||d.reconWeight+d.lineWeight+d.supportWeight<=0||d.producer!=PlayableBuildingKind.Factory||d.productionCommand!=Command(d.kind)))throw new ArgumentException("Missing role or production adapter.");
+                if(string.IsNullOrWhiteSpace(d.exclusionReason)&&(!PlayableUnitRules.Supported(d.kind)||d.reconWeight+d.lineWeight+d.supportWeight<=0||d.producer!=(d.kind==PlayableEntityKind.Hawk?PlayableBuildingKind.Hangar:PlayableBuildingKind.Factory)||d.productionCommand!=Command(d.kind)))throw new ArgumentException("Missing role or production adapter.");
             }
             Hash=AiProfile.Digest(string.Join("\n",descriptors.Select(d=>d.kind+"|"+d.mobility+"|"+d.producer+"|"+d.productionCommand+"|"+string.Join(",",d.targetTags.OrderBy(t=>t,StringComparer.Ordinal))+"|"+string.Join(",",d.unlockDependencies.OrderBy(r=>(int)r))+"|"+(d.exclusionReason??"")+"|"+string.Join(",",new[]{d.reconWeight,d.lineWeight,d.supportWeight,d.scoutingUtility}.Select(x=>x.ToString("R",CultureInfo.InvariantCulture))))));
         }
         public AiRosterDescriptorData[] CopyData()=>descriptors.Select(Copy).ToArray();
         public AiRosterDescriptorData For(PlayableEntityKind kind)=>Copy(descriptors.Single(d=>d.kind==kind));
+        // Scalar queries retain private ownership without allocating detached metadata.
+        private AiRosterDescriptorData DescriptorFor(PlayableEntityKind kind)
+        {
+            foreach(var descriptor in descriptors)if(descriptor.kind==kind)return descriptor;
+            throw new InvalidOperationException("Sequence contains no matching element");
+        }
+        public double LineWeight(PlayableEntityKind kind)=>DescriptorFor(kind).lineWeight;
+        public double SupportWeight(PlayableEntityKind kind)=>DescriptorFor(kind).supportWeight;
+        public double ReconWeight(PlayableEntityKind kind)=>DescriptorFor(kind).reconWeight;
+        public bool Targets(PlayableEntityKind kind,string tag)=>Array.IndexOf(DescriptorFor(kind).targetTags,tag)>=0;
         public static PlayableCommandKind Command(PlayableEntityKind kind)=>PlayableUnitRules.ProductionCommand(kind);
         public static bool IsProduction(PlayableCommandKind command)=>PlayableUnitRules.ProductionKind(command).HasValue;
         // Decode authoritative command-kind terms first. Exclusions cannot alias another

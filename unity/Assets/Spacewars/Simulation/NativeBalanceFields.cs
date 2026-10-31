@@ -11,6 +11,11 @@ namespace Spacewars.Simulation
     {
         // AI has an independent revision and numeric DTO; gameplay writers never mutate it.
         public static IReadOnlyList<AiProfileField> AiFields=>AiProfileMetadata.Fields;
+        public static IReadOnlyList<AiProfileField> AiOpeningFields=>AiProfileMetadata.Fields
+            .Where(f=>f.Path.StartsWith("openingsMidgame.",StringComparison.Ordinal))
+            .ToArray();
+        public static AiProfile InitialAiOpeningProfile()
+        {var data=AiProfile.Initial.CopyData();data.id="ai-openings-midgame-v1";return new AiProfile(data);}
         public static IReadOnlyList<AiProfileField> AiRosterFields=>AiRosterCatalog.Metadata;
         public static void Write(AiProfileField descriptor,AiProfileData data,double value)
         {
@@ -42,10 +47,13 @@ namespace Spacewars.Simulation
         {
             if(ReferenceEquals(field,PlayableProfileMetadata.AccruedCreditField))return true;
             string name=field.FieldName??"";
+            // Maneuver capability is bound at genesis/current capture; changes require a new match.
+            if(name.StartsWith("tankReverse",StringComparison.Ordinal))return false;
             if(field.Group=="Arena"||field.Group=="Slots"||field.Group=="Minimap"||field.Group=="Fog presentation"||field.Group=="Camera"||field.Group=="Navigation"||field.Group=="Rendering"||field.Group=="Input"||field.Group=="Presentation")return false;
             if(name.StartsWith("minimap")||name.StartsWith("fog")||name=="visionCellSize"||name=="startingCredits"||name=="matchScoreEarnedCreditsDivisor"||name=="ballisticWallHeight"||name=="factoryExitDistance"||name=="defaultRallyDistance"||name=="evacuationClearance"||name=="shkvalBuildingCollisionHeight"||name=="shkvalProjectileRadius")return false;
             if(name=="shkvalMarkerStartRadius"||name=="shkvalMarkerOpacity")return true;
             if(name.Contains("Marker")||name.Contains("Tracer")||name.Contains("Muzzle")||name=="shkvalArcHeight"||name=="shkvalLaunchHeight")return false;
+            if(name=="turretPadOffset"||name=="turretPassageWidth")return false; // Plot topology is fixed at genesis, like SlotRingRadius.
             if(name=="hawkRadius")return false; // Immutable physical envelope, like the other unit collision radii.
             if(name.Contains("CollisionRadius")||name.Contains("FootprintRadius")||name.Contains("ModelRadius")||name.Contains("ModelScale")||name.Contains("ModelHeight"))return false;
             return true;
@@ -53,6 +61,7 @@ namespace Spacewars.Simulation
         public static string ValidateLiveDifference(PlayableProfile before,PlayableProfile after)
         {
             var a=before.CopyData();var b=after.CopyData();
+            if(a.groundRouteBackend!=b.groundRouteBackend)return "Навигационный backend задаётся при создании матча.";
             foreach(var field in PlayableProfileMetadata.Fields)
                 if(!Editable(field)&&field.Read(a)!=field.Read(b))return "Параметр не доступен в лаборатории: "+field.Path;
             if(!ReferenceEquals(before.AuthoredMap,after.AuthoredMap))return "Карта не может изменяться в лаборатории.";

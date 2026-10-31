@@ -32,6 +32,30 @@ namespace Spacewars.Presentation
     {
         public string id="three-crossings-materials-v1";
         public int revision=1;
+        [SurfaceSetting("Yard metal","Curb value","Blue-grey steel curb brightness.","ratio",.2f,.7f,.01f)] public float yardCurbValue=.48f;
+        [SurfaceSetting("Industrial fleet","Walker scale","Uniform game size of the walker in central quarry pockets; full source silhouette is retained.","ratio",.65f,1.25f,.05f)] public float fleetWalkerScale=.85f;
+        [SurfaceSetting("Industrial fleet","Paint aging","Patch contrast of worn paint on the three industrial vehicles.","ratio",0,.8f,.01f)] public float fleetPaintAging=.34f;
+        [SurfaceSetting("Industrial fleet","Work scratches","Directional bare-metal scrapes on working panels.","ratio",0,1,.01f)] public float fleetScratches=.42f;
+        [SurfaceSetting("Industrial fleet","Patch chips","Localized paint chips away from panel edges.","ratio",0,1,.01f)] public float fleetChips=.7f;
+        [SurfaceSetting("Yard metal","Steel reflection","Reflection strength on bare steel.","ratio",0,1,.01f)] public float yardSteelReflection=.65f;
+        [SurfaceSetting("Yard metal","Steel focus","Bare steel reflection focus.","power",8,128,1)] public float yardSteelFocus=32;
+        [SurfaceSetting("Yard metal","Paint reflection","Restrained sheen on painted tractor panels.","ratio",0,1,.01f)] public float yardPaintReflection=.22f;
+        [SurfaceSetting("Yard metal","Paint focus","Painted panel reflection focus.","power",8,128,1)] public float yardPaintFocus=24;
+        [SurfaceSetting("Yard metal","Edge wear width","Exposed steel along physical panel edges.","m",.005f,.08f,.005f)] public float yardEdgeWear=.025f;
+        [SurfaceSetting("Yard metal","Wear scale","Size of irregular chips and oxidation.","m",.1f,2,.05f)] public float yardWearScale=.45f;
+        [SurfaceSetting("Yard metal","Oxidation","Localized oxidation on exposed metal.","ratio",0,.5f,.01f)] public float yardOxidation=.12f;
+        [SurfaceSetting("Yard metal","Glass reflection","Reflection strength on cab glass.","ratio",0,1,.01f)] public float yardGlassReflection=.8f;
+        [SurfaceSetting("Starting yards","Gravel reach","Compacted gravel shoulder inside the retained base boundary.","m",.5f,6,.25f)] public float yardGravelReach=3;
+        [SurfaceSetting("Starting yards","Mine apron half width","Width across the loading approach; keeps neighboring service pockets clear.","m",2,5,.25f)] public float mineYardHalfWidth=3;
+        [SurfaceSetting("Starting yards","Steel width","Flush service strip through the concrete yard.","m",.5f,4,.25f)] public float yardSteelWidth=1.5f;
+        [SurfaceSetting("Starting yards","Steel contrast","Restrained steel contrast against worn concrete.","ratio",0,.5f,.05f)] public float yardSteelContrast=.18f;
+        [SurfaceSetting("Hydroworks","Edge offset","Keep fittings outside the full authoritative clear bridge band.","m",.15f,.6f,.05f)] public float hydroEdgeOffset=.35f;
+        [SurfaceSetting("Hydroworks","Spill reach","Downstream extent of falling sluice water, below the driving plane.","m",.8f,4,.1f)] public float hydroSpillReach=2.5f;
+        [SurfaceSetting("Hydroworks","Hoist height","Low gate machinery height outside travel bands.","m",1,2.5f,.1f)] public float hydroMachineHeight=1.6f;
+        [SurfaceSetting("Hydroworks","Quarry shelves","Scale of partly submerged quarry fragments.","m",1,3.5f,.1f)] public float hydroShelfScale=2.5f;
+        [SurfaceSetting("Hydroworks","Tailrace foam","Broken foam/caustic intensity confined to downstream water.","ratio",0,.8f,.05f)] public float hydroFoam=.6f;
+        [SurfaceSetting("Hydroworks","Current speed","Downstream water flow, shader only.","m/s",.1f,2,.1f)] public float hydroFlow=.8f;
+
         [SurfaceSetting("Ground","Hue","Ground palette hue.","turn",0,1,.01f)] public float groundHue=.18f;
         [SurfaceSetting("Ground","Saturation","Muted olive saturation.","ratio",0,.5f,.01f)] public float groundSaturation=.16f;
         [SurfaceSetting("Ground","Brightness","Ground base value.","ratio",.15f,.8f,.01f)] public float groundBrightness=.48f;
@@ -117,7 +141,7 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Edge compounds","Size variation","Size variation between perimeter compounds.","ratio",0,.2f,.02f)] public float edgeCompoundVariation=.10f;
         [SurfaceSetting("Corporate scenery","Module scale","Size of cargo and extraction machinery.","ratio",.5f,1.2f,.05f)] public float industrialScale=.85f;
         [SurfaceSetting("Corporate scenery","Site reach","Maximum distance of industrial scenery from its actual mine.","m",7,14,.5f)] public float industrialReach=10;
-        [SurfaceSetting("Industrial landmarks","Tractor scale","Scale of the two heavy industrial wrecks; full mesh envelope is protected.","ratio",.75f,1.25f,.05f)] public float tractorScale=1;
+        [SurfaceSetting("Industrial landmarks","Tractor scale","Scale of the six industrial vehicles; full mesh envelope is protected.","ratio",.75f,1.25f,.05f)] public float tractorScale=1;
         [SurfaceSetting("Hangar logistics","Access width","Width of supported painted hangar spurs.","m",2.8f,4,.1f)] public float hangarAccessWidth=3.2f;
         [SurfaceSetting("Hangar logistics","Apron length","Loading pad depth from the actual gate.","m",3,5,.25f)] public float hangarApronLength=3.75f;
         [SurfaceSetting("Hangar logistics","Apron width","Loading pad width at hangar gates.","m",3.2f,5,.1f)] public float hangarApronWidth=3.6f;
@@ -203,6 +227,22 @@ namespace Spacewars.Presentation
             public readonly double StartDistance;
             public Segment(NavPoint a,NavPoint b,double startDistance=0){A=a;B=b;StartDistance=startDistance;}
         }
+        public readonly struct RoadPaintBounds
+        {
+            public readonly Segment Road;
+            readonly double minX,minZ,maxX,maxZ;
+            public RoadPaintBounds(Segment road,ThreeCrossingsSurfaceProfile p)
+            {
+                Road=road;
+                // Broad phase only: four meander amplitudes conservatively enclose
+                // sine + gradient-noise drift, including Perlin's small overshoot.
+                // The coordinate slack covers roundoff; painted width stays exact.
+                double reach=p.arterialWidth/2d+4d*p.roadMeander+1e-6;
+                minX=Math.Min(road.A.X,road.B.X)-reach;maxX=Math.Max(road.A.X,road.B.X)+reach;
+                minZ=Math.Min(road.A.Z,road.B.Z)-reach;maxZ=Math.Max(road.A.Z,road.B.Z)+reach;
+            }
+            public bool Contains(double x,double z)=>x>=minX&&x<=maxX&&z>=minZ&&z<=maxZ;
+        }
         public static IEnumerable<Segment> Segments(ThreeCrossingsSurfaceProfile p)
         {
             foreach(var road in p.roads)foreach(int turn in new[]{-1,1})
@@ -266,8 +306,8 @@ namespace Spacewars.Presentation
                     double dx=point.X-access.Site.Position.X,dz=point.Z-access.Site.Position.Z;
                     double ax=access.Connection.X-access.Site.Position.X,az=access.Connection.Z-access.Site.Position.Z,len=Math.Sqrt(ax*ax+az*az);ax/=len;az/=len;
                     float along=(float)(dx*ax+dz*az),across=(float)(-dx*az+dz*ax);
-                    // Chamfered loading apron aligns with the access, not with a random global patch.
-                    float distance=Profile.mineYardRadius-Mathf.Max(Mathf.Max(Mathf.Abs(along),Mathf.Abs(across)),(Mathf.Abs(along)+Mathf.Abs(across))*.72f);
+                    // Rectangular work apron follows the supported access; soft mineral edges blend into the quarry floor.
+                    float distance=Mathf.Min(Profile.mineYardRadius-Mathf.Abs(along),Profile.mineYardHalfWidth-Mathf.Abs(across));
                     float edgeWidth=Profile.minePadContactWidth;
                     float fill=Mathf.SmoothStep(0,1,Mathf.InverseLerp(0,edgeWidth,distance));yard=Mathf.Max(yard,fill);
                     edge=Mathf.Max(edge,fill*(1-Mathf.SmoothStep(0,1,Mathf.InverseLerp(edgeWidth,edgeWidth*2,distance))));
@@ -289,13 +329,20 @@ namespace Spacewars.Presentation
             Profile=p;Preparation=Initialize(p,map,material,gameplay);
             if(!staged){try{LoadingPreparation.Drain(Preparation);}catch{Dispose();throw;}}
         }
+        private ThreeCrossingsMaterials(ThreeCrossingsSurfaceProfile profile,EnvironmentArtProfile art,Texture[] textures,PreparedAccess[] accesses,PreparedMineAccess[] mines,PlayableProfile gameplay)
+        {
+            Profile=profile;Art=art;RoadMask=(Texture2D)textures[0];ShoreMask=(Texture2D)textures[1];RockMask=(Texture2D)textures[2];ConstructionMask=(Texture2D)textures[3];WeatheringMask=(Texture2D)textures[4];Preparation=Enumerable.Empty<object>().GetEnumerator();var sites=TerritoryRules.Sites(gameplay).ToDictionary(s=>s.Id);MineAccesses=(mines??Array.Empty<PreparedMineAccess>()).Select(a=>new MineAccess(sites[a.site],new NavPoint(a.cx,a.cz),new NavPoint(a.ex,a.ez))).ToArray();
+            foreach(var a in accesses??Array.Empty<PreparedAccess>())HangarAccesses.Add(new HangarAccess(a.group,a.gate,a.direction,a.points));
+        }
+        internal static ThreeCrossingsMaterials RestorePrepared(PreparedSurface data,Texture[] textures,PlayableProfile gameplay)
+            =>new ThreeCrossingsMaterials(PreparedSceneCodec.FromJson<ThreeCrossingsSurfaceProfile>(data.profile),PreparedSceneCodec.FromJson<EnvironmentArtProfile>(data.art),data.textures.Select(i=>textures[i]).ToArray(),data.accesses,data.mines,gameplay);
         public System.Collections.IEnumerator Preparation{get;}
         private System.Collections.IEnumerator Initialize(ThreeCrossingsSurfaceProfile p,ThreeCrossingsMap map,Material material,PlayableProfile gameplay)
         {
             var budget=new LoadingFrameBudget();
             ValidateRoads(p,map);MineAccesses=PlanMineAccess(p,map,gameplay);
             RoadMask=new Texture2D(MaskSize,MaskSize,TextureFormat.R8,false,true){name="Three Crossings dirt road mask",wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};
-            var pixels=new byte[MaskSize*MaskSize];var segments=Segments(p).ToArray();
+            var pixels=new byte[MaskSize*MaskSize];var segments=Segments(p).Select(s=>new RoadPaintBounds(s,p)).ToArray();
             var bridges=map.Supports.Where(s=>s.IsBridge).ToArray();
             var mineReserves=TerritoryRules.Sites(gameplay).Where(s=>s.Kind==PlayableBuildingKind.Mine).ToArray();
             for(int y=0;y<MaskSize;y++)for(int x=0;x<MaskSize;x++)
@@ -303,8 +350,10 @@ namespace Spacewars.Presentation
                 if(x==0&&budget.Expired){yield return null;budget.Restart();}
                 float wx=(float)(((x+.5)/MaskSize*2-1)*map.HalfExtent),wz=(float)(((y+.5)/MaskSize*2-1)*map.HalfExtent);
                 double best=double.MaxValue;
-                foreach(var s in segments)
+                foreach(var bounds in segments)
                 {
+                    if(!bounds.Contains(wx,wz))continue;
+                    var s=bounds.Road;
                     double dx=s.B.X-s.A.X,dz=s.B.Z-s.A.Z,length=dx*dx+dz*dz;
                     double t=length>0?Math.Max(0,Math.Min(1,((wx-s.A.X)*dx+(wz-s.A.Z)*dz)/length)):0;
                     double centerX=s.A.X+dx*t,centerZ=s.A.Z+dz*t;
@@ -359,6 +408,10 @@ namespace Spacewars.Presentation
             material.SetVector("_Concrete",new Vector4(Linear(p.concreteBrightness),p.slabSize,p.jointWidth,p.jointContrast));
             material.SetVector("_Metal",new Vector4(Linear(p.metalBrightness),p.metalPanelLength,p.metalPanelWidth,p.metalSeamContrast));
             material.SetVector("_SurfaceExtras",new Vector4(p.metalGrain,p.rockBrightness,p.metalHighlight,p.metalShininess));
+            material.SetVector("_FleetWear",new Vector4(p.fleetPaintAging,p.fleetScratches,p.fleetChips,0));
+            material.SetVector("_YardFinish",new Vector4(p.yardSteelReflection,p.yardSteelFocus,p.yardPaintReflection,p.yardPaintFocus));
+            material.SetVector("_YardWear",new Vector4(p.yardEdgeWear,p.yardWearScale,p.yardOxidation,p.yardGlassReflection));
+            material.SetFloat("_YardCurbValue",p.yardCurbValue);
             Art=EnvironmentArtProfile.Load();EnvironmentArt.Apply(material,Art);
             material.SetVector("_CrossingsRockProjection",new Vector4(1,p.rockProjectionTransition,0,0));
             material.SetVector("_CrossingsGroundDetail",new Vector4(1,p.groundOpenDetail,p.groundFootDetail,p.groundGrainRetention));

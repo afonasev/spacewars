@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using UnityEditor;
+using Spacewars.Presentation;
 using UnityEngine;
 namespace Spacewars.Editor
 {
@@ -10,6 +11,30 @@ namespace Spacewars.Editor
         [Serializable] class Catalog{public Model[] models;}
         [Serializable] class Model{public string name;public Role[] materials;}
         [Serializable] class Role{public string name,texture;public float[] baseColor;public float metallic,roughness;}
+        // Explicit Editor bake. Imported GLBs remain immutable sources; only privately
+        // cloned complete meshes with a measured buffer reduction become saved assets.
+        public static int OptimizePreparedMeshes()
+        {
+            const string folder="Assets/Spacewars/Content/Resources/Wrecks/";
+            long Cost(Mesh mesh)=>Enumerable.Range(0,mesh.vertexBufferCount).Sum(i=>(long)mesh.vertexCount*mesh.GetVertexBufferStride(i))+Enumerable.Range(0,mesh.subMeshCount).Sum(i=>(long)mesh.GetIndexCount(i))*(mesh.indexFormat==UnityEngine.Rendering.IndexFormat.UInt16?2:4);
+            int changed=0;
+            foreach(string path in Directory.GetFiles(folder,"*.prefab").OrderBy(x=>x,StringComparer.Ordinal))
+            {
+                var host=UnityEngine.Object.Instantiate(AssetDatabase.LoadAssetAtPath<GameObject>(path));bool dirty=false;
+                try{
+                    foreach(var f in host.GetComponentsInChildren<MeshFilter>(true)){
+                        var candidate=UnityEngine.Object.Instantiate(f.sharedMesh);
+                        try{
+                            FinalProceduralMesh.IndexOwned(candidate);
+                            if(Cost(candidate)>=Cost(f.sharedMesh))continue;
+                            f.sharedMesh=UnitModelResources.ImmutableSharedMesh(candidate,folder+"SharedMeshes/");dirty=true;changed++;
+                        }finally{UnityEngine.Object.DestroyImmediate(candidate);}
+                    }
+                    if(dirty)PrefabUtility.SaveAsPrefabAsset(host,path);
+                }finally{UnityEngine.Object.DestroyImmediate(host);}
+            }
+            AssetDatabase.SaveAssets();return changed;
+        }
         public static void Prepare()
         {
             const string source="Assets/Spacewars/Content/Wrecks/",output="Assets/Spacewars/Content/Resources/Wrecks/";
@@ -29,7 +54,8 @@ namespace Spacewars.Editor
                 if(host.GetComponentsInChildren<Collider>(true).Length!=0)throw new InvalidOperationException("Wrecks must have no collision");
                 PrefabUtility.SaveAsPrefabAsset(host,output+row.name+".prefab");UnityEngine.Object.DestroyImmediate(host);
             }
-            AssetDatabase.SaveAssets();Debug.Log("UNIT_WRECK_IMPORT_PASS nine unchanged approved meshes and charred textures");
+            OptimizePreparedMeshes();
+            AssetDatabase.SaveAssets();Debug.Log("UNIT_WRECK_IMPORT_PASS current-source base and upgraded vehicle wreck variants");
         }
     }
 }

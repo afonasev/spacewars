@@ -1,7 +1,7 @@
 {
   "id": "actor-industrial-finish-v1",
   "variant": "restrained",
-  "revision": 1,
+  "revision": 2,
   "armorMetallic": 0.12,
   "armorSmoothness": 0.28,
   "metalMetallic": 0.4,
@@ -14,5 +14,8 @@
   "bloomThreshold": 1.2,
   "bloomScatter": 0.45,
   "refineryBeaconEmission": 0.65,
-  "buildingLampEmission": 0.7
+  "buildingLampEmission": 0.7,
+  "wreckMetallic": 0.03,
+  "wreckSmoothness": 0.15,
+  "wreckWarmthCompensation": 0.7
 }

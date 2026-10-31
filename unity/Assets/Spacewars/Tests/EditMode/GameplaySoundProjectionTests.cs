@@ -13,7 +13,7 @@ namespace Spacewars.Tests.EditMode
         private static readonly Type Domain=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.PlayableDomain",true);
         private const BindingFlags Flags=BindingFlags.Instance|BindingFlags.NonPublic;
         private object domain;
-        private object Call(string name,params object[] args)=>Domain.GetMethod(name,Flags).Invoke(domain,args);
+        private object Call(string name,params object[] args){var method=Domain.GetMethod(name,Flags);return method.Invoke(domain,method.GetParameters().Select((parameter,i)=>i<args.Length?args[i]:parameter.DefaultValue).ToArray());}
         private PlayableSnapshot View(PlayableOwner owner=PlayableOwner.Player)=>(PlayableSnapshot)Call("PlayerSnapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7,owner);
         [SetUp] public void Setup(){domain=Activator.CreateInstance(Domain,Flags,null,new object[]{PlayableProfile.Default,1L},null);View();}
         [Test] public void HiddenEventStaysHiddenWhenVisionLaterRevealsIt()

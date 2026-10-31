@@ -10,7 +10,7 @@ def prepare_volume_icon(install,icon):
  # Finder reads the mounted volume icon from its root and custom-icon flag.
  shutil.copy2(icon,install/'.VolumeIcon.icns')
  run(['SetFile','-a','C',install])
-def validate_build_identity(build_dir,platform,version,head,allow_dirty=False):
+def validate_build_identity(build_dir,platform,version,head,allow_dirty=False,channel=None):
  identity_path=build_dir/'native-build.json'
  if not identity_path.exists():raise ValueError('bound native build missing; use build.py')
  identity=json.loads(identity_path.read_text())
@@ -23,6 +23,10 @@ def validate_build_identity(build_dir,platform,version,head,allow_dirty=False):
   f=player_dir/name
   with f.open('rb') as stream:actual=hashlib.file_digest(stream,'sha256').hexdigest()
   if f.stat().st_size!=record['size'] or actual!=record['sha256']:raise ValueError('native Player bytes differ from bound build: '+name)
+ if channel is not None:
+  if identity.get('channel')!=channel or identity.get('test_match_logging') is not (channel=='test'):raise ValueError('native build channel/logging identity differs; rebuild with --channel '+channel)
+  marker=player_dir/('Contents/Resources/Data/StreamingAssets/TestBuildIdentity.json' if platform=='macos-universal' else 'Player_Data/StreamingAssets/TestBuildIdentity.json')
+  if not marker.exists() or json.loads(marker.read_text()).get('TestBuild') is not (channel=='test'):raise ValueError('embedded test logging marker differs from requested channel')
  return identity
 
 def windows_manifest(executable):
@@ -96,7 +100,7 @@ def main():
  build_dir=ROOT/'unity/Builds/release'/('windows' if a.platform=='windows-x64' else 'macOS')
  identity_path=build_dir/'native-build.json'
  head=run(['git','rev-parse','HEAD'],cwd=ROOT)
- identity=validate_build_identity(build_dir,a.platform,a.version,head,a.allow_dirty)
+ identity=validate_build_identity(build_dir,a.platform,a.version,head,a.allow_dirty,channel=a.channel)
  key=pathlib.Path.home()/'.local/share/spacewars-release/native-ed25519.key'
  if not key.exists():run(['go','run','.','--keygen',key],cwd=UPDATER)
  private=base64.b64decode(key.read_text());pub=base64.b64encode(private[32:]).decode()

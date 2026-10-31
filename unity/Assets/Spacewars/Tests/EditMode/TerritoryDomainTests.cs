@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using Spacewars.Runtime;
+using Spacewars.Presentation;
 using Spacewars.Simulation;
 
 namespace Spacewars.Tests.EditMode
@@ -85,6 +86,38 @@ namespace Spacewars.Tests.EditMode
             Frames(150,true);Assert.AreNotEqual(ConstructionPhase.Pending,View().Buildings.Last().Phase);
             Assert.Greater(View().Geometry.Revision,revision);Assert.IsFalse(Nav.Crowd.Units.Single(x=>x.Id==unit).Held);
         }
+        [TestCase(false)] [TestCase(true)] public void FoundationEvacuationReplacesArrivedCommonPointGroup(bool held)
+        {
+            var pos=View().Sites[2].Site.Position;int unit=Spawn(pos);Frames(152);
+            var ids=new[]{unit};
+            var command=new PlayableCommand(1,++sequence,"player-1",PlayableCommandKind.Move,ids,pos)
+                .WithResolvedLocation(new NavLocation(pos,NavLocation.FlatSurface));
+            Nav.PrepareCommandGroup(command,sequence,View().Tick,1);
+            Assert.True(Nav.MoveGroup(ids,new[]{pos}));Nav.FinishCommandGroup(true,ids);
+            using(var host=new UnityHostRouteService())
+            {
+                void Routes()
+                {
+                    var binding=new PlayableRouteBinding(View().Geometry,p,Nav.Admission,Nav.RoutePort);
+                    for(int i=0;i<4096&&Nav.PendingCount>0;i++){host.Service(binding,8);Nav.ApplyResults();}
+                    Assert.Zero(Nav.PendingCount,"bounded component route preparation");
+                }
+                Routes();Nav.Step(1d/30d);
+                Assert.AreEqual(NavigationOutcome.Arrived,Nav.Crowd.Units.Single(x=>x.Id==unit).Outcome);
+                long arrivedGroup=Nav.GroupFor(unit).GroupId;
+                if(held)Nav.Stop(unit,true);
+                Assert.AreEqual(PlayableCommandStatus.Applied,Apply(PlayableCommandKind.BuildAt,3));Frames(1);
+                Assert.AreEqual(ConstructionPhase.Pending,View().Buildings.Last().Phase);
+                Assert.AreNotEqual(arrivedGroup,Nav.GroupFor(unit).GroupId,"evacuation must not inherit the arrived common-point command");
+                Routes();var before=Nav.Crowd.Units.Single(x=>x.Id==unit).Position;Nav.Step(1d/30d);
+                var actor=Nav.Crowd.Units.Single(x=>x.Id==unit);
+                Assert.AreNotEqual(before,actor.Position,"installed evacuation must move away from the old terminal point");
+                Assert.AreEqual(NavigationOutcome.Moving,actor.Outcome);
+                for(int i=0;i<150&&actor.Moving;i++){Nav.Step(1d/30d);actor=Nav.Crowd.Units.Single(x=>x.Id==unit);}
+                Assert.AreEqual(NavigationOutcome.Arrived,actor.Outcome);
+                Frames(1);Assert.AreNotEqual(ConstructionPhase.Pending,View().Buildings.Last().Phase,"vacated foundation can materialize");
+            }
+        }
         [Test] public void HostileOccupancyBlocksAndCancelRefundsOnceWithClaimPreserved()
         {
             Capture(4);Spawn(View().Sites[3].Site.Position,true);
@@ -119,6 +152,8 @@ namespace Spacewars.Tests.EditMode
             int parent=View().Sites[0].CenterId;
             Apply(PlayableCommandKind.BuildAt,1,1,PlayableBuildingKind.Factory,parent);Frames(451);
             int old=View().Buildings.Last().Id;Call("Damage",old,100000);
+            Assert.AreEqual(PlayableCommandStatus.OccupiedPad,Apply(PlayableCommandKind.BuildAt,1,1,PlayableBuildingKind.Factory,parent));
+            Frames((int)Math.Ceiling(p.BuildingDestructionSeconds*30));
             int before=View().Credits;Assert.AreEqual(PlayableCommandStatus.InvalidTarget,Apply(PlayableCommandKind.BuildAt,1,1,PlayableBuildingKind.Factory,parent+999));Assert.AreEqual(before,View().Credits);
             Assert.AreEqual(PlayableCommandStatus.Applied,Apply(PlayableCommandKind.BuildAt,1,1,PlayableBuildingKind.Factory,parent));Assert.Greater(View().Buildings.Last().Id,old);
         }

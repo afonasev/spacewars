@@ -22,16 +22,15 @@ namespace Spacewars.Presentation
             actor.Health.parent.position+=Vector3.up*((float)pose.Altitude-AirGroundPoint(position).y);
             actor.Root.position=new Vector3((float)position.X,(float)pose.Altitude,(float)position.Z);actor.Root.rotation=Quaternion.identity;
             actor.Hull.localRotation=Quaternion.Euler((float)pose.Pitch,90-(float)pose.Hull*Mathf.Rad2Deg,(float)pose.Roll);
-            foreach(var t in actor.Hull.GetComponentsInChildren<Transform>(true))
-            {
-                if(t.name=="mainRotor")t.localRotation=Quaternion.Euler(0,(float)(aircraftAnimationTime*profile.HawkRotorSpeed),0);
-                if(t.name=="tailRotor")t.localRotation=Quaternion.Euler((float)(aircraftAnimationTime*profile.HawkRotorSpeed),0,0);
-            }
+            if(!actor.Hawk)actor.Hawk=actor.Hull.gameObject.AddComponent<HawkModelPresentation>();
+            actor.Hawk.Observe(e,view);actor.UnitUpgraded=e.Upgraded;
+            actor.Hawk.Render(aircraftAnimationTime,view.Tick/30d,(float)pose.Pitch,(float)pose.Roll,(float)profile.HawkRotorSpeed);
             // Projection is anchored at the terrain, independent of the body altitude/tilt. It is never painted onto roofs.
             bool terrain=profile.AuthoredMap==null||profile.AuthoredMap.SupportAt(position)!=null;
             bool obstructed=view.Buildings.Any(b=>b.Phase!=ConstructionPhase.Pending&&DistanceAir(position,b.Position)<TerritoryRules.Radius(profile,b.Kind))||view.Entities.Any(u=>u.Id!=e.Id&&u.Kind!=PlayableEntityKind.Hawk&&DistanceAir(position,u.Position)<PlayableUnitRules.Radius(profile,u.Kind));
-            actor.Selection.SetActive(terrain&&!obstructed);actor.Selection.transform.position=AirGroundPoint(position)+Vector3.up*(float)profile.SelectionRingLift;actor.Selection.transform.rotation=Quaternion.identity;
-            if(terrain&&!obstructed)ProjectAirRing(actor,position);
+            bool showProjection=selected&&terrain&&!obstructed;
+            actor.Selection.SetActive(showProjection);actor.Selection.transform.position=AirGroundPoint(position)+Vector3.up*(float)profile.SelectionRingLift;actor.Selection.transform.rotation=Quaternion.identity;
+            if(showProjection)ProjectAirRing(actor,position);
             // Health outline is independent of the projection circle, including selection over a roof.
             var outline=actor.Health.parent.Find("Health outline").GetComponent<Renderer>();var block=new MaterialPropertyBlock();outline.GetPropertyBlock(block);block.SetColor("_BaseColor",selected?OrbitalTheme.Cyan:Color.black);outline.SetPropertyBlock(block);
         }
@@ -75,7 +74,7 @@ namespace Spacewars.Presentation
             }
             var staged=actor.Hull.Find("stagedHawk");bool visible=b.LaunchPhase>=1&&b.LaunchPhase<=3;
             if(!staged&&visible){var prefab=Resources.Load<GameObject>("StyleA/hawk");staged=UnityEngine.Object.Instantiate(prefab,actor.Hull,false).transform;staged.name="stagedHawk";staged.localScale=Vector3.one*((float)profile.HawkModelScale/scale);Layer(staged.gameObject);actor.PresentationPaint=null;}
-            if(staged){staged.gameObject.SetActive(visible);staged.rotation=Quaternion.Euler(0,90-(float)b.Heading*Mathf.Rad2Deg,0);staged.localPosition=Vector3.up*(platformTop-(float)(HawkHangarGeometry.HawkSoleHeight*profile.HawkModelScale)/scale);var spin=staged.GetComponent<HawkStagedRotor>();if(!spin)spin=staged.gameObject.AddComponent<HawkStagedRotor>();spin.Render(b.LaunchPhase,Math.Min(1,b.LaunchTime/profile.HawkSpinSeconds),aircraftAnimationTime,profile.HawkRotorSpeed);}
+            if(staged){var visual=staged.GetComponent<HawkModelPresentation>();if(!visual)visual=staged.gameObject.AddComponent<HawkModelPresentation>();visual.SetUpgrade(b.LaunchUpgraded);staged.gameObject.SetActive(visible);staged.rotation=Quaternion.Euler(0,90-(float)b.Heading*Mathf.Rad2Deg,0);staged.localPosition=Vector3.up*(platformTop-(float)(HawkHangarGeometry.HawkSoleHeight*profile.HawkModelScale)/scale);var spin=staged.GetComponent<HawkStagedRotor>();if(!spin)spin=staged.gameObject.AddComponent<HawkStagedRotor>();spin.Render(b.LaunchPhase,Math.Min(1,b.LaunchTime/profile.HawkSpinSeconds),aircraftAnimationTime,profile.HawkRotorSpeed);}
         }
     }
 }

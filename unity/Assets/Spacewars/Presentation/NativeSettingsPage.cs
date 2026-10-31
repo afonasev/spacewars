@@ -19,7 +19,7 @@ namespace Spacewars.Presentation
         private readonly Label status;
         private readonly Dictionary<string,VisualElement> groups=new Dictionary<string,VisualElement>();
         private static readonly string[] Sections={"Экран","Графика","Звук","Управление","Интерфейс"};
-        public NativeSettingsPage(VisualElement root,NativeMenuNavigation navigation,Action closed,NativeLocalControlSettings controls)
+        public NativeSettingsPage(VisualElement root,NativeMenuNavigation navigation,Action closed,NativeLocalControlSettings controls,Action<Action> openHistory=null)
         {
             this.root=root;nav=navigation;this.closed=closed;this.controls=controls;
             Page=OrbitalTheme.Screen(root,"settings-screen");card=OrbitalTheme.Card(Page);card.AddToClassList("orbital-settings-card");
@@ -36,6 +36,10 @@ namespace Spacewars.Presentation
             status=OrbitalTheme.Text("Настройки общие для этого устройства. Применяются автоматически.","orbital-muted");status.style.whiteSpace=WhiteSpace.Normal;card.Add(status);
             var actions=new VisualElement();actions.style.flexDirection=FlexDirection.Row;actions.style.flexWrap=Wrap.Wrap;card.Add(actions);
             actions.Add(OrbitalTheme.Action("Сбросить все настройки",Reset,"settings-reset-all"));
+            if(openHistory!=null)actions.Add(OrbitalTheme.Action("Что нового",()=>{
+                Page.style.display=DisplayStyle.None;
+                openHistory(()=>{Page.style.display=DisplayStyle.Flex;nav.SetScope(Page,Back,Page.Q("settings-history"));});
+            },"settings-history"));
             actions.Add(OrbitalTheme.Action("Назад",Back,"settings-back"));
             Action<string> failed=message=>status.text=message;
             Page.RegisterCallback<AttachToPanelEvent>(_=>NativePreferenceWriter.Failed+=failed);
@@ -83,6 +87,7 @@ namespace Spacewars.Presentation
             Toggle(input,"Инверсия камеры · X","settings-invert-x",NativeDevicePreferences.InvertX,v=>NativeDevicePreferences.InvertX=v);Toggle(input,"Инверсия камеры · Y","settings-invert-y",NativeDevicePreferences.InvertY,v=>NativeDevicePreferences.InvertY=v);
             input.Add(OrbitalTheme.Action("Управление",()=>{Page.style.display=DisplayStyle.None;NativeControlsHelp.Open(root,nav,()=>{Page.style.display=DisplayStyle.Flex;nav.SetScope(Page,Back,Page.Q("settings-controls"));});},"settings-controls"));
             var ui=groups["Интерфейс"];Toggle(ui,"Показывать здоровье постоянно","settings-health",NativeUserSettings.AlwaysHealth,v=>NativeUserSettings.AlwaysHealth=v);
+            Toggle(ui,"Скрывать здоровье при отдалении","settings-hide-distant-health",NativeUserSettings.HideDistantHealth,v=>NativeUserSettings.HideDistantHealth=v);
             Toggle(ui,"Повышенный контраст","settings-contrast",NativeDevicePreferences.HighContrast,v=>NativeDevicePreferences.HighContrast=v);Toggle(ui,"Счётчик FPS","settings-show-fps",NativeDevicePreferences.ShowFps,v=>NativeDevicePreferences.ShowFps=v);
             Slider(ui,"Масштаб интерфейса","settings-ui-scale",1,1.25f,NativeDevicePreferences.UiScale,"%",v=>NativeDevicePreferences.UiScale=v,100);
             ShowSection();
@@ -110,7 +115,7 @@ namespace Spacewars.Presentation
             if(group=="Графика"){foreach(var key in NativeGraphicsSettings.PreferenceKeys)PlayerPrefs.DeleteKey(key);keys=new[]{"spacewars.display.shadows"};}
             if(group=="Звук")keys=new[]{"spacewars.ui.volume","spacewars.audio.music","spacewars.audio.effects","spacewars.audio.notifications"};
             if(group=="Управление")keys=new[]{"spacewars.controls.cursorSpeed","spacewars.controls.cameraSpeed","spacewars.controls.cursorRecenterIdleMs",NativeCameraScrollSettings.EdgeKey,NativeCameraScrollSettings.ArrowKey,NativeDevicePreferences.Prefix+"deadzone",NativeDevicePreferences.Prefix+"invertX",NativeDevicePreferences.Prefix+"invertY"};
-            if(group=="Интерфейс")keys=new[]{"spacewars.ui.alwaysHealth",NativeDevicePreferences.Prefix+"uiScale",NativeDevicePreferences.Prefix+"highContrast",NativeDevicePreferences.Prefix+"showFps"};
+            if(group=="Интерфейс")keys=new[]{"spacewars.ui.alwaysHealth",NativeUserSettings.HideDistantHealthKey,NativeDevicePreferences.Prefix+"uiScale",NativeDevicePreferences.Prefix+"highContrast",NativeDevicePreferences.Prefix+"showFps"};
             foreach(var key in keys)PlayerPrefs.DeleteKey(key);
         }
         private void Confirm(string message,Action yes,Action no,int seconds=0)

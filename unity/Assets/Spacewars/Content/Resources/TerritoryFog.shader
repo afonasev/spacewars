@@ -6,6 +6,12 @@ Shader "Spacewars/TerritoryFog"
         _FogColor("Fog tint",Color)=(0,0,0,1)
         _FogMask("Team fog",2D)="black" {}
         _SurfaceRole("Surface role",Float)=0
+        _YardObject("Crossing object: off curb tractor",Float)=0
+        _YardFinish("Steel strength focus paint strength focus",Vector)=(.65,32,.22,24)
+        _YardWear("Edge width chip scale oxidation glass reflection",Vector)=(.025,.45,.12,.8)
+        _FleetWear("Fleet paint aging scratches chips",Vector)=(.34,.42,.7,0)
+        _YardCurbValue("Curb value",Float)=.48
+        _CrossingsYard("Mixed yard enabled gravel reach steel width contrast",Vector)=(0,3,1.5,.18)
         _PlatformSteel("Platform enabled lane panels contrast tread",Vector)=(0,2,.4,.55)
         _PlatformBounds("Platform deck XZ bounds",Vector)=(0,0,1,1)
         _IndustrialFinish("Steel strength exponent concrete strength exponent",Vector)=(0,24,0,12)
@@ -16,6 +22,11 @@ Shader "Spacewars/TerritoryFog"
         _FoundryPadAge("Foundry edge age width strength",Vector)=(2.5,0,0,0)
         _FoundrySandTint("Foundry edge sand",Color)=(.55,.473,.363,1)
         _FoundryCenterValue("Foundry central concrete value",Float)=.28
+        _FoundryHeightLevels("Foundry rear and upper support heights",Vector)=(0,0,0,0)
+        _FoundryLowTint("Foundry low warm slag",Color)=(.36,.297,.245,1)
+        _FoundryRearTint("Foundry rear neutral ground",Color)=(.45,.42,.396,1)
+        _FoundryUpperTint("Foundry upper cool slag",Color)=(.504,.54,.56,1)
+        _FoundryHeightStrength("Foundry height palette strength",Float)=0
         _FoundryVariation("Foundry texture variation",Vector)=(.8,13,0,0)
         _FoundryReadability("Foundry face contrast road detail entry length wear",Vector)=(0,1,3,0)
         _FoundryRouteMask("Foundry climb and outpost accents",2D)="black" {}
@@ -67,6 +78,8 @@ Shader "Spacewars/TerritoryFog"
         _ArtTiles("Art tile meters",Vector)=(7,6,5,4)
         _ArtReliefLimit("Maximum micro-relief slope",Float)=.35
         _ArtDetail("Texture relief moss wet width",Vector)=(0,0,0,1)
+        _CrossingsHydro("Crossings hydro enabled tail foam speed",Vector)=(0,0,0,0)
+        _CrossingsHydroExtent("Crossings hydro span spill reach",Vector)=(0,0,0,0)
         _WaterDeep("Deep water",Color)=(.09,.34,.32,1)
         _WaterShallow("Shallow water",Color)=(.34,.63,.6,1)
         _WaterMotion("Ripple scale speed strength reflection",Vector)=(2.5,.35,.25,.35)
@@ -82,6 +95,15 @@ Shader "Spacewars/TerritoryFog"
         _CrossingsConstruction("Crossings steel width age wear sand removal",Vector)=(.24,.24,.32,.9)
         _Dressing("Dressing kind",Float)=0
         _FogBounds("Map half bounds",Vector)=(32,32,0,0)
+        _FoundryQuarry("Quarry detail normal roads routes",Vector)=(1,1,1,1)
+        _FoundrySteel("Home steel blend plate size seam width contrast",Vector)=(0,7,.04,.35)
+        _FoundrySteelTint("Home steel albedo",Color)=(.46,.47,.48,1)
+        _FoundrySteelFinish("Steel variation wear sheen exponent",Vector)=(.08,.2,.22,24)
+        _FoundrySteelDetail("Steel fastener radius inset micro relief",Vector)=(.055,.2,.04,0)
+        _FoundryCrustCoverage("Additional cooled crust",Float)=0
+        _FoundrySteelWear("Steel texture scale joint edge",Vector)=(12,.12,0,0)
+        _FoundryGroundTint("Original quarry base tint",Color)=(.49,.43,.36,1)
+        _FoundryYardShape("Mine yard half extents and chamfer",Vector)=(1,1,0,0)
     }
     SubShader
     {
@@ -130,12 +152,15 @@ Shader "Spacewars/TerritoryFog"
                 half4 _FogColor;
                 float4 _FogBounds;
                 float _SurfaceRole;
-                float4 _PlatformSteel, _PlatformBounds;
+                float4 _PlatformSteel, _PlatformBounds, _CrossingsYard;
                 float _ArtReliefLimit;
                 float4 _FoundryGrain;
                 float4 _FoundryLavaFinish,_FoundryLavaRim;
                 half4 _FoundryLavaTint;
                 float4 _FoundryVariation;
+                float4 _FoundryHeightLevels;
+                half4 _FoundryLowTint,_FoundryRearTint,_FoundryUpperTint;
+                float _FoundryHeightStrength;
                 float4 _FoundryReadability;
                 float _FoundryBasaltWarmth;
                 float4 _FoundryRouteFinish;
@@ -147,22 +172,31 @@ Shader "Spacewars/TerritoryFog"
                 float4 _CrossingsRoadFinish, _CrossingsMinePad;
                 float4 _SurfaceNoise, _Concrete, _Metal, _SurfaceExtras;
                 float4 _ArtTiles, _ArtDetail, _WaterMotion, _ShoreSettings, _NaturalBlend;
+                float4 _CrossingsHydro, _CrossingsHydroExtent;
                 half4 _WaterDeep, _WaterShallow, _BasaltTint, _RustTint;
                 float4 _Geology, _Weathering;
                 float4 _CrossingsPalette, _CrossingsRegion, _CrossingsConstruction, _CrossingsInfrastructure;
                 half4 _CrossingsDustB;
                 float _ContactShade, _Dressing;
                 float4 _IndustrialFinish;
+                // Append new controls: preserve offsets used by existing factory materials.
+                float4 _FoundryQuarry, _FoundrySteel, _FoundrySteelFinish, _FoundrySteelDetail;
+                half4 _FoundrySteelTint;
+                float _FoundryCrustCoverage;
+                float4 _FoundrySteelWear, _FoundryYardShape;
+                half4 _FoundryGroundTint;
+                float _YardObject,_YardCurbValue;
+                float4 _YardFinish,_YardWear,_FleetWear;
             CBUFFER_END
-            struct Attributes {float4 positionOS:POSITION;float3 normalOS:NORMAL;half4 color:COLOR;};
-            struct Varyings {float4 positionCS:SV_POSITION;float3 positionWS:TEXCOORD0;half3 normalWS:TEXCOORD1;half4 color:COLOR;};
+            struct Attributes {float4 positionOS:POSITION;float3 normalOS:NORMAL;half4 color:COLOR;float4 faceUV:TEXCOORD0;};
+            struct Varyings {float4 positionCS:SV_POSITION;float3 positionWS:TEXCOORD0;half3 normalWS:TEXCOORD1;half4 color:COLOR;float4 faceUV:TEXCOORD2;float3 positionOS:TEXCOORD3;};
             Varyings vert(Attributes input)
             {
                 Varyings output;
                 output.positionWS=TransformObjectToWorld(input.positionOS.xyz);
                 output.positionCS=TransformWorldToHClip(output.positionWS);
                 output.normalWS=TransformObjectToWorldNormal(input.normalOS);
-                output.color=input.color;
+                output.color=input.color;output.faceUV=input.faceUV;output.positionOS=input.positionOS.xyz;
                 return output;
             }
             // Hash, cubic interpolation and half-cell offsets are fixed sampling invariants.
@@ -191,6 +225,7 @@ Shader "Spacewars/TerritoryFog"
                 return weights/max(dot(weights,1),.0001);
             }
             #define VARIANT_SAMPLE(role,smp,coord,world) (SAMPLE_TEXTURE2D(_##role##Tex,smp,coord).rgb*_##role##VariantGain.x*variantWeights(world).x + SAMPLE_TEXTURE2D(_##role##TexB,smp,coord).rgb*_##role##VariantGain.y*variantWeights(world).y + SAMPLE_TEXTURE2D(_##role##TexC,smp,coord).rgb*_##role##VariantGain.z*variantWeights(world).z)
+            #define VARIANT_SAMPLE_GRAD(role,smp,coord,world,gx,gy) (SAMPLE_TEXTURE2D_GRAD(_##role##Tex,smp,coord,gx,gy).rgb*_##role##VariantGain.x*variantWeights(world).x + SAMPLE_TEXTURE2D_GRAD(_##role##TexB,smp,coord,gx,gy).rgb*_##role##VariantGain.y*variantWeights(world).y + SAMPLE_TEXTURE2D_GRAD(_##role##TexC,smp,coord,gx,gy).rgb*_##role##VariantGain.z*variantWeights(world).z)
             #define NATURAL_SAMPLE(role,smp,p,tile) VARIANT_SAMPLE(role,smp,(p).xz/(tile),(p).xz)
             // Oblique XZ basis retains two-dimensional detail on axis-aligned terrain.
             float3 naturalPosition(float3 p) { return float3(dot(p,float3(0.64863783,-0.57400305,0.49978942)),dot(p,float3(0.68211449,0.72972141,-0.04718577)),dot(p,float3(-0.33762227,0.37152008,0.86486070))); }
@@ -231,11 +266,45 @@ Shader "Spacewars/TerritoryFog"
                 slope*=min(1,_ArtReliefLimit/max(length(slope),.0001));
                 return normalize(normal-slope);
             }
+            // Ground and buried foundation edges share this exact material path.
+            // This keeps color, deposit scale and crisp sibling detail continuous.
+            float3 quarryGround(float3 p,float broad,float grain,float detail,float2 masks,float2 uv,float3 baseTint)
+            {
+                float3 surface=baseTint*(1+broad*_FoundryGrain.z+grain*_FoundryGrain.w);
+                float rust=smoothstep(.35,.75,noise(p.xz/_FoundryGrain.x+13));
+                float deposit=smoothstep(.25,.75,naturalNoise(p+float3(23,0,41),_FoundryGrain.x*.55));
+                // Only ground roles use actual support Y; roads/pads/rocks/lava stay independent.
+                float3 heightTint=p.y<=_FoundryHeightLevels.x
+                    ?lerp(_FoundryLowTint.rgb,_FoundryRearTint.rgb,saturate(p.y/max(_FoundryHeightLevels.x,.0001)))
+                    :lerp(_FoundryRearTint.rgb,_FoundryUpperTint.rgb,saturate((p.y-_FoundryHeightLevels.x)/max(_FoundryHeightLevels.y-_FoundryHeightLevels.x,.0001)));
+                float heightStrength=_FoundryHeightLevels.y>0?_FoundryHeightStrength:0;
+                surface=lerp(surface,heightTint*(1+broad*_FoundryGrain.z+grain*_FoundryGrain.w),heightStrength);
+                // Hue comes from the height palette; retain deposit/grain modulation without warming the cool flanks.
+                float3 mineral=lerp(float3(.82,.86,.93),float3(1.22,1.03,.82),rust);
+                float3 ash=surface*lerp(mineral,dot(mineral,float3(.299,.587,.114)).xxx,heightStrength);
+                ash=lerp(ash,ash*float3(.72,.76,.79),deposit*_FoundryVariation.x*.45);
+                float3 slag=_RoadTint.rgb*(1+(broad*_FoundryGrain.z+grain*_FoundryGrain.w)*_FoundryReadability.y);
+                float calibratedDetail=lerp(_EarthVariantGain.w,detail,_FoundryQuarry.x);
+                float ashFinish=lerp(1,.35+calibratedDetail*2.2,_ArtDetail.x);
+                float roadFinish=lerp(1,.35+calibratedDetail*2.2,_ArtDetail.x*_FoundryReadability.y);
+                surface=lerp(ash*ashFinish,slag*roadFinish,masks.r*_FoundryQuarry.z);
+                float2 routes=SAMPLE_TEXTURE2D(_FoundryRouteMask,sampler_FoundryRouteMask,uv).rg;
+                // Broad flush aggregate wear follows the authored X-axis climb.
+                // Uneven band edges and retained grain prevent a painted ladder.
+                float wearPhase=p.x/max(.1,_FoundryRouteFinish.x)+(noise(p.xz/_FoundryGrain.y)-.5)*.18;
+                float wearBand=smoothstep(.15,.75,sin(wearPhase*6.2831853)*.5+.5);
+                float3 climb=_FoundryClimbTint.rgb*roadFinish*(1-wearBand*_FoundryRouteFinish.y);
+                surface=lerp(surface,_FoundryConnectionTint.rgb*roadFinish,routes.g*_FoundryQuarry.w);
+                surface=lerp(surface,climb,routes.r*_FoundryQuarry.w);
+                surface=lerp(surface,_BasaltTint.rgb*float3(.91,.85,.78)*ashFinish,masks.g*.6);
+                return surface;
+            }
             half4 frag(Varyings input):SV_Target
             {
                 float2 uv=input.positionWS.xz/(2*_FogBounds.xy)+.5;
                 half fog=SAMPLE_TEXTURE2D(_FogMask,sampler_FogMask,uv).r;
                 float3 normal=normalize(input.normalWS);
+                float foundationReflection=0;
                 // Map-wide world coordinates: no mesh IDs, tiled palette cells or UV seams.
                 float regionWarp=(noise(input.positionWS.xz/_CrossingsRegion.y+float2(17,43))-.5)*2*_CrossingsRegion.x;
                 float frontier=smoothstep(-_CrossingsPalette.w*.5,_CrossingsPalette.w*.5,
@@ -273,6 +342,9 @@ Shader "Spacewars/TerritoryFog"
                         float crossingsRoadEdgeNoise=_CrossingsPalette.x>.5?roadEdgeNoise*_CrossingsRoadFinish.w:0;
                         road=smoothstep(0,1,saturate(road+variation*_NaturalBlend.y*road*(1-road)*2+crossingsRoadEdgeNoise*road*(1-road)*2));
                         road*=1-smoothstep(0,width,abs(height));
+                        // Roads cover the loading apron, including its later dust/contact finish.
+                        // Only the local render sample changes; placement masks remain authoritative.
+                        if(_CrossingsPalette.x>.5&&_SurfaceRole<1.5&&_Dressing<.5)infrastructure.g*=1-road;
                         half3 soil=lerp(_GroundTint.rgb*(1+broad*_SurfaceNoise.y*2),_RoadTint.rgb*(1+broad*_SurfaceNoise.y),road);
                         float3 texturePosition=detailPosition(p);
                         half3 earth=NATURAL_SAMPLE(Earth,sampler_EarthTex,texturePosition,_ArtTiles.x);
@@ -389,6 +461,21 @@ Shader "Spacewars/TerritoryFog"
                             surface=lerp(surface,frame,infrastructure.r*.9);
 
                         }
+                        if(_CrossingsYard.x>.5)
+                        {
+                            float2 center=(_PlatformBounds.xy+_PlatformBounds.zw)*.5;
+                            float2 local=abs(input.positionWS.xz-center);
+                            float2 extent=(_PlatformBounds.zw-_PlatformBounds.xy)*.5;
+                            float edge=min(extent.x-local.x,extent.y-local.y);
+                            float gravel=1-smoothstep(.15,_CrossingsYard.y,edge+naturalNoise(input.positionWS,3)*.65);
+                            float lane=1-smoothstep(_CrossingsYard.z*.5,_CrossingsYard.z*.5+.06,min(local.x,local.y));
+                            float earth=dot(NATURAL_SAMPLE(Earth,sampler_EarthTex,detailPosition(input.positionWS),_ArtTiles.x),half3(.2126,.7152,.0722));
+                            half3 dust=_GroundTint.rgb*lerp(.9,1.12,saturate(earth*2));
+                            surface=lerp(surface,dust,gravel*.88);
+                            surface=lerp(surface,surface*(1-_CrossingsYard.w),lane*(1-gravel*.6));
+                            // Long flush expansion strips, without a raised metal tray.
+                            surface*=1-joints(plane,float2(6,8),_Concrete.z)*_Concrete.w*.5;
+                        }
                     }
                     else if(_SurfaceRole<3.5)
                     {
@@ -438,6 +525,53 @@ Shader "Spacewars/TerritoryFog"
                     }
                     else
                     {
+                        // Strict opt-in from the Crossings map adapter. Other map water is unchanged.
+                        if(_CrossingsHydro.x>.5)
+                        {
+                            Light main=GetMainLight();
+                            float waterClock=_CrossingsHydroExtent.z>.5?_CrossingsHydroExtent.w:_Time.y;
+                            float2 w=input.positionWS.xz;
+                            float t=waterClock*_CrossingsHydro.w*(_WaterMotion.y/.35);
+                            float2 flow=w*(2.975/_WaterMotion.x)+float2(noise(w*.21)*.6,t*.8);
+                            float current=noise(flow*.45),fine=noise(flow*5.3+float2(t*.11,0));
+                            float depth=saturate(shore/(_ShoreSettings.x*1.6));
+                            surface=lerp(_WaterShallow.rgb*.72,_WaterDeep.rgb*.90,depth);
+                            // Fine broken caustics with advected domain warp, separate from broad depth.
+                            float warp=noise(flow*1.7)*1.4;
+                            float ridge=abs(noise(flow*4.7+warp)-.51);
+                            float ripple=(1-smoothstep(.015,.05,ridge))*smoothstep(.42,.68,fine);
+                            surface+=half3(.016,.052,.044)*ripple*(1-depth*.55);
+                            surface*=.90+.20*current;
+                            float center=noise(flow*2.1);
+                            float sx=(noise((flow+float2(.06,0))*2.1)-center)/.06;
+                            float sz=(noise((flow+float2(0,.06))*2.1)-center)/.06;
+                            normal=normalize(float3(-sx*_WaterMotion.z*.8,1,-sz*_WaterMotion.z*.8));
+                            float fres=pow(1-saturate(dot(normal,eye)),4);
+                            surface=lerp(surface,half3(.20,.31,.33),_WaterMotion.w*(.36+fres));
+                            float downstream=_CrossingsHydro.y-w.y;
+                            float tail=exp(-abs(downstream-_CrossingsHydroExtent.y)*.7)*step(0,downstream);
+                            tail*=1-smoothstep(_CrossingsHydroExtent.x-1,_CrossingsHydroExtent.x+1,abs(w.x));
+                            float turbulence=noise(flow*8.9)*.65+noise(flow*19.1)*.35;
+                            float churn=smoothstep(.50,.72,turbulence)*tail*(.45+.55*noise(flow*2.1));
+                            float coast=(1-smoothstep(.05,.65,shore))*smoothstep(.54,.76,fine);
+                            surface=lerp(surface,half3(.40,.63,.59),saturate(churn*_CrossingsHydro.z+coast*.4*_ShoreSettings.y));
+                            float falling=_Dressing>1.5?1:0;
+                            float2 fallingFlow=float2(w.x*9+noise(float2(input.positionWS.y*.9,t*.3))*.8,input.positionWS.y*.9+t*4);
+                            float streak=smoothstep(.59,.83,noise(fallingFlow));
+                            float fallFine=noise(float2(w.x*26,input.positionWS.y*7+t*6));
+                            half3 cascade=_WaterDeep.rgb*1.1+_WaterShallow.rgb*(.18+streak*.6)+fallFine*.025;
+                            // Travel is encoded in the privately generated cascade vertex alpha.
+                            float foot=smoothstep(.68,.98,input.color.a);
+                            cascade=lerp(cascade,surface,foot*.92);
+                            surface=lerp(surface,cascade,falling);
+                            // Analytic continuous flow normal prevents triangle-sized specular facets on the curved sheet.
+                            float drop=max(.1,(-.65-input.positionWS.y)/max(.01,input.color.a));
+                            float3 cascadeNormal=normalize(float3(0,_CrossingsHydroExtent.y,-drop*1.6*pow(max(.001,input.color.a),.375)));
+                            normal=normalize(lerp(normal,cascadeNormal,falling));
+                            highlight=pow(saturate(dot(normal,normalize(main.direction+eye))),64)*_WaterMotion.w*1.28;
+                        }
+                        else
+                        {
                         float2 p=input.positionWS.xz/_WaterMotion.x;
                         float time=_Time.y*_WaterMotion.y;
                         float warp=noise(p*.37+time*.03)*5;
@@ -456,6 +590,8 @@ Shader "Spacewars/TerritoryFog"
                         surface=lerp(surface,half3(.35,.48,.52)*( .8+cloud*.4),_WaterMotion.w*(.22+fresnel*.78));
                         Light main=GetMainLight();
                         highlight=pow(saturate(dot(normal,normalize(main.direction+eye))),96)*_WaterMotion.w;
+                        }
+
                     }
                     if(_Dressing>.5)surface*=input.color.rgb;
                     if(_Dressing>2.5)surface*=2; // Wreck vertex paints define authored material separation.
@@ -499,6 +635,8 @@ Shader "Spacewars/TerritoryFog"
                 if(_SurfaceRole>5.5)
                 {
                     float3 p=input.positionWS;
+                    if(_SurfaceRole>=7.5&&_SurfaceRole<8.5)p.y-=.006; // Shared foundation mesh lift.
+                    float3 reliefDx=ddx(p),reliefDy=ddy(p);
                     float broad=noise(p.xz/_FoundryGrain.x)-.5;
                     float grain=noise((p.xz+p.y)/_FoundryGrain.y)-.5;
                     float3 projected=detailPosition(p);
@@ -521,23 +659,7 @@ Shader "Spacewars/TerritoryFog"
                         // support triangles without altering terrain, ramps or rock normals.
                         if(normal.y>.75)normal=normalize(lerp(normal,float3(0,1,0),_FoundryVariation.z));
                         float2 masks=SAMPLE_TEXTURE2D(_RoadMask,sampler_RoadMask,uv).rg;
-                        float rust=smoothstep(.35,.75,noise(p.xz/_FoundryGrain.x+13));
-                        float deposit=smoothstep(.25,.75,naturalNoise(p+float3(23,0,41),_FoundryGrain.x*.55));
-                        float3 ash=surface*lerp(float3(.82,.86,.93),float3(1.22,1.03,.82),rust);
-                        ash=lerp(ash,ash*float3(.72,.76,.79),deposit*_FoundryVariation.x*.45);
-                        float3 slag=_RoadTint.rgb*(1+(broad*_FoundryGrain.z+grain*_FoundryGrain.w)*_FoundryReadability.y);
-                        float ashFinish=lerp(1,.35+detail*2.2,_ArtDetail.x);
-                        float roadFinish=lerp(1,.35+detail*2.2,_ArtDetail.x*_FoundryReadability.y);
-                        surface=lerp(ash*ashFinish,slag*roadFinish,masks.r);
-                        float2 routes=SAMPLE_TEXTURE2D(_FoundryRouteMask,sampler_FoundryRouteMask,uv).rg;
-                        // Broad flush aggregate wear follows the authored X-axis climb.
-                        // Uneven band edges and retained grain prevent a painted ladder.
-                        float wearPhase=p.x/max(.1,_FoundryRouteFinish.x)+(noise(p.xz/_FoundryGrain.y)-.5)*.18;
-                        float wearBand=smoothstep(.15,.75,sin(wearPhase*6.2831853)*.5+.5);
-                        float3 climb=_FoundryClimbTint.rgb*roadFinish*(1-wearBand*_FoundryRouteFinish.y);
-                        surface=lerp(surface,_FoundryConnectionTint.rgb*roadFinish,routes.g);
-                        surface=lerp(surface,climb,routes.r);
-                        surface=lerp(surface,_BasaltTint.rgb*float3(.91,.85,.78)*ashFinish,masks.g*.6);
+                        surface=quarryGround(p,broad,grain,detail,masks,uv,_BaseColor.rgb);
                         detail*=lerp(1,_FoundryReadability.y,masks.r);
                     }
                     else if(_SurfaceRole<8.5)
@@ -553,8 +675,11 @@ Shader "Spacewars/TerritoryFog"
                         // Exact inward distance for the fixed six-sided circumscribed
                         // polygon (diagonal slope 1/2), or the unchanged square sites.
                         float edge=_FoundryPadBounds.z-max(local.x,local.y);
-                        if(_FoundryPadBounds.w>.5)
+                        if(_FoundryPadBounds.w>.5&&_FoundryPadBounds.w<1.5)
                             edge=min(_FoundryPadBounds.z-local.y,(_FoundryPadBounds.z-local.x-local.y*.5)/sqrt(1.25));
+                        if(_FoundryPadBounds.w>1.5)
+                            edge=min(min(_FoundryYardShape.x-local.x,_FoundryYardShape.y-local.y),
+                                (_FoundryYardShape.x+_FoundryYardShape.y-_FoundryYardShape.z-local.x-local.y)/sqrt(2));
                         float drift=noise(p.xz/_FoundryPadFinish.y+float2(17,43));
                         float sand=1-smoothstep(0,_FoundryPadFinish.x*(.3+1.4*drift),max(0,edge));
                         float approach=SAMPLE_TEXTURE2D(_RoadMask,sampler_RoadMask,uv).b;
@@ -588,6 +713,47 @@ Shader "Spacewars/TerritoryFog"
                         surface=lerp(surface,foundation,center*_FoundryPadCenter);
                         detail=lerp(wear,sandGrain+.5,sand);
                         detail=lerp(detail,centerDetail,center*_FoundryPadCenter);
+                        if(_FoundryPadBounds.w>.5&&_FoundrySteel.x>0)
+                        {
+                            // Large staggered structural plates, clipped by the unchanged
+                            // foundation mesh. No extra meshes, materials, seams or colliders.
+                            float size=max(_FoundrySteel.y,.1);
+                            float rowId=floor(padPoint.y/size);
+                            float2 platePoint=float2(padPoint.x+fmod(abs(rowId),2)*size*.5,padPoint.y);
+                            float2 cell=floor(platePoint/size),within=frac(platePoint/size)*size;
+                            float2 toEdge=min(within,size-within);
+                            float seamDistance=min(toEdge.x,toEdge.y);
+                            float seamAA=max(fwidth(seamDistance),.001);
+                            float seam=1-smoothstep(_FoundrySteel.z*.5-seamAA,_FoundrySteel.z*.5+seamAA,seamDistance);
+                            float plateValue=hash(cell+_FoundryPadBounds.xy)-.5;
+                            float3 steel=VARIANT_SAMPLE(Steel,sampler_SteelTex,p.xz/_FoundrySteelWear.x,p.xz);
+                            float steelGrain=dot(steel,float3(.299,.587,.114));
+                            float patina=lerp(steelGrain/max(_SteelVariantGain.w,.001),wear/max(_ConcreteVariantGain.w,.001),_FoundrySteelWear.z);
+                            float polish=noise(p.xz/size);
+                            float3 plate=_FoundrySteelTint.rgb*(1+plateValue*_FoundrySteelFinish.x);
+                            plate*=max(.1,1+(patina-1)*_FoundrySteelFinish.y+(polish-.5)*_FoundrySteelFinish.x);
+                            float rim=(1-smoothstep(_FoundrySteel.z,_FoundrySteel.z+seamAA,seamDistance))*(1-seam);
+                            plate*=1-seam*_FoundrySteel.w+rim*_FoundrySteelWear.y;
+                            float boltDistance=length(toEdge-_FoundrySteelDetail.y);
+                            float boltAA=max(fwidth(boltDistance),.001);
+                            float bolt=1-smoothstep(_FoundrySteelDetail.x-boltAA,_FoundrySteelDetail.x+boltAA,boltDistance);
+                            // Fasteners use the same subdued contrast as welded joints.
+                            float head=1-smoothstep(_FoundrySteelDetail.x*.5-boltAA,_FoundrySteelDetail.x*.5+boltAA,boltDistance);
+                            plate*=1-bolt*_FoundrySteel.w+head*_FoundrySteel.w;
+                            plate*=1-age*_FoundryPadAge.y*.5;
+                            // Entire boundary meets the actual surrounding sand; only
+                            // the inward reach varies. No foreign yellow tint or rim.
+                            float reach=_FoundryPadFinish.x*(.25+.75*drift);
+                            float scattered=grain*_FoundryPadFinish.x*.3*saturate(max(0,edge)/reach);
+                            float steelSand=1-smoothstep(reach*.5,reach,max(0,edge)+scattered);
+                            float2 groundMasks=SAMPLE_TEXTURE2D(_RoadMask,sampler_RoadMask,uv).rg;
+                            float3 edgeGround=quarryGround(p,broad,grain,dot(earth,float3(.299,.587,.114)),groundMasks,uv,_FoundryGroundTint.rgb);
+                            plate=lerp(plate,edgeGround,steelSand);
+                            surface=lerp(surface,plate,_FoundrySteel.x);
+                            float plateRelief=lerp(steelGrain*_FoundrySteelDetail.z,dot(earth,float3(.299,.587,.114))*_FoundryQuarry.y,steelSand);
+                            detail=lerp(detail,plateRelief,_FoundrySteel.x);
+                            foundationReflection=_FoundrySteel.x*(1-steelSand)*(1-seam)*(1-bolt*.5);
+                        }
                     }
                     else if(_SurfaceRole<10.5)
                     {
@@ -610,23 +776,114 @@ Shader "Spacewars/TerritoryFog"
                         float2 flow=p.xz+float2(0,_Time.y*_FoundryLavaFinish.w);
                         float2 q=flow/_FoundryLavaFinish.z;
                         float crust=smoothstep(.48,.67,noise(q+noise(q*.37)*2)*.7+noise(q*2.7)*.3);
-                        float molten=heat*(1-crust*.92);
+                        float molten=heat*(1-saturate(crust+_FoundryCrustCoverage)*lerp(.92,.98,saturate(_FoundryCrustCoverage)));
                         surface=_BasaltTint.rgb*(.4+noise(q*3)*.2)*(1-molten);
                         emission=_FoundryLavaTint.rgb*molten*_FoundryLavaFinish.y*(.65+heat*.65);
 
                     }
                     else
                     {
-                        float3 steel=VARIANT_SAMPLE(Steel,sampler_SteelTex,plane/_ArtTiles.w,input.positionWS.xz);
+                        float3 steel;
+                        // Orthographic pixel tangents depend on the camera and surface
+                        // plane, not the rasterizer's primitive/helper-quad partition.
+                        // Use the same footprint for texture LOD and the relief basis.
+                        float3 viewForward=UNITY_MATRIX_I_V._m02_m12_m22;
+                        float normalForward=dot(normal,viewForward);
+                        // Other viewport/render scales keep their established derivative path.
+                        if(unity_OrthoParams.w>0&&all(_ScreenParams.xy==_ScaledScreenParams.xy)&&abs(normalForward)>.00001)
+                        {
+                            float2 pixelWorld=2*unity_OrthoParams.xy/_ScreenParams.xy;
+                            float3 right=UNITY_MATRIX_I_V._m00_m10_m20*pixelWorld.x;
+                            float3 up=UNITY_MATRIX_I_V._m01_m11_m21*pixelWorld.y;
+                            float3 stableDx=right-viewForward*(dot(right,normal)/normalForward);
+                            float3 stableDy=up-viewForward*(dot(up,normal)/normalForward);
+                            // Keep each backend's derivative orientation; only replace
+                            // its numerically variable magnitude/direction in the plane.
+                            reliefDx=stableDx*sign(dot(reliefDx,stableDx));
+                            reliefDy=stableDy*sign(dot(reliefDy,stableDy));
+                            float2 gx=(abs(normal.y)>.5?reliefDx.xz:abs(normal.x)>abs(normal.z)?reliefDx.zy:reliefDx.xy)/_ArtTiles.w;
+                            float2 gy=(abs(normal.y)>.5?reliefDy.xz:abs(normal.x)>abs(normal.z)?reliefDy.zy:reliefDy.xy)/_ArtTiles.w;
+                            steel=VARIANT_SAMPLE_GRAD(Steel,sampler_SteelTex,plane/_ArtTiles.w,input.positionWS.xz,gx,gy);
+                        }
+                        else steel=VARIANT_SAMPLE(Steel,sampler_SteelTex,plane/_ArtTiles.w,input.positionWS.xz);
                         surface*=lerp(1,.65+steel*.65,_ArtDetail.x*.5);
                         detail=dot(steel,float3(.299,.587,.114));
                     }
                     if(_SurfaceRole<10.5||_SurfaceRole>11.5)
                     {
-                        float3 dx=ddx(p),dy=ddy(p),r1=cross(dy,normal),r2=cross(normal,dx);
+                        float3 dx=reliefDx,dy=reliefDy,r1=cross(dy,normal),r2=cross(normal,dx);
                         float determinant=dot(dx,r1);
                         float3 gradient=(r1*ddx(detail)+r2*ddy(detail))*sign(determinant)/max(abs(determinant),.00001);
-                        normal=reliefNormal(normal,gradient);
+                        normal=reliefNormal(normal,gradient*(_SurfaceRole<7.5?_FoundryQuarry.y:1));
+                    }
+                    highlight=0;
+                }
+                bool yardObject=_YardObject>.5;
+                float yardSheen=0,yardFocus=1;
+                if(yardObject)
+                {
+                    // The tractor and curb use smooth manufactured surfaces, never terrain relief,
+                    // world-sized deck joints or the generic steel floor texture.
+                    normal=normalize(input.normalWS);
+                    float materialId=_YardObject<1.5?1:round(input.color.a*3);
+                    float3 p=input.positionOS;
+                    float age=noise(p.xz/_YardWear.y+float2(31,19));
+                    float brushed=(noise(p.xz/float2(_SurfaceNoise.z,_Metal.y))-.5)*_SurfaceExtras.x;
+                    float edgeDistance=min(min(input.faceUV.x,input.faceUV.y),min(input.faceUV.z-input.faceUV.x,input.faceUV.w-input.faceUV.y));
+                    float aa=max(fwidth(edgeDistance),.0001);
+                    float edge=(1-smoothstep(_YardWear.x-aa,_YardWear.x+aa,edgeDistance))*smoothstep(.3,.65,age);
+                    float3 paint=SRGBToLinear(input.color.rgb);
+                    float3 steelTint=SRGBToLinear(float3(.48,.53,.54));
+                    if(_YardObject<1.5)steelTint=SRGBToLinear(_YardCurbValue*float3(.8,.9,1));
+                    float2 metalPlane=abs(normal.y)>.5?p.xz:abs(normal.x)>abs(normal.z)?p.zy:p.xy;
+                    float3 metalDetail=VARIANT_SAMPLE(Steel,sampler_SteelTex,metalPlane/_ArtTiles.w,p.xz);
+                    float grain=clamp(dot(metalDetail,float3(.2126,.7152,.0722))/.18,.7,1.3);
+                    float3 wornSteel=steelTint*(1+brushed)*lerp(1,grain,_ArtDetail.x);
+                    paint*=1+(age-.5)*_SurfaceExtras.x;
+                    if(_YardObject<1.5)
+                    {
+                        // Fabrication joints run across the existing wall, not across the floor.
+                        float along=abs(normal.x)>abs(normal.z)?p.z:p.x;
+                        float panel=frac(along/_Metal.y)*_Metal.y;
+                        float joint=1-smoothstep(_Concrete.z*.5,_Concrete.z,min(panel,_Metal.y-panel));
+                        wornSteel*=1-joint*_Metal.w;
+                    }
+                    wornSteel=lerp(wornSteel,wornSteel*float3(1.4,.65,.32),smoothstep(.6,.85,age)*_YardWear.z);
+                    surface=materialId<.5?lerp(paint,wornSteel,edge):wornSteel;
+                    yardSheen=materialId<.5?lerp(_YardFinish.z,_YardFinish.x,edge):_YardFinish.x;
+                    yardFocus=materialId<.5?_YardFinish.w:_YardFinish.y;
+                    if(materialId>1.5&&materialId<2.5){surface=paint;yardSheen=0;}
+                    if(materialId>2.5)
+                    {
+                        float fresnel=pow(1-saturate(dot(normal,eye)),5);
+                        surface=paint*.35+float3(.12,.20,.25)*fresnel;
+                        yardSheen=_YardWear.w;yardFocus=_YardFinish.y*2;
+                    }
+                    if(_YardObject>2.5 && materialId<2.5)
+                    {
+                        // Panel-local wear: chips on edges, rub marks along work direction,
+                        // dark oil in low joints. Smooth manufactured normals remain intact.
+                        float2 panel=input.faceUV.xy;
+                        float stain=noise(panel/_YardWear.y+float2(7,31));
+                        float fleck=noise(panel/(_YardWear.y*.12)+float2(19,43));
+                        float scrape=noise(panel/float2(_YardWear.y*2,_YardWear.y*.025));
+                        float chip=smoothstep(.64,.79,fleck)*saturate(edge*2+smoothstep(.66,.85,stain)*_FleetWear.z);
+                        float scratches=smoothstep(.76,.89,scrape)*smoothstep(.3,.7,stain);
+                        float wear=saturate(edge+chip+scratches*_FleetWear.y);
+                        float3 dirtySteel=wornSteel*lerp(.55,1.05,stain);
+                        if(materialId<.5)
+                        {
+                            float3 agedPaint=paint*lerp(1-_FleetWear.x,1+_FleetWear.x*.35,stain);
+                            surface=lerp(agedPaint,dirtySteel,wear);
+                            yardSheen=lerp(_YardFinish.z*.55,_YardFinish.x,wear);
+                        }
+                        else if(materialId<1.5)
+                        {
+                            surface=dirtySteel+scratches*steelTint*.3;
+                            yardSheen=_YardFinish.x*lerp(.45,1,stain);
+                        }
+                        float dust=(1-smoothstep(.10,.7,p.y))*_YardWear.z;
+                        surface=lerp(surface,SRGBToLinear(float3(.29,.25,.18)),dust);
                     }
                     highlight=0;
                 }
@@ -636,6 +893,8 @@ Shader "Spacewars/TerritoryFog"
                 bool concrete=(_SurfaceRole>1.5&&_SurfaceRole<2.5)||(_SurfaceRole>7.5&&_SurfaceRole<8.5);
                 float sheen=steel?_IndustrialFinish.x:concrete?_IndustrialFinish.z:0;
                 float exponent=steel?_IndustrialFinish.y:_IndustrialFinish.w;
+                if(yardObject){sheen=yardSheen;exponent=yardFocus;}
+                if(foundationReflection>0){sheen=_FoundrySteelFinish.z*foundationReflection;exponent=_FoundrySteelFinish.w;}
                 float facing=saturate(dot(normal,light.direction));
                 float specular=pow(saturate(dot(normal,normalize(light.direction+eye))),max(exponent,1))*sheen*facing;
                 // Keep water's established reflection and lava emission; only direct light is shadowed.

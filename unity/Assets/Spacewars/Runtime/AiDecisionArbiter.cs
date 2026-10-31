@@ -102,7 +102,7 @@ namespace Spacewars.Runtime
                 if(chosen.Count==actionLimit){rejections[p.Id]="decision attention limit";continue;}
                 long held=budget?.ReservationAmount(p.ReservationId??p.Id)??0;
                 var earmarked=p.ReservationId==null?null:budget?.ReservationEntry(p.ReservationId);
-                bool factoryHold=earmarked!=null&&earmarked.Purpose=="factory-startup"&&p.Policy=="production"&&p.Action.Kind==PlayableCommandKind.QueueTank&&earmarked.Action.Kind==p.Action.Kind&&earmarked.Action.UnitKind==p.Action.UnitKind&&earmarked.Action.EntityIds.SequenceEqual(p.Action.EntityIds);
+                bool factoryHold=earmarked!=null&&earmarked.Purpose=="factory-startup"&&p.Policy=="production"&&AiRosterCatalog.IsProduction(p.Action.Kind)&&earmarked.Action.Kind==p.Action.Kind&&earmarked.Action.UnitKind==p.Action.UnitKind&&earmarked.Action.EntityIds.SequenceEqual(p.Action.EntityIds);
                 bool expansionHold=earmarked!=null&&AiExpansionPlanner.IsFunding(earmarked)&&p.Policy=="expansion"&&p.Action.Kind==PlayableCommandKind.BuildAt&&earmarked.Action.Kind==p.Action.Kind&&
                     p.Action.SlotId==0&&p.Action.ParentId==0&&p.Action.EntityIds.Count==1&&(p.Action.BuildingKind==PlayableBuildingKind.Mine||p.Action.BuildingKind==PlayableBuildingKind.Outpost)&&p.Action.BuildingKind==earmarked.Action.BuildingKind&&p.Action.SiteId==earmarked.Action.SiteId&&
                     p.Action.PlayerId==earmarked.Action.PlayerId&&p.Action.Generation==earmarked.Action.Generation&&p.Action.EntityIds.SequenceEqual(earmarked.Action.EntityIds)&&earmarked.Amount==p.Credits&&

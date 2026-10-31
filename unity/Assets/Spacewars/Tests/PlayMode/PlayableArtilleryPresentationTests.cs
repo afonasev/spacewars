@@ -42,13 +42,14 @@ public sealed class PlayableArtilleryPresentationTests
         var impact=new PlayableImpactSnapshot(9,PlayableOwner.Player,new BallisticPoint(8,0,3),1.4,30,1);Render(Array.Empty<PlayableProjectileSnapshot>(),new[]{impact});Assert.Zero(Get("shells").Count);Assert.AreEqual(1,Get("impactEffects").Count);
         Render(Array.Empty<PlayableProjectileSnapshot>());Assert.Zero(Get("impactEffects").Count);
     }
-    [Test]public void WebShellShapesAndImpactExpansionUseAuthoritativeTicks()
+    [TestCase(false)][TestCase(true)]public void WebShellShapesAndImpactExpansionUseAuthoritativeTicks(bool detailed)
     {
+        world.HybridTanks=detailed;
         var shots=new[]{new PlayableProjectileSnapshot(1,1,2,new NavPoint(0,0),PlayableEntityKind.Tank,.4,1,.2),new PlayableProjectileSnapshot(2,1,2,new NavPoint(1,0),PlayableEntityKind.Explorer)};
         var hit=new PlayableImpactSnapshot(3,PlayableOwner.Player,new BallisticPoint(3,2,4),1.4,30,1);
         Render(shots,new[]{hit},tick:31);
-        var tank=(GameObject)Get("shells")[1];Assert.NotNull(tank.transform.Find("kinetic-shell-nose"));Assert.NotNull(tank.transform.Find("kinetic-shell-tracer"));
-        Assert.That(tank.transform.GetChild(0).GetComponent<MeshFilter>().sharedMesh.bounds.size.x,Is.EqualTo(.28f).Within(.00001));
+        var tank=(GameObject)Get("shells")[1];Assert.NotNull(tank.transform.Find(detailed?"Tungsten point":"kinetic-shell-nose"));Assert.NotNull(tank.transform.Find(detailed?"Soft hot wake":"kinetic-shell-tracer"));
+        Assert.That(tank.transform.GetChild(0).GetComponent<MeshFilter>().sharedMesh.bounds.size.x,Is.EqualTo(detailed?TankMechanismProfile.Load().shellLength:.28f).Within(.00001));
         var circle=(GameObject)Get("impactEffects")[3];Assert.That(circle.transform.position.y,Is.EqualTo(2f).Within(.00001));
         Assert.Greater(circle.GetComponent<MeshFilter>().sharedMesh.bounds.size.y,0);
         Assert.That(circle.transform.localScale.x,Is.EqualTo(PlayableProfile.Default.ImpactEffectRadius*2*(1d/30)/PlayableProfile.Default.ImpactEffectSec).Within(.00001));Assert.IsNull(circle.GetComponent<Collider>());

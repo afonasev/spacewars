@@ -258,10 +258,12 @@ type ReleaseHistory struct {
 	Releases []ReleaseNote `json:"releases"`
 }
 type ReleaseNote struct {
-	Version string `json:"version"`
-	Date    string `json:"date"`
-	Russian string `json:"ru"`
-	English string `json:"en"`
+	Version  string         `json:"version"`
+	Date     string         `json:"date"`
+	Russian  string         `json:"ru"`
+	English  string         `json:"en"`
+	BlocksRu []HistoryBlock `json:"blocks_ru"`
+	BlocksEn []HistoryBlock `json:"blocks_en"`
 }
 
 func releaseNote(r githubRelease) ReleaseNote {
@@ -272,6 +274,8 @@ func releaseNote(r githubRelease) ReleaseNote {
 		n.Russian = strings.TrimSpace(body[ru+len("## Русский") : en])
 		n.English = strings.TrimSpace(body[en+len("## English"):])
 	}
+	n.BlocksRu = historyBlocks(n.Russian, r)
+	n.BlocksEn = historyBlocks(n.English, r)
 	return n
 }
 func githubHistory(installed string) (ReleaseHistory, error) {

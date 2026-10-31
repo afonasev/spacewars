@@ -1,20 +1,22 @@
 using System;
+using System.Threading;
 
 namespace Spacewars.Simulation
 {
     // Paid actor headers and derived working index. Immutable route arrays are
     // borrowed through explicit pins, never copied with the crowd frame.
-    internal sealed class NavPreparedCrowdStep : NavOwnedStorage
+    internal sealed class NavPreparedCrowdStep : NavOwnedStorage,INavMotionWork
     {
         private static readonly long HeaderBytes=NavStorageLayout.ObjectBytesBound(typeof(NavPreparedCrowdStep)),UnitBytes=NavStorageLayout.ObjectBytesBound(typeof(NavUnit)),CrowdBytes=NavStorageLayout.ObjectBytesBound(typeof(NavCrowd));
         private static long Align(long n)=>checked((n+7)/8*8);
-        private static long Layout(int count)=>checked(HeaderBytes+16*32L+104L*count+Align(4L*count)+2*Align(count)+2L*count*UnitBytes+CrowdBytes+NavMotionWorkspace.ArrayBytes(count));
+        private static long Layout(int count)=>checked(HeaderBytes+20*32L+112L*count+Align(8L*count)+Align(count*(long)NavStorageLayout.ValueBytes(typeof(NavRecastStepState)))+Align(count*(long)NavStorageLayout.ValueBytes(typeof(NavRecastSweepReceipt)))+Align(4L*count)+2*Align(count)+2L*count*UnitBytes+CrowdBytes+NavMotionWorkspace.ArrayBytes(count));
         internal readonly NavUnit[] Source,Before,After;
         internal readonly NavLiveUnitStorage[] ActorPins;
         internal readonly NavRetainedArray<NavPoint>[] Globals,Locals,NewLocals,RetiredGlobals,RetiredLocals;
         internal readonly NavOwnedStorage[] LocationPins,GoalPins,FailurePins;
         internal readonly int[] InitialRows;internal readonly bool[] TerminalSeeds;
-        internal readonly double[] Preferred;
+        internal readonly double[] Preferred,RecastReceiver;
+        internal readonly NavTypedRoute[] RecastRoutes;internal readonly NavRecastStepState[] RecastStates;internal readonly NavRecastSweepReceipt[] RecastReceipts;
         // Final destination disposition, not an event history. At commit a
         // cleared route also makes any preserved installed owner historical.
         internal readonly bool[] Cleared;
@@ -27,11 +29,48 @@ namespace Spacewars.Simulation
         internal long NextIncarnation;internal double MaximumRadius;
         internal int SourceNeighbor,SourceRepair,SourceFailed,SourceNoProgress;internal double SourceRepairCpu;
         private bool transferred;
+        // Included in HeaderBytes. Borrowed execution is fully joined before
+        // any publication, capture, reservation release or source-pin release.
+        private int selectCursor,firstFailureRow;
+        private double selectDt;
+        private Exception selectFailure;
+#if UNITY_INCLUDE_TESTS
+        internal Action<int> SelectRowForTests;
+#endif
+        internal bool TrySelectParallel(double dt)
+        {
+            var executor=NavMotionExecutor.Current;
+            if(executor==null||!Working.StableSelectClearance)return false;
+            int eligible=0;for(int i=0;i<Motion.Length;i++)if(Motion[i].Active&&Motion[i].Speed>0&&NeighborCounts[i]>=0&&++eligible==2)break;
+            if(eligible<2)return false;
+            if(!NavStorageScratch.TryReserve(Reservation,checked((executor.HelperCount+1L)*Working.ParallelSelectScratchBound),out var scratch))return false;
+            using(scratch){
+                selectCursor=-1;selectDt=dt;firstFailureRow=int.MaxValue;selectFailure=null;
+                try{executor.Dispatch(this);if(selectFailure!=null)throw selectFailure;}
+                finally{selectDt=0;selectCursor=0;firstFailureRow=0;selectFailure=null;}
+            }
+            return true;
+        }
+        void INavMotionWork.RunRows()
+        {
+            int row;
+            // Single rows, rather than fixed chunks: most ordinary actors are
+            // cheap and a few avoidance searches dominate a frame.
+            while((row=Interlocked.Increment(ref selectCursor))<Motion.Length){
+                try{
+#if UNITY_INCLUDE_TESTS
+                    SelectRowForTests?.Invoke(row);
+#endif
+                    Proposals[row]=NavCrowdMotion.Select(Motion,row,Neighbors,NeighborCounts[row],Profile,selectDt,Working,After[row].Goal);
+                }
+                catch(Exception error){lock(this)if(row<firstFailureRow){firstFailureRow=row;selectFailure=error;}}
+            }
+        }
         private NavPreparedCrowdStep(NavCrowd crowd,int count,INavStorageReservation reservation):base(Layout(count))
         {
             SourceCrowd=crowd;Reservation=reservation;Source=new NavUnit[count];Before=new NavUnit[count];After=new NavUnit[count];ActorPins=new NavLiveUnitStorage[count];
             Globals=new NavRetainedArray<NavPoint>[count];Locals=new NavRetainedArray<NavPoint>[count];NewLocals=new NavRetainedArray<NavPoint>[count];RetiredGlobals=new NavRetainedArray<NavPoint>[count];RetiredLocals=new NavRetainedArray<NavPoint>[count];
-            LocationPins=new NavOwnedStorage[count];GoalPins=new NavOwnedStorage[count];FailurePins=new NavOwnedStorage[count];InitialRows=new int[count];Preferred=new double[count];Cleared=new bool[count];TerminalSeeds=new bool[count];for(int i=0;i<count;i++)Preferred[i]=double.NaN;
+            LocationPins=new NavOwnedStorage[count];GoalPins=new NavOwnedStorage[count];FailurePins=new NavOwnedStorage[count];InitialRows=new int[count];Preferred=new double[count];RecastReceiver=new double[count];RecastRoutes=new NavTypedRoute[count];RecastStates=new NavRecastStepState[count];RecastReceipts=new NavRecastSweepReceipt[count];Cleared=new bool[count];TerminalSeeds=new bool[count];for(int i=0;i<count;i++){Preferred[i]=double.NaN;RecastReceiver[i]=double.NaN;}
             Motion=new NavMotionBody[count];Proposals=new NavMotionProposal[count];Neighbors=new int[checked(count*NavCrowdMotion.NeighborCapacity)];NeighborCounts=new int[count];ComponentLabels=new int[count];OriginalSpeeds=new double[count];YieldLabels=new int[count];YieldQueue=new int[count];
             Working=new NavCrowd(this,crowd);Retain();
         }
@@ -41,6 +80,8 @@ namespace Spacewars.Simulation
             using(var a=new NavStorageAllocation(r.TryReserve)){a.Reserve(Layout(count));var result=a.Register(new NavPreparedCrowdStep(crowd,count,r));
                 try{result.NextSpatial=count==0?null:NavCrowdSpatialStorage.Create(count,r.TryReserve);return result;}catch{result.Release();throw;}}
         }
+        internal void BindRecast(int row,NavTypedRoute route,NavRecastStepState state)
+        {if(RecastRoutes[row]!=null)throw new ArgumentException("Duplicate Recast frame binding.");NavStorageAdmission.RequireOwned(Reservation,route);RecastRoutes[row]=NavPhysicalMacro.Acquire(this,route);RecastStates[row]=state;}
         internal int Find(int id){int lo=0,hi=After.Length-1;while(lo<=hi){int mid=(lo+hi)/2,at=After[mid].Id;if(at==id)return mid;if(at<id)lo=mid+1;else hi=mid-1;}for(int i=0;i<After.Length;i++)if(After[i].Id==id)return i;return -1;}
         internal void ReplaceLocal(NavUnit unit,NavLocalRepairWorkspace route)
         {int row=Find(unit.Id);var next=NavRetainedArray<NavPoint>.Copy(route,Reservation.TryReserve);NewLocals[row]?.Release();NewLocals[row]=next;unit.localRoute=next.ReadOnlyBacking;}
@@ -62,6 +103,7 @@ namespace Spacewars.Simulation
         }
         protected override void ReleaseEdges()
         {
+            foreach(var route in RecastRoutes)route?.Release();
             foreach(var p in LocationPins)p?.Release();foreach(var p in GoalPins)p?.Release();foreach(var p in FailurePins)p?.Release();foreach(var p in ActorPins)p?.Release();foreach(var p in Globals)p?.Release();foreach(var p in Locals)p?.Release();foreach(var p in NewLocals)p?.Release();foreach(var p in RetiredGlobals)p?.Release();foreach(var p in RetiredLocals)p?.Release();
             SourceSpatial?.Release();if(!transferred)NextSpatial?.Release();RetiredSpatial?.Release();GeometryPin?.Release();ProfilePin?.Release();NamesPin?.Release();Reservation=null;
         }
@@ -69,7 +111,7 @@ namespace Spacewars.Simulation
     public sealed partial class NavCrowd
     {
         internal NavCrowd(NavPreparedCrowdStep frame,NavCrowd source)
-        {preparedStep=frame;terrain=source.terrain;unitView=frame.After;}
+        {preparedStep=frame;ProductionEscape=source.ProductionEscape;terrain=source.terrain;unitView=frame.After;}
         internal void ValidatePreparationLedger(INavStorageReservation reservation)
         {
             NavStorageAdmission.RequireOwned(reservation,geometry.StorageRoot);NavStorageAdmission.RequireOwned(reservation,profile.StorageRoot);

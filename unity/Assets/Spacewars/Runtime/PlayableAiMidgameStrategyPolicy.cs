@@ -38,7 +38,7 @@ namespace Spacewars.Runtime
             checkpoint=state;
         }
         public PlayableAiMidgameCheckpoint Review(PlayableAiObservation observation,PlayableAiOpeningCompositionState opening,
-            PlayableAiCombatMission mission=null,bool emergency=false,AiArmyDeployment nativeDeployment=null)
+            PlayableAiCombatMission mission=null,bool emergency=false,AiArmyDeployment nativeDeployment=null,AiPersonality? personality=null)
         {
             if(observation==null||opening==null)throw new ArgumentNullException(observation==null?nameof(observation):nameof(opening));
             if(observation.OwnerId!=OwnerId||opening.OwnerId!=OwnerId||opening.MatchSeed!=observation.Seed||opening.SourceIdentity!=PlayableAiOpeningComposition.SourceIdentity)
@@ -55,6 +55,12 @@ namespace Spacewars.Runtime
             if(current==null||current.Seed!=observation.Seed||current.Generation!=observation.Generation)
                 current=new PlayableAiMidgameCheckpoint(observation.Seed,observation.Generation,-1,0,0,0,PlayableAiOpeningPhase.Active,null,OwnerId,opening.SourceIdentity,observation.ProfileId,observation.ProfileRevision);
             if(observation.Tick<=current.ReviewedTick)return current;
+            if(personality.HasValue)
+            {
+                var selected=personality==AiPersonality.Harassing?PlayableAiMidgameStrategy.Raids:personality==AiPersonality.Aggressive?PlayableAiMidgameStrategy.MassAssault:PlayableAiMidgameStrategy.MapControl;
+                long completedTick=opening.Phase!=PlayableAiOpeningPhase.Active&&current.Phase==PlayableAiOpeningPhase.Active?observation.Tick:current.OpeningCompletedTick;
+                return checkpoint=new PlayableAiMidgameCheckpoint(observation.Seed,observation.Generation,observation.Tick,current.Strategy==selected?current.LastStrategyTick:observation.Tick,completedTick,current.DecisionSequence+1,opening.Phase,selected,OwnerId,opening.SourceIdentity,observation.ProfileId,observation.ProfileRevision);
+            }
             if(current.ReviewedTick>=0&&observation.Tick-current.ReviewedTick<45)return current; // frozen fighter decisionIntervalTicks
             var phase=current.Phase;var completed=current.OpeningCompletedTick;
             if(phase==PlayableAiOpeningPhase.Active)

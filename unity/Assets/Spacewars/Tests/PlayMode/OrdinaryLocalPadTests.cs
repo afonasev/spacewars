@@ -28,22 +28,22 @@ namespace Spacewars.Input.Tests
         private PlayableRuntime Runtime=>Get<PlayableRuntime>(app,"runtime");
         private HashSet<int> Selection(PlayableBootstrap seat)=>Get<HashSet<int>>(seat,"selection");
         private readonly Dictionary<string,float> savedControls=new Dictionary<string,float>();
-        private readonly string[] controlKeys={"spacewars.controls.cursorSpeed","spacewars.controls.cameraSpeed","spacewars.controls.cursorRecenterIdleMs"};
+        private readonly string[] controlKeys={"spacewars.controls.cursorSpeed","spacewars.controls.cameraSpeed","spacewars.controls.cursorRecenterIdleMs","spacewars.controls.mapCursorSpeed"};
         private bool savedCursorVisible;
         [SetUp] public override void Setup()
         {savedCursorVisible=Cursor.visible;base.Setup();savedControls.Clear();foreach(var key in controlKeys){if(PlayerPrefs.HasKey(key))savedControls[key]=PlayerPrefs.GetFloat(key);PlayerPrefs.DeleteKey(key);}}
         [TearDown] public override void TearDown()
         {if(host!=null)UnityEngine.Object.DestroyImmediate(host);Cursor.visible=savedCursorVisible;foreach(var key in controlKeys){if(savedControls.TryGetValue(key,out var value))PlayerPrefs.SetFloat(key,value);else PlayerPrefs.DeleteKey(key);}PlayerPrefs.Save();base.TearDown();}
-        private IEnumerator StartOrdinary(int humans,bool humanAfterBots=false)
+        private IEnumerator StartOrdinary(int humans,bool humanAfterBots=false,bool allied=false,Action<NativeLobbyConfiguration> configureRoster=null,string mapName=null)
         {
             var keyboard=InputSystem.AddDevice<Keyboard>();var mouse=InputSystem.AddDevice<Mouse>();keyboard.MakeCurrent();mouse.MakeCurrent();pads=Enumerable.Range(0,humans).Select(_=>InputSystem.AddDevice<Gamepad>()).ToArray();
             host=new GameObject("Ordinary lobby gamepad test");app=host.AddComponent<PlayableBootstrap>();app.enabled=false;Put(app,"profile",PlayableProfile.ThreeCrossingsDefault);Call(app,"CreateWorld");Call(app,"CreateHud");Put(app,"input",host.AddComponent<PlayableInput>());Call(app,"BindLocalKeyboardInput");Call(app,"CreateLobby");Call(app,"ShowLobby");
-            Get<UnityEngine.UIElements.VisualElement>(app,"lobbyScreen").Q<UnityEngine.UIElements.DropdownField>("lobby-map-choice").value="Огненный разлом (6)";
+            Get<UnityEngine.UIElements.VisualElement>(app,"lobbyScreen").Q<UnityEngine.UIElements.DropdownField>("lobby-map-choice").value=mapName??"Огненный разлом (6)";
             var draft=Get<NativeLobbyConfiguration>(app,"lobbySetup");draft.HasExplicitSeed=true;draft.ExplicitSeed=19092026;
-            for(int i=0;i<humans;i++){draft.Participants[i].Human=true;draft.Participants[i].DeviceId=i==0?0:pads[i].deviceId;draft.Participants[i].Name="Человек "+(i+1);draft.Participants[i].Team=humans==2?i+1:humans==4?i+1:1;}
+            for(int i=0;i<humans;i++){draft.Participants[i].Human=true;draft.Participants[i].DeviceId=pads[i].deviceId;draft.Participants[i].Name="Человек "+(i+1);draft.Participants[i].Team=allied?1:humans==2?i+1:humans==4?i+1:1;}
             if(humanAfterBots){foreach(var participant in draft.Participants)participant.Human=false;draft.Participants[2].Human=true;draft.Participants[2].DeviceId=0;}
-            Call(app,"RebuildRoster");Call(app,"LaunchLobbyMatch");yield return Wait(()=>Runtime!=null&&!Get<bool>(app,"preparing"));
-            Call(app,"UpdateFrame");Assert.AreEqual(humans,Seats.Length);Assert.AreEqual(humans,Runtime.Latest.Participants.Count(p=>p.Control==OfflineControl.Human));
+            configureRoster?.Invoke(draft);Call(app,"RebuildRoster");Call(app,"LaunchLobbyMatch");yield return Wait(()=>Runtime!=null&&!Get<bool>(app,"preparing"));
+            Call(app,"UpdateFrame");Assert.AreEqual(Math.Max(1,humans),Seats.Length);Assert.AreEqual(humans,Runtime.Latest.Participants.Count(p=>p.Control==OfflineControl.Human));
             foreach(var seat in Seats){Assert.IsTrue(Get<Camera>(seat,"cameraView").enabled,"Prepared local seat must render.");Assert.AreSame(Runtime,Get<PlayableRuntime>(seat,"runtime"));Assert.AreEqual(Runtime.Generation,Get<PlayableSnapshot>(seat,"view").Generation);Assert.True(Get<PlayableInput>(seat,"input").WorldInputEnabled);}
             Call(app,"OnApplicationFocus",true);Call(app,"UpdateFrame");yield return null;
         }
@@ -74,27 +74,33 @@ namespace Spacewars.Input.Tests
         private IEnumerator Wait(Func<bool> ready,string phase="runtime")
         {float end=Time.realtimeSinceStartup+15;int progress=-1;while(!ready()){int current=(Runtime!=null?10:0)+Seats.Length;if(current!=progress){progress=current;end=Time.realtimeSinceStartup+15;}if(Time.realtimeSinceStartup>=end)break;if(Runtime!=null&&!Get<bool>(app,"preparing"))Call(app,"OnApplicationFocus",true);Call(app,"UpdateFrame");yield return null;}Assert.True(ready(),"ordinary local scenario deadline: "+phase+" paused="+Get<bool>(app,"paused")+" preparing="+Get<bool>(app,"preparing")+" stopped="+Runtime?.IsStopped+" failure="+Runtime?.Latest?.Failure+RallyDiagnostics()+" receipts="+string.Join(",",Runtime?.OfflineFrame?.Receipts.Select(r=>r.Receipt.OwnerId+":"+r.Receipt.Sequence+":"+r.Receipt.Status)??Array.Empty<string>()));}
         private void PadCursor(PlayableBootstrap seat,NavPoint point)
-        {Put(seat,"padCursorGround",point);Put(seat,"padCursorInitialized",true);Put(seat,"battleCursor",(Vector2)Get<Camera>(seat,"cameraView").WorldToScreenPoint(Get<PlayableWorld>(seat,"world").Point(point)));}
-        private IEnumerator Capture(string label,Action context=null,int captureWidth=1920,int captureHeight=1200)
+        {Put(seat,"padCursorGround",point);Put(seat,"padCursorInitialized",true);if(!Get<bool>(seat,"mapOpen"))Put(seat,"battleCursor",(Vector2)Get<Camera>(seat,"cameraView").WorldToScreenPoint(Get<PlayableWorld>(seat,"world").Point(point)));}
+        private IEnumerator Capture(string label,Action context=null,int captureWidth=1920,int captureHeight=1200,Action beforeFrames=null,Action captureChecks=null,bool refreshWorld=true)
         {
             string output=Environment.GetEnvironmentVariable("ORDINARY_PAD_EVIDENCE");if(string.IsNullOrEmpty(output))yield break;
             var panel=host.GetComponent<UnityEngine.UIElements.UIDocument>().panelSettings;var image=new RenderTexture(captureWidth,captureHeight,24);image.Create();panel.targetTexture=image;
-            var scenes=new List<UnityEngine.UIElements.VisualElement>();var targets=new List<RenderTexture>();
+            var scenes=new List<UnityEngine.UIElements.VisualElement>();var targets=new List<RenderTexture>();var cameras=new List<Camera>();var aspects=new List<float>();
             try
             {
                 foreach(var seat in Seats)
                 {
-                    var camera=Get<Camera>(seat,"cameraView");var rect=camera.rect;int width=(int)(captureWidth*rect.width),height=(int)(captureHeight*rect.height);var scene=new RenderTexture(width,height,24);scene.Create();targets.Add(scene);
+                    var camera=Get<Camera>(seat,"cameraView");var rect=camera.rect;int width=(int)(captureWidth*rect.width),height=(int)(captureHeight*rect.height);var scene=new RenderTexture(width,height,24);scene.Create();targets.Add(scene);cameras.Add(camera);aspects.Add(camera.aspect);camera.aspect=(float)width/height;
                     camera.targetTexture=scene;camera.rect=new Rect(0,0,1,1);camera.Render();camera.targetTexture=null;camera.rect=rect;
                     var backdrop=new UnityEngine.UIElements.VisualElement{pickingMode=UnityEngine.UIElements.PickingMode.Ignore};backdrop.style.position=UnityEngine.UIElements.Position.Absolute;backdrop.style.left=backdrop.style.right=backdrop.style.top=backdrop.style.bottom=0;backdrop.style.backgroundImage=new UnityEngine.UIElements.StyleBackground(UnityEngine.UIElements.Background.FromRenderTexture(scene));Get<UnityEngine.UIElements.VisualElement>(seat,"root").Insert(0,backdrop);scenes.Add(backdrop);
                 }
-                for(int i=0;i<8;i++){yield return null;Call(app,"UpdateFrame");context?.Invoke();}
+                beforeFrames?.Invoke();
+                for(int i=0;i<8;i++){
+                    yield return null;if(refreshWorld)Call(app,"UpdateFrame");context?.Invoke();
+                    // The UI signal projection follows the current camera. Refresh its
+                    // scene backdrop too, instead of compositing onto a stale first frame.
+                    for(int j=0;j<cameras.Count;j++){var camera=cameras[j];var rect=camera.rect;camera.targetTexture=targets[j];camera.rect=new Rect(0,0,1,1);camera.Render();camera.targetTexture=null;camera.rect=rect;}
+                }
                 if(label.EndsWith("-humans"))foreach(var seat in Seats){var bounds=Get<VisualElement>(seat,"root").worldBound;var header=Get<VisualElement>(seat,"top");Assert.AreEqual(DisplayStyle.Flex,header.style.display.value);Assert.True(bounds.Contains(header.worldBound.center),"header must remain in seat: "+bounds+" header="+header.worldBound);}
 
-                AssertCompactBounds();
+                if(captureChecks==null)AssertCompactBounds();else captureChecks();
                 Directory.CreateDirectory(output);var old=RenderTexture.active;RenderTexture.active=image;var png=new Texture2D(captureWidth,captureHeight,TextureFormat.RGB24,false);png.ReadPixels(new Rect(0,0,captureWidth,captureHeight),0,0);png.Apply();File.WriteAllBytes(Path.Combine(output,label+".png"),png.EncodeToPNG());RenderTexture.active=old;UnityEngine.Object.Destroy(png);
             }
-            finally{panel.targetTexture=null;foreach(var scene in scenes)scene.RemoveFromHierarchy();foreach(var target in targets){target.Release();UnityEngine.Object.Destroy(target);}image.Release();UnityEngine.Object.Destroy(image);}
+            finally{panel.targetTexture=null;for(int j=0;j<cameras.Count;j++)cameras[j].aspect=aspects[j];foreach(var scene in scenes)scene.RemoveFromHierarchy();foreach(var target in targets){target.Release();UnityEngine.Object.Destroy(target);}image.Release();UnityEngine.Object.Destroy(image);}
         }
         private static void Inside(Rect outer,Rect inner,string name)
         {Assert.GreaterOrEqual(inner.xMin,outer.xMin-.5f,name);Assert.LessOrEqual(inner.xMax,outer.xMax+.5f,name);Assert.GreaterOrEqual(inner.yMin,outer.yMin-.5f,name);Assert.LessOrEqual(inner.yMax,outer.yMax+.5f,name);}
@@ -170,7 +176,7 @@ namespace Spacewars.Input.Tests
         [UnityTest] public IEnumerator TwoHumansHaveIndependentOrdinaryOwners()=>RoutingAndLayout(2);
         [UnityTest] public IEnumerator ThreeHumansHaveIndependentOrdinaryOwners()=>RoutingAndLayout(3);
         [UnityTest] public IEnumerator FourHumansHaveIndependentOrdinaryOwners()=>RoutingAndLayout(4);
-        [UnityTest] public IEnumerator KeyboardAssignedGroupCanBeRecalledByPadAndDisconnectCancelsHold()
+        [UnityTest] public IEnumerator AssignedPadRecallsSharedGroupsAndDisconnectCancelsHold()
         {
             yield return StartOrdinary(2);var seats=Seats;var primary=seats[0];var own=Get<PlayableSnapshot>(primary,"view").Entities.First(e=>e.Owner==PlayableOwner.Player);Selection(primary).Add(own.Id);Call(primary,"KeyboardSelection",1,true,Time.unscaledTimeAsDouble);Selection(primary).Clear();
             Set(pads[0].leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");Press(pads[0].rightShoulder);InputSystem.Update();Call(app,"UpdateFrame");Release(pads[0].rightShoulder);InputSystem.Update();Call(app,"UpdateFrame");yield return new WaitForSecondsRealtime(.5f);Call(app,"UpdateFrame");CollectionAssert.AreEqual(new[]{own.Id},Selection(primary),"RB mode="+Get<OfflinePadGestures>(primary,"battleGestures").Mode+" blocked="+Get<OfflinePadGestures>(primary,"battleGestures").Blocked+" active="+Get<KeyboardControlGroups>(primary,"keyboardGroups").Active+" ready="+Get<PlayableInput>(primary,"input").WorldInputEnabled);Assert.AreEqual(1,Get<KeyboardControlGroups>(primary,"keyboardGroups").Active);
@@ -189,18 +195,19 @@ namespace Spacewars.Input.Tests
         {
             Assert.AreEqual(padCursor,Get<bool>(app,"systemCursorHidden"));
             Assert.AreEqual(!padCursor,Cursor.visible,"Hardware mouse cursor visibility");
-            Assert.AreEqual(padCursor?DisplayStyle.Flex:DisplayStyle.None,Get<VisualElement>(app,"battleCursorVisual").style.display.value);
+            Assert.AreEqual(padCursor?DisplayStyle.Flex:DisplayStyle.None,(Get<VisualElement>(app,"battleCursorVisual")?.style.display.value??DisplayStyle.None));
         }
-        [UnityTest] public IEnumerator PadCursorReplacesMouseAndRestoresItAcrossLifecycle()
+        [UnityTest] public IEnumerator AssignedPadIgnoresMouseInCombatAndRestoresCursorAcrossLifecycle()
         {
             Cursor.visible=true;yield return StartOrdinary(1);
             Set(pads[0].rightStick,new Vector2(.7f,0));InputSystem.Update();Call(app,"UpdateFrame");AssertCursor(true);
             yield return Capture("single-pad-cursor",captureWidth:1280,captureHeight:800);
             Set(pads[0].rightStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");AssertCursor(true);
-            Set(Mouse.current.delta,new Vector2(4,0));InputSystem.Update();Call(app,"UpdateFrame");AssertCursor(false);
-            yield return Capture("mouse-control",captureWidth:1280,captureHeight:800);
+            Set(Mouse.current.delta,new Vector2(4,0));InputSystem.Update();Call(app,"UpdateFrame");AssertCursor(true);
+            Assert.False(Get<PlayableInput>(app,"input").enabled,"Mouse is menu-only for a pad-bound human");
+            yield return Capture("mouse-does-not-steal-combat",captureWidth:1280,captureHeight:800);
             InputSystem.Update();Set(pads[0].rightStick,new Vector2(.7f,0));InputSystem.Update();Call(app,"UpdateFrame");AssertCursor(true);
-            Set(pads[0].rightStick,Vector2.zero);InputSystem.Update();Press(Mouse.current.rightButton);InputSystem.Update();Call(app,"UpdateFrame");AssertCursor(false);Release(Mouse.current.rightButton);InputSystem.Update();
+            Set(pads[0].rightStick,Vector2.zero);InputSystem.Update();Press(Mouse.current.rightButton);InputSystem.Update();Call(app,"UpdateFrame");AssertCursor(true);Release(Mouse.current.rightButton);InputSystem.Update();
             Set(pads[0].rightStick,new Vector2(.7f,0));InputSystem.Update();Call(app,"UpdateFrame");AssertCursor(true);
             Call(app,"Pause",true);Call(app,"UpdateFrame");AssertCursor(false);
             Set(pads[0].rightStick,Vector2.zero);InputSystem.Update();Call(app,"Pause",false);Call(app,"UpdateFrame");
@@ -216,11 +223,11 @@ namespace Spacewars.Input.Tests
         }
         [UnityTest] public IEnumerator OtherLocalPadDoesNotHideMousePlayersCursor()
         {
-            Cursor.visible=true;yield return StartOrdinary(2);
+            Cursor.visible=true;yield return StartOrdinary(2,configureRoster:draft=>draft.Participants[0].DeviceId=0);
             Set(pads[1].rightStick,new Vector2(.7f,0));InputSystem.Update();Call(app,"UpdateFrame");
             Assert.IsFalse(Get<bool>(app,"systemCursorHidden"));Assert.IsTrue(Cursor.visible);
             Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(Seats[1],"battleCursorVisual").style.display.value);
-            Set(pads[0].rightStick,new Vector2(.7f,0));InputSystem.Update();Call(app,"UpdateFrame");AssertCursor(true);
+            Set(pads[0].rightStick,new Vector2(.7f,0));InputSystem.Update();Call(app,"UpdateFrame");AssertCursor(false);
             Set(pads[0].rightStick,Vector2.zero);InputSystem.Update();Set(Mouse.current.delta,new Vector2(4,0));InputSystem.Update();Call(app,"UpdateFrame");AssertCursor(false);
             Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(Seats[1],"battleCursorVisual").style.display.value);
             Runtime.RequestStop();yield return Wait(()=>Runtime.IsStopped,"stop");
@@ -231,6 +238,8 @@ namespace Spacewars.Input.Tests
             Assert.That(overlay.worldBound.xMin,Is.EqualTo(root.worldBound.xMin).Within(.5));Assert.That(overlay.worldBound.yMin,Is.EqualTo(root.worldBound.yMin).Within(.5));
             Assert.That(overlay.worldBound.width,Is.EqualTo(root.worldBound.width).Within(.5));Assert.That(overlay.worldBound.height,Is.EqualTo(root.worldBound.height).Within(.5));
             var frame=overlay.Q("tactical-map-background");Assert.AreEqual(1,frame.resolvedStyle.backgroundColor.a);Inside(overlay.worldBound,frame.worldBound,"opaque map frame");
+            Assert.That(frame.worldBound.center.x,Is.EqualTo(root.worldBound.center.x).Within(.5),"map centered in player viewport horizontally");
+            Assert.That(frame.worldBound.center.y,Is.EqualTo(root.worldBound.center.y).Within(.5),"map centered in player viewport vertically");
             Assert.That(frame.worldBound.width-map.worldBound.width,Is.EqualTo(20).Within(.5));Assert.That(frame.worldBound.height-map.worldBound.height,Is.EqualTo(20).Within(.5));
             Assert.That(map.worldBound.xMin-frame.worldBound.xMin,Is.EqualTo(10).Within(.5));Assert.That(map.worldBound.yMin-frame.worldBound.yMin,Is.EqualTo(10).Within(.5));
             foreach(float border in new[]{frame.resolvedStyle.borderLeftWidth,frame.resolvedStyle.borderRightWidth,frame.resolvedStyle.borderTopWidth,frame.resolvedStyle.borderBottomWidth})Assert.AreEqual(2,border);
@@ -240,13 +249,26 @@ namespace Spacewars.Input.Tests
             var top=Get<VisualElement>(seat,"top");var composition=Get<VisualElement>(seat,"armyComposition");Assert.AreEqual(DisplayStyle.Flex,top.style.display.value);Assert.AreEqual(DisplayStyle.Flex,composition.style.display.value);
             var children=root.Children().ToList();Assert.Greater(children.IndexOf(top),children.IndexOf(overlay));Assert.Greater(children.IndexOf(composition),children.IndexOf(overlay));Inside(root.worldBound,top.worldBound,"tactical resources");Inside(root.worldBound,composition.worldBound,"tactical composition");Assert.False(map.worldBound.Overlaps(composition.worldBound));
             var view=Get<PlayableSnapshot>(seat,"view");var counts=Get<Label[]>(seat,"armyCounts");var kinds=new[]{PlayableEntityKind.Explorer,PlayableEntityKind.Tank,PlayableEntityKind.Shkval};
-            for(int i=0;i<kinds.Length;i++){Assert.AreEqual(view.Entities.Count(e=>e.Owner==view.Owner&&e.Kind==kinds[i]).ToString(),counts[i].text);Assert.AreEqual(DisplayStyle.Flex,counts[i].style.display.value,"Tactical counts include zero types.");}
+            for(int i=0;i<kinds.Length;i++){int count=view.Entities.Count(e=>e.Owner==view.Owner&&e.Kind==kinds[i]);Assert.AreEqual(count.ToString(),counts[i].text);Assert.AreEqual(count>0?DisplayStyle.Flex:DisplayStyle.None,counts[i].style.display.value,"The approved army row shows only types with living own units, including on TAB.");}
         }
         [UnityTest] public IEnumerator SharedMinimapReturnsOnlyAfterAllTacticalScreensClose()
         {
             yield return StartOrdinary(2);var first=Seats[0];var second=Seats[1];var minimap=Get<VisualElement>(app,"sharedMapFrame");
             Call(first,"ToggleMap");Call(second,"ToggleMap");Call(app,"UpdateFrame");Assert.AreEqual(DisplayStyle.None,minimap.style.display.value);
             yield return Capture("two-tactical-screens");AssertTacticalScreen(first);AssertTacticalScreen(second);
+            yield return Capture("two-tactical-screens-1080",captureWidth:1920,captureHeight:1080,captureChecks:()=>
+            {
+                // This additional fractional-scale viewport checks placement; the full
+                // fixed border/padding contract remains above at its original resolution.
+                foreach(var seat in new[]{first,second})
+                {
+                    var root=Get<VisualElement>(seat,"root");var frame=Get<VisualElement>(seat,"tacticalOverlay").Q("tactical-map-background");
+                    Assert.That(frame.worldBound.center.x,Is.EqualTo(root.worldBound.center.x).Within(.5));
+                    Assert.That(frame.worldBound.center.y,Is.EqualTo(root.worldBound.center.y).Within(.5));
+                    Inside(root.worldBound,frame.worldBound,"centered 1080 map panel");
+                    Assert.False(Get<PlayableMapSurface>(seat,"tacticalMap").worldBound.Overlaps(Get<VisualElement>(seat,"armyComposition").worldBound),"centered map must clear corner HUD");
+                }
+            });
             Call(first,"ToggleMap");Call(app,"UpdateFrame");Assert.AreEqual(DisplayStyle.None,minimap.style.display.value);Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(first,"bottom").style.display.value);
             Call(second,"ToggleMap");Call(app,"UpdateFrame");Assert.AreEqual(DisplayStyle.Flex,minimap.style.display.value);Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(second,"bottom").style.display.value);
             Runtime.RequestStop();yield return Wait(()=>Runtime.IsStopped,"stop");
@@ -261,7 +283,7 @@ namespace Spacewars.Input.Tests
             var camera=Get<Camera>(seat,"cameraView");var cameraPosition=camera.transform.position;
             PadCursor(seat,default);Set(pad.leftStick,new Vector2(.7f,.7f));InputSystem.Update();
             yield return null;Call(app,"UpdateFrame");
-            var moved=Get<NavPoint>(seat,"padCursorGround");Assert.Greater(moved.X,0);Assert.Less(moved.Z,0);
+            var moved=Get<NavPoint>(seat,"padCursorGround");Assert.Greater(moved.X,0);Assert.Greater(moved.Z,0,"Up on the map stick must move north/top");
             Assert.AreEqual(cameraPosition,camera.transform.position,"Left stick moves the map cursor without panning the world camera.");
             Set(pad.leftStick,Vector2.zero);Set(pad.rightStick,new Vector2(-.7f,-.7f));InputSystem.Update();
             yield return null;Call(app,"UpdateFrame");Assert.AreEqual(moved,Get<NavPoint>(seat,"padCursorGround"),"Right stick does not move the tactical map cursor.");
@@ -293,10 +315,10 @@ namespace Spacewars.Input.Tests
         }
         [UnityTest] public IEnumerator LocalPauseSettingsRestartResultAndReturnStayWithOrdinaryCoordinator()
         {
-            yield return StartOrdinary(2);var secondary=Seats[1];Call(app,"PauseFrom",secondary,true);Call(app,"UpdateFrame");Assert.AreSame(secondary,Get<PlayableBootstrap>(app,"localPauseOwner"));Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(secondary,"modal").style.display.value);Assert.AreEqual(DisplayStyle.None,Get<VisualElement>(app,"root").style.display.value);
+            yield return StartOrdinary(2);var secondary=Seats[1];Call(app,"PauseFrom",secondary,true);Call(app,"UpdateFrame");Assert.AreSame(app,Get<PlayableBootstrap>(app,"localPauseOwner"));Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(app,"modal").style.display.value);Assert.AreEqual(DisplayStyle.None,Get<VisualElement>(secondary,"root").style.display.value);
             Tap(pads[0],pads[0].buttonSouth);Assert.True(Get<bool>(app,"paused"),"another pad cannot resume the menu owner");
-            Call(secondary,"OpenPauseSettings");var settings=Get<VisualElement>(secondary,"childMenu");var speed=settings.Q<Slider>("settings-pad-cursorSpeed");Assert.NotNull(speed);float before=speed.value;((Action<int>)speed.userData)(1);Assert.Greater(speed.value,before);Assert.AreEqual(Get<NativeLocalControlSettings>(app,"localControlSettings")?.CursorSpeed??20,20);Assert.AreEqual(20,Get<NativeLocalInputProfile>(app,"battleInputProfile").cursorSpeed);
-            Get<NativeMenuNavigation>(secondary,"menuNavigation").Back();Call(app,"UpdateFrame");yield return Capture("ordinary-local-pause");Call(secondary,"OpenPauseHelp");Assert.NotNull(Resources.Load<Texture2D>("ControlsHelp/field"));yield return Capture("ordinary-controls-help");var navigation=Get<NativeMenuNavigation>(secondary,"menuNavigation");navigation.Move(Vector2.down);navigation.Move(Vector2.down);navigation.Activate();Assert.AreSame(Resources.Load<Texture2D>("ControlsHelp/groups"),navigation.Scope.Q<Image>("controls-help-image").image);yield return Capture("ordinary-controls-groups");Get<NativeMenuNavigation>(secondary,"menuNavigation").Back();
+            Call(app,"OpenPauseSettings");var settings=Get<VisualElement>(app,"childMenu");var speed=settings.Q<Slider>("settings-pad-cursorSpeed");Assert.NotNull(speed);float before=speed.value;((Action<int>)speed.userData)(1);Assert.Greater(speed.value,before);Assert.AreEqual(Get<NativeLocalControlSettings>(app,"localControlSettings")?.CursorSpeed??20,20);Assert.AreEqual(20,Get<NativeLocalInputProfile>(app,"battleInputProfile").cursorSpeed);
+            Get<NativeMenuNavigation>(app,"menuNavigation").Back();Call(app,"UpdateFrame");yield return Capture("ordinary-local-pause");Call(app,"OpenPauseHelp");Assert.NotNull(Resources.Load<Texture2D>("ControlsHelp/field"));yield return Capture("ordinary-controls-help");var navigation=Get<NativeMenuNavigation>(app,"menuNavigation");navigation.Move(Vector2.down);navigation.Move(Vector2.down);navigation.Activate();Assert.AreSame(Resources.Load<Texture2D>("ControlsHelp/groups"),navigation.Scope.Q<Image>("controls-help-image").image);yield return Capture("ordinary-controls-groups");Get<NativeMenuNavigation>(app,"menuNavigation").Back();
             Call(secondary,"Pause",false);Call(app,"UpdateFrame");long generation=Runtime.Generation;Call(secondary,"Restart");yield return Wait(()=>Runtime.Generation>generation&&!Runtime.IsStopped,"restart");Call(app,"UpdateFrame");Assert.AreEqual(2,Seats.Length);Assert.AreSame(Runtime,Get<PlayableRuntime>(Seats[1],"runtime"));
             Runtime.RequestFinish();yield return Wait(()=>Runtime.Result!=null,"finish");Call(app,"UpdateFrame");Assert.True((bool)typeof(PlayableBootstrap).GetProperty("ResultsVisible",F).GetValue(app));
             Assert.AreEqual(100,Get<VisualElement>(app,"root").style.width.value.value);yield return Capture("ordinary-local-results");
@@ -304,10 +326,24 @@ namespace Spacewars.Input.Tests
             Get<NativeLobbyConfiguration>(app,"lobbySetup").Participants[1].Human=false;Call(app,"RebuildRoster");Call(app,"LaunchLobbyMatch");yield return Wait(()=>Runtime!=null&&!Get<bool>(app,"preparing"),"one-human relaunch");Call(app,"UpdateFrame");yield return null;
             Assert.AreEqual(1,Seats.Length);Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(app,"root").Q("tactical-minimap-frame").style.display.value);Assert.AreEqual(0,Get<VisualElement>(app,"armyRegion").style.marginRight.value.value);Runtime.RequestStop();yield return Wait(()=>Runtime.IsStopped,"stop");
         }
+        [UnityTest] public IEnumerator PrimaryOwnsPauseAndKeyboardMouseRemainMenuFallback()
+        {
+            yield return StartOrdinary(2);var secondary=Seats[1];Call(app,"PauseFrom",secondary,true);Call(app,"UpdateFrame");
+            Assert.AreSame(app,Get<PlayableBootstrap>(app,"localPauseOwner"));Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(app,"modal").style.display.value);Assert.AreEqual(DisplayStyle.None,Get<VisualElement>(secondary,"root").style.display.value);
+            var nav=Get<NativeMenuNavigation>(app,"menuNavigation");Assert.AreSame(pads[0],nav.CurrentGamepad);
+            var settingsButton=Get<VisualElement>(app,"root").Q<Button>("pause-settings");settingsButton.Focus();
+            using(var key=KeyDownEvent.GetPooled('\0',KeyCode.Return,EventModifiers.None)){key.target=settingsButton;settingsButton.SendEvent(key);}
+            using(var key=KeyUpEvent.GetPooled('\0',KeyCode.Return,EventModifiers.None)){key.target=settingsButton;settingsButton.SendEvent(key);}
+            Assert.NotNull(Get<VisualElement>(app,"childMenu"),"Keyboard opens settings for a gamepad-bound first human");
+            nav.Back();Call(app,"UpdateFrame");settingsButton.Focus();var scope=nav.Scope;Tap(pads[1],pads[1].buttonSouth);Tap(pads[1],pads[1].buttonEast);Assert.AreSame(scope,nav.Scope);Assert.True(Get<bool>(app,"paused"));
+            using(var key=KeyDownEvent.GetPooled('\0',KeyCode.Escape,EventModifiers.None)){key.target=settingsButton;settingsButton.SendEvent(key);}
+            Call(app,"UpdateFrame");Assert.False(Get<bool>(app,"paused"));Assert.False(Get<PlayableInput>(app,"input").enabled,"Menu fallback does not enable mouse combat input");
+            Runtime.RequestStop();yield return Wait(()=>Runtime.IsStopped,"stop");
+        }
         [Test] public void SharedPadRecallPreservesKeyboardTapTimingAndUnitOnlyAssignment()
         {
             var entities=new[]{new KeyboardSelectable(1,0,true,false,0,0),new KeyboardSelectable(2,0,true,false,1,0),new KeyboardSelectable(3,0,true,true,2,0),new KeyboardSelectable(4,0,false,false,3,0)};var groups=new KeyboardControlGroups();
-            groups.Apply(1,true,0,new[]{1},entities,450,out _);groups.Apply(9,true,0,new[]{3},entities,450,out _);Assert.AreEqual(9,groups.SlotCount(entities));Assert.False(groups.PadActions(new[]{3},entities,true,9).Any(s=>s.Enabled));
+            groups.Apply(1,true,0,new[]{1},entities,450,out _);groups.Apply(9,true,0,new[]{3},entities,450,out _);CollectionAssert.AreEqual(new[]{1,2,3,9},groups.VisibleSlots(entities,3,2));Assert.False(groups.PadActions(new[]{3},entities,true,groups.VisibleSlots(entities,3,2)).Any(s=>s.Enabled));
             groups.Apply(1,false,1,new int[0],entities,450,out bool first);Assert.False(first);CollectionAssert.AreEqual(new[]{3},groups.RecallPad(9,entities));groups.Apply(1,false,1.2,new[]{3},entities,450,out bool second);Assert.True(second,"pad recall must not rewrite keyboard tap timing");
             Assert.True(groups.Add(1,new[]{2,4},entities));CollectionAssert.AreEqual(new[]{1,2},groups.RecallPad(1,entities));Assert.AreEqual(1,groups.Active);
         }

@@ -52,3 +52,66 @@ def previous_release(releases,channel):
  selected=[r for r in releases if not r['draft'] and r['prerelease']==(channel=='test')]
  selected=[r for r in selected if re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+',r['tag_name'])]
  return max(selected,key=lambda r:tuple(map(int,r['tag_name'][1:].split('.'))))['tag_name'] if selected else None
+
+def validate_png(content):
+ import struct,zlib
+ if len(content)>8*1024*1024 or content[:8]!=b'\x89PNG\r\n\x1a\n':raise ValueError('notes image must be a PNG up to 8 MiB')
+ offset=8;compressed=bytearray();width=height=0;ended=False
+ while offset+12<=len(content):
+  size=struct.unpack('>I',content[offset:offset+4])[0];kind=content[offset+4:offset+8];end=offset+12+size
+  if end>len(content):raise ValueError('truncated PNG')
+  payload=content[offset+8:end-4]
+  if zlib.crc32(kind+payload)!=struct.unpack('>I',content[end-4:end])[0]:raise ValueError('PNG checksum mismatch')
+  if offset==8:
+   if kind!=b'IHDR' or size!=13:raise ValueError('missing PNG header')
+   width,height,depth,color,compression,filters,interlace=struct.unpack('>IIBBBBB',payload)
+   if not 0<width<=4096 or not 0<height<=4096 or depth!=8 or color not in (0,2,4,6) or compression or filters or interlace:raise ValueError('use noninterlaced 8-bit PNG up to 4096 per side')
+   stride=width*{0:1,2:3,4:2,6:4}[color]+1
+  elif kind==b'IHDR':raise ValueError('duplicate PNG header')
+  if kind==b'IDAT':compressed.extend(payload)
+  if kind==b'IEND':
+   if size or end!=len(content):raise ValueError('invalid PNG ending')
+   ended=True;break
+  offset=end
+ if not ended or not compressed:raise ValueError('incomplete PNG')
+ stream=zlib.decompressobj();raw=stream.decompress(compressed,height*stride+1)
+ if len(raw)!=height*stride or not stream.eof or stream.unused_data or any(raw[row*stride]>4 for row in range(height)):raise ValueError('invalid PNG pixels')
+ return width,height
+
+# Authored notes are committed inputs. Images are release assets, never local URLs.
+def authored(root, head, manifest, version, assets):
+ import pathlib, hashlib, struct
+ root=pathlib.Path(root)
+ def blob(path):
+  path=str(path)
+  if not path or pathlib.PurePosixPath(path).is_absolute() or '..' in pathlib.PurePosixPath(path).parts or '\\' in path:
+   raise ValueError('notes paths must be repository-relative')
+  return subprocess.check_output(['git','show',f'{head}:{path}'],cwd=root,stderr=subprocess.PIPE)
+ def words(value):
+  if not isinstance(value,str) or not value.strip() or any(x in value for x in ('\n','\r','![','](', '<','>')):
+   raise ValueError('notes text must be a nonempty plain line')
+  return value.strip()
+ if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',version):raise ValueError('notes require release version')
+ data=json.loads(blob(manifest));entries=data['entries']
+ if data.get('schema')!=1 or not isinstance(entries,list) or not entries or len(entries)>100:raise ValueError('invalid notes manifest')
+ sections={'ru':{},'en':{}};media={}
+ for entry in entries:
+  rendered={lang:['- '+words(entry[lang])] for lang in sections}
+  for image in entry.get('images',[]):
+   source=image['source_commit']
+   if not re.fullmatch(r'[a-f0-9]{40}',source):raise ValueError('image needs exact source revision')
+   subprocess.run(['git','merge-base','--is-ancestor',source,head],cwd=root,check=True,capture_output=True)
+   content=blob(image['path'])
+   validate_png(content)
+   digest=hashlib.sha256(content).hexdigest();name='notes-'+digest+'.png'
+   media[name]={'sha256':digest,'path':image['path'],'source_commit':source,'bytes':content}
+   for lang in sections:
+    caption=words(image[lang]).replace('[','').replace(']','')
+    rendered[lang].append(f'\n  ![{caption}](https://github.com/afonasev/spacewars/releases/download/v{version}/{name})')
+  for lang in sections:
+   category=words(entry['category_'+lang]);sections[lang].setdefault(category,[]).append('\n'.join(rendered[lang]))
+ # Validate all inputs before touching output. Asset names include their full content hash.
+ assets=pathlib.Path(assets);assets.mkdir(parents=True,exist_ok=True)
+ for name,item in media.items():(assets/name).write_bytes(item['bytes'])
+ body='\n\n'.join('## '+title+'\n\n'+'\n\n'.join('### '+category+'\n'+'\n'.join(items) for category,items in sections[lang].items()) for lang,title in [('ru','Русский'),('en','English')])+'\n'
+ return body,{'manifest':str(manifest),'head':head,'images':[{k:v for k,v in item.items() if k!='bytes'}|{'asset':name} for name,item in media.items()]}

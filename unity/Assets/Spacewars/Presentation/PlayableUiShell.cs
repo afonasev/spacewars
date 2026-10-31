@@ -164,7 +164,7 @@ namespace Spacewars.Presentation
             compactHud=panelWidth<1000;
             bool local=localHumanCount>1,left=local&&localViewportIndex%2==0;
             top.style.left=left?new StyleLength(6):new StyleLength(StyleKeyword.Auto);top.style.right=left?new StyleLength(StyleKeyword.Auto):new StyleLength(6);top.style.top=6;top.style.minHeight=26;top.style.paddingTop=top.style.paddingBottom=2;top.style.paddingLeft=top.style.paddingRight=6;
-            armyComposition.style.left=left?new StyleLength(6):new StyleLength(StyleKeyword.Auto);armyComposition.style.right=left?new StyleLength(StyleKeyword.Auto):new StyleLength(6);
+            LayoutArmyComposition();
             creditsLabel.style.fontSize=hudFocusButton.style.fontSize=12;hudFocusButton.style.height=hudFocusButton.style.minHeight=24;
             bottom.style.left=bottom.style.right=0;bottom.style.bottom=0;
             hudRow.style.flexWrap=Wrap.NoWrap;hudRow.style.justifyContent=local?(left?Justify.FlexStart:Justify.FlexEnd):Justify.SpaceBetween;
@@ -184,7 +184,7 @@ namespace Spacewars.Presentation
         {
             if(view==null||hudRow==null)return;
             buildRegion.style.display=commandRegion.style.display=DisplayStyle.None;
-            armyRegion.style.display=selection.Count>0||selectedSite!=0||spectatorMode&&inspectionEntityId!=0?DisplayStyle.Flex:DisplayStyle.None;
+            armyRegion.style.display=selection.Count>0||spectatorMode&&inspectionEntityId!=0?DisplayStyle.Flex:DisplayStyle.None;
             armyRegion.style.flexGrow=0;
             if(armyRegion.parent!=hudRow)hudRow.Add(armyRegion);
         }

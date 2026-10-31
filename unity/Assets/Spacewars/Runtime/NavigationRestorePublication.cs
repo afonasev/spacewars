@@ -39,6 +39,7 @@ namespace Spacewars.Runtime
                         // spare slots and the restored request array are paid up front.
                         candidate=NavigationRestoreCandidate.CreateOwned(groupCount,state.Requests?.Length??0,scope.OwnedReservation());
                         candidate.Session=new NavigationSession(Generation,geometry,profile,navigationGeometry,terrain,budget,null,transportGate,terrainNameOwners);
+                        candidate.Session.UsesRecastGroundRoutes=UsesRecastGroundRoutes;
                         candidate.Session.marchConfigured=marchConfigured;candidate.Session.marchStretch=marchStretch;candidate.Session.marchProfileRevision=marchProfileRevision;
                         candidate.Requests=candidate.Session.RestoreWorldStateCore(state);
                         int at=0;if(candidate.Session.groups is NavigationCommandSlots<long,GroupOrderState> slots)for(int i=0;i<slots.Capacity;i++)if(slots.TryReadSlot(i,out long key,out _)){

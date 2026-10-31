@@ -126,7 +126,7 @@ namespace Spacewars.Runtime
             if(!c.MarchConfigured)return true;
             foreach(var observation in c.GroupSources){
                 using(EnterTransport()){if(!MovementSourceCurrent(c)||!MarchRecordMatches(c.Groups[observation.Version.Data.GroupId],observation.Version))return false;}
-                var next=GroupMarch.PrepareOwned(c.Frame,observation.Version,c.Installed,c.Detached,c.Members,c.MarchStretch,c.MarchRevision,dt,scope.OwnedReservation());
+                var next=GroupMarch.PrepareOwned(c.Frame,observation.Version,c.Installed,c.Detached,c.Members,c.MarchStretch,c.MarchRevision,dt,scope.OwnedReservation(),UsesRecastGroundRoutes);
                 if(next!=null)c.Changes[c.ChangeCount++]=new RebindGroup{Source=observation,Next=next};
             }return true;
         }
@@ -138,6 +138,7 @@ namespace Spacewars.Runtime
             int actors,groupCount,attemptCount,leaseCount;long publication,operation;NavCrowd sourceCrowd;
             using(EnterTransport()){
                 if(!physicalArrivalEnabled||admissionBatchDepth!=0||commandGroup!=null||Crowd.HasPreferredMotion||barrierAnswers.Count!=0||Answers.Count!=0||arrivalProjectionLeases.Count>0&&liveArrivalLeaseTable==null||probes.Count>0&&!(probes is NavigationCommandSlots<int,NavigationRequest>)||groupCommandBacking==null||!(groups is NavigationCommandSlots<long,GroupOrderState>)||!(memberGroups is NavigationCommandSlots<int,long>)||!(pending is NavigationCommandSlots<int,NavigationRequest>)||!(allocating is NavigationCommandSlots<int,NavigationRequest>)||!(arrivalLedger is NavigationCommandSlots<long,NavigationArrivalReservation>)||!(retainedGoals is NavigationCommandSlots<int,NavPoint>)||!(reservations is NavigationCommandSlots<int,NavPoint>)||!(movementIdentities is NavigationCommandSlots<int,string>)||liveArrivalTables==null){RecordMovementNoOp(11,0,0,"eligibility",!physicalArrivalEnabled?1:admissionBatchDepth!=0?2:commandGroup!=null?3:Crowd.HasPreferredMotion?4:barrierAnswers.Count!=0?5:Answers.Count!=0?6:arrivalProjectionLeases.Count>0&&liveArrivalLeaseTable==null?7:probes.Count>0&&!(probes is NavigationCommandSlots<int,NavigationRequest>)?8:groupCommandBacking==null?9:!(groups is NavigationCommandSlots<long,GroupOrderState>)?10:!(memberGroups is NavigationCommandSlots<int,long>)?11:!(pending is NavigationCommandSlots<int,NavigationRequest>)?12:!(allocating is NavigationCommandSlots<int,NavigationRequest>)?13:!(arrivalLedger is NavigationCommandSlots<long,NavigationArrivalReservation>)?14:!(retainedGoals is NavigationCommandSlots<int,NavPoint>)?15:!(reservations is NavigationCommandSlots<int,NavPoint>)?16:!(movementIdentities is NavigationCommandSlots<int,string>)?17:18);return null;}
+                if(!CanOwnAdmissionProjection()){RecordMovementNoOp(11,0,0,"raw-ingress");return null;}
                 actors=Crowd.Units.Count;groupCount=groups.Count;attemptCount=liveArrivalTables.Count;leaseCount=liveArrivalLeaseTable?.Count??0;publication=admissionPublicationIdentity;operation=authorityOperationIdentity;sourceCrowd=Crowd;
             }
             if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,Generation,publication,out var scope))return RefuseOwnedMovement(1);
@@ -161,7 +162,9 @@ namespace Spacewars.Runtime
                 if(c.SuspendPending)foreach(var actor in c.Frame.After)if(c.Pending.ContainsKey(actor.Id)||c.Allocating.ContainsKey(actor.Id))actor.Moving=false;
                 if(!PrepareMovementMarch(c,dt,scope))return RefuseOwnedMovement(4);
                 c.Traffic=NavigationTrafficAuthority.Prepare(c.SourceTraffic,c.Frame,c.Installed,c.Detached,c.Members,terrain,scope.OwnedReservation());
-                using(NavStorageScratch.Reserve(scope.OwnedReservation(),RebindStagingScratchBound(actors,0,navigationGeometry.Obstacles.Count))){MarkTerminalContactComponents(c.Frame,c.GroupSources,c.GroupSources.Length,c.Installed,c.Detached,c.Pending,c.Allocating);c.Frame.Compute(dt);CaptureMovementDelay(1,c.Frame.Motion,c.Frame.Proposals,c.Frame.Preferred);}
+                using(NavStorageScratch.Reserve(scope.OwnedReservation(),RebindStagingScratchBound(actors,0,navigationGeometry.Obstacles.Count))){MarkTerminalContactComponents(c.Frame,c.GroupSources,c.GroupSources.Length,c.Installed,c.Detached,c.Pending,c.Allocating);c.Frame.Compute(dt);
+                    if(UsesRecastGroundRoutes)foreach(var observation in c.GroupSources){int index=-1;for(int j=0;j<c.ChangeCount;j++)if(ReferenceEquals(c.Changes[j].Source.Owner,observation.Owner)){index=j;break;}var current=index<0?observation.Version:c.Changes[index].Next;var completed=GroupMarch.CompleteRecastOwned(c.Frame,current,scope.OwnedReservation());if(completed!=null){if(index<0){index=c.ChangeCount++;c.Changes[index]=new RebindGroup{Source=observation,Next=completed};}else{c.Changes[index].Next.ReleaseStorage();c.Changes[index].Next=completed;}}}
+                    CaptureMovementDelay(1,c.Frame.Motion,c.Frame.Proposals,c.Frame.Preferred);}
                 if(MovementDiagnosticObserver!=null){var trace=new StringBuilder();for(int i=0;i<c.Frame.After.Length;i++){var before=c.Frame.Before[i];var after=c.Frame.After[i];if(i>0)trace.Append(';');trace.Append(after.Id).Append(':').Append(before.Position.X.ToString("R",System.Globalization.CultureInfo.InvariantCulture)).Append(',').Append(before.Position.Z.ToString("R",System.Globalization.CultureInfo.InvariantCulture)).Append('/').Append(before.Heading.ToString("R",System.Globalization.CultureInfo.InvariantCulture)).Append('/').Append(before.Moving).Append("->").Append(after.Position.X.ToString("R",System.Globalization.CultureInfo.InvariantCulture)).Append(',').Append(after.Position.Z.ToString("R",System.Globalization.CultureInfo.InvariantCulture)).Append('/').Append(after.Heading.ToString("R",System.Globalization.CultureInfo.InvariantCulture)).Append('/').Append(after.Moving).Append(" cap=").Append(c.Frame.Preferred[i].ToString("R",System.Globalization.CultureInfo.InvariantCulture)).Append(" yield=").Append(c.Frame.Motion[i].Yielding);}LastOwnedMovementComputation=trace.ToString();}
                 using(EnterTransport()){if(!MovementSourceCurrent(c))return RefuseOwnedMovement(5);if(!MovementCleanupNoOp(c))return null;}
                 c.Admission=PrepareAdmissionProjection(c.Groups,c.Pending,c.Sequence,checked(publication+1),c.Operation,scope,c.SourceAdmission,rebindGroups:c.Changes,rebindGroupCount:c.ChangeCount);
@@ -173,7 +176,7 @@ namespace Spacewars.Runtime
                     for(int i=0;i<c.ChangeCount;i++){ref var change=ref c.Changes[i];change.Retired=change.Source.Version;change.Source.Owner.ApplyMarchNoThrow(change.Next);}
                     c.RetiredTraffic=trafficAuthority;trafficAuthority=c.Traffic;c.Traffic=null;c.Frame.ApplyNoThrow();if(PublishAdmissionOwnerNoThrow(c.Admission)){c.Admission=null;c.AdmissionChanged=true;}authorityOperationIdentity=c.Operation+3;OwnedMovementPublications++;c.Destinations=false;c.Published=true;LastOwnedMovementPublicationAllocatedBytes=GC.GetAllocatedBytesForCurrentThread()-before;
                 };
-                using(EnterTransport())scope.Publish(c,publish);scope.ResolveCommitted();if(c.AdmissionChanged)SignalHost();return true;
+                using(EnterTransport())scope.Publish(c,publish);scope.ResolveCommitted();CaptureRecastMovementReceipt(c.Frame);if(c.AdmissionChanged)SignalHost();return true;
             }catch(InvalidOperationException error){if(c?.Published==true)throw;return RefuseOwnedMovement(6,error);}finally{c?.Dispose();}}
         }
         private static bool TerminalMemberMatches(NavUnit actor,NavigationAuthorityMember.Values member,NavigationAuthorityGroup.Values order,NavigationInstalledExecutionOwner installed,bool detached)
@@ -186,6 +189,26 @@ namespace Spacewars.Runtime
         private void MarkTerminalContactComponents(NavPreparedCrowdStep frame,NavigationLiveGroupObservation[] groups,int groupCount,NavigationInstalledExecutionOwner[] installed,bool[] detached,NavigationCommandSlots<int,NavigationRequest> pending,NavigationCommandSlots<int,NavigationRequest> allocating)
         {
             Array.Clear(frame.TerminalSeeds,0,frame.TerminalSeeds.Length);
+            // New backend completion is the accepted individual slot, never the
+            // legacy contact-connected component around the common click point.
+            if(UsesRecastGroundRoutes){
+                for(int g=0;g<groupCount;g++){
+                    var group=groups[g].Version;var order=group.Data;
+                    if(order.Kind!=PlayableCommandKind.Move&&order.Kind!=PlayableCommandKind.AttackMove)continue;
+                    for(int m=0;m<group.Members.Count;m++){
+                        var member=(NavigationAuthorityMember)group.Members[m];int row=frame.Find(member.Data.Entity);
+                        if(row<0||pending.ContainsKey(member.Data.Entity)||allocating.ContainsKey(member.Data.Entity))continue;
+                        var actor=frame.After[row];var owner=installed[row];
+                        if(!TerminalMemberMatches(actor,member.Data,order,owner,detached[row])||!member.Data.HasGoal||!member.GoalLocation.HasValue)continue;
+                        var corridor=owner.Corridor.Corridor;
+                        if(corridor.Request!=actor.InstalledRequest||corridor.Order!=actor.InstalledOrder||corridor.Group!=order.GroupId||corridor.RootRevision!=order.OrderRevision||corridor.ActivationRevision!=member.Data.OrderRevision||corridor.Incarnation!=actor.Incarnation||corridor.Mobility!=actor.MobilityRevision)continue;
+                        var endpoint=corridor.Endpoint;
+                        if(!endpoint.Equals(member.GoalLocation.Value)||!endpoint.Position.Equals(member.Data.Goal)||!RecastAssignedTerminal(actor,endpoint,Crowd.Geometry,terrain,profile.ArrivalTolerance))continue;
+                        frame.TerminalSeeds[row]=true;
+                    }
+                }
+                CompleteTerminalSeeds(frame);return;
+            }
             for(int groupIndex=0;groupIndex<groupCount;groupIndex++){var observation=groups[groupIndex];
                 var order=observation.Version.Data;var originalLocation=observation.Version.OriginalLocation;if(order.Kind!=PlayableCommandKind.Move&&order.Kind!=PlayableCommandKind.AttackMove||!originalLocation.HasValue)continue;
                 // Assigned-slot Arrived is deliberately not a seed: the original
@@ -203,6 +226,18 @@ namespace Spacewars.Runtime
                 int head=0,tail=0;frame.TerminalSeeds[seed]=true;frame.YieldQueue[tail++]=seed;
                 while(head<tail){int at=frame.YieldQueue[head++];var a=frame.After[at];for(int memberIndex=0;memberIndex<observation.Version.Members.Count;memberIndex++){var member=((NavigationAuthorityMember)observation.Version.Members[memberIndex]).Data;int row=frame.Find(member.Entity);if(row<0||frame.TerminalSeeds[row]||pending.ContainsKey(member.Entity)||allocating.ContainsKey(member.Entity))continue;var b=frame.After[row];if(!TerminalMemberMatches(b,member,order,installed[row],detached[row])||b.Team!=a.Team||!HasPhysicalContactCertificate(a,b))continue;frame.TerminalSeeds[row]=true;frame.YieldQueue[tail++]=row;}}
             }
+            CompleteTerminalSeeds(frame);
+        }
+        internal static bool RecastAssignedTerminal(NavUnit actor,NavLocation goal,NavGeometry geometry,IPlayableTerrain terrain,double tolerance)
+        {
+            if(actor.Held||!actor.GoalLocation.HasValue||!actor.GoalLocation.Value.Equals(goal)||!actor.Goal.Equals(goal.Position)||actor.Location.SurfaceId!=goal.SurfaceId)return false;
+            double dx=actor.Position.X-goal.Position.X,dz=actor.Position.Z-goal.Position.Z;
+            if(dx*dx+dz*dz>tolerance*tolerance||!geometry.IsFree(actor.Position,actor.Radius)||!geometry.IsFree(goal.Position,actor.Radius))return false;
+            if(terrain==null)return actor.Location.SurfaceId==NavLocation.FlatSurface;
+            return terrain.IsValidLocation(actor.Location,actor.Radius)&&terrain.IsValidLocation(goal,actor.Radius)&&terrain.TryLocate(actor.Position,actor.Radius,out var here)&&here.Equals(actor.Location);
+        }
+        private static void CompleteTerminalSeeds(NavPreparedCrowdStep frame)
+        {
             for(int row=0;row<frame.After.Length;row++)if(frame.TerminalSeeds[row]){
                 var actor=frame.After[row];actor.Moving=false;actor.Outcome=NavigationOutcome.Arrived;actor.blockedSeconds=0;actor.noProgressTicks=0;actor.routeIndex=actor.route.Length;actor.localIndex=actor.localRoute.Length;
             }

@@ -19,11 +19,13 @@ namespace Spacewars.Simulation
         }
         internal bool IsHistoricalCandidate=>demandContinuationMode&&input.IndependentMembers&&!derivativesDiscarded&&(Status==NavArrivalStatus.Pending||Status==NavArrivalStatus.BudgetExhausted||Status==NavArrivalStatus.Ready);
         internal NavigationArrivalWork HistoricalSource=>historicalOracle?.HistoricalSource??this;
+        // Birth admission only: existing attached/saved work keeps its continuation.
+        internal bool IsPhysicalBirthHistoricalCandidate=>IsHistoricalCandidate&&(!page0OccupancyMode||Status==NavArrivalStatus.Ready);
         internal void AttachHistorical(NavigationArrivalWork source,INavStorageReservation r)
         {
             MutableRoot();source=source.HistoricalSource;NavStorageAdmission.RequireOwned(r,source);
-            if(terminalCostMode!=source.terminalCostMode||ownedArrivalAnchorMode!=source.ownedArrivalAnchorMode||originShadowMode!=source.originShadowMode||terminalCornerMode!=source.terminalCornerMode||terminalRectangleMode!=source.terminalRectangleMode||rectangleOriginsMode!=source.rectangleOriginsMode||certifiedMode!=source.certifiedMode||lazyMode!=source.lazyMode||astarMode!=source.astarMode||exactCostMode!=source.exactCostMode||!demandContinuationMode||!source.IsHistoricalCandidate||source.input.Members.Count!=input.Members.Count)return;
-            historicalOracle=NavPhysicalMacro.Acquire(historicalState,source);historicalEpochBase=checked(source.lastEpoch+1);historicalGate=0;historicalCursor=0;
+            if(paidPagePolicy!=source.paidPagePolicy||terminalCostMode!=source.terminalCostMode||ownedArrivalAnchorMode!=source.ownedArrivalAnchorMode||originShadowMode!=source.originShadowMode||terminalCornerMode!=source.terminalCornerMode||terminalRectangleMode!=source.terminalRectangleMode||rectangleOriginsMode!=source.rectangleOriginsMode||certifiedMode!=source.certifiedMode||lazyMode!=source.lazyMode||astarMode!=source.astarMode||exactCostMode!=source.exactCostMode||!demandContinuationMode||!source.IsHistoricalCandidate||source.input.Members.Count!=input.Members.Count)return;
+            NavArrivalDiagnostic.Mark("attach-historical",this);historicalOracle=NavPhysicalMacro.Acquire(historicalState,source);historicalEpochBase=checked(source.lastEpoch+1);historicalGate=0;historicalCursor=0;
             historicalLegs=NavPagedList<NavTypedLeg>.Create(r.TryReserve);
         }
         internal void SealPreparedIfMutable(){if(!rootFrozen)SealPrepared();}
@@ -39,7 +41,7 @@ namespace Spacewars.Simulation
         }
         private void DropHistorical()
         {
-            if(historicalOracle!=null)scheduler.AbsorbHistoricalCounters(historicalOracle.RouteCounters);ClearHistoricalStorage();ClearAssignments();memberIndex=0;pageIndex=0;phase=Phase.PrepareRegions;Status=NavArrivalStatus.BudgetExhausted;
+            NavArrivalDiagnostic.Mark("drop-historical",this);if(historicalOracle!=null)scheduler.AbsorbHistoricalCounters(historicalOracle.RouteCounters);ClearHistoricalStorage();ClearAssignments();memberIndex=0;pageIndex=0;phase=Phase.PrepareRegions;Status=NavArrivalStatus.BudgetExhausted;
         }
         private bool HistoricalHeader()
         {
@@ -63,7 +65,7 @@ namespace Spacewars.Simulation
         {
             long start=AllocationWorkConsumed;
             while(historicalGate<4&&allocationRemaining>0){
-                SpendCandidate();bool valid=true;
+                SpendCandidate(historicalGate==0?NavCandidateCharge.HistoricalHeader:historicalGate==1?NavCandidateCharge.HistoricalMember:historicalGate==2?NavCandidateCharge.HistoricalSource:NavCandidateCharge.HistoricalGeometry);bool valid=true;
                 if(historicalGate==0){valid=HistoricalHeader();historicalGate=1;historicalCursor=0;}
                 else if(historicalGate==1){if(historicalCursor<members.Length)valid=HistoricalMemberSame(historicalCursor++);else{historicalGate=2;historicalCursor=0;}}
                 else if(historicalGate==2&&RemovalActive){valid=RemovalSubsequenceStep();}
@@ -78,7 +80,7 @@ namespace Spacewars.Simulation
                 if(historicalOracle.rootFrozen){var next=historicalOracle.ForkOwned(OwnedReservation);historicalOracle.Release();historicalOracle=next;}
                 if(!historicalOracle.TryReserveAuthorityBytes(authorityReservationBase+OutputRetainedBytes+input.Provider.EstimatedRetainedBytes)){LastAdvanceRetentionBlocked=true;Status=NavArrivalStatus.BudgetExhausted;LastAdvanceConsumed=AllocationWorkConsumed-start;return Status;}
                 long prior=historicalOracle.AllocationWorkConsumed,priorCandidate=historicalOracle.CandidateWorkConsumed,priorOccupancy=historicalOracle.OccupancyWorkConsumed,priorDirect=historicalOracle.DirectWorkConsumed;bool page0Boundary=false;if(page0OccupancyMode)historicalOracle.AdvancePage0(checked(historicalEpochBase+epoch),allocationRemaining,quota,out page0Boundary);else historicalOracle.Advance(checked(historicalEpochBase+epoch),allocationRemaining,quota);
-                long used=historicalOracle.AllocationWorkConsumed-prior;allocationRemaining=checked(allocationRemaining-(int)used);AllocationWorkConsumed+=used;CandidateWorkConsumed+=historicalOracle.CandidateWorkConsumed-priorCandidate;OccupancyWorkConsumed+=historicalOracle.OccupancyWorkConsumed-priorOccupancy;DirectWorkConsumed+=historicalOracle.DirectWorkConsumed-priorDirect;
+                long used=historicalOracle.AllocationWorkConsumed-prior;allocationRemaining=checked(allocationRemaining-(int)used);AllocationWorkConsumed+=used;CandidateWorkConsumed+=historicalOracle.CandidateWorkConsumed-priorCandidate;OccupancyWorkConsumed+=historicalOracle.OccupancyWorkConsumed-priorOccupancy;DirectWorkConsumed+=historicalOracle.DirectWorkConsumed-priorDirect;NavArrivalDiagnostic.Buffer?.Copy(used,historicalOracle.CandidateWorkConsumed-priorCandidate,historicalOracle.OccupancyWorkConsumed-priorOccupancy,historicalOracle.DirectWorkConsumed-priorDirect);
                 LastAdvanceRetentionBlocked=historicalOracle.LastAdvanceRetentionBlocked;
                 if(page0Boundary){DropHistorical();LastAdvanceConsumed=AllocationWorkConsumed-start;return Status;}
                 if((page0OccupancyMode||RemovalActive)&&!RemovalOraclePageZero()){DropHistorical();LastAdvanceConsumed=AllocationWorkConsumed-start;return Status;}
@@ -94,7 +96,7 @@ namespace Spacewars.Simulation
                     if(HistoricalOccupantBlocks(member,endpoint,occupant)){DropHistorical();break;}
                     continue;
                 }
-                SpendCandidate();
+                SpendCandidate(NavCandidateCharge.HistoricalRoute);
                 if(historicalRecipe==null){
                     if(!provider.IsValid(member.Origin,member.Clearance)||!provider.IsValid(endpoint,member.Clearance)){DropHistorical();break;}
                     var sub=new NavRouteSubscription(member.WorldGeneration,member.GroupId,member.RootOrderRevision,member.CommandSequence,member.IssuedTick,member.ActivationRevision,member.EntityId,member.Incarnation,member.MemberOrderRevision,member.MobilityRevision,member.RequestSequence,member.Origin,endpoint,member.HoldBinding,NavRouteProvenance.CommandMember);

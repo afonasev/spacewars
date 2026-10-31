@@ -31,6 +31,32 @@ namespace Spacewars.Input.Tests
             float scale=host.GetComponent<UIDocument>().panelSettings.scale;
             return new Vector2(panel.x*scale,Screen.height-panel.y*scale);
         }
+        // Rally UI now belongs only to actual producers. Prepare a real factory through
+        // the ordinary command path; keep the existing route/gesture assertions intact.
+        private IEnumerator BuildRallyFactory(PlayableBootstrap seat)
+        {
+            var view=Get<PlayableSnapshot>(seat,"view");var centre=view.Buildings.First(b=>b.Owner==view.Owner&&b.Kind==PlayableBuildingKind.Headquarters);
+            var site=view.Sites.Single(s=>s.Site.Id==centre.SiteId);var slot=site.Site.Slots.First(s=>!view.Buildings.Any(b=>b.SiteId==site.Site.Id&&b.SlotId==s.Id));
+            long seq=Get<long>(seat,"sequence")+1;Put(seat,"sequence",seq);
+            Assert.True(Runtime.TrySubmit(new PlayableCommand(view.Generation,seq,view.OwnerId,PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:site.Site.Id,slotId:slot.Id,buildingKind:PlayableBuildingKind.Factory,parentId:centre.Id)).Accepted);
+            bool Ready()=>Get<PlayableSnapshot>(seat,"view").Buildings.Any(b=>b.Owner==view.Owner&&b.Kind==PlayableBuildingKind.Factory&&b.Phase==ConstructionPhase.Ready);
+            float end=Time.realtimeSinceStartup+(float)Get<PlayableProfile>(seat,"profile").FactoryBuildSeconds+15;
+            while(!Ready()&&Time.realtimeSinceStartup<end){Call(app,"OnApplicationFocus",true);Call(app,"UpdateFrame");yield return null;}
+            Assert.True(Ready(),"Real producer setup must finish before rally interaction");
+        }
+        private NavPoint RallyTestTarget(PlayableBootstrap seat,PlayableBuildingSnapshot producer)
+        {
+            var view=Get<PlayableSnapshot>(seat,"view");var profile=Get<PlayableProfile>(seat,"profile");
+            var site=view.Sites.Single(s=>s.Site.Id==producer.SiteId);var slot=site.Site.Slots.Single(s=>s.Id==producer.SlotId);
+            // Keep the original six-metre test distance, but bind it to the authored
+            // outward slot direction. Global +X points back into southern HQs.
+            var target=new NavPoint(producer.Position.X+Math.Cos(slot.Heading)*6,producer.Position.Z+Math.Sin(slot.Heading)*6);
+            var old=new NavPoint(producer.Position.X+6,producer.Position.Z);
+            TestContext.WriteLine("rally setup: site="+site.Site.Id+" slot="+slot.Id+" heading="+slot.Heading+" factory="+producer.Position.X+","+producer.Position.Z+" oldTarget="+old.X+","+old.Z+" oldFree="+view.Geometry.IsFree(old,profile.TankCollisionRadius)+" target="+target.X+","+target.Z);
+            foreach(var kind in new[]{PlayableEntityKind.Tank,PlayableEntityKind.Explorer,PlayableEntityKind.Shkval})
+                Assert.IsTrue(view.Geometry.IsFree(target,PlayableUnitRules.Radius(profile,kind)),"Rally input fixture requires a free target footprint for "+kind);
+            return target;
+        }
         [UnityTest] public IEnumerator MouseKeepsProducerSelectionHidesDistantMenuAndKeepsUnitCircles()
         {
             yield return StartOrdinary(1);Put(app,"battleController",false);
@@ -50,16 +76,16 @@ namespace Spacewars.Input.Tests
         }
         [UnityTest] public IEnumerator MouseRallyUsesFieldCompactAndTacticalMapForProducerKinds()
         {
-            yield return StartOrdinary(1);Put(app,"battleController",false);var original=Get<PlayableSnapshot>(app,"view");var own=original.Buildings.First(b=>b.Owner==original.Owner&&b.Kind==PlayableBuildingKind.Headquarters);
-            foreach(var kind in new[]{PlayableBuildingKind.Headquarters,PlayableBuildingKind.Outpost,PlayableBuildingKind.Factory})
+            yield return StartOrdinary(1);yield return BuildRallyFactory(app);Put(app,"battleController",false);var original=Get<PlayableSnapshot>(app,"view");var own=original.Buildings.First(b=>b.Owner==original.Owner&&b.Kind==PlayableBuildingKind.Factory);var point=RallyTestTarget(app,own);
+            foreach(var kind in new[]{PlayableBuildingKind.Factory,PlayableBuildingKind.Hangar})
             foreach(int mapKind in new[]{0,1,2})
             {
                 var current=Runtime.Latest;var producer=new PlayableBuildingSnapshot(own.Id,current.Owner,kind,own.Position,own.Health,1,0,0,default);
-                // Presentation variants share a real authoritative HQ ID; authority/routing is executed, not copied.
+                // Presentation variants share a real authoritative factory ID; authority/routing is executed, not copied.
                 var view=new PlayableSnapshot(current.ProfileId,current.ProfileRevision,current.Generation,current.Seed,current.Sequence,current.Tick,current.Status,false,current.Outcome,current.Credits,current.Geometry,current.Entities.ToArray(),new[]{producer},current.Projectiles.ToArray(),current.Metrics,null,vision:current.Vision,owner:current.Owner,ownerId:current.OwnerId);
-                Put(app,"view",view);Selection(app).Clear();Selection(app).Add(own.Id);var point=new NavPoint(own.Position.X+6,own.Position.Z);
+                Put(app,"view",view);Selection(app).Clear();Selection(app).Add(own.Id);
                 Call(app,"UpdateMaps");if(mapKind==2){Call(app,"ToggleMap");yield return null;yield return null;Call(app,"UpdateMaps");}
-                if(mapKind==0){var camera=Get<Camera>(app,"cameraView");var screen=(Vector2)camera.WorldToScreenPoint(Get<PlayableWorld>(app,"world").Point(point));Call(app,"Order",screen,false,false);}
+                if(mapKind==0){var camera=Get<Camera>(app,"cameraView");var screen=(Vector2)camera.WorldToScreenPoint(Get<PlayableWorld>(app,"world").Point(point));var converted=(NavPoint)Call(app,"Ground",screen);Assert.AreEqual(point.X,converted.X,.01);Assert.AreEqual(point.Z,converted.Z,.01);Call(app,"Order",screen,false,false);}
                 else{var screen=RallyMapScreen(app,mapKind,point);var converted=(NavPoint)Call(app,"MapGround",mapKind,screen);Assert.AreEqual(point.X,converted.X,.01);Assert.AreEqual(point.Z,converted.Z,.01);Call(app,"MapOrder",mapKind,screen,false,false);}
                 long sequence=Get<long>(app,"sequence");Assert.Greater(sequence,0);Call(app,"CloseMap");
                 yield return Wait(()=>Runtime.OfflineFrame.Receipts.Any(r=>r.Receipt.Sequence==sequence&&r.Receipt.OwnerId==current.OwnerId&&r.Receipt.Status==PlayableCommandStatus.Applied),"mouse rally "+kind+" map "+mapKind);
@@ -71,7 +97,7 @@ namespace Spacewars.Input.Tests
         }
         [UnityTest] public IEnumerator PadFlagPlacementSurvivesMapTogglesReturnsToProducerAndCancelsSafely()
         {
-            yield return StartOrdinary(2);var seat=Seats[1];var other=Seats[0];var view=Get<PlayableSnapshot>(seat,"view");var own=view.Buildings.First(b=>b.Owner==view.Owner&&b.Kind==PlayableBuildingKind.Headquarters);
+            yield return StartOrdinary(2);var seat=Seats[1];var other=Seats[0];yield return BuildRallyFactory(seat);Put(seat,"battleController",true);var view=Get<PlayableSnapshot>(seat,"view");var own=view.Buildings.First(b=>b.Owner==view.Owner&&b.Kind==PlayableBuildingKind.Factory);
             Selection(seat).Clear();Selection(seat).Add(own.Id);PadCursor(seat,own.Position);Call(app,"UpdateFrame");
             Call(seat,"ExecuteBattleAction","rally",false,true);Call(app,"UpdateFrame");
             Assert.IsTrue(Get<bool>(seat,"battleRally"));var world=Get<PlayableWorld>(seat,"world");Assert.IsNotNull(world.RallyPreview);Assert.IsTrue(world.RallyPreview.gameObject.activeSelf);
@@ -83,7 +109,7 @@ namespace Spacewars.Input.Tests
             Assert.IsTrue(Get<bool>(seat,"battleRally"));Assert.IsFalse(world.RallyPreview.gameObject.activeSelf);
             Tap(pads[1],pads[1].selectButton);Assert.IsFalse(Get<bool>(seat,"mapOpen"));Assert.AreEqual("rallyTarget",Get<OfflinePadGestures>(seat,"battleGestures").Mode);
             Tap(pads[1],pads[1].selectButton);Assert.IsTrue(Get<bool>(seat,"mapOpen"));
-            var point=new NavPoint(own.Position.X+6,own.Position.Z);PadCursor(seat,point);Call(app,"UpdateFrame");
+            var point=RallyTestTarget(seat,own);PadCursor(seat,point);Call(app,"UpdateFrame");
             Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(seat,"battleCursorVisual").style.display.value);
             Assert.AreSame(Resources.Load<Texture2D>("OrbitalIcons/rally"),Get<VisualElement>(seat,"battleCursorVisual").style.backgroundImage.value.texture);
             Assert.IsEmpty(Get<VisualElement>(seat,"tacticalOverlay").Query<Label>().ToList(),"Rally map keeps the requested hint-free layout.");

@@ -6,7 +6,7 @@ using UnityEngine;
 using UnityEngine.UIElements;
 namespace Spacewars.Presentation
 {
-    // Approved A rings; no permanent chain or route/reservation requests.
+    // Selection/map rings and transient accepted-order Vector confirmation; no route requests.
     public sealed class PlayableOrderMarkerLayer : VisualElement
     {
         IReadOnlyList<PlayableQueueMarker> markers=Array.Empty<PlayableQueueMarker>();
@@ -26,10 +26,42 @@ namespace Spacewars.Presentation
             {
                 if(!marker.Location.HasValue)continue;var point=project(marker.Location.Value);if(!point.HasValue)continue;
                 var at=point.Value;if(at.x<0||at.y<0||at.x>contentRect.width||at.y>contentRect.height)continue;
+                if(!compact&&marker.ConfirmationElapsed>=0)
+                {
+                    DrawVector(p,at,marker.Attack,(float)(marker.ConfirmationElapsed/art.orderConfirmationDuration));
+                    continue;
+                }
                 var color=marker.Attack?Color.red:Color.green;
                 p.lineWidth=art.orderMarkerWidth;p.strokeColor=color;p.BeginPath();p.Arc(at,radius,0,360);p.Stroke();
                 var text=marker.Number.ToString();ctx.DrawText(text,at-new Vector2(text.Length*font*.28f,font*.55f),font,color,null);
             }
+        }
+        void DrawVector(Painter2D p,Vector2 at,bool attack,float t)
+        {
+            if(t<0||t>=1)return;
+            // The 3/4-way silhouettes and polygon proportions define the approved Vector icon.
+            // Timing, size, excursion, recoil, opacity and stroke are designer-facing profile values.
+            float approach=Mathf.Clamp01(t/art.orderConfirmationConverge);
+            float radius=art.orderConfirmationRadius*(1+art.orderConfirmationTravel*Mathf.Pow(1-approach,3));
+            float recoil=Mathf.Clamp01((t-art.orderConfirmationConverge)/(art.orderConfirmationFadeStart-art.orderConfirmationConverge));
+            radius+=art.orderConfirmationRadius*art.orderConfirmationRecoil*Mathf.Sin(recoil*Mathf.PI);
+            float fade=Mathf.SmoothStep(1,0,Mathf.InverseLerp(art.orderConfirmationFadeStart,1,t));
+            var color=attack?new Color(1,.08f,.06f):new Color(.08f,1,.12f);color.a=fade*art.orderConfirmationOpacity;
+            int count=attack?4:3;
+            for(int i=0;i<count;i++)
+            {
+                float angle=(-90+i*360f/count)*Mathf.Deg2Rad;
+                var axis=new Vector2(Mathf.Cos(angle),Mathf.Sin(angle));var side=new Vector2(-axis.y,axis.x);
+                float length=art.orderConfirmationRadius*.8f,width=art.orderConfirmationRadius*.3f;
+                var tip=at+axis*(radius-length*.65f);
+                var outer=at+axis*(radius+length*.35f);
+                p.fillColor=color;p.strokeColor=new Color(0,.04f,.025f,color.a*.85f);p.lineWidth=art.orderConfirmationWidth;
+                p.BeginPath();p.MoveTo(tip);p.LineTo(outer+side*width);p.LineTo(outer-axis*length*.25f);p.LineTo(outer-side*width);p.ClosePath();p.Fill();p.Stroke();
+            }
+            p.fillColor=color;p.strokeColor=color;p.lineWidth=art.orderConfirmationWidth;
+            float center=art.orderConfirmationRadius*.16f;
+            if(attack){p.BeginPath();p.MoveTo(at-new Vector2(center,0));p.LineTo(at+new Vector2(center,0));p.MoveTo(at-new Vector2(0,center));p.LineTo(at+new Vector2(0,center));p.Stroke();}
+            else{p.BeginPath();p.Arc(at,art.orderConfirmationRadius*.2f,0,360);p.Fill();}
         }
         public static Vector2? WorldPoint(VisualElement root,Camera camera,PlayableProfile profile,NavLocation location,bool mirrored=false)
         {

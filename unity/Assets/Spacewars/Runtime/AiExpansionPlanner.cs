@@ -41,6 +41,7 @@ namespace Spacewars.Runtime
         private readonly string ownerId;
         internal AiKnowledgeState Knowledge{get;set;}
         internal bool PreferRemote{get;set;}
+        internal bool AllowOutposts{get;set;}=true;
         internal int LocalSiteId{get;set;}
         internal ISet<int> TeamDeniedSites{get;set;}
         internal bool TeamAllowsSite(int id)=>id==siteId||TeamDeniedSites==null||!TeamDeniedSites.Contains(id);
@@ -163,7 +164,7 @@ namespace Spacewars.Runtime
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"financial-site-filter",financialSite==0||s.Site.Id==financialSite)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-admissibility",admissibleSite==null||admissibleSite(s.Site.Id))
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"known-main-territory",AiIncomeSiteSelection.TerritoryAllowed(o,p,ai,Knowledge,s))
-                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-kind-and-income",(s.Site.Kind==PlayableBuildingKind.Mine||s.Site.Kind==PlayableBuildingKind.Outpost)&&TerritoryRules.Income(p,s.Site.Kind)>0)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-kind-and-income",(s.Site.Kind==PlayableBuildingKind.Mine||AllowOutposts&&s.Site.Kind==PlayableBuildingKind.Outpost)&&TerritoryRules.Income(p,s.Site.Kind)>0)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-unoccupied",s.CenterId==0)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-uncontested",!s.Contested)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-owner",!s.Owner.HasValue||s.Owner==o.Owner)

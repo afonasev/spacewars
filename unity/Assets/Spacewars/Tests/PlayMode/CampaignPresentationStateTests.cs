@@ -24,8 +24,13 @@ public sealed class CampaignPresentationStateTests
         try
         {
             Set("profile",profile);Call("CreateHud");Set("runtime",runtime);Set("campaignConfiguration",config);Set("view",View(true));Call("UpdateCampaignHud");Assert.AreEqual(DisplayStyle.None,Get<Label>("creditsLabel").style.display.value);
+            Assert.IsNull(Get<Label>("campaignHistory").parent,"Closed maps do not retain a hidden campaign history element.");
+            Set("mapOpen",true);Call("UpdateCampaignHud");Assert.AreSame(Get<VisualElement>("tacticalOverlay"),Get<Label>("campaignHistory").parent);Assert.AreEqual(DisplayStyle.Flex,Get<Label>("campaignHistory").style.display.value);StringAssert.Contains("СПОРНАЯ ТЕРРИТОРИЯ",Get<Label>("campaignHistory").text);
+            Set("mapOpen",false);Call("UpdateCampaignHud");Assert.IsNull(Get<Label>("campaignHistory").parent);
+            Set("mapOpen",true);Call("UpdateCampaignHud");Assert.AreSame(Get<VisualElement>("tacticalOverlay"),Get<Label>("campaignHistory").parent);
             // The main/lobby transition clears the scenario; a subsequent ordinary perspective restores its header.
             Set("inLobby",true);Set("campaignConfiguration",null);Set("view",View(false));Call("UpdateCampaignHud");Set("inLobby",false);Call("UpdateCampaignHud");Assert.AreEqual(DisplayStyle.Flex,Get<Label>("creditsLabel").style.display.value);Assert.AreEqual(DisplayStyle.None,Get<Label>("campaignGoal").style.display.value);
+            Assert.IsNull(Get<Label>("campaignHistory").parent,"Leaving a campaign removes its history from the ordinary tactical map.");Assert.IsNull(Get<VisualElement>("tacticalOverlay").Q<Label>("campaign-revealed-goals"));Set("mapOpen",false);
             Set("matchSetup",new NativeLobbyConfiguration{Participants=new List<NativeLobbyParticipant>{new NativeLobbyParticipant{Human=false,Team=1}}});Call("ResetSpectatorPresentation");Get<Label>("creditsLabel").style.display=DisplayStyle.None;Call("UpdateCampaignHud");Assert.AreEqual(DisplayStyle.None,Get<Label>("creditsLabel").style.display.value,"spectator overview must not expose credits");
             Set("matchSetup",null);Call("ResetSpectatorPresentation");Set("campaignConfiguration",config);Set("view",View(true,PlayableMatchOutcome.PlayerLost));Call("UpdateHud");Assert.AreEqual("АРМИЯ ПОТЕРЯНА",Get<Label>("modalTitle").text);
             Set("campaignConfiguration",null);Set("view",View(false,PlayableMatchOutcome.PlayerLost));Call("UpdateHud");Assert.AreEqual("ЦЕНТРЫ ПОТЕРЯНЫ",Get<Label>("modalTitle").text);

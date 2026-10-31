@@ -1,6 +1,6 @@
 # Fast AI decision lab
 
-Runs the **same current production C# Runtime and Simulation sources** under .NET 8, without Unity Editor, graphics, workers or an alternate game implementation. Both source assemblies already declare `noEngineReferences`. No NuGet packages or network sources are used. `UNITY_INCLUDE_TESTS` is not defined: the ordinary production path is compiled, without diagnostic hooks.
+Runs the **same current production C# Runtime and Simulation sources** under .NET 8, without Unity Editor, graphics, workers or an alternate game implementation. Both source assemblies already declare `noEngineReferences`. No NuGet packages or network sources are used. Production communication diagnostics require Newtonsoft.Json: the tool references the assembly bundled with the selected .NET 8 SDK via `MSBuildToolsPath` and fails explicitly if it is absent. `UNITY_INCLUDE_TESTS` is not defined: the ordinary production path is compiled, without diagnostic hooks.
 
 From the repository root:
 
@@ -18,6 +18,8 @@ python3 tools/ai-decision-lab/audit.py --main main --candidate codex/ai-methodol
 ```
 
 Use the launcher for evidence: direct DLL calls can be stale after edits and do not create source manifests. The Python tests use the already built Release executable, never Unity, and reject missing builds rather than silently skipping.
+
+The affected-tooling PR workflow invokes this launcher and then `test_runner.py` explicitly when lab sources or their production Runtime/Simulation dependencies change. Its output is selected decision/tooling evidence, not Unity or gameplay acceptance.
 
 ## What the first case answers
 

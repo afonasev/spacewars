@@ -40,7 +40,7 @@ namespace Spacewars.Runtime
         internal PlayableAuthorityTick(PlayableDomain domain,AiAuthorityScheduler scheduler,int seed,OfflineMatchConfiguration configuration=null,bool asynchronousRoutes=false)
         {this.domain=domain;this.scheduler=scheduler;this.seed=seed;domain.BindMatchSeed(seed);savedConfiguration=configuration;SetRouteDeliveryPolicy(asynchronousRoutes);}
         private void SetRouteDeliveryPolicy(bool asynchronous)
-        {asynchronousRoutes=asynchronous;domain.Navigation.SuspendPendingMovement=asynchronous||tickQuanta;domain.Navigation.TickQuantaEnabled=tickQuanta;}
+        {asynchronousRoutes=asynchronous;domain.NonblockingNavigationPreparation=asynchronous;domain.Navigation.SuspendPendingMovement=asynchronous||tickQuanta;domain.Navigation.TickQuantaEnabled=tickQuanta;}
         public PlayableAuthorityTick(OfflineMatchConfiguration configuration,long generation,AiProfile aiProfile=null,AiDifficulty difficulty=AiDifficulty.Fighter,bool asynchronousRoutes=false)
         {
             if(configuration==null)throw new ArgumentNullException(nameof(configuration));
@@ -81,7 +81,7 @@ namespace Spacewars.Runtime
             var status=domain.Apply(command,out var message);
             if(status==PlayableCommandStatus.Applied||status==PlayableCommandStatus.Accepted)
                 if(command.Origin!=PlayableOrderOrigin.Ai)humans[command.PlayerId]=command.Sequence;
-            return new PlayableCommandReceipt(command?.Sequence??0,domain.Tick,status,message,0,command?.PlayerId);
+            var receipt=new PlayableCommandReceipt(command?.Sequence??0,domain.Tick,status,message,0,command?.PlayerId);OriginalGroupDiagnostics.Receipt(receipt,domain.Navigation.OriginalDiagnosticOperation,domain.Navigation.OriginalDiagnosticQuantum);return receipt;
         }
         public bool TryAdvance(bool paused=false)
         {
@@ -115,10 +115,11 @@ namespace Spacewars.Runtime
                     if(publishWaiting)Latest=snapshot=domain.PlayerSnapshot(publication,RuntimeStatus.Running,false,metrics(),null,seed);
                     return false;
                 }
+                domain.Navigation.OriginalDiagnosticBarrier(domain.Tick+1);
                 domain.StepWithAiRepairAccounting(1d/30d,scheduler.Owners.Select(o=>o.Budget));barrierPhase=RouteBarrierPhase.Idle;
                 stepped=performanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0;
             }
-            if(paused)scheduler.Deliver(domain,human,true);
+            if(paused){domain.Navigation.RoutePort.CancelResultPreparation();scheduler.Deliver(domain,human,true);}
             using(PerformanceProfile.Measure(ProfileStage.PlayerView))snapshot=domain.PlayerSnapshot(publication,paused?RuntimeStatus.Paused:RuntimeStatus.Running,paused,metrics(),null,seed);
             long projected=performanceTrace?System.Diagnostics.Stopwatch.GetTimestamp():0;
             scheduler.Review(domain,publication,snapshot.Status,paused,snapshot.Metrics,seed,human);

@@ -8,6 +8,8 @@ namespace Spacewars.Presentation
 {
     public static class NativeUserSettings
     {
+        public const string HideDistantHealthKey="spacewars.ui.hideDistantHealth";
+        public static bool HideDistantHealth { get=>PlayerPrefs.GetInt(HideDistantHealthKey,1)!=0; set {NativePreferenceWriter.SetInt(HideDistantHealthKey,value?1:0);} }
         public static bool AlwaysHealth { get=>PlayerPrefs.GetInt("spacewars.ui.alwaysHealth",1)!=0; set {NativePreferenceWriter.SetInt("spacewars.ui.alwaysHealth",value?1:0);} }
         public static float Volume { get {float value=PlayerPrefs.GetFloat("spacewars.ui.volume",0);return float.IsNaN(value)||float.IsInfinity(value)?0:Mathf.Clamp01(value);} set {if(NativeSilentStartup.IsSilent)return;NativePreferenceWriter.SetFloat("spacewars.ui.volume",Mathf.Clamp01(value));AudioListener.volume=Mathf.Clamp01(value);} }
     }
@@ -71,7 +73,7 @@ namespace Spacewars.Presentation
     }
     public static class NativeSettingsView
     {
-        public static VisualElement Open(VisualElement root,NativeMenuNavigation navigation,Action closed,NativeLocalControlSettings controls=null)
-            =>new NativeSettingsPage(root,navigation,closed,controls??new NativeLocalControlSettings()).Page;
+        public static VisualElement Open(VisualElement root,NativeMenuNavigation navigation,Action closed,NativeLocalControlSettings controls=null,Action<Action> openHistory=null)
+            =>new NativeSettingsPage(root,navigation,closed,controls??new NativeLocalControlSettings(),openHistory).Page;
     }
 }

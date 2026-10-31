@@ -28,9 +28,12 @@ namespace Spacewars.Presentation
             Preparation=Prepare(p,size);
             if(!staged)LoadingPreparation.Drain(Preparation);
         }
+        public bool PreparationCacheHit{get;private set;}
         public System.Collections.IEnumerator Preparation{get;}
         private System.Collections.IEnumerator Prepare(PlayableProfile p,int size)
         {
+            string group="Minimap-"+PreparedMapCache.MapKey(p.AuthoredMap),key=PreparedMapCache.Key(p.AuthoredMap,p);
+            if(PreparedMapCache.TryColors(group,key,terrain)){PreparationCacheHit=true;yield break;}
             var budget=new LoadingFrameBudget();
             // Reuse the world's basalt palette; profile controls all added contrast tuning.
             Color ground=new Color(.20f,.25f,.25f);Color.RGBToHSV(ground,out float h,out float s,out float v);
@@ -41,7 +44,14 @@ namespace Spacewars.Presentation
             var basaltArt=p.AuthoredMap is BasaltCrownMap?BasaltCrownArtProfile.Load():null;
             var basaltMines=p.AuthoredMap is BasaltCrownMap bm?BasaltCrownDetails.Mines(bm,p):null;
             var sitePads=p.AuthoredMap is BasaltCrownMap padMap?BasaltCrownDetails.SitePads(padMap,p,basaltArt):Array.Empty<BasaltCrownDetails.SitePad>();
+            var foundryArt=p.AuthoredMap is FoundryMap?FoundrySurfaceProfile.Load():null;
             var heights=p.AuthoredMap==null?null:new float[terrain.Length];
+            var dockMap=p.AuthoredMap as NullDockMap;
+            var dockArt=dockMap!=null?NullDockArtProfile.Load():null;
+            var dockHome=dockMap!=null?dockMap.Supports.Single(s=>s.Id=="H-A").Bounds:default(NavObstacle);
+            var dockNorth=dockMap!=null?dockMap.Supports.Single(s=>s.Id=="F-N").Bounds:default(NavObstacle);
+            var dockSouth=dockMap!=null?dockMap.Supports.Single(s=>s.Id=="F-S").Bounds:default(NavObstacle);
+            var dockSites=dockMap?.Sites(p).Where(s=>s.Kind!=PlayableBuildingKind.Mine).ToArray();
             var groveArt=p.AuthoredMap is CrimsonGroveMap?CrimsonGroveArtProfile.Load():null;
             for(int y=0;y<size;y++)for(int x=0;x<size;x++)
             {
@@ -53,7 +63,26 @@ namespace Spacewars.Presentation
                 bool obstacle=false;foreach(var wall in walls)if(wall.Contains(terrainPoint)){obstacle=true;break;}
                 bool edge=false;
                 if(obstacle)foreach(var wall in walls){double band=p.MinimapTerrainStroke*(p.ArenaHalfExtent*2/size);if(wall.Contains(terrainPoint)&&wall.BoundaryDistanceSquared(terrainPoint)<band*band)edge=true;}
-                if(p.AuthoredMap is FoundryMap foundry){bool road=System.Linq.Enumerable.Any(foundry.Roads,r=>r.Contains(terrainPoint));terrain[y*size+x]=System.Linq.Enumerable.Any(foundry.Lava,l=>l.Contains(terrainPoint))?PlayableWorld.FoundryLava:obstacle?PlayableWorld.FoundryRock:road?PlayableWorld.FoundryRoad:PlayableWorld.FoundryGround;}
+                if(p.AuthoredMap is FoundryMap foundry){bool road=System.Linq.Enumerable.Any(foundry.Roads,r=>r.Contains(terrainPoint));terrain[y*size+x]=System.Linq.Enumerable.Any(foundry.Lava,l=>l.Contains(terrainPoint))?PlayableWorld.FoundryLava:obstacle?PlayableWorld.FoundryRock:road?PlayableWorld.FoundryRoad:foundryArt.GroundAtHeight(mapSupport?.HeightAt(terrainPoint)??0,foundry);}
+                else if(dockMap!=null){
+                    Color color=Color.clear;
+                    if(mapSupport!=null){
+                        color=dockArt.Upper;
+                        if(mapSupport.Id=="station-deck"){
+                            // Same static support boundaries and sRGB palette as NullDockSurface.
+                            bool central=Math.Abs(wx)<=-dockHome.MaxX&&Math.Abs(wz)<=dockNorth.MinZ;
+                            bool rear=wx>=-dockSouth.MinX&&wz>=-dockHome.MinZ||wx<=dockSouth.MinX&&wz<=dockHome.MinZ;
+                            color=central?dockArt.Battle:rear?dockArt.Rear:dockArt.Contested;
+                        }else if(mapSupport.Id.StartsWith("H-")||mapSupport.Id.StartsWith("F-")){
+                            var b=mapSupport.Bounds;
+                            if(wx>=b.MinX+1.2&&wx<=b.MaxX-1.2&&wz>=b.MinZ+1.2&&wz<=b.MaxZ-1.2)
+                                color=mapSupport.Id.StartsWith("H-")?dockArt.Headquarters:dockArt.Outpost;
+                        }
+                        if(mapSupport.HeightAt(terrainPoint)>0&&dockSites.Any(site=>Math.Pow(site.Position.X-wx,2)+Math.Pow(site.Position.Z-wz,2)<11.3*11.3))
+                            color=Color.Lerp(color,Color.white,dockArt.siteDiskLift);
+                    }
+                    terrain[y*size+x]=mapSupport==null?Color.clear:obstacle?new Color(.22f,.28f,.32f):color;
+                }
                 else if(p.AuthoredMap is CrimsonGroveMap){var art=groveArt;terrain[y*size+x]=mapSupport==null?Color.clear:obstacle?art.Leaves:art.Ground;}
                 else if(p.AuthoredMap is WhiteMeridianMap meridian){
                     var q=new NavPoint(wx,wz);var c=obstacle?meridianArt.Gypsum*(float)(1-p.MinimapTerrainTierContrast):meridian.SurfaceHeight(q)>0?meridianArt.Gypsum:meridianArt.Salt;
@@ -88,6 +117,7 @@ namespace Spacewars.Presentation
                         terrain[i]=Color.Lerp(terrain[i],new Color(.10f,.14f,.14f,terrain[i].a),(float)p.MinimapTerrainTierContrast*3.5f);
                 }
             }
+            PreparedMapCache.SaveColors(group,key,terrain);
         }
         public void ShowPublicTerrain()
         {
@@ -153,14 +183,17 @@ namespace Spacewars.Presentation
         public void Set(PlayableSnapshot view,HashSet<int> selection,NavPoint[] camera)
         {
             transform=new PlayableMapTransform(view.Vision.HalfWidth,view.Vision.HalfDepth);marks=PlayableMapView.Marks(view);selected=selection;footprint=camera;
-            rallyBuildings=view.Buildings.Where(b=>selection.Contains(b.Id)&&b.Owner==view.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.HasRally==true&&b.PrivateState.Lifecycle?.Selling!=true).ToArray();MarkDirtyRepaint();
+            rallyBuildings=view.Buildings.Where(b=>PlayableMenuDescriptions.RallyProducer(b.Kind)&&selection.Contains(b.Id)&&b.Owner==view.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.HasRally==true&&b.PrivateState.Lifecycle?.Selling!=true).ToArray();MarkDirtyRepaint();
         }
         public void SetPublic(IReadOnlyList<PlayableMapMark> publicMarks,double extent)
-        {transform=new PlayableMapTransform(extent,extent);marks=publicMarks;selected=new HashSet<int>();footprint=null;rallyBuildings=Array.Empty<PlayableBuildingSnapshot>();MarkDirtyRepaint();}
+        {teamSignals=Array.Empty<PlayableTeamSignal>();transform=new PlayableMapTransform(extent,extent);marks=publicMarks;selected=new HashSet<int>();footprint=null;rallyBuildings=Array.Empty<PlayableBuildingSnapshot>();MarkDirtyRepaint();}
         public NavPoint Ground(Vector2 local)=>transform.Ground(new NavPoint(local.x/contentRect.width,local.y/contentRect.height));
         private Vector2 Point(NavPoint world){var uv=transform.Project(world);return new Vector2((float)uv.X*contentRect.width,(float)uv.Z*contentRect.height);}
         private System.Collections.Generic.IReadOnlyList<CampaignObjective> campaignGoals;
         public void SetCampaignGoals(System.Collections.Generic.IReadOnlyList<CampaignObjective> goals){campaignGoals=goals;MarkDirtyRepaint();}
+        private IReadOnlyList<PlayableTeamSignal> teamSignals=Array.Empty<PlayableTeamSignal>();private double signalTick;
+        public int TeamSignalCount=>teamSignals.Count;
+        public void SetTeamSignals(IReadOnlyList<PlayableTeamSignal> signals,double tick){teamSignals=signals??Array.Empty<PlayableTeamSignal>();signalTick=tick;MarkDirtyRepaint();}
         public Func<PlayableOwner?,Color> OwnerPaint;
         private Color Owner(PlayableOwner? owner)=>!owner.HasValue?new Color(.32f,.37f,.36f):OwnerPaint!=null?OwnerPaint(owner):owner==PlayableOwner.Player?new Color(.19f,.72f,.77f):new Color(.93f,.34f,.23f);
         private void Draw(MeshGenerationContext ctx)
@@ -173,6 +206,10 @@ namespace Spacewars.Presentation
             mesh.SetNextVertex(new Vertex{position=new Vector3(w,h,Vertex.nearZ),tint=Color.white,uv=new Vector2(1,0)});
             mesh.SetNextIndex(0);mesh.SetNextIndex(1);mesh.SetNextIndex(2);mesh.SetNextIndex(2);mesh.SetNextIndex(3);mesh.SetNextIndex(0);
             var painter=ctx.painter2D;
+            if(profile.AuthoredMap is ProvingGroundMap){
+                painter.BeginPath();painter.strokeColor=new Color(.97f,.94f,.82f);painter.lineWidth=(float)profile.MinimapCameraStroke;
+                painter.MoveTo(Point(new NavPoint(0,-profile.ArenaHalfExtent)));painter.LineTo(Point(new NavPoint(0,profile.ArenaHalfExtent)));painter.Stroke();
+            }
             foreach(var m in marks)
             {
                 Vector2 p=Point(m.Position);bool unit=m.State==MapMarkState.Unit;
@@ -212,6 +249,7 @@ namespace Spacewars.Presentation
                 painter.BeginPath();painter.MoveTo(at+new Vector2(0,-size*2));painter.LineTo(at+new Vector2(size,-size*1.5f));painter.LineTo(at+new Vector2(0,-size));painter.ClosePath();painter.Fill();
             }
             if(campaignGoals!=null)foreach(var goal in campaignGoals.Where(g=>!g.Complete)){var p=Point(goal.Point);painter.strokeColor=Color.cyan;painter.fillColor=Color.cyan;painter.lineWidth=2;painter.BeginPath();painter.MoveTo(p);painter.LineTo(p+new Vector2(0,-14));painter.LineTo(p+new Vector2(9,-10));painter.LineTo(p+new Vector2(0,-6));painter.Stroke();}
+            foreach(var signal in teamSignals)TeamSignalArtwork.Mark(painter,Point(signal.Point),signal.Kind,(float)profile.TeamSignalMapPixels,(float)signal.Alpha(signalTick,profile),true);
             if(footprint!=null){painter.BeginPath();painter.strokeColor=Color.white;painter.lineWidth=(float)profile.MinimapCameraStroke;for(int i=0;i<footprint.Length;i++){if(i==0)painter.MoveTo(new Vector2(Mathf.Clamp(Point(footprint[i]).x,0,w),Mathf.Clamp(Point(footprint[i]).y,0,h)));else painter.LineTo(new Vector2(Mathf.Clamp(Point(footprint[i]).x,0,w),Mathf.Clamp(Point(footprint[i]).y,0,h)));}painter.ClosePath();painter.Stroke();}
         }
     }

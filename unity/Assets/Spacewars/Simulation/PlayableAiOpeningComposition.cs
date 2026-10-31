@@ -6,7 +6,7 @@ using Spacewars.Simulation.Ai;
 
 namespace Spacewars.Simulation
 {
-    public enum PlayableAiOpening { Safe, GreedySafe, GreedyMine, BlindRush, ExplorerAllIn, DoubleMineExplorerRush }
+    public enum PlayableAiOpening { Safe, GreedySafe, GreedyMine, BlindRush, ExplorerAllIn, DoubleMineExplorerRush, Air }
     public enum PlayableAiOpeningPhase { Active, Complete, Aborted }
 
     [Serializable]
@@ -61,7 +61,7 @@ namespace Spacewars.Simulation
             var ai=aiProfile??AiProfile.Initial;var binding=ProfileBinding(ai);
             if(sourceProfileIdentity!=null&&sourceProfileIdentity!=binding)throw new ArgumentException("Native AI profile identity mismatch.",nameof(sourceProfileIdentity));
             var personalitySeed=AiRandom.Key(matchSeed,ownerId,binding,"personality",0);
-            var weights=AiOpeningCatalog.All.Select(d=>ai.Value(d.WeightPath)*(.5+Random(personalitySeed,"trait:"+d.Id))).ToArray();
+            var weights=AiOpeningCatalog.All.Select(d=>ai.Value(d.WeightPath)).ToArray();
             var pick=Random(personalitySeed,"opening")*weights.Sum();var cursor=0d;var selected=weights.Length-1;
             for(var i=0;i<weights.Length;i++){cursor+=weights[i];if(pick<cursor){selected=i;break;}}
             var definition=forcedOpening.HasValue?AiOpeningCatalog.For(forcedOpening.Value):AiOpeningCatalog.All[selected];

@@ -10,6 +10,10 @@ namespace Spacewars.Runtime
     // paths and local support positions are current detached owner observations.
     public static class AiTacticalExecutor
     {
+#if UNITY_INCLUDE_TESTS
+        // Observation-only audit hook; absent from Player/release, no cache/state effect.
+        internal static Action<PlayableAiObservation,PlayableRouteProof,PlayableProfile,bool> RouteSafetyAuditForQa;
+#endif
         private static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
         private static double SegmentDistance(NavPoint p,NavPoint a,NavPoint b)
         {
@@ -19,16 +23,23 @@ namespace Spacewars.Runtime
         }
         public static bool SafeRoute(PlayableAiObservation o,PlayableRouteProof route,PlayableProfile p)
         {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            QaAiRouteAudit.Observe(o,route,p,false);
+#endif
+#if UNITY_INCLUDE_TESTS
+            RouteSafetyAuditForQa?.Invoke(o,route,p,false);
+#endif
             if(route==null||route.Owner!=o.Owner||route.Generation!=o.Generation||route.Tick!=o.Tick||route.GeometryRevision<=0||route.Path.Count==0||!route.Path.Last().Equals(route.Goal))return false;
             var actor=o.Entities.FirstOrDefault(u=>u.Id==route.UnitId&&u.Owner==o.Owner&&u.Health>0);
             if(actor==null||!actor.Position.Equals(route.Origin)||route.Radius!=PlayableUnitRules.Radius(p,actor.Kind))return false;
             if(route.Kind!=PlayableRouteTargetKind.FriendlyAnchor||!o.Entities.Any(u=>u.Id==route.TargetId&&u.Owner==o.Owner&&u.Health>0&&(u.Position.Equals(route.Target)||u.Id!=route.UnitId&&PlayableUnitRules.FollowGoal(p,u.Position,u.HullHeading).Equals(route.Target)||u.Id==route.UnitId&&u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move&&u.CurrentOrder.Destination.Equals(route.Target)))&&
                 !o.Buildings.Any(b=>b.Id==route.TargetId&&b.Owner==o.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.Position.Equals(route.Target)))return false;
-            return SafePath(o,route.Origin,route.Path,route.Radius,p);
+            return SafePathForUnit(o,route.Origin,route.Path,route.Radius,p,actor.Kind==PlayableEntityKind.Hawk);
         }
-        internal static bool SafePath(PlayableAiObservation o,NavPoint origin,IEnumerable<NavPoint> path,double radius,PlayableProfile p)
+        internal static bool SafePath(PlayableAiObservation o,NavPoint origin,IEnumerable<NavPoint> path,double radius,PlayableProfile p)=>SafePathForUnit(o,origin,path,radius,p,false);
+        internal static bool SafePathForUnit(PlayableAiObservation o,NavPoint origin,IEnumerable<NavPoint> path,double radius,PlayableProfile p,bool airborne)
         {
-            var enemies=o.Entities.Where(u=>o.IsHostile(u.Owner)&&u.Health>0).ToArray();var at=origin;
+            var enemies=o.Entities.Where(u=>o.IsHostile(u.Owner)&&u.Health>0&&AiRosterCatalog.Initial.Targets(u.Kind,airborne?"air":"ground")).ToArray();var at=origin;
             foreach(var point in path)
             {
                 if(o.Vision==null||enemies.Any(e=>SegmentDistance(e.Position,at,point)<=PlayableUnitRules.Range(p,e.Kind,e.Upgraded)+radius+PlayableUnitRules.Radius(p,e.Kind)))return false;
@@ -38,9 +49,10 @@ namespace Spacewars.Runtime
         }
         // A retreat may begin inside an enemy's weapon envelope. It must leave that
         // envelope monotonically, never enter a new one, and finish outside all of them.
-        internal static bool WithdrawalPath(PlayableAiObservation o,NavPoint origin,IEnumerable<NavPoint> path,double radius,PlayableProfile p)
+        internal static bool WithdrawalPath(PlayableAiObservation o,NavPoint origin,IEnumerable<NavPoint> path,double radius,PlayableProfile p)=>WithdrawalPathForUnit(o,origin,path,radius,p,false);
+        internal static bool WithdrawalPathForUnit(PlayableAiObservation o,NavPoint origin,IEnumerable<NavPoint> path,double radius,PlayableProfile p,bool airborne)
         {
-            var enemies=o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0&&o.Vision!=null&&o.Vision.IsVisible(e.Position)&&AiRosterCatalog.Initial.For(e.Kind).targetTags.Contains("ground")).ToArray();
+            var enemies=o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0&&o.Vision!=null&&o.Vision.IsVisible(e.Position)&&AiRosterCatalog.Initial.Targets(e.Kind,airborne?"air":"ground")).ToArray();
             var at=origin;var points=path.ToArray();if(points.Length==0)return false;
             foreach(var point in points)
             {
@@ -59,26 +71,32 @@ namespace Spacewars.Runtime
         }
         public static bool WithdrawalRoute(PlayableAiObservation o,PlayableRouteProof r,PlayableProfile p)
         {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            QaAiRouteAudit.Observe(o,r,p,true);
+#endif
+#if UNITY_INCLUDE_TESTS
+            RouteSafetyAuditForQa?.Invoke(o,r,p,true);
+#endif
             if(r==null||r.Owner!=o.Owner||r.Generation!=o.Generation||r.Tick!=o.Tick||r.GeometryRevision<=0||r.Kind!=PlayableRouteTargetKind.FriendlyAnchor||r.Path.Count==0||!r.Path.Last().Equals(r.Goal))return false;
             var u=o.Entities.FirstOrDefault(e=>e.Id==r.UnitId&&e.Owner==o.Owner&&e.Health>0);
             if(u==null||!u.Position.Equals(r.Origin)||r.Radius!=PlayableUnitRules.Radius(p,u.Kind))return false;
             bool current=r.TargetId==u.Id&&u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move&&u.CurrentOrder.Destination.Equals(r.Target);
             bool home=o.Buildings.Any(b=>b.Id==r.TargetId&&b.Owner==o.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.Position.Equals(r.Target)&&
                 (b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost||b.Kind==PlayableBuildingKind.Factory));
-            return (current||home)&&WithdrawalPath(o,r.Origin,r.Path,r.Radius,p);
+            return (current||home)&&WithdrawalPathForUnit(o,r.Origin,r.Path,r.Radius,p,u.Kind==PlayableEntityKind.Hawk);
         }
         public static PlayableEntitySnapshot[] LocalThreats(PlayableAiObservation o,AiArmyState army,PlayableProfile p)
         {
             var members=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)).ToArray();
-            return o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0&&o.Vision!=null&&o.Vision.IsVisible(e.Position)&&AiRosterCatalog.Initial.For(e.Kind).targetTags.Contains("ground")&&members.Any(u=>
+            return o.Entities.Where(e=>o.IsHostile(e.Owner)&&e.Health>0&&o.Vision!=null&&o.Vision.IsVisible(e.Position)&&members.Any(u=>AiRosterCatalog.Initial.Targets(e.Kind,u.Kind==PlayableEntityKind.Hawk?"air":"ground")&&
                 Distance(u.Position,e.Position)<=Math.Max(PlayableUnitRules.Range(p,e.Kind,e.Upgraded),PlayableUnitRules.Range(p,u.Kind,u.Upgraded))+PlayableUnitRules.Radius(p,u.Kind)+PlayableUnitRules.Radius(p,e.Kind)&&
                 (u.TargetId==e.Id||e.TargetId==u.Id||o.RouteProofs.Any(r=>r.UnitId==u.Id&&r.Kind==PlayableRouteTargetKind.VisibleEnemy&&r.TargetId==e.Id))))
                 .OrderBy(e=>e.Id).ToArray();
         }
-        public static bool Withdraw(PlayableAiObservation o,AiArmyState army,PlayableProfile p,AiProfile ai)
+        public static bool Withdraw(PlayableAiObservation o,AiArmyState army,PlayableProfile p,AiProfile ai,double? threatRatio=null)
         {
             var own=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)).ToArray();
-            return AiDefensePlanner.Force(LocalThreats(o,army,p),p,ai)>AiDefensePlanner.Force(own,p,ai)*ai.Value("armies.retreatThreatRatio");
+            return AiDefensePlanner.Force(LocalThreats(o,army,p),p,ai)>AiDefensePlanner.Force(own,p,ai)*(threatRatio??ai.Value("armies.retreatThreatRatio"));
         }
         internal static bool EffectiveWithdrawal(PlayableAiObservation o,AiArmyState army,PlayableEntitySnapshot u,IEnumerable<PlayableAiTraceRecord> records,PlayableProfile p,bool certified=true)
         {
@@ -89,18 +107,18 @@ namespace Spacewars.Runtime
             if(order!=null&&(order.Owner!=o.Owner||order.Generation!=o.Generation||order.UnitId!=u.Id||order.CommandSequence!=stamp.Sequence||order.IssuedTick!=stamp.Tick))return false;
             var kind=arrived||order.Kind==PlayableTacticalOrderKind.Move?PlayableCommandKind.Move:PlayableCommandKind.Attack;
             if(!arrived&&order.Kind!=PlayableTacticalOrderKind.Move&&order.Kind!=PlayableTacticalOrderKind.Attack||stamp.Kind!=kind)return false;
-            if(!(records??Array.Empty<PlayableAiTraceRecord>()).Any(r=>r.Policy==AiArmyPlanner.Policy&&r.Kind==kind&&r.Status==PlayableAiDeliveryStatus.Applied&&r.RuntimeStatus==PlayableCommandStatus.Applied&&r.OwnerId==o.OwnerId&&r.SourceIdentity==stamp.Source&&r.ActionId==stamp.ActionId&&r.CommandSequence==stamp.Sequence&&r.ApplicationTick==stamp.Tick&&r.ReceiptIdentity?.Generation==o.Generation&&r.ReceiptIdentity.OwnerId==o.OwnerId))return false;
+            if(!(records??Array.Empty<PlayableAiTraceRecord>()).Any(r=>r.Policy==army.TacticalOwner&&r.Kind==kind&&r.Status==PlayableAiDeliveryStatus.Applied&&r.RuntimeStatus==PlayableCommandStatus.Applied&&r.OwnerId==o.OwnerId&&r.SourceIdentity==stamp.Source&&r.ActionId==stamp.ActionId&&r.CommandSequence==stamp.Sequence&&r.ApplicationTick==stamp.Tick&&r.ReceiptIdentity?.Generation==o.Generation&&r.ReceiptIdentity.OwnerId==o.OwnerId))return false;
             if(!certified)return true;
             if(arrived)return o.RouteProofs.Any(r=>r.UnitId==u.Id&&o.Buildings.Any(b=>b.Id==r.TargetId)&&WithdrawalRoute(o,r,p)&&Distance(u.Position,r.Goal)<=p.Navigation.ArrivalTolerance+PlayableUnitRules.Radius(p,u.Kind));
             return kind==PlayableCommandKind.Move?o.RouteProofs.Any(r=>r.UnitId==u.Id&&r.TargetId==u.Id&&r.Target.Equals(order.Destination)&&r.Goal.Equals(order.Destination)&&WithdrawalRoute(o,r,p)):
                 LocalThreats(o,army,p).Any(e=>e.Id==order.TargetId);
         }
-        public static PlayableAiAction Withdrawal(PlayableAiObservation o,AiArmyState army,PlayableProfile p,AiProfile ai,long actionId,bool stalled=false)
+        public static PlayableAiAction Withdrawal(PlayableAiObservation o,AiArmyState army,PlayableProfile p,AiProfile ai,long actionId,bool stalled=false,double? threatRatio=null)
         {
-            if(army.OwnerId!=o.OwnerId||army.TacticalOwner!=AiArmyPlanner.Policy||army.Phase==AiArmyPhase.Disbanded)return null;
-            if(army.Phase==AiArmyPhase.Recovering&&!Withdraw(o,army,p,ai))return null;
+            if(army.OwnerId!=o.OwnerId||!AiArmyPlanner.IsArmyPolicy(army.TacticalOwner)||army.Phase==AiArmyPhase.Disbanded)return null;
+            if(army.Phase==AiArmyPhase.Recovering&&!Withdraw(o,army,p,ai,threatRatio))return null;
             bool active=army.Phase==AiArmyPhase.Retreating||army.Phase==AiArmyPhase.Recovering;
-            if(!active&&!stalled&&!Withdraw(o,army,p,ai))return null;
+            if(!active&&!stalled&&!Withdraw(o,army,p,ai,threatRatio))return null;
             var members=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)).OrderBy(u=>u.Id).ToArray();
             foreach(var u in members)
             {
@@ -117,7 +135,7 @@ namespace Spacewars.Runtime
             }
             return null;
         }
-        private static PlayableEntitySnapshot[] Core(PlayableAiObservation o,AiArmyState army)=>o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)&&AiRosterCatalog.Initial.For(u.Kind).lineWeight>0).OrderBy(u=>u.Id).ToArray();
+        private static PlayableEntitySnapshot[] Core(PlayableAiObservation o,AiArmyState army)=>o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)&&AiRosterCatalog.Initial.LineWeight(u.Kind)>0).OrderBy(u=>u.Id).ToArray();
         internal static bool IsCurrentAppliedDefenseAssemblyOrder(PlayableAiObservation o,PlayableEntitySnapshot unit,IEnumerable<PlayableAiTraceRecord> records)
         {
             var order=unit?.CurrentOrder;var stamp=unit?.OrderStamp;
@@ -131,19 +149,19 @@ namespace Spacewars.Runtime
         }
         public static void Observe(PlayableAiObservation o,AiArmyRegistry registry,long armyId,PlayableProfile p,IEnumerable<int> unavailable=null,string tacticalOwner=AiArmyPlanner.Policy,IEnumerable<PlayableAiTraceRecord> records=null)
         {
-            var army=registry.Capture().Armies.FirstOrDefault(a=>a.Id==armyId&&a.TacticalOwner==tacticalOwner&&a.Phase!=AiArmyPhase.Disbanded);
+            var army=registry.CaptureArmy(armyId).FirstOrDefault(a=>a.Id==armyId&&a.TacticalOwner==tacticalOwner&&a.Phase!=AiArmyPhase.Disbanded);
             if(army==null)return;
             var excluded=new HashSet<int>(unavailable??Array.Empty<int>());
             bool Eligible(PlayableEntitySnapshot u)=>u.Owner==o.Owner&&u.Health>0&&registry.ArmyFor(u.Id)==0&&!excluded.Contains(u.Id)&&
-                AiRosterCatalog.Initial.For(u.Kind).lineWeight+AiRosterCatalog.Initial.For(u.Kind).supportWeight>0;
+                AiRosterCatalog.Initial.LineWeight(u.Kind)+AiRosterCatalog.Initial.SupportWeight(u.Kind)>0;
             var core=Core(o,army);
             var free=o.Entities.Where(u=>Eligible(u)&&(tacticalOwner!=AiDefensePlanner.Policy||!u.Held&&u.CurrentOrder==null&&u.Queue==null&&u.NavigationOutcome==NavigationOutcome.Idle&&
                 core.Any(c=>o.RouteProofs.Any(r=>r.UnitId==u.Id&&r.Kind==PlayableRouteTargetKind.FriendlyAnchor&&r.TargetId==c.Id&&SafeRoute(o,r,p))))).Select(u=>u.Id).ToArray();
             if(free.Length>0)registry.TryReinforce(o,army.Id,army.TacticalOwner,free);
-            army=registry.Capture().Armies.Single(a=>a.Id==armyId);
+            army=registry.CaptureArmy(armyId).Single(a=>a.Id==armyId);
             // Arrival uses the existing follow spacing/tolerance, not a new AI balance value.
             var joined=Ready(o,army,p).Where(u=>tacticalOwner==AiDefensePlanner.Policy?
-                AiRosterCatalog.Initial.For(u.Kind).lineWeight>0&&DefenseAssemblyApplied(o,army,u,p,records):AiRosterCatalog.Initial.For(u.Kind).supportWeight>0).Select(u=>u.Id);
+                AiRosterCatalog.Initial.LineWeight(u.Kind)>0&&DefenseAssemblyApplied(o,army,u,p,records):AiRosterCatalog.Initial.SupportWeight(u.Kind)>0).Select(u=>u.Id);
             registry.JoinReinforcements(armyId,army.TacticalOwner,joined);
         }
         private static bool DefenseAssemblyApplied(PlayableAiObservation o,AiArmyState army,PlayableEntitySnapshot unit,PlayableProfile p,IEnumerable<PlayableAiTraceRecord> records)
@@ -154,7 +172,7 @@ namespace Spacewars.Runtime
                 stamp.Source!=PlayableAiOpeningComposition.SourceIdentity||stamp.ActionId<=0||stamp.JobId!=stamp.ActionId||order.Generation!=o.Generation||
                 order.Owner!=o.Owner||order.UnitId!=unit.Id||order.CommandSequence!=stamp.Sequence||order.IssuedTick!=stamp.Tick)return false;
             var leader=o.Entities.FirstOrDefault(c=>c.Id==order.TargetId&&c.Id!=unit.Id&&c.Owner==o.Owner&&c.Health>0&&army.Members.Contains(c.Id)&&
-                !army.Reinforcements.Contains(c.Id)&&AiRosterCatalog.Initial.For(c.Kind).lineWeight>0);
+                !army.Reinforcements.Contains(c.Id)&&AiRosterCatalog.Initial.LineWeight(c.Kind)>0);
             return leader!=null&&(records??Array.Empty<PlayableAiTraceRecord>()).Any(r=>r.Policy==AiDefensePlanner.Policy&&r.Kind==PlayableCommandKind.Follow&&
                 r.Status==PlayableAiDeliveryStatus.Applied&&r.RuntimeStatus==PlayableCommandStatus.Applied&&r.OwnerId==o.OwnerId&&r.SourceIdentity==stamp.Source&&
                 r.ActionId==stamp.ActionId&&r.CommandSequence==stamp.Sequence&&r.ApplicationTick==stamp.Tick&&r.ApplicationTick<=o.Tick&&
@@ -164,8 +182,10 @@ namespace Spacewars.Runtime
         }
         public static PlayableEntitySnapshot[] Ready(PlayableAiObservation o,AiArmyState army,PlayableProfile p)
         {
-            var core=Core(o,army);
-            return o.Entities.Where(u=>army.Reinforcements.Contains(u.Id)&&core.Any(c=>
+            // Membership only: preserve entity order, duplicates and every route predicate.
+            var entities=o.Entities;var members=new HashSet<int>(army.Members);var reinforcements=new HashSet<int>(army.Reinforcements);
+            var core=entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&members.Contains(u.Id)&&!reinforcements.Contains(u.Id)&&AiRosterCatalog.Initial.LineWeight(u.Kind)>0).OrderBy(u=>u.Id).ToArray();
+            return entities.Where(u=>reinforcements.Contains(u.Id)&&core.Any(c=>
                 Distance(u.Position,c.Position)<=p.FollowDistance+p.FollowArrivalTolerance+PlayableUnitRules.Radius(p,u.Kind)+PlayableUnitRules.Radius(p,c.Kind)&&
                 o.RouteProofs.Any(r=>r.UnitId==u.Id&&r.Kind==PlayableRouteTargetKind.FriendlyAnchor&&r.TargetId==c.Id&&SafeRoute(o,r,p)&&
                     RouteLength(r)<=p.FollowDistance+p.FollowArrivalTolerance+PlayableUnitRules.Radius(p,u.Kind)+PlayableUnitRules.Radius(p,c.Kind)))).ToArray();
@@ -174,7 +194,7 @@ namespace Spacewars.Runtime
         // attack, so it establishes the same proven assembly through ordinary Follow.
         internal static PlayableAiAction RecoveryAssembly(PlayableAiObservation o,AiArmyState army,PlayableProfile p,long actionId,long repeat,IEnumerable<PlayableAiTraceRecord> records)
         {
-            if(army.OwnerId!=o.OwnerId||army.TacticalOwner!=AiArmyPlanner.Policy||army.Phase!=AiArmyPhase.Recovering)return null;
+            if(army.OwnerId!=o.OwnerId||!AiArmyPlanner.IsArmyPolicy(army.TacticalOwner)||army.Phase!=AiArmyPhase.Recovering)return null;
             var core=Core(o,army);
             foreach(var unit in o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&army.Members.Contains(u.Id)&&army.Reinforcements.Contains(u.Id)).OrderBy(u=>u.Id))
             {
@@ -192,7 +212,7 @@ namespace Spacewars.Runtime
         // still needs correction. Finish the accepted gather leg before line promotion.
         internal static PlayableAiAction ArrivalAssembly(PlayableAiObservation o,AiArmyState army,PlayableProfile p,long actionId,IEnumerable<PlayableAiTraceRecord> records=null)
         {
-            if(army.OwnerId!=o.OwnerId||army.TacticalOwner!=AiArmyPlanner.Policy||
+            if(army.OwnerId!=o.OwnerId||!AiArmyPlanner.IsArmyPolicy(army.TacticalOwner)||
                 army.Phase!=AiArmyPhase.Advancing&&army.Phase!=AiArmyPhase.Engaging)return null;
             var core=Core(o,army);
             var applied=(records??Array.Empty<PlayableAiTraceRecord>()).ToArray();
@@ -271,7 +291,7 @@ namespace Spacewars.Runtime
                 return Action(PlayableCommandKind.Move,wave,route.Goal);
             }
             if(assemblyOnly)return null;
-            foreach(var gun in o.Entities.Where(u=>army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)&&AiRosterCatalog.Initial.For(u.Kind).supportWeight>0).OrderBy(u=>u.Id))
+            foreach(var gun in o.Entities.Where(u=>army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)&&AiRosterCatalog.Initial.SupportWeight(u.Kind)>0).OrderBy(u=>u.Id))
             {
                 var fact=o.ArtillerySupport.FirstOrDefault(f=>f.UnitId==gun.Id&&f.Generation==o.Generation&&f.Tick==o.Tick);
                 if(fact==null)continue;
@@ -298,12 +318,14 @@ namespace Spacewars.Runtime
         {
             if(state==null||state.Generation!=generation)return Array.Empty<PlayableRouteRequest>();
             var own=entities.Where(u=>u.Owner==owner&&u.Health>0).ToArray();
-            var army=state.Armies.FirstOrDefault(a=>a.TacticalOwner==AiDefensePlanner.Policy&&a.Phase!=AiArmyPhase.Disbanded)??
-                state.Armies.FirstOrDefault(a=>a.TacticalOwner==AiArmyPlanner.Policy&&a.Phase!=AiArmyPhase.Disbanded);
-            if(army==null)return Array.Empty<PlayableRouteRequest>();
-            var core=own.Where(u=>army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)&&AiRosterCatalog.Initial.For(u.Kind).lineWeight>0).ToArray();
+            var active=state.Armies.Where(a=>a.Phase!=AiArmyPhase.Disbanded&&(a.TacticalOwner==AiDefensePlanner.Policy||AiArmyPlanner.IsArmyPolicy(a.TacticalOwner))).ToArray();
+            return active.SelectMany(army=>ArmyRouteRequests(own,buildings,state,army,owner,generation,tick,p)).ToArray();
+        }
+        private static PlayableRouteRequest[] ArmyRouteRequests(PlayableEntitySnapshot[] own,IEnumerable<PlayableBuildingSnapshot> buildings,AiArmyRegistryState state,AiArmyState army,PlayableOwner owner,long generation,long tick,PlayableProfile p)
+        {
+            var core=own.Where(u=>army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)&&AiRosterCatalog.Initial.LineWeight(u.Kind)>0).ToArray();
             var assigned=new HashSet<int>(state.Armies.SelectMany(a=>a.Members));
-            return own.Where(u=>(army.Members.Contains(u.Id)||!assigned.Contains(u.Id))&&AiRosterCatalog.Initial.For(u.Kind).lineWeight+AiRosterCatalog.Initial.For(u.Kind).supportWeight>0)
+            return own.Where(u=>(army.Members.Contains(u.Id)||!assigned.Contains(u.Id))&&AiRosterCatalog.Initial.LineWeight(u.Kind)+AiRosterCatalog.Initial.SupportWeight(u.Kind)>0)
                 .OrderBy(u=>u.Id).SelectMany(u=>(army.Reinforcements.Contains(u.Id)||!assigned.Contains(u.Id)?core.OrderBy(c=>c.Id).SelectMany(c=>new[]{new PlayableRouteRequest(u.Id,PlayableRouteTargetKind.FriendlyAnchor,c.Id,generation,tick,u.Position,PlayableUnitRules.Radius(p,u.Kind),c.Position),new PlayableRouteRequest(u.Id,PlayableRouteTargetKind.FriendlyAnchor,c.Id,generation,tick,u.Position,PlayableUnitRules.Radius(p,u.Kind),PlayableUnitRules.FollowGoal(p,c.Position,c.HullHeading))}):Enumerable.Empty<PlayableRouteRequest>())
                     .Concat(buildings.Where(b=>b.Owner==owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&(b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost||b.Kind==PlayableBuildingKind.Factory)).OrderBy(b=>b.Id)
                         .Select(b=>new PlayableRouteRequest(u.Id,PlayableRouteTargetKind.FriendlyAnchor,b.Id,generation,tick,u.Position,PlayableUnitRules.Radius(p,u.Kind),b.Position)))
@@ -315,18 +337,18 @@ namespace Spacewars.Runtime
         {
             if(state==null||state.Generation!=generation)return Array.Empty<PlayableRouteRequest>();
             var own=entities.Where(u=>u.Owner==owner&&u.Health>0).ToArray();var requests=new List<PlayableRouteRequest>();
-            foreach(var army in state.Armies.Where(a=>a.Phase!=AiArmyPhase.Disbanded&&(a.TacticalOwner==AiArmyPlanner.Policy||a.TacticalOwner==AiDefensePlanner.Policy)))
+            foreach(var army in state.Armies.Where(a=>a.Phase!=AiArmyPhase.Disbanded&&(AiArmyPlanner.IsArmyPolicy(a.TacticalOwner)||a.TacticalOwner==AiDefensePlanner.Policy)))
             foreach(var unit in own.Where(u=>army.Reinforcements.Contains(u.Id)&&army.Members.Contains(u.Id)&&u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Follow))
             {
                 var order=unit.CurrentOrder;var stamp=unit.OrderStamp;
                 if(stamp==null||stamp.UnitId!=unit.Id||stamp.Owner!=owner||stamp.Generation!=generation||stamp.Origin!=PlayableOrderOrigin.Ai||stamp.Kind!=PlayableCommandKind.Follow||
                     stamp.Source!=PlayableAiOpeningComposition.SourceIdentity||stamp.ActionId<=0||stamp.JobId!=stamp.ActionId||order.Owner!=owner||order.Generation!=generation||order.UnitId!=unit.Id||
                     order.CommandSequence!=stamp.Sequence||order.IssuedTick!=stamp.Tick||stamp.Tick>tick)continue;
-                var leader=own.FirstOrDefault(c=>c.Id==order.TargetId&&c.Id!=unit.Id&&army.Members.Contains(c.Id)&&!army.Reinforcements.Contains(c.Id)&&AiRosterCatalog.Initial.For(c.Kind).lineWeight>0);
+                var leader=own.FirstOrDefault(c=>c.Id==order.TargetId&&c.Id!=unit.Id&&army.Members.Contains(c.Id)&&!army.Reinforcements.Contains(c.Id)&&AiRosterCatalog.Initial.LineWeight(c.Kind)>0);
                 if(leader==null)continue;
                 requests.Add(new PlayableRouteRequest(unit.Id,PlayableRouteTargetKind.FriendlyAnchor,leader.Id,generation,tick,unit.Position,PlayableUnitRules.Radius(p,unit.Kind),PlayableUnitRules.FollowGoal(p,leader.Position,leader.HullHeading)));
             }
-            foreach(var army in state.Armies.Where(a=>a.Phase==AiArmyPhase.Retreating&&a.TacticalOwner==AiArmyPlanner.Policy))
+            foreach(var army in state.Armies.Where(a=>a.Phase==AiArmyPhase.Retreating&&AiArmyPlanner.IsArmyPolicy(a.TacticalOwner)))
             foreach(var unit in own.Where(u=>army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)&&u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move))
             {
                 var order=unit.CurrentOrder;var stamp=unit.OrderStamp;

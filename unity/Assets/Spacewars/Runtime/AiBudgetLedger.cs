@@ -211,6 +211,32 @@ namespace Spacewars.Runtime
                 state.Unpaid.Concat(state.Paid).Any(x=>x.Receipt.DecisionOrdinal>state.AdmittedDecision||x.Receipt.DecisionOrdinal==state.AdmittedDecision&&x.Receipt.ActionOrdinal>state.AdmittedAction))throw new ArgumentException("Overlapping budget state.");
             return ledger;
         }
+        // Review owns a detached ledger. Only deferred gameplay payments may change
+        // the authority ledger while that review is in flight; never replay those
+        // payments against the clone (repair totals depend on the exact stream).
+        internal static bool TryMergeReview(AiBudgetState initial,AiBudgetState planned,AiBudgetState current,long tick,out AiBudgetLedger merged)
+        {
+            merged=null;
+            bool SameEntries(IEnumerable<AiBudgetEntry> a,IEnumerable<AiBudgetEntry> b){var aa=a.OrderBy(x=>x.Id,StringComparer.Ordinal).ToArray();var bb=b.OrderBy(x=>x.Id,StringComparer.Ordinal).ToArray();return aa.Length==bb.Length&&aa.Zip(bb,Same).All(x=>x);}
+            if(initial==null||planned==null||current==null||
+                initial.OwnerId!=planned.OwnerId||initial.OwnerId!=current.OwnerId||initial.Generation!=planned.Generation||initial.Generation!=current.Generation||
+                initial.ReservationLifetimeTicks!=planned.ReservationLifetimeTicks||initial.ReservationLifetimeTicks!=current.ReservationLifetimeTicks||
+                initial.AdmittedDecision!=current.AdmittedDecision||initial.AdmittedAction!=current.AdmittedAction||initial.SafetyReserve!=current.SafetyReserve||
+                !SameEntries(initial.Reserved,current.Reserved)||!SameEntries(initial.Unpaid.Where(x=>!x.AwaitingPayment),current.Unpaid.Where(x=>!x.AwaitingPayment))||
+                !SameEntries(initial.Unpaid.Where(x=>x.AwaitingPayment),planned.Unpaid.Where(x=>x.AwaitingPayment))||
+                !SameEntries(initial.Paid,planned.Paid)||initial.PaidTotal!=planned.PaidTotal||initial.RepairPaidTotal!=planned.RepairPaidTotal)return false;
+            // Authority can settle/remove an existing invoice, never add one here.
+            if(current.Unpaid.Where(x=>x.AwaitingPayment).Any(x=>!initial.Unpaid.Any(b=>b.AwaitingPayment&&b.Id==x.Id&&b.Receipt.Id==x.Receipt.Id)))return false;
+            var unpaid=planned.Unpaid.Where(x=>!x.AwaitingPayment).Concat(current.Unpaid.Where(x=>x.AwaitingPayment)).ToArray();
+            long committed=planned.Reserved.Sum(x=>(long)x.Amount)+unpaid.Sum(x=>(long)x.Amount);
+            long existing=current.Reserved.Sum(x=>(long)x.Amount)+current.Unpaid.Sum(x=>(long)x.Amount);
+            // Existing unfunded invoices remain legal; a stale review cannot add
+            // commitments beyond either those invoices or the current bank.
+            if(committed>Math.Max(existing,Math.Max(0,(long)current.Liquid-planned.SafetyReserve)))return false;
+            merged=Restore(new AiBudgetState(current.OwnerId,current.Generation,current.Liquid,planned.SafetyReserve,current.PaidTotal,
+                planned.Reserved,unpaid,current.Paid,current.ReservationLifetimeTicks,planned.AdmittedDecision,planned.AdmittedAction,current.RepairPaidTotal),tick);
+            return true;
+        }
         private void ValidateEntry(AiBudgetEntry entry,bool accepted)
         {
             if(entry==null||entry.ExactSettled>0&&entry.Action.Kind!=PlayableCommandKind.StartBuildingRepair||entry.Action.PlayerId!=OwnerId||entry.Action.Generation!=Generation||

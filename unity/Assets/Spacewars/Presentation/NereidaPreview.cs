@@ -6,7 +6,7 @@ using UnityEngine;
 namespace Spacewars.Presentation
 {
     // Inspection geometry, deliberately independent from live match actors/selection.
-    public sealed class NereidaPreview : MonoBehaviour
+    public sealed partial class NereidaPreview : MonoBehaviour
     {
         public NereidaMap Map { get; private set; }
         private readonly List<UnityEngine.Object> owned = new List<UnityEngine.Object>();
@@ -21,6 +21,9 @@ namespace Spacewars.Presentation
             if(Map!=null)throw new InvalidOperationException("Create a fresh preview for each profile.");
             Map=new NereidaMap(data);
             Art=NereidaArtProfile.Load();
+            string cacheKey=PreparedMapCache.Key(Map,null,new{data=JsonUtility.ToJson(data),art=JsonUtility.ToJson(Art)});bool cacheEligible=transform.childCount==0;
+            if(cacheEligible&&TryPrepared(cacheKey))return;
+            if(cacheEligible)PreparedMapCache.PrimeResources("Preview-Nereida");
             iceMaterial=Art.Material("Environment/NaturalFrontier/Rock",new Vector3(.13677501f,.13289979f,.14225178f),0);
             snowMaterial=Art.Material("Environment/NaturalFrontier/Concrete",new Vector3(.38497328f,.37142344f,.37949659f),1);
             rockMaterial=Art.Material("Environment/NaturalFrontier/Rock",new Vector3(.13677501f,.13289979f,.14225178f),2);
@@ -65,6 +68,14 @@ namespace Spacewars.Presentation
                 Label(prefix+number,site.Position,height+.4,color);
                 foreach(var slot in site.Slots)Disc("Factory reserve "+site.Id+"/"+slot.Id,slot.Position,height+.22,profile.FactoryFootprintRadius,new Color(.41f,.51f,.54f));
             }
+            var detailCatalog=Resources.Load<ModelDetailCatalog>("ModelDetail/Nereida");
+            if(detailCatalog)foreach(var filter in GetComponentsInChildren<MeshFilter>(true)){
+                if(!ModelDetailCatalog.IsModeled("Nereida",filter.name))continue;var row=detailCatalog.Find(filter.sharedMesh);if(row==null)continue;
+                var renderer=filter.GetComponent<MeshRenderer>();var detail=filter.gameObject.AddComponent<ModelDetailLod>();
+                detail.Configure(new Renderer[]{renderer},new[]{filter.sharedMesh},new[]{row.normal},new[]{row.far},filter.sharedMesh.bounds);
+                detail.ConfigureSelectionBounds(row.compactBounds);detail.MarkCatalogBound();filter.gameObject.AddComponent<ModelDetailCameraBinding>().Bind(detail);
+            }
+            if(cacheEligible)SavePrepared(cacheKey);
         }
         private void BuildStationComposition(int q)
         {
@@ -162,7 +173,7 @@ namespace Spacewars.Presentation
         }
         private void Prism(string name,NavObstacle shape,double bottom,double top,Color color,Func<NavPoint,double> height=null)
         {
-            var mesh=TerrainMesh.Prism(shape,bottom,top,height);owned.Add(mesh);
+            var mesh=TerrainMesh.Prism(shape,bottom,top,height);FinalProceduralMesh.IndexOwned(mesh);owned.Add(mesh);
             var obj=new GameObject(name);obj.transform.SetParent(transform,false);obj.AddComponent<MeshFilter>().sharedMesh=mesh;
             var r=obj.AddComponent<MeshRenderer>();Paint(r,color);
             if(name=="Open water (not traversable)")r.sharedMaterial=waterMaterial;
@@ -200,6 +211,6 @@ namespace Spacewars.Presentation
             var obj=new GameObject(text);obj.transform.SetParent(transform,false);obj.transform.localPosition=new Vector3((float)p.X,(float)y,(float)p.Z);obj.transform.localRotation=Quaternion.Euler(90,0,0);
             var label=obj.AddComponent<TextMesh>();label.text=text;label.anchor=TextAnchor.MiddleCenter;label.alignment=TextAlignment.Center;label.fontSize=64;label.characterSize=.8f;label.color=color;
         }
-        private void OnDestroy(){foreach(var obj in owned)if(obj)DestroyImmediate(obj);owned.Clear();}
+        private void OnDestroy(){prepared?.Dispose();foreach(var obj in owned)if(obj)DestroyImmediate(obj);owned.Clear();}
     }
 }

@@ -55,7 +55,7 @@ namespace Spacewars.Runtime
                 var a=Action(o,PlayableCommandKind.StartBuildingRepair,b.Id);
                 // Useful healthy buildings remain diagnostic rejects, not actionable spam.
                 result.Add(new AiEconomyCandidate("infrastructure",a,AiEconomyAdmission.Reject(o,p,a),
-                    (double)b.Health/TerritoryRules.Health(p,b.Kind)<=ai.Value("economy.repairPriorityHealthRatio")?1:0));
+                    (double)b.Health/TerritoryRules.MaximumHealth(p,b)<=ai.Value("economy.repairPriorityHealthRatio")?1:0));
             }
             if(site!=0)
             {

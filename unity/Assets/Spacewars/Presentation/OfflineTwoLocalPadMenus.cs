@@ -18,7 +18,7 @@ namespace Spacewars.Presentation
             }
             v.GroupSlots=null;
             if(gestures.Mode=="baseWheel"){
-                var bases=PadBases(v);var sectors=OfflinePadGroups.Bases(bases,v.OriginalHq,v.BasePage,(int)padProfile.basePageSize,out pages);
+                var bases=PadBases(v);var sectors=OfflinePadGroups.Bases(bases,v.OriginalHq,0,Math.Max(1,bases.Length),out pages);
                 return sectors.Select(a=>{var point=bases.FirstOrDefault(b=>b.Id.ToString()==a.Id);return new OfflinePadAction(a.Id,a.Id==v.OriginalHq.ToString()||a.Id=="original-hq"?"Первый штаб":OfflinePadWorldActions.Name(v.View.Buildings.First(b=>b.Id==point.Id).Kind),a.Enabled,a.Enabled?"Перейти камерой":"Штаб уничтожен"){Point=a.Enabled?new NavPoint(point.X,point.Z):(NavPoint?)null};}).ToArray();
             }
             if(gestures.Mode=="buildingWheel")return v.Anchor!=0?OfflinePadWorldActions.Building(v.View,profile,v.Anchor):OfflinePadWorldActions.Build(v.View,profile,v.Site,v.Slot);

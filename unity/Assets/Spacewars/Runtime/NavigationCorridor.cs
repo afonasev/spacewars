@@ -32,6 +32,7 @@ namespace Spacewars.Runtime
     public sealed class NavCorridorDescriptor
     {
         private readonly NavCorridorLeg[] legs;
+        internal NavRecastMemberPlan RecastPlan;
         public const int CurrentVersion=1;
         public NavCorridorDescriptor(int version,string graphKey,string providerBinding,string profileBinding,
             string surfaceProviderId,string holdBinding,int topologyRevision,double radius,double gridCell,NavRouteProvenance provenance,
@@ -77,6 +78,11 @@ namespace Spacewars.Runtime
             });
             EstimatedRetainedBytes=checked(1024L+256L*legs.Length+
                 2L*(SurfaceProviderId.Length+(HoldBinding?.Length??0)+legs.Sum(x=>(long)(x.PortalId?.Length??0)+x.From.SurfaceId.Length+x.To.SurfaceId.Length)));
+        }
+        public object CopyRecastDecisionEvidence()
+        {
+            var p=RecastPlan;if(p==null)return null;var s=p.Spine;
+            return new{Version=2,p.Join,p.Exit,p.OriginLegs,p.TerminalLeg,s.World,s.Group,s.Order,s.Command,s.Radius,s.GeometryRevision,s.Binding,s.MapBinding,s.ProviderBinding,s.KnowledgeBinding,MemberGraph=p.GraphBinding,MemberProfile=p.ProfileBinding,s.FanCenter,s.FanRadius,s.FanNode,SpineLegs=s.Legs.Select(l=>new{l.From,l.To,l.Kind,l.PortalId,l.Cost}).ToArray()};
         }
         public int Version{get;} public string GraphKey{get;} public string ProviderBinding{get;}
         public string ProfileBinding{get;} public string SurfaceProviderId{get;} public string HoldBinding{get;}

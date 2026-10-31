@@ -17,7 +17,7 @@ namespace Spacewars.Presentation
             if(!spectator&&view!=null)
             foreach(var building in view.Buildings)
             {
-                if(!selected.Contains(building.Id)||building.Owner!=view.Owner||building.Health<=0||
+                if(!PlayableMenuDescriptions.RallyProducer(building.Kind)||!selected.Contains(building.Id)||building.Owner!=view.Owner||building.Health<=0||
                    building.Phase!=ConstructionPhase.Ready||building.PrivateState?.HasRally!=true||
                    building.PrivateState.Lifecycle?.Selling==true)continue;
                 visible.Add(building.Id);

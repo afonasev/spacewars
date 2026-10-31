@@ -10,13 +10,20 @@ namespace Spacewars.Runtime
         {internal PlayableSoundEvent Event;internal int Mask;internal PlayableOwner? SubjectOwner;}
         private readonly Queue<ObservedSound> soundJournal=new Queue<ObservedSound>();
         private long nextSoundEvent;
-        private void Sound(PlayableSoundKind kind,NavPoint position,PlayableEntityKind weapon,PlayableOwner? subjectOwner=null,bool building=false,int unitId=0,double hullHeading=0,double altitude=0)
+        private void Sound(PlayableSoundKind kind,NavPoint position,PlayableEntityKind weapon,PlayableOwner? subjectOwner=null,bool building=false,int unitId=0,double hullHeading=0,double altitude=0,int shotSide=-1,NavPoint? notificationPoint=null)
         {
-            PublishSound(new PlayableSoundEvent(++nextSoundEvent,Tick,kind,position,weapon,building,unitId,hullHeading,altitude:altitude,owner:subjectOwner),subjectOwner);
+            if(subjectOwner.HasValue){
+                if(kind==PlayableSoundKind.ConstructionComplete)MatchEvent(MatchEventKind.BuildingCompleted,subjectOwner.Value,position);
+                else if(kind==PlayableSoundKind.ProductionComplete)MatchEvent(MatchEventKind.UnitReady,subjectOwner.Value,notificationPoint??position);
+                else if(kind==PlayableSoundKind.ResearchComplete)MatchEvent(MatchEventKind.ResearchCompleted,subjectOwner.Value,position);
+            }
+            PublishSound(new PlayableSoundEvent(++nextSoundEvent,Tick,kind,position,weapon,building,unitId,hullHeading,altitude:altitude,owner:subjectOwner,shotSide:shotSide),subjectOwner);
         }
         private void DirectImpactSound(Projectile projectile,int targetId,NavPoint position,bool building=false)
+            =>DirectImpactSoundAt(projectile,targetId,position,building,null);
+        private void DirectImpactSoundAt(Projectile projectile,int targetId,NavPoint position,bool building,BallisticPoint? physicalPoint)
         {
-            var contact=new PlayableDirectContact(projectile.Id,targetId,new BallisticPoint(projectile.Position.X,projectile.Height,projectile.Position.Z));
+            var contact=new PlayableDirectContact(projectile.Id,targetId,new BallisticPoint(projectile.Position.X,projectile.Height,projectile.Position.Z),physicalPoint);
             PublishSound(new PlayableSoundEvent(++nextSoundEvent,Tick,PlayableSoundKind.Impact,position,projectile.Kind,building,contact:contact),null);
         }
         private void PublishSound(PlayableSoundEvent fact,PlayableOwner? subjectOwner)

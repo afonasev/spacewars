@@ -47,11 +47,18 @@ public sealed class PersistentConstructionApronTests
     {
         var pad=Pad(b.SiteId+":"+b.SlotId);var bounds=pad.GetComponentInChildren<MeshFilter>().sharedMesh.bounds;var actor=world.Actors[b.Id];var art=EnvironmentArtProfile.Load();float margin=art.apronMargin+(b.Kind==PlayableBuildingKind.Outpost?art.outpostApronMargin:0);
         Assert.Less(Quaternion.Angle(pad.rotation,actor.Hull.rotation),.001f);
-        var foundation=actor.Hull.GetComponentsInChildren<Renderer>().Where(r=>r.name.EndsWith(":foundation-concrete",StringComparison.Ordinal)).ToArray();Assert.AreEqual(1,foundation.Length);var half=Vector2.zero;
+        // Replacement display meshes have different node names (the armored factory has no
+        // separate concrete mesh). The retained StyleA prefab is the approved support datum.
+        string key=b.Kind==PlayableBuildingKind.ScientificCenter?"scientificCenter":b.Kind==PlayableBuildingKind.Refinery&&b.RefineryUpgraded?"refineryUpgraded":b.Kind.ToString().ToLowerInvariant();
+        var calibration=Resources.Load<GameObject>("StyleA/"+key);Assert.NotNull(calibration,key+" support calibration");
+        var foundation=calibration.GetComponentsInChildren<Renderer>(true).Where(r=>r.name.EndsWith(":foundation-concrete",StringComparison.Ordinal)).ToArray();Assert.AreEqual(1,foundation.Length,key+" calibrated lower platform");var half=Vector2.zero;
         foreach(var renderer in foundation)for(int i=0;i<8;i++)
         {
             var bb=renderer.localBounds;var corner=bb.center+Vector3.Scale(bb.extents,new Vector3((i&1)==0?-1:1,(i&2)==0?-1:1,(i&4)==0?-1:1));
-            var p=pad.InverseTransformPoint(renderer.transform.TransformPoint(corner));
+            // Measure the independent calibration geometry in the live actor's scale/pose,
+            // rather than deriving an expected size from the pad or its production helper.
+            var modelCorner=calibration.transform.InverseTransformPoint(renderer.transform.TransformPoint(corner));
+            var p=pad.InverseTransformPoint(actor.Hull.TransformPoint(modelCorner));
             half=Vector2.Max(half,new Vector2(Mathf.Abs(p.x),Mathf.Abs(p.z)));
         }
         Assert.AreEqual(half.x+margin,bounds.extents.x,.001f,b.Kind+" exact lower-platform width");
@@ -65,7 +72,7 @@ public sealed class PersistentConstructionApronTests
         var view=SceneView(true);world.RenderSites(view,camera);Actors(view);foreach(var b in view.Buildings)Fits(b);
         var refinery=view.Buildings.Single(b=>b.Kind==PlayableBuildingKind.Refinery);var original=Pad("100:2");
         var upgraded=SceneView(true,true);world.UpdateRefineryModel(world.Actors[refinery.Id],upgraded.Buildings.Single(b=>b.Kind==PlayableBuildingKind.Refinery),30);world.RenderSites(upgraded,camera);
-        world.FaceBuilding(world.Actors[refinery.Id],camera);Fits(refinery);Assert.AreSame(original,Pad("100:2"));
+        world.FaceBuilding(world.Actors[refinery.Id],camera);Fits(upgraded.Buildings.Single(b=>b.Id==refinery.Id));Assert.AreSame(original,Pad("100:2"));
         Assert.AreEqual(EnvironmentArtProfile.Load().apronHeight,world.Actors[refinery.Id].Root.position.y,.0001f);
     }
     [UnityTest] public IEnumerator PausedCameraTurnKeepsApronsSquareAndRebindRecalculatesModelEnvelope()

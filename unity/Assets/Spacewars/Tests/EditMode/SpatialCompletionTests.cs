@@ -107,6 +107,14 @@ namespace Spacewars.Tests.EditMode
             int id=Spawn(-12,-12);Send(id,new NavPoint(-10,-12));Arrive(id);Call("Damage",id,10000);Assert.Null(Receipt(id));Restore(Save());Assert.Null(Receipt(id));
             domain=Activator.CreateInstance(D,F,null,new object[]{PlayableProfile.Default,2L,false},null);nav=(NavigationSession)D.GetProperty("Navigation",F).GetValue(domain);Assert.Null(Receipt(id));
         }
+        [Test] public void CompletedReceiptThenInternalEndpointReplacementRevokesCacheAndRestores()
+        {
+            actualHost=new UnityHostRouteService();int id=Spawn(-12,-12);Send(id,new NavPoint(-10,-12));Arrive(id);var receipt=Receipt(id);Assert.NotNull(receipt);
+            Assert.True(nav.Move(id,new NavPoint(-8,-12)),"Real internal navigation replacement without a new domain tactical order");
+            var own=(PlayableSnapshot)Call("PlayerSnapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,19092026,PlayableOwner.Player);
+            Assert.AreEqual(receipt.Order.Sequence,own.Entities.Single(e=>e.Id==id).OrderStamp.Sequence);Assert.AreEqual(receipt.OriginalTarget,nav.GroupFor(id).OriginalGoal);Assert.AreNotEqual(receipt.AssignedLocation,nav.GroupFor(id).Members.Single(m=>m.Entity==id).GoalLocation);
+            Assert.Null(Receipt(id),"Superseded endpoint cannot retain an arrival receipt");Restore(Save());Assert.Null(Receipt(id));Deliver();Step(40);Restore(Save());Assert.Null(Receipt(id),"Internal movement cannot invent a new tactical receipt");
+        }
         [Test] public void FoundationEvacuationPendingAndInstalledReplacementRoundTripWithoutOldReceipt()
         {
             var view=(PlayableSnapshot)Call("PlayerSnapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,19092026,PlayableOwner.Player);

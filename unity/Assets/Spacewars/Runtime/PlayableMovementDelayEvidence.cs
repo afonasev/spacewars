@@ -18,7 +18,8 @@ namespace Spacewars.Runtime
             public string RefusalMessage;
             public int Actor,Path,NullReason,NullActor,Refusal,TrafficStage,RouteIndex,RouteLength,LocalIndex,LocalLength,NoProgress;
             public double Dt,StepMs,X,Z,Heading,GoalX,GoalZ,BlockedSeconds,Speed,TurnSpeed;
-            public bool Moving,Held,Pending,Computed;
+            public bool Moving,Held,Pending,Computed,ProductionCallback,ProductionPressure;
+            public double EscapeX,EscapeZ;
             public int Outcome,ComputePath;
             public double BodyX,BodyZ,BodyHeading,TargetX,TargetZ,BodySpeed,BodyTurn,Cap,ProposalX,ProposalZ,ProposalHeading,VelocityX,VelocityZ;
             public bool Active,Potential,Yielding,Refused,Blocked,Overflow,StaticNoWinner,IndependentTurn;
@@ -27,13 +28,22 @@ namespace Spacewars.Runtime
         private readonly string directory;
         private int count,dropped;
         internal int Actor;
+        internal long StartTick;
+        internal bool ProductionBlockers;
         private PlayableMovementDelayEvidence(string directory){this.directory=directory;}
         internal static PlayableMovementDelayEvidence Create()
         {
             var args=Environment.GetCommandLineArgs();
             if(Array.IndexOf(args,"-movementDelayEvidence")<0)return null;
-            int at=Array.IndexOf(args,"-playableEvidence");
-            return at<0||at+1>=args.Length?null:new PlayableMovementDelayEvidence(args[at+1]);
+            int at=Array.IndexOf(args,"-movementDelayOutput");
+            if(at<0)at=Array.IndexOf(args,"-playableEvidence");
+            if(at<0||at+1>=args.Length)return null;
+            var trace=new PlayableMovementDelayEvidence(args[at+1]);
+            trace.ProductionBlockers=Array.IndexOf(args,"-productionClearanceEvidence")>=0;
+            int actorAt=Array.IndexOf(args,"-movementDelayActor"),tickAt=Array.IndexOf(args,"-movementDelayStartTick");
+            if(actorAt>=0&&actorAt+1<args.Length)trace.Actor=int.Parse(args[actorAt+1],CultureInfo.InvariantCulture);
+            if(tickAt>=0&&tickAt+1<args.Length)trace.StartTick=long.Parse(args[tickAt+1],CultureInfo.InvariantCulture);
+            return trace;
         }
         internal void Record(NavigationSession nav,long tick,long order,double dt,long begin)
         {
@@ -44,6 +54,9 @@ namespace Spacewars.Runtime
             row.Path=nav.LastNavigationStepPath;row.NullReason=nav.LastOwnedMovementNullReason;row.NullActor=nav.LastOwnedMovementNullActor;
             row.Refusals=nav.OwnedMovementRefusals;row.Refusal=nav.LastOwnedMovementRefusal;row.TrafficStage=nav.LastTrafficDispatchStage;row.SourceMismatch=nav.MovementDelaySourceMismatch;row.RefusalMessage=nav.LastOwnedMovementRefusalMessage;row.ResultStage=nav.LastResultBatchStage;row.ResultSourceReason=nav.LastResultBatchSourceReason;
             row.X=unit.Position.X;row.Z=unit.Position.Z;row.Heading=unit.Heading;row.Moving=unit.Moving;row.Held=unit.Held;
+            row.ProductionCallback=nav.Crowd.ProductionEscape!=null;
+            var escape=nav.Crowd.ProductionEscape?.Invoke(unit);row.ProductionPressure=escape.HasValue;
+            row.EscapeX=escape?.X??0;row.EscapeZ=escape?.Z??0;
             row.Pending=nav.IsPending(Actor);row.Outcome=(int)unit.Outcome;row.GoalX=unit.Goal.X;row.GoalZ=unit.Goal.Z;
             row.Speed=unit.Speed;row.TurnSpeed=unit.TurnSpeed;row.InstalledRequest=unit.InstalledRequest;row.InstalledOrder=unit.InstalledOrder;row.Group=unit.InstalledGroupId;
             row.RouteIndex=unit.routeIndex;row.RouteLength=unit.route.Length;row.LocalIndex=unit.localIndex;row.LocalLength=unit.localRoute.Length;
@@ -117,7 +130,14 @@ namespace Spacewars.Runtime
         internal void FlushMovementDelayEvidence()=>movementDelayEvidence?.Flush(navigation.Generation);
         private void StepNavigationCore(double dt)
         {
-            var trace=movementDelayEvidence;if(trace==null){StepNavigationMeasured(dt);return;}
+            var trace=movementDelayEvidence;if(trace==null||Tick<trace.StartTick){StepNavigationMeasured(dt);return;}
+            if(trace.ProductionBlockers){
+                // Allocation changes with ordinary threaded scheduling. Select
+                // the actual ground footprint under paid producer pressure.
+                trace.Actor=0;
+                foreach(var actor in navigation.Crowd.Units)if(GroundProductionEscape(actor).HasValue){trace.Actor=actor.Id;break;}
+                if(trace.Actor==0){StepNavigationMeasured(dt);return;}
+            }
             if(trace.Actor==0)foreach(var unit in units.Values)if(unit.Owner==PlayableOwner.Player&&unit.Kind==PlayableEntityKind.Explorer){trace.Actor=unit.Id;break;}
             navigation.MovementDelayActor=trace.Actor;navigation.MovementDelayComputation=default;navigation.MovementDelaySourceMismatch=0;long begin=Stopwatch.GetTimestamp();
             try{StepNavigationMeasured(dt);}

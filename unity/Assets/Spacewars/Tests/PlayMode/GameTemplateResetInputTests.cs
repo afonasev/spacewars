@@ -35,7 +35,7 @@ public sealed class GameTemplateResetInputTests:InputTestFixture
         Poll(true);Assert.NotNull(root.Q("settings-confirm"));nav.Back();Poll(true);Assert.IsNull(root.Q("settings-confirm"),"Hold after returning must not repeat");
         Poll(false);var text=new TextField();page.Add(text);text.Focus();Poll(true);Assert.IsNull(root.Q("settings-confirm"),"Text editing owns the top button");text.RemoveFromHierarchy();
         Poll(false);page.Q<DropdownField>("settings-resolution").Focus();var popup=new VisualElement();popup.AddToClassList("unity-base-dropdown");root.panel.visualTree.Add(popup);Poll(true);Assert.IsNull(root.Q("settings-confirm"),"Dropdown owns input");popup.RemoveFromHierarchy();
-        Poll(false);nav.UseGamepad();Assert.AreEqual("Верх",page.Q<Button>("settings-reset-all").Q<Label>("menu-pad-glyph").text);Poll(true);Assert.NotNull(root.Q("settings-confirm"));
+        Poll(false);nav.UseGamepad();Assert.AreEqual("Y",page.Q<Button>("settings-reset-all").Q<NativeControllerGlyph>("menu-pad-glyph").Q<Label>("controller-glyph-symbol").text);Poll(true);Assert.NotNull(root.Q("settings-confirm"));
         Poll(false);Poll(true);Assert.AreEqual("settings-confirm",nav.Scope.name,"Top button must not accept reset confirmation");nav.Back();
         var other=new VisualElement(){name="other-menu"};root.Add(other);nav.SetScope(other,()=>{});Poll(false);Poll(true);Assert.IsNull(root.Q("settings-confirm"),"Shortcut must not escape settings");
     }

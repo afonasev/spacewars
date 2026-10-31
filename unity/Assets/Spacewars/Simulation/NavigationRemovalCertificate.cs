@@ -7,19 +7,23 @@ namespace Spacewars.Simulation
         // The same paid normal preparation serves ordinary work and the new
         // certificate. Full current source/pages are retained, never pruned.
         private bool RemovalActive=>removalMode&&historicalOracle!=null&&input.Source.Candidates.Count<historicalOracle.input.Source.Candidates.Count;
-        private int ActivePreparationMember=>RemovalActive&&historicalOracle!=null&&historicalGate==4&&historicalState.PreparationMember<members.Length?historicalState.PreparationMember:memberIndex;
-        private bool PrepareRegionsFor(int member)
+        private int ActivePreparationMember=>paidPagePolicy?preparationMember:RemovalActive&&historicalOracle!=null&&historicalGate==4&&historicalState.PreparationMember<members.Length?historicalState.PreparationMember:memberIndex;
+        // Historical consumers explicitly request page zero; ordinary Q4 work passes
+        // its current page. Checkpoint22 retains the original whole-key prerequisite.
+        private bool PrepareRegionsFor(int member,int requestedPage=0)
         {
             string key=WorkingKey(members[member]);
-            if(preparedClearances.ContainsKey(key))return true;
-            if(preparingClearanceKey!=key)BeginPreparation(key);
+            if(preparedClearances.TryGetValue(key,out var prepared)&&(!paidPagePolicy||requestedPage>=pageStarts.Length||prepared.CandidateIndices[requestedPage]!=null))return true;
+            if(paidPagePolicy&&requestedPage>=pageStarts.Length)return true;
+            if(preparingClearanceKey!=key||paidPagePolicy&&(preparationPageIndex!=requestedPage||preparationMember!=member))BeginPreparation(key,member,requestedPage);
+            var working=input.WorkingFor(members[member]);
             while(true){
                 if(preparationPageIndex>=pageStarts.Length){AddPrepared(key,preparationCandidateIndices,preparationRegions);ClearPreparation();return true;}
                 int end=pageStarts[preparationPageIndex]+pageCounts[preparationPageIndex];
-                if(preparationCursor>=end){FinishPreparationPage(key);preparationPageIndex++;preparationValidCandidateIndices.Clear();preparationCursor=preparationPageIndex<pageStarts.Length?pageStarts[preparationPageIndex]:0;continue;}
+                if(preparationCursor>=end){FinishPreparationPage(key);if(paidPagePolicy){AddPrepared(key,preparationCandidateIndices,preparationRegions);ClearPreparation();preparationValidCandidateIndices.Clear();return true;}preparationPageIndex++;preparationValidCandidateIndices.Clear();preparationCursor=preparationPageIndex<pageStarts.Length?pageStarts[preparationPageIndex]:0;continue;}
                 if(allocationRemaining==0)return false;
-                SpendCandidate();int raw=preparationCursor++;
-                if(input.WorkingFor(members[member]).Provider.IsValid(input.Source.Candidates[raw],members[member].Clearance))preparationValidCandidateIndices.Add(raw);
+                SpendCandidate(NavCandidateCharge.PrepareValidity);int raw=preparationCursor++;
+                if(working.Provider.IsValid(input.Source.Candidates[raw],members[member].Clearance))preparationValidCandidateIndices.Add(raw);
             }
         }
         private void ResetRemoval()
@@ -62,20 +66,20 @@ namespace Spacewars.Simulation
                 if(historicalState.RemovalStage==0){
                     // Header/control admission is itself paid, including reuse
                     // of a prepared clearance. No free member-sized traversal.
-                    if(allocationRemaining==0)return false;SpendCandidate();
+                    if(allocationRemaining==0)return false;SpendCandidate(NavCandidateCharge.Page0Control);
                     if(RemovalRegion(historicalOracle,index)==null){DropHistorical();return false;}
                     historicalState.RemovalStage=1;
                 }
                 if(historicalState.RemovalStage==1){
                     if(!PrepareRegionsFor(index))return false;
-                    if(allocationRemaining==0)return false;SpendCandidate();
+                    if(allocationRemaining==0)return false;SpendCandidate(NavCandidateCharge.Page0Control);
                     var old=RemovalRegion(historicalOracle,index);var current=RemovalRegion(this,index);
                     if(current==null||old.Candidates.Count!=current.Candidates.Count||!old.Requested.Equals(current.Requested)||!RemovalOldRecipe(index,old)){DropHistorical();return false;}
                     historicalState.RemovalStage=2;
                 }
                 var previous=RemovalRegion(historicalOracle,index);var now=RemovalRegion(this,index);
                 while(historicalState.RegionCursor<now.Candidates.Count){
-                    if(allocationRemaining==0)return false;SpendCandidate();int n=historicalState.RegionCursor;
+                    if(allocationRemaining==0)return false;SpendCandidate(NavCandidateCharge.Page0RegionCompare);int n=historicalState.RegionCursor;
                     if(!now.Candidates[n].Equals(previous.Candidates[n])){DropHistorical();return false;}
                     historicalState.RegionCursor++;
                 }
@@ -87,7 +91,7 @@ namespace Spacewars.Simulation
         {
             var region=RemovalRegion(this,historicalMember);
             while(!historicalState.EndpointFound&&historicalState.EndpointCursor<region.Candidates.Count){
-                if(allocationRemaining==0)return false;SpendCandidate();int n=historicalState.EndpointCursor++;
+                if(allocationRemaining==0)return false;SpendCandidate(NavCandidateCharge.HistoricalEndpoint);int n=historicalState.EndpointCursor++;
                 historicalState.EndpointFound=region.Candidates[n].Equals(old.Endpoint);
             }
             if(!historicalState.EndpointFound){DropHistorical();return false;}return true;

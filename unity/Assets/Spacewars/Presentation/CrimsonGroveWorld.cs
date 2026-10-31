@@ -29,10 +29,10 @@ namespace Spacewars.Presentation
             // Distance raster precision is a fixed presentation data contract, not gameplay tuning.
             const int resolution=512;groveSurfaceMask=new Texture2D(resolution,resolution,TextureFormat.RGBA32,false,true){name="Crimson Grove ground transitions",wrapMode=TextureWrapMode.Clamp,filterMode=FilterMode.Bilinear};
             var pixels=new Color[resolution*resolution];var routes=CrimsonGroveSurfaces.Routes(map);
+            var rockDistances=new TerrainPolygonDistances(map.Solids);
             for(int z=0;z<resolution;z++){
                 for(int x=0;x<resolution;x++){
-                    var p=new NavPoint(((x+.5)/resolution*2-1)*map.HalfExtent,((z+.5)/resolution*2-1)*map.HalfExtent);double distance=double.MaxValue;
-                    foreach(var rock in map.Solids)distance=Math.Min(distance,Math.Sqrt(rock.Footprint.DistanceSquared(p)));
+                    var p=new NavPoint(((x+.5)/resolution*2-1)*map.HalfExtent,((z+.5)/resolution*2-1)*map.HalfExtent);double distance=rockDistances.Minimum(p);
                     double road=CrimsonGroveSurfaces.RouteDistance(p,routes);float variation=.8f+.4f*Mathf.PerlinNoise((float)p.X/7+11,(float)p.Z/7+29);
                     float wear=1-Mathf.SmoothStep(0,1,(float)road/(art.roadWidth*variation*.5f));pixels[z*resolution+x]=new Color(Mathf.Clamp01((float)distance/8),wear,0,1);
                 }
@@ -76,6 +76,7 @@ namespace Spacewars.Presentation
             }
         }
         private void GroveMesh(string name,Mesh mesh,Color color,int role,NavPoint centre=default(NavPoint)){
+            FinalProceduralMesh.IndexOwned(mesh);
             terrainMeshes.Add(mesh);var obj=new GameObject(name);obj.transform.SetParent(root,false);obj.AddComponent<MeshFilter>().sharedMesh=mesh;var renderer=obj.AddComponent<MeshRenderer>();renderer.sharedMaterial=groveMaterial;
             var block=new MaterialPropertyBlock();block.SetColor("_BaseColor",color);block.SetFloat("_Role",role);block.SetVector("_PadOrigin",new Vector4((float)centre.X,(float)centre.Z,0,0));renderer.SetPropertyBlock(block);
         }

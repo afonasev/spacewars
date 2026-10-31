@@ -36,20 +36,35 @@ namespace Spacewars.Runtime
             =>request.MemberIdentity!=null&&request.MemberIdentity.GroupId==execution.GroupId&&
                 request.MemberIdentity.OrderRevision==execution.Order.Revision&&request.MemberIdentity.Incarnation==execution.Incarnation&&
                 request.Goal.Equals(execution.AssignedGoal)&&request.GoalLocation.HasValue&&request.GoalLocation.Value.Equals(execution.AssignedLocation.Value);
+        private static bool CompletionMatchesRequest(PlayableSpatialCompletion receipt,NavigationRequest request)
+            =>request.MemberIdentity!=null&&receipt.Order.Generation==request.Session&&receipt.Order.UnitId==request.Entity&&
+                receipt.GroupId==request.MemberIdentity.GroupId&&receipt.Order.Revision==request.MemberIdentity.OrderRevision&&
+                receipt.Incarnation==request.MemberIdentity.Incarnation&&request.GoalLocation.HasValue&&
+                receipt.AssignedLocation.Equals(request.GoalLocation.Value)&&receipt.AssignedLocation.Position.Equals(request.Goal);
+        private void RevokeReassignedCompletion(NavigationRequest request)
+        {
+            // A completed arrival remains evidence through idle, but cannot certify a replacement endpoint.
+            if(spatialCompletions.TryGetValue(request.Entity,out var receipt)&&!CompletionMatchesRequest(receipt,request))spatialCompletions.Remove(request.Entity);
+            if(tacticalQueues.TryGetValue(request.Entity,out var queue)&&queue.Completion?.SpatialReceipt!=null&&
+                !CompletionMatchesRequest(queue.Completion.SpatialReceipt,request))queue.Completion=null;
+        }
         private void ObserveEndpointAssignment(NavigationRequest request)
         {
+            RevokeReassignedCompletion(request);
             if(tacticalQueues.TryGetValue(request.Entity,out var q)) {
-                var e=Matches(q.Pending,request)?q.Pending:null;
+                var e=Matches(q.Pending,request)?q.Pending:WaitingForWreck(request.Entity)&&Matches(q.Active,request)?q.Active:null;
                 if(e!=null){e.Assigned=DomainLocation(request.GoalLocation);e.AttemptLocation=DomainLocation(request.GoalLocation);e.AttemptRequest=request.Request;e.AttemptOrder=request.Order;}
             }
             if(spatialExecutions.TryGetValue(request.Entity,out var execution)&&request.MemberIdentity!=null&&
                 execution.GroupId==request.MemberIdentity.GroupId&&execution.Order.Revision==request.MemberIdentity.OrderRevision&&execution.Incarnation==request.MemberIdentity.Incarnation){
                 execution.AssignedGoal=request.Goal;execution.AssignedLocation=DomainLocation(request.GoalLocation);
             }
+            TraceOriginalQueue(request,OriginalGroupEvent.Endpoint);
         }
         private void ObserveSpatialRequest(NavigationRequest request)=>ObserveSpatialRequest(request,false);
         private void ObserveSpatialRequest(NavigationRequest request,bool combat)
         {
+            RevokeReassignedCompletion(request);
             ObserveTacticalRequest(request,combat);
             // Foundation evacuation/internal movement replacement can change the goal
             // without a tactical command. It revokes the interrupted execution only.
@@ -58,7 +73,8 @@ namespace Spacewars.Runtime
         }
         private void ActivateSpatialExecution(NavigationRequest request)
         {
-            ActivateTacticalRoute(request);
+            if(units.TryGetValue(request.Entity,out var resumed))resumed.WreckWaiting=false;
+            ActivateTacticalRoute(request);TraceOriginalQueue(request,OriginalGroupEvent.Installed);
             // Only a previously admitted spatial intent can be armed by a successful route.
             // Legacy hydration and internal chase/Follow paths cannot invent evidence.
             if(!spatialExecutions.TryGetValue(request.Entity,out var execution)||!units.TryGetValue(request.Entity,out var unit))return;

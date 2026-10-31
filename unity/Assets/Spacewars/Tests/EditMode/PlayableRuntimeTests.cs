@@ -161,19 +161,21 @@ namespace Spacewars.Tests.EditMode
 
         [Test] public void RefineryPauseFreezesProgressAndRestartRejectsOldUpgrade()
         {
-            var data=Data();data.refineryBuildSeconds=1;data.scienceBuildSeconds=1;data.startingCredits=2000;
+            var data=Data();data.refineryBuildSeconds=1;data.scienceBuildSeconds=1;data.factoryBuildSeconds=1;data.startingCredits=2000;
             var profile=PlayableProfile.Create(data);var runtime=new PlayableRuntime(profile,41,7,false);
             try
             {
-                Assert.True(runtime.TrySubmit(new PlayableCommand(41,1,"player-1",PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:1,slotId:1,parentId:1,buildingKind:PlayableBuildingKind.Refinery)).Accepted);
-                Assert.True(runtime.TrySubmit(new PlayableCommand(41,2,"player-1",PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:1,slotId:2,parentId:1,buildingKind:PlayableBuildingKind.ScientificCenter)).Accepted);
-                Assert.True(Until(()=>runtime.Latest.Buildings.Count(b=>b.Owner==PlayableOwner.Player&&b.Phase==ConstructionPhase.Ready)==3));
+                Assert.True(runtime.TrySubmit(new PlayableCommand(41,1,"player-1",PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:1,slotId:5,parentId:1,buildingKind:PlayableBuildingKind.Factory)).Accepted);
+                Assert.True(Until(()=>runtime.Latest.Buildings.Any(b=>b.Kind==PlayableBuildingKind.Factory&&b.Phase==ConstructionPhase.Ready)));
+                Assert.True(runtime.TrySubmit(new PlayableCommand(41,2,"player-1",PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:1,slotId:1,parentId:1,buildingKind:PlayableBuildingKind.Refinery)).Accepted);
+                Assert.True(runtime.TrySubmit(new PlayableCommand(41,3,"player-1",PlayableCommandKind.BuildAt,Array.Empty<int>(),siteId:1,slotId:2,parentId:1,buildingKind:PlayableBuildingKind.ScientificCenter)).Accepted);
+                Assert.True(Until(()=>runtime.Latest.Buildings.Count(b=>b.Owner==PlayableOwner.Player&&b.Phase==ConstructionPhase.Ready)==4));
                 int id=runtime.Latest.Buildings.Single(b=>b.Kind==PlayableBuildingKind.Refinery).Id;
-                runtime.TrySubmit(Command(41,3,PlayableCommandKind.UpgradeRefinery,new[]{id}));
+                runtime.TrySubmit(Command(41,4,PlayableCommandKind.UpgradeRefinery,new[]{id}));
                 Assert.True(Until(()=>runtime.Latest.Buildings.Single(b=>b.Id==id).PrivateState.Upgrade.Active));
                 runtime.RequestPause(true);Assert.True(Until(()=>runtime.Latest.Paused));var frozen=runtime.Latest;
                 double elapsed=frozen.Buildings.Single(b=>b.Id==id).PrivateState.Upgrade.Elapsed;
-                Assert.AreEqual(PlayableCommandStatus.Rejected,runtime.TrySubmit(Command(41,4,PlayableCommandKind.CancelRefineryUpgrade,new[]{id})).Status);
+                Assert.AreEqual(PlayableCommandStatus.Rejected,runtime.TrySubmit(Command(41,5,PlayableCommandKind.CancelRefineryUpgrade,new[]{id})).Status);
                 Assert.True(Until(()=>runtime.Latest.Sequence>frozen.Sequence+3));Assert.AreEqual(frozen.Tick,runtime.Latest.Tick);
                 Assert.AreEqual(elapsed,runtime.Latest.Buildings.Single(b=>b.Id==id).PrivateState.Upgrade.Elapsed);
                 runtime.RequestPause(false);Assert.True(Until(()=>runtime.Latest.Buildings.Single(b=>b.Id==id).PrivateState.Upgrade.Elapsed>elapsed));

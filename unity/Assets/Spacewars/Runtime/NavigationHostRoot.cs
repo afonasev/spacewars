@@ -5,7 +5,7 @@ namespace Spacewars.Runtime
 {
     // The scheduler and ordered host work share one capture traversal and ledger.
     // Each queue carries the owned name even after its row is removed.
-    internal sealed class NavigationHostRoot : NavOwnedStorage, INavPhysicalBody
+    internal sealed partial class NavigationHostRoot : NavOwnedStorage, INavPhysicalBody
     {
         private static readonly long LayoutBytes=Math.Max(256,NavStorageLayout.ObjectBytesBound(typeof(NavigationHostRoot)));
         internal readonly struct OperationDescriptor
@@ -613,6 +613,8 @@ namespace Spacewars.Runtime
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityCatalogTerrain))?NavigationAuthorityOwners.ReadPhysicalBody(reader,true,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityCatalog))?NavigationAuthorityOwners.ReadPhysicalBody(reader,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityGroup))?NavigationAuthorityGroup.ReadPhysicalBody(reader):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityMember,value:NavPhysicalValueKind.RecastMemberProgressV1))?throw new ArgumentException("Historical Recast progress v1 is not current."):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityMember,value:NavPhysicalValueKind.RecastMemberProgressV2))?NavigationAuthorityMember.ReadPhysicalBody(reader,true,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityMember,value:NavPhysicalValueKind.GroupMarchProgressV2))?NavigationAuthorityMember.ReadPhysicalBody(reader,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityMember))?NavigationAuthorityMember.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostAuthority))?NavigationAuthorityOwners.ReadPhysicalBody(reader):
@@ -628,6 +630,7 @@ namespace Spacewars.Runtime
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostProvider))?NavigationHostProvider.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostRow))?NavigationHostRow.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostAnswer))?NavigationHostAnswer.ReadPhysicalBody(reader):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostAnswer,value:NavPhysicalValueKind.HostPartialAnswerV1))?NavigationHostAnswer.ReadPhysicalBody(reader,partial:true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostCorridor))?NavigationHostCorridor.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostProjection))?NavigationHostProjection.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostArrivalIntents))?NavigationHostArrivalIntents.ReadPhysicalBody(reader):

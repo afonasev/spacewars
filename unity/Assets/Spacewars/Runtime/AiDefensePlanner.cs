@@ -19,6 +19,7 @@ namespace Spacewars.Runtime
         internal static Action<string> TechnologyCoverageReadbackForTests;
         internal static string TechnologyCoverageOwnerFilterForTests;
 #endif
+        internal int ProtectedUnit{get;set;}
         public const string Policy="defense";
         private readonly string owner;private readonly long generation;
         private long armyId,nextId=1,pendingId,pendingGeneration;
@@ -75,14 +76,10 @@ namespace Spacewars.Runtime
             if(a==null){armyId=0;targetId=0;emergencyObserved=threats.Length>0;return entered;}
             if(threats.Length==0)
             {
-                if(a.Reinforcements.Length>0)
-                {
-                    // Keep the Defense lifecycle long enough to reassemble members
-                    // whose safe routes were unavailable during the visible threat.
-                    emergencyObserved=true;
-                    registry.UpdateMission(armyId,Policy,AiArmyPhase.Staging,o.Tick,"defend:"+targetId,rally:a.Rally);
-                    return entered;
-                }
+                // The emergency has ended. Releasing registry ownership includes
+                // unjoined members; their physical orders remain authoritative until
+                // a subsequent plan replaces them. A stranded follower must not hold
+                // every defender in a permanent emergency.
                 registry.Disband(armyId);armyId=0;targetId=0;emergencyObserved=false;return entered;
             }
             emergencyObserved=true;
@@ -98,20 +95,30 @@ namespace Spacewars.Runtime
         private sealed class Choice {public long ArmyId;public PlayableEntitySnapshot[] Units;public PlayableEntitySnapshot Target;public double Distance;}
         private static PlayableRouteProof Route(PlayableAiObservation o,PlayableEntitySnapshot u,PlayableEntitySnapshot target)=>
             o.RouteProofs.FirstOrDefault(r=>r.UnitId==u.Id&&r.Owner==o.Owner&&r.Generation==o.Generation&&r.Tick==o.Tick&&r.Origin.Equals(u.Position)&&r.Kind==PlayableRouteTargetKind.VisibleEnemy&&r.TargetId==target.Id);
+        private bool LocalScout(PlayableAiObservation o,PlayableProfile p,AiArmyRegistry registry,PlayableEntitySnapshot u,PlayableEntitySnapshot target)=>
+            u.Owner==o.Owner&&u.Health>0&&u.Kind==PlayableEntityKind.Explorer&&u.Id!=ProtectedUnit&&!u.Held&&u.Queue==null&&
+            !(u.CurrentOrder!=null&&u.OrderStamp?.Origin==PlayableOrderOrigin.Human)&&
+            (registry.ArmyFor(u.Id)==0||registry.CanYieldScoutToDefense(u.Id))&&
+            o.Buildings.Any(b=>b.Owner==o.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&
+                Distance(target.Position,b.Position)<=DefenseRange(b,p)&&Distance(u.Position,b.Position)<=DefenseRange(b,p));
         // O5 read-only coverage. Broad A3 threats/preemption remain unchanged.
         // A registry Active bit or Scheduled intent is not applied physical defense.
         public bool CoversTechnologyThreats(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiArmyRegistry registry,IEnumerable<PlayableAiTraceRecord> records)
+            =>CoversCurrentThreats(o,p,ai,registry,records,true);
+        internal bool StructurallyCoversThreats(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiArmyRegistry registry,IEnumerable<PlayableAiTraceRecord> records)
+            =>CoversCurrentThreats(o,p,ai,registry,records,false);
+        private bool CoversCurrentThreats(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiArmyRegistry registry,IEnumerable<PlayableAiTraceRecord> records,bool requireRoutes)
         {
             Bind(o);var threats=Threats(o,p);if(threats.Length==0)return true;
 #if UNITY_INCLUDE_TESTS
-            if(TechnologyCoverageReadbackForTests!=null&&TechnologyCoverageOwnerFilterForTests==o.OwnerId)
+            if(requireRoutes&&TechnologyCoverageReadbackForTests!=null&&TechnologyCoverageOwnerFilterForTests==o.OwnerId)
                 return CoversTechnologyThreatsReadback(o,p,ai,registry,records,threats);
 #endif
             if(!Active||pendingId!=0||registry.OwnerId!=owner||registry.Generation!=generation)return false;
             var army=registry.Capture().Armies.SingleOrDefault(a=>a.Id==armyId&&a.OwnerId==owner&&a.TacticalOwner==Policy&&a.Role==AiArmyRole.MobileDefense&&a.Phase!=AiArmyPhase.Disbanded&&a.Objective=="defend:"+targetId);
             var target=threats.FirstOrDefault(t=>t.Id==targetId);if(army==null||target==null)return false;
             var members=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)).OrderBy(u=>u.Id).ToArray();
-            if(members.Length<army.MinimumViableForce||members.Any(u=>!AppliedDefenseOrder(o,u,targetId,records)||!CertifiedDefenseRoute(o,u,target,p)))return false;
+            if(members.Length<army.MinimumViableForce||members.Any(u=>!AppliedDefenseOrder(o,u,targetId,records)||requireRoutes&&!CertifiedDefenseRoute(o,u,target,p)))return false;
             // The defended visible target must lie in EACH threatened center's existing
             // defense region. A distant committed army cannot waive another front.
             foreach(var center in o.Buildings.Where(b=>b.Owner==o.Owner&&b.Health>0&&(b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost)))
@@ -210,20 +217,20 @@ namespace Spacewars.Runtime
         {
             Bind(o);if(registry==null||registry.OwnerId!=owner||registry.Generation!=generation)throw new ArgumentException("Defense registry binding");if(pendingId!=0)return null;
             var survival=LastHeadquartersAttackers(o);
-            if(survival.Length>0)return ProposeSurvival(o,registry,survival);
+            if(survival.Length>0)return ProposeSurvival(o,p,registry,survival);
             var threats=Threats(o,p);if(threats.Length==0)return null;
-            var own=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&!u.Held&&!(u.CurrentOrder!=null&&u.OrderStamp?.Origin==PlayableOrderOrigin.Human)).ToArray();
+            var own=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&u.Id!=ProtectedUnit&&!u.Held&&!(u.CurrentOrder!=null&&u.OrderStamp?.Origin==PlayableOrderOrigin.Human)).ToArray();
             var groups=registry.Capture().Armies.Where(a=>a.Major&&a.Phase!=AiArmyPhase.Disbanded&&(Active?a.Id==armyId:true)).Select(a=>new
                 {Id=a.Id,Units=own.Where(u=>a.Members.Contains(u.Id)&&(!Active||!a.Reinforcements.Contains(u.Id))).ToArray()}).ToList();
             if(!Active&&groups.Count<registry.MajorCap)
             {
-                // Scout/transport members are never recruited through a combat loophole.
-                var free=own.Where(u=>registry.ArmyFor(u.Id)==0&&AiRosterCatalog.Initial.For(u.Kind).lineWeight>0).ToArray();
+                // Scouts join below through the explicit local defense handoff.
+                var free=own.Where(u=>(registry.ArmyFor(u.Id)==0||registry.CanYieldScoutToDefense(u.Id))&&AiRosterCatalog.Initial.For(u.Kind).lineWeight>0).ToArray();
                 if(free.Length>0)groups.Add(new{Id=0L,Units=free});
             }
             var choices=groups.SelectMany(g=>threats.Select(t=>
             {
-                var reachable=g.Units.Where(u=>Route(o,u,t)!=null).OrderBy(u=>RouteDistance(Route(o,u,t))).ThenBy(u=>u.Id).ToArray();
+                var reachable=g.Units.Where(u=>Route(o,u,t)!=null&&(g.Id!=0||!registry.CanYieldScoutToDefense(u.Id)||LocalScout(o,p,registry,u,t))).OrderBy(u=>RouteDistance(Route(o,u,t))).ThenBy(u=>u.Id).ToArray();
                 if(g.Id!=0&&reachable.Length!=g.Units.Length)return null; // Whole-group atomic ownership.
                 if(g.Id==0)
                 {
@@ -231,6 +238,8 @@ namespace Spacewars.Runtime
                     while(count<reachable.Length&&Force(reachable.Take(count).ToArray(),p,ai)<Force(LocalThreats(o,p,t),p,ai))count++;
                     reachable=reachable.Take(count).ToArray();
                 }
+                reachable=reachable.Concat(own.Where(u=>LocalScout(o,p,registry,u,t)&&Route(o,u,t)!=null))
+                    .GroupBy(u=>u.Id).Select(g=>g.First()).OrderBy(u=>u.Id).ToArray();
                 if(reachable.Length==0||Force(reachable,p,ai)<Force(LocalThreats(o,p,t),p,ai))return null;
                 return new Choice{ArmyId=g.Id,Units=reachable,Target=t,Distance=reachable.Average(u=>RouteDistance(Route(o,u,t)))};
             })).Where(c=>c!=null).OrderBy(c=>c.Distance).ThenBy(c=>c.ArmyId).ThenBy(c=>c.Target.Id).ToArray();
@@ -239,17 +248,18 @@ namespace Spacewars.Runtime
             if(Active&&units.All(u=>u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Attack&&u.CurrentOrder.TargetId==choice.Target.Id))return null;
             return new PlayableAiAction(nextId,owner,o.ProfileId,o.ProfileRevision,generation,o.SnapshotSequence,PlayableCommandKind.Attack,units.Select(u=>u.Id).ToArray(),choice.Target.Position,targetId:choice.Target.Id,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
         }
-        private PlayableAiAction ProposeSurvival(PlayableAiObservation o,AiArmyRegistry registry,PlayableEntitySnapshot[] attackers)
+        private PlayableAiAction ProposeSurvival(PlayableAiObservation o,PlayableProfile p,AiArmyRegistry registry,PlayableEntitySnapshot[] attackers)
         {
-            var own=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&!u.Held&&u.Queue==null&&
+            var own=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&u.Id!=ProtectedUnit&&!u.Held&&u.Queue==null&&
                 !(u.CurrentOrder!=null&&u.OrderStamp?.Origin==PlayableOrderOrigin.Human)).ToArray();
-            // New production is idle; never seize a human order, queue or scout assignment.
+            // New production is idle; nearby AI scouts may yield their assignment.
             var free=own.Where(u=>registry.ArmyFor(u.Id)==0&&u.CurrentOrder==null&&u.Queue==null&&u.NavigationOutcome==NavigationOutcome.Idle&&AiRosterCatalog.Initial.For(u.Kind).lineWeight>0).ToArray();
             var groups=registry.Capture().Armies.Where(a=>a.Major&&a.Phase!=AiArmyPhase.Disbanded&&(Active?a.Id==armyId:true)).ToArray();
             var choices=new List<Choice>();
             foreach(var target in attackers)
             {
-                var available=free.Where(u=>Route(o,u,target)!=null).ToArray();
+                var scouts=own.Where(u=>LocalScout(o,p,registry,u,target)&&Route(o,u,target)!=null).ToArray();
+                var available=free.Where(u=>Route(o,u,target)!=null).Concat(scouts).GroupBy(u=>u.Id).Select(g=>g.First()).ToArray();
                 foreach(var group in groups)
                 {
                     var members=own.Where(u=>group.Members.Contains(u.Id)).ToArray();
@@ -257,7 +267,7 @@ namespace Spacewars.Runtime
                     // the group, an unavailable member must not block reachable defenders.
                     var reachable=members.Where(u=>Route(o,u,target)!=null).ToArray();
                     if(!Active&&reachable.Length!=group.Members.Length)continue;
-                    var units=reachable.Concat(Active?available:Array.Empty<PlayableEntitySnapshot>()).OrderBy(u=>u.Id).ToArray();
+                    var units=reachable.Concat(Active?available:scouts).GroupBy(u=>u.Id).Select(g=>g.First()).OrderBy(u=>u.Id).ToArray();
                     if(!units.Any(u=>AiRosterCatalog.Initial.For(u.Kind).lineWeight>0))continue;
                     choices.Add(new Choice{ArmyId=group.Id,Units=units,Target=target,Distance=units.Average(u=>RouteDistance(Route(o,u,target)))});
                 }
@@ -295,22 +305,26 @@ namespace Spacewars.Runtime
             if(!route)throw new InvalidOperationException("Defense assembly route is not currently safe");
             pendingId=nextId++;pendingGeneration=generation;
         }
-        public void Commit(PlayableAiObservation o,PlayableAiAction action,AiArmyRegistry registry)
+        public void Commit(PlayableAiObservation o,PlayableAiAction action,AiArmyRegistry registry,PlayableProfile profile=null)
         {
             Bind(o);if(action==null||action.ActionId!=nextId||pendingId!=0||action.PlayerId!=owner||action.Generation!=generation||action.SnapshotSequence!=o.SnapshotSequence||registry.OwnerId!=owner||registry.Generation!=generation||action.Kind!=PlayableCommandKind.Attack||!o.Entities.Any(e=>e.Id==action.TargetId&&o.IsHostile(e.Owner)&&e.Health>0))throw new InvalidOperationException("Defense commit binding");
-            bool survival=LastHeadquartersAttackers(o).Any(e=>e.Id==action.TargetId);
-            var assigned=action.EntityIds.Select(registry.ArmyFor).Where(assignedArmy=>assignedArmy!=0).Distinct().ToArray();
+            if(action.EntityIds.Any(id=>id==ProtectedUnit||!o.Entities.Any(u=>u.Id==id&&u.Owner==o.Owner&&u.Health>0&&!u.Held&&!(u.CurrentOrder!=null&&u.OrderStamp?.Origin==PlayableOrderOrigin.Human))))throw new InvalidOperationException("Defense actor authority");
+            if(!registry.CanAdmitDefense(action.EntityIds))throw new InvalidOperationException("Defense handoff admission");
+            var yielded=action.EntityIds.Where(registry.CanYieldScoutToDefense).ToArray();
+            if(yielded.Any(id=>!LocalScout(o,profile??PlayableProfile.Default,registry,o.Entities.Single(u=>u.Id==id),o.Entities.Single(u=>u.Id==action.TargetId))))throw new InvalidOperationException("Defense scout is not local or protected");
+            var assigned=action.EntityIds.Where(id=>!yielded.Contains(id)).Select(registry.ArmyFor).Where(assignedArmy=>assignedArmy!=0).Distinct().ToArray();
             if(assigned.Length>1||Active&&assigned.Any(assignedArmy=>assignedArmy!=armyId))throw new InvalidOperationException("Defense crosses army ownership");
             var id=Active?armyId:assigned.FirstOrDefault();
+            foreach(var scout in yielded)registry.Disband(registry.ArmyFor(scout));
             if(id==0){if(!registry.TryCreate(o,AiArmyRole.MobileDefense,Policy,action.EntityIds,out id))throw new InvalidOperationException("Defense slot admission");}
             else
             {
                 var original=action.EntityIds.Where(unit=>registry.ArmyFor(unit)==id).ToArray();
                 if(!(Active&&id==armyId&&registry.Capture().Armies.Any(a=>a.Id==id&&a.TacticalOwner==Policy))&&!registry.PreemptDefense(id,original))throw new InvalidOperationException("Defense atomic ownership admission");
                 var additions=action.EntityIds.Where(unit=>registry.ArmyFor(unit)==0).ToArray();
-                if(additions.Length>0&&(!survival||!registry.TryReinforce(o,id,Policy,additions)))throw new InvalidOperationException("Defense survival reinforcement admission");
+                if(additions.Length>0&&!registry.TryReinforce(o,id,Policy,additions))throw new InvalidOperationException("Defense reinforcement admission");
             }
-            if(survival)registry.JoinReinforcements(id,Policy,action.EntityIds);
+            registry.JoinReinforcements(id,Policy,action.EntityIds);
             armyId=id;targetId=action.TargetId;emergencyObserved=true;
             previousDistance=o.Entities.Where(u=>u.Owner==o.Owner&&action.EntityIds.Contains(u.Id)).Average(u=>Distance(u.Position,action.Target));previousTargetHealth=o.Entities.Single(e=>e.Id==targetId&&o.IsHostile(e.Owner)).Health;
             registry.UpdateMission(id,Policy,AiArmyPhase.Staging,o.Tick,"defend:"+targetId,rally:action.Target);

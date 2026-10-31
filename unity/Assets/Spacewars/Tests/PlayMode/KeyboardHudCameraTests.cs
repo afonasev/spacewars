@@ -38,10 +38,32 @@ namespace Spacewars.Input.Tests
             Set("spectatorMode",spectator);input.CommandInputEnabled=!spectator;
             var players=Enumerable.Range(0,2).Select(i=>new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,30,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,840,null,
                 Array.Empty<PlayableEntitySnapshot>(),new[]{new PlayableBuildingSnapshot(i+1,(PlayableOwner)i,PlayableBuildingKind.Headquarters,new NavPoint(i*20,10),1000,1,0,0,default)},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,
-                incomePerSecond:12,population:new PlayablePopulationSnapshot(0,0,100),owner:(PlayableOwner)i,ownerId:"player-"+(i+1))).ToArray();
+                incomePerSecond:12,population:new PlayablePopulationSnapshot(0,0,100),owner:(PlayableOwner)i,ownerId:"player-"+(i+1),activeProfile:PlayableProfile.Default)).ToArray();
             Set("view",players[0]);Set("spectatorFrame",Activator.CreateInstance(typeof(PlayableSpectatorFrame),Flags,null,new object[]{players[0],players},null));Call("UpdateHud");
         }
         [UnityTest] public IEnumerator SpectatorTableFocusKeepsArrowsOnCamera()=>CheckHudFocus(true);
+        [UnityTest] public IEnumerator WheelMovesRealCameraInBothDirectionsAndHonorsLimitsAndUi()
+        {
+            Show(false);yield return null;yield return null;
+            InputSystem.settings.scrollDeltaBehavior=InputSettings.ScrollDeltaBehavior.UniformAcrossAllPlatforms;
+            input.MapAt=_=>0;input.IsPointerOverUi=_=>false;
+            var profile=PlayableProfile.Default;camera.orthographic=true;camera.orthographicSize=(float)profile.CameraOrthoSize;
+            float before=camera.orthographicSize;
+            Scroll(1);Assert.AreEqual(before-120f*(float)profile.CameraZoomSpeed,camera.orthographicSize,.0001f);
+            yield return null;
+            Scroll(-1);Assert.AreEqual(before,camera.orthographicSize,.0001f);
+            Scroll(100);Assert.AreEqual((float)profile.CameraMinZoom,camera.orthographicSize);
+            Scroll(-100);Assert.AreEqual((float)profile.CameraMaxZoom,camera.orthographicSize);
+            input.IsPointerOverUi=_=>true;Scroll(1);Assert.AreEqual((float)profile.CameraMaxZoom,camera.orthographicSize);
+            input.IsPointerOverUi=_=>false;input.MapAt=_=>1;Scroll(1);Assert.AreEqual((float)profile.CameraMaxZoom,camera.orthographicSize);
+            input.MapAt=_=>0;input.WorldInputEnabled=false;Scroll(1);Assert.AreEqual((float)profile.CameraMaxZoom,camera.orthographicSize);
+            input.WorldInputEnabled=true;input.SetFocus(false);Scroll(1);Assert.AreEqual((float)profile.CameraMaxZoom,camera.orthographicSize);
+        }
+        void Scroll(float delta)
+        {
+            InputSystem.QueueStateEvent(input.AssignedMouse,new MouseState{position=new Vector2(600,300),scroll=new Vector2(0,delta)});
+            InputSystem.Update();input.Poll();
+        }
         [UnityTest] public IEnumerator PlayerHudFocusKeepsArrowsOnCamera()=>CheckHudFocus(false);
         IEnumerator CheckHudFocus(bool spectator)
         {

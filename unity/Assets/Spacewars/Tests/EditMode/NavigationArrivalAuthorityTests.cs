@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using NUnit.Framework;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
@@ -199,19 +200,31 @@ namespace Spacewars.Tests.EditMode
             Domain.GetProperty("Geometry",F).SetValue(domain,next);nav.ChangeGeometry(next);Complete();
             var installed=nav.ArrivalReservations.Single();Assert.Greater(installed.Request,request);Assert.AreEqual(original.GroupId,installed.Group);Assert.AreEqual(original.CommandSequence,installed.Command);Assert.False(Interrupted(id,"Active"));RestoreOnlyBytes(Bytes());
         }
-        [TestCase(false)][TestCase(true)] public void HiddenOccupancyAndObstacleFactsCannotChangeVisibleArmyPreflight(bool withdrawal)
+        [TestCase(false,false)][TestCase(true,false)][TestCase(false,true)][TestCase(true,true)] public void HiddenOccupancyAndObstacleFactsCannotChangeVisibleArmyPreflight(bool withdrawal,bool asynchronous)
         {
             int id=Spawn(-18,-14);var action=new PlayableAiAction(1,"player-1",PlayableProfile.Default.ProfileId,PlayableProfile.Default.Revision,1,0,PlayableCommandKind.Move,new[]{id},new NavPoint(-10,-14),seed:7);
-            string method=withdrawal?"ArmyWithdrawalSafe":"ArmyMoveSafe";Assert.True((bool)Call(method,action));
+            string method=withdrawal?"ArmyWithdrawalSafe":"ArmyMoveSafe";
+            bool Safety(){
+                if(!asynchronous)return (bool)Call(method,action);
+                bool result=false;
+                Assert.True(SpinWait.SpinUntil(()=>{
+                    try{result=(bool)Call(method,action);return true;}
+                    catch(TargetInvocationException error)when(error.InnerException is ObservedPathPending){return false;}
+                },5000),"Current async preflight must settle without treating pending as unsafe.");return result;
+            }
+            if(asynchronous)Call("EnableAsyncObservedPaths");
+            try{
+            Assert.True(Safety());
             var baseGeometry=(NavGeometry)Domain.GetProperty("Geometry",F).GetValue(domain);var hidden=new NavObstacle(-14,-32,-13,32);
             var geometry=new NavGeometry(baseGeometry.HalfExtent,baseGeometry.Obstacles.Concat(new[]{hidden}).ToArray(),baseGeometry.Revision+1);
             Domain.GetProperty("Geometry",F).SetValue(domain,geometry);nav.ChangeGeometry(geometry);
             int enemy=(int)Call("SpawnUnit",new NavPoint(22,14),PlayableOwner.Enemy,PlayableEntityKind.Tank);
-            Assert.True((bool)Call(method,action),"same visible facts must preserve preflight despite hidden occupancy and an unobserved long wall");
+            Assert.True(Safety(),"same visible facts must preserve preflight despite hidden occupancy and an unobserved long wall");
             var visible=new NavObstacle(-10.8,-14.8,-9.2,-13.2);var observed=new NavGeometry(baseGeometry.HalfExtent,baseGeometry.Obstacles.Concat(new[]{visible}).ToArray(),geometry.Revision+1);
-            Domain.GetProperty("Geometry",F).SetValue(domain,observed);nav.ChangeGeometry(observed);Assert.False((bool)Call(method,action),"a visible destination blocker remains effective");
+            Domain.GetProperty("Geometry",F).SetValue(domain,observed);nav.ChangeGeometry(observed);Assert.False(Safety(),"a visible destination blocker remains effective");
             Assert.False(observed.IsFree(action.Target,PlayableProfile.Default.TankCollisionRadius));
             Assert.AreEqual(PlayableCommandStatus.InvalidTarget,Call("Apply",new PlayableCommand(1,++sequence,"player-1",PlayableCommandKind.Move,new[]{id},action.Target,origin:PlayableOrderOrigin.Human),null),"actual authority still rejects unsafe actual destination");
+            }finally{if(asynchronous){Call("StopObservedPaths");Assert.True(SpinWait.SpinUntil(()=>(bool)Domain.GetProperty("ObservedPathWorkerStopped",F).GetValue(domain),5000));}}
         }
         [TestCase(false)][TestCase(true)] public void CorruptArrivalAuthorityOrMissingMandatoryTailIsRejected(bool missing)
         {

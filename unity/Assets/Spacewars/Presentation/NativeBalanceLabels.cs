@@ -27,6 +27,7 @@ namespace Spacewars.Presentation
         internal static string Section(PlayableProfileField f)
         {
             if(f.Path=="ai.research.armySystemsMinimumUnits"||f.Path.StartsWith("ai.research.armySystems."))return "Правила";
+            if(f.Path.StartsWith("research.reinforcedConcrete.")||f.Path.StartsWith("research.centerUpgrade."))return "Здания";
             var n=f.FieldName??"";
             if(f.Path.StartsWith("unitUpgrades.")||f.Path.StartsWith("research."))return "Юниты";
             if(f.Path.StartsWith("presentation.")||f.Group=="Selection ring"||f.Group.StartsWith("Бой ·")||n=="rallyFlagHeight"||n=="saleMarkerScale"||n=="refineryTurbineSpeed"||n=="shkvalMarkerStartRadius"||n=="shkvalMarkerOpacity")return "Графика";
@@ -38,9 +39,12 @@ namespace Spacewars.Presentation
         internal static string Entity(PlayableProfileField f)
         {
             var n=(f.FieldName??"").ToLowerInvariant();
+            if(f.Path.StartsWith("research.reinforcedConcrete."))return "Усиленный бетон";
+            if(f.Path.StartsWith("research.centerUpgrade."))return "Научный центр";
             if(f.Path.StartsWith("research.weaponSystems."))return "Оружейные системы";
             if(f.Path.StartsWith("research.defensiveSystems."))return "Защитные системы";
             if(f.Path=="ai.research.armySystemsMinimumUnits"||f.Path.StartsWith("ai.research.armySystems."))return "ИИ";
+            if(n.StartsWith("turret"))return "Пулемётная турель";
             if(n.StartsWith("hawk"))return "Ястреб";
             if(n.Contains("tank"))return "Танк";
             if(n.Contains("explorer"))return "Исследователь";
@@ -55,7 +59,7 @@ namespace Spacewars.Presentation
             return "Общие";
         }
         internal static string Glyph(string name)=>name switch {
-            "Ястреб"=>"hawk","Танк"=>"tank","Исследователь"=>"explorer","Шквал"=>"shkval","Штаб"=>"headquarters","Форпост"=>"outpost","Шахта"=>"mine","Фабрика"=>"factory","Ангар"=>"hangar","Переработчик"=>"refinery","Научный центр"=>"science","Оружейные системы"=>"weapon-systems-1","Защитные системы"=>"defensive-systems-1",_=>"army"};
+            "Пулемётная турель"=>"sentry-turret","Усиленный бетон"=>"reinforced-concrete","Ястреб"=>"hawk","Танк"=>"tank","Исследователь"=>"explorer","Шквал"=>"shkval","Штаб"=>"headquarters","Форпост"=>"outpost","Шахта"=>"mine","Фабрика"=>"factory","Ангар"=>"hangar","Переработчик"=>"refinery","Научный центр"=>"science","Оружейные системы"=>"weapon-systems-1","Защитные системы"=>"defensive-systems-1",_=>"army"};
         internal static string Bucket(PlayableProfileField f)
         {
             if(f.Path.StartsWith("research.")||f.Path.StartsWith("unitUpgrades.")||(f.FieldName??"").StartsWith("refineryUpgrade"))return "Улучшения";
@@ -131,6 +135,6 @@ namespace Spacewars.Presentation
             {"tankProjectileCollisionRadius","Радиус снаряда для проверки столкновений с объектами."}
         };
         internal static string Label(PlayableProfileField field)=>Labels.TryGetValue(field.Label,out var text)?text:field.Label;
-        internal static string Unit(string value){switch(value){case "credits":return "кр.";case "s":return "с";case "ms":return "мс";case "m":return "м";case "m/s":return "м/с";case "rad/s":return "рад/с";case "ratio":return "×";case "degrees":return "°";case "count":return "шт.";case "population":return "мест";case "orders":return "приказов";case "index":return "№";case "degrees/s":return "°/с";default:return value;}}
+        internal static string Unit(string value){switch(value){case "credits":return "кр.";case "s":return "с";case "ms":return "мс";case "m":return "м";case "m/s":return "м/с";case "rad/s":return "рад/с";case "ratio":return "×";case "degrees":return "°";case "count":return "шт.";case "population":return "мест";case "orders":return "приказов";case "index":return "№";case "degrees/s":return "°/с";case "weight":return "вес";case "buildings":return "зданий";case "units":return "юнитов";case "changes":return "смен";default:return value;}}
     }
 }

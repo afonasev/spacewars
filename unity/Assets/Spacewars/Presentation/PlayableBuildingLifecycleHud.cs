@@ -12,7 +12,7 @@ namespace Spacewars.Presentation
         private PlayableBuildingLifecycleSnapshot lifecycleState;
         private void CreateBuildingLifecycleHud(VisualElement parent)
         {
-            sellBuilding=Button("$ Продать",ConfirmBuildingSale);sellBuilding.name="sell-building";parent.Add(sellBuilding);
+            sellBuilding=Button((provingGround!=null?"Убрать здание":"$ Продать"),ConfirmBuildingSale);sellBuilding.name="sell-building";parent.Add(sellBuilding);
             repairBuilding=Button("Ремонт",()=>
             {
                 if(lifecycleBuilding!=0)Submit(lifecycleState?.Repairing==true?PlayableCommandKind.CancelBuildingRepair:PlayableCommandKind.StartBuildingRepair,new[]{lifecycleBuilding});
@@ -33,16 +33,16 @@ namespace Spacewars.Presentation
             bool available=id!=0&&lifecycleState!=null&&!paused&&!restarting&&view.Outcome==PlayableMatchOutcome.Playing;
             var state=lifecycleState;
             if(!available||state.SaleBlockedReason!=null)confirmSaleBuilding=0;
-            sellBuilding.text=confirmSaleBuilding==id&&id!=0?"✓ Подтвердить продажу":"$ Продать";
+            sellBuilding.text=confirmSaleBuilding==id&&id!=0?"✓ Подтвердить продажу":(provingGround!=null?"Убрать здание":"$ Продать");
             sellBuilding.SetEnabled(available&&state.SaleBlockedReason==null);
-            sellBuilding.tooltip=state?.SaleBlockedReason??"Возврат: "+(state?.Refund??0)+" · зданий: "+(state?.CascadeCount??0);
+            sellBuilding.tooltip=state?.SaleBlockedReason??(provingGround!=null?"Убрать здание":"Возврат: "+(state?.Refund??0)+" · зданий: "+(state?.CascadeCount??0));
             repairBuilding.text=state?.Repairing==true?"Отменить ремонт":"Ремонт";
             repairBuilding.SetEnabled(available&&(state.Repairing||state.RepairBlockedReason==null));
             repairBuilding.style.backgroundColor=state?.Repairing==true?new Color(.55f,.15f,.12f):new Color(.12f,.25f,.28f);
             repairBuilding.tooltip=state?.RepairBlockedReason??"Восстановить повреждённое здание";
             lifecycleLabel.text=state==null?"":state.Selling?"Демонтаж · "+(int)(state.SaleProgress*100)+"%":state.Repairing?(state.WaitingForCredits?"Ремонт: ожидает кредитов":"Ремонт · "+state.PaidSeconds.ToString("0.#")+" / "+state.RepairDuration.ToString("0.#")+" с"):
-                "$ "+state.Refund+" · зданий: "+state.CascadeCount+(state.LastCenter?"\nПоследний центр: поражение после демонтажа":"");
+                (provingGround!=null?"Зданий: ":"$ "+state.Refund+" · зданий: ")+state.CascadeCount+(state.LastCenter?"\nПоследний центр: поражение после демонтажа":"");
         }
-        private void OnApplicationFocus(bool focused){localInputFocused=focused;if(localCoordinator==null)foreach(var seat in localPresentations){seat.localInputFocused=focused;seat.input?.SetFocus(focused);}if(!focused){SetSystemCursorHidden(false);confirmSaleBuilding=0;if(localCoordinator==null&&runtime!=null)Pause(true);}}
+        private void OnApplicationFocus(bool focused){localInputFocused=focused;if(localCoordinator==null)foreach(var seat in localPresentations){seat.localInputFocused=focused;seat.input?.SetFocus(focused);}if(!focused){CloseChat();SetSystemCursorHidden(false);confirmSaleBuilding=0;if(localCoordinator==null&&runtime!=null&&!battleHudUnattended&&!routePerformanceEvidence)Pause(true);}}
     }
 }

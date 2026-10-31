@@ -9,8 +9,9 @@ namespace Spacewars.Presentation
     public sealed partial class PlayableBootstrap
     {
         private int rallyPlacementBuilding;
+        private VisualElement rallyHints;
         private PlayableBuildingSnapshot SelectedRallyProducer()
-            =>view==null||selection.Count!=1?null:view.Buildings.FirstOrDefault(b=>selection.Contains(b.Id)&&b.Owner==view.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState!=null&&b.PrivateState.Lifecycle?.Selling!=true&&(b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost||b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar));
+            =>view==null||selection.Count!=1?null:view.Buildings.FirstOrDefault(b=>selection.Contains(b.Id)&&b.Owner==view.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState!=null&&b.PrivateState.Lifecycle?.Selling!=true&&PlayableMenuDescriptions.RallyProducer(b.Kind));
         private void BeginRallyPlacement(bool controller)
         {
             var producer=SelectedRallyProducer();if(producer==null)return;
@@ -20,7 +21,7 @@ namespace Spacewars.Presentation
         }
         private void CompleteRallyPlacement(NavPoint point,bool returnToProducer)
         {
-            var producer=view?.Buildings.FirstOrDefault(b=>b.Id==rallyPlacementBuilding&&b.Owner==view.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true)??SelectedRallyProducer();
+            var producer=view?.Buildings.FirstOrDefault(b=>b.Id==rallyPlacementBuilding&&PlayableMenuDescriptions.RallyProducer(b.Kind)&&b.Owner==view.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true)??SelectedRallyProducer();
             if(producer!=null)Submit(PlayableCommandKind.SetRally,new[]{producer.Id},point);
             EndRallyPlacement(producer,returnToProducer);
         }
@@ -49,9 +50,12 @@ namespace Spacewars.Presentation
         }
         private void UpdateRallyPreview()
         {
-            var producer=view?.Buildings.FirstOrDefault(b=>b.Id==rallyPlacementBuilding&&b.Owner==view.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true);
+            var producer=view?.Buildings.FirstOrDefault(b=>b.Id==rallyPlacementBuilding&&PlayableMenuDescriptions.RallyProducer(b.Kind)&&b.Owner==view.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true);
             bool active=battleRally&&battleController&&!paused&&!restarting&&view?.Outcome==PlayableMatchOutcome.Playing&&producer!=null;
             if(battleRally&&producer==null)EndRallyPlacement(null,battleController);
+            if(rallyHints==null&&root!=null){rallyHints=new VisualElement{name="rally-placement-hints",pickingMode=PickingMode.Ignore};rallyHints.style.position=Position.Absolute;rallyHints.style.top=54;rallyHints.style.left=Length.Percent(50);rallyHints.style.marginLeft=-130;rallyHints.style.width=260;rallyHints.style.flexDirection=FlexDirection.Row;rallyHints.style.paddingLeft=rallyHints.style.paddingRight=8;OrbitalPrecision.Frame(rallyHints);
+                foreach(var item in new[]{("A","Поставить"),("B","Отменить")}){rallyHints.Add(new NativeControllerGlyph(item.Item1,()=>SeatPad,false));var label=new Label(item.Item2){pickingMode=PickingMode.Ignore};label.style.fontSize=12;label.style.color=OrbitalTheme.Ink;label.style.marginRight=12;rallyHints.Add(label);}root.Add(rallyHints);}
+            if(rallyHints!=null){rallyHints.style.display=active?DisplayStyle.Flex:DisplayStyle.None;if(active)rallyHints.BringToFront();}
             world?.RenderRallyPreview(active&&!mapOpen?(NavPoint?)padCursorGround:null,view?.Owner??PlayableOwner.Player);
         }
     }

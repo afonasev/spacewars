@@ -84,7 +84,7 @@ namespace Spacewars.Runtime
             m.Phase==Stage.Research?PlayableCommandKind.QueueResearch:PlayableCommandKind.BuildAt,m.Phase==Stage.Research?new[]{m.Center}:Array.Empty<int>(),
             siteId:m.Phase==Stage.Research?0:m.Site,slotId:m.Phase==Stage.Research?0:m.Slot,parentId:m.Phase==Stage.Research?0:m.Parent,buildingKind:m.Phase==Stage.Research?PlayableBuildingKind.Headquarters:PlayableBuildingKind.ScientificCenter,
             researchKind:m.Phase==Stage.Research?m.Branch:PlayableResearchKind.TankChassis,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
-        private static int Required(Memo m)=>checked(m.ResearchCost+(m.Phase==Stage.Science?m.ScienceCost:0));
+        private static int Required(Memo m)=>m.Phase==Stage.Science?m.ScienceCost:m.ResearchCost;
         private AiBudgetEntry Entry(Memo m,PlayableAiAction action,PlayableProfile p)=>new AiBudgetEntry(Id(m),Purpose,action,m.Amount,1,m.Created,m.Expires,"actual technology payment / target loss / no-progress expiry",Array.Empty<string>(),Terms(p));
         public static long CoveredAmount(AiBudgetState b,PlayableResearchKind kind,PlayableProfile p)=>b.Reserved.Where(e=>IsFunding(e)&&ParseId(e.Id,out _,out var branch,out _,out _,out _)&&branch==kind&&e.Action.PlayerId==b.OwnerId&&e.Action.Generation==b.Generation&&e.Action.ProfileId==p.ProfileId&&e.Action.ProfileRevision==p.Revision&&e.Terms==Terms(p)).Sum(e=>(long)e.Amount);
         private static bool Target(Memo m,PlayableAiAction a)=>a.PlayerId==m.Owner&&a.Generation==m.Generation&&
@@ -342,7 +342,7 @@ namespace Spacewars.Runtime
             var accepted=new AiBudgetEntry(i.Id,i.Policy,i.Action,i.Credits,i.Priority,o.Tick,i.ExpiresTick,"terminal receipt / invalid target / expiry",i.Claims,Terms(p),receipt);
             AiBudgetEntry remainder=null;
             if(m.Phase==Stage.Science)
-            {m.BuildIntent=accepted.Id;m.BuildReceipt=receipt;m.BuildAmount=accepted.Amount;m.BuildTerms=accepted.Terms;m.Phase=Stage.AwaitingScience;m.Amount=m.ResearchCost;remainder=Entry(m,Desired(m,o,p),p);}
+            {m.BuildIntent=accepted.Id;m.BuildReceipt=receipt;m.BuildAmount=accepted.Amount;m.BuildTerms=accepted.Terms;m.Phase=Stage.AwaitingScience;m.Amount=0;remainder=Entry(m,Desired(m,o,p),p);}
             if(!b.AcceptReserved(accepted,hold.Id,remainder))
             {
 #if UNITY_INCLUDE_TESTS
@@ -362,7 +362,7 @@ namespace Spacewars.Runtime
             var m=Load(a);if(m==null)return;foreach(var e in b.Capture().Reserved.Where(IsFunding))b.Release(e.Id);m.Expired=true;m.Amount=0;m.Cash=b.Liquid;Save(a,m);
         }
         public int Reprice(AiBudgetEntry e,PlayableProfile p)
-        {if(!ParseId(e.Id,out var stage,out var branch,out _,out _,out _))throw new ArgumentException("Invalid technology reservation ID.");return Math.Min(e.Amount,checked((int)Math.Ceiling(AiResearchCatalog.For(branch).Cost(p))+(stage==Stage.Science?TerritoryRules.Cost(p,PlayableBuildingKind.ScientificCenter):0)));}
+        {if(!ParseId(e.Id,out var stage,out var branch,out _,out _,out _))throw new ArgumentException("Invalid technology reservation ID.");return Math.Min(e.Amount,stage==Stage.Science?TerritoryRules.Cost(p,PlayableBuildingKind.ScientificCenter):checked((int)Math.Ceiling(AiResearchCatalog.For(branch).Cost(p))));}
         public void Rebind(PlayableProfile p,AiProfile ai,AiBudgetLedger b,AiDecisionArbiter arbiter)
         {
             var m=Load(arbiter);if(m==null)return;m.MetadataChanged=true;m.Metadata=Metadata(p,ai);m.Expires=Math.Min(m.Expires,checked(m.Created+b.ReservationLifetimeTicks));
@@ -386,7 +386,10 @@ namespace Spacewars.Runtime
             var m=Load(a);var held=b.Capture().Reserved.Where(IsFunding).ToArray();
             if(m==null){AiStateWire.Require(held.Length==0,"orphan technology reservation");return;}
             AiStateWire.Require(m.Owner==owner&&m.Generation==generation&&m.Created<=o.Tick&&m.Expires-m.Created<=b.ReservationLifetimeTicks&&m.Income<=o.SettledIncome&&m.ScienceCost==TerritoryRules.Cost(p,PlayableBuildingKind.ScientificCenter)&&m.ResearchCost==(int)Math.Ceiling(AiResearchCatalog.For(m.Branch).Cost(p)),"technology memo owner/terms/clock");
-            AiStateWire.Require(held.Length<=1&&held.All(e=>e.Id==Id(m)&&e.Amount==m.Amount&&e.Amount<=Required(m)&&e.CreatedTick==m.Created&&e.ExpiresTick==m.Expires&&e.Terms==Terms(p)&&e.Claims.Count==0&&e.Action.PlayerId==owner&&e.Action.Generation==generation&&e.Action.ProfileId==p.ProfileId&&e.Action.ProfileRevision==p.Revision&&
+            // Existing current-format saves may contain the former combined quote.
+            // Read it exactly; the next ordinary allocation caps it to the current stage.
+            int serializedMaximum=checked(m.ResearchCost+(m.Phase==Stage.Science?m.ScienceCost:0));
+            AiStateWire.Require(held.Length<=1&&held.All(e=>e.Id==Id(m)&&e.Amount==m.Amount&&e.Amount<=serializedMaximum&&e.CreatedTick==m.Created&&e.ExpiresTick==m.Expires&&e.Terms==Terms(p)&&e.Claims.Count==0&&e.Action.PlayerId==owner&&e.Action.Generation==generation&&e.Action.ProfileId==p.ProfileId&&e.Action.ProfileRevision==p.Revision&&
                 (m.Phase==Stage.Research?Target(m,e.Action):e.Action.Kind==PlayableCommandKind.BuildAt&&e.Action.BuildingKind==PlayableBuildingKind.ScientificCenter&&e.Action.SiteId==m.Site&&e.Action.SlotId==m.Slot&&e.Action.ParentId==m.Parent&&e.Action.EntityIds.Count==0)),"technology reservation binding");
             AiStateWire.Require(!m.Expired||held.Length==0&&m.Amount==0,"expired technology hold");
             AiStateWire.Require(m.Expired||m.Phase!=Stage.AwaitingScience||AcceptedScience(m,b),"awaiting science exact accepted receipt");
@@ -404,7 +407,7 @@ namespace Spacewars.Runtime
         {
             var owner=OwnerFor(id);
             var rs=research.TryGetValue(owner,out var orders)?orders.Select(r=>new PlayableResearchOrderSnapshot(r.Id,r.Kind,r.CenterId,r.PaidCost,r.Elapsed,r.Duration,r.Active,r.Complete)).ToArray():Array.Empty<PlayableResearchOrderSnapshot>();
-            var bs=buildings.Values.Where(b=>b.Owner==owner).Select(b=>new PlayableBuildingSnapshot(b.Id,b.Owner,b.Kind,b.Position,(int)Math.Ceiling(b.Health),b.Ready?1:b.Build/TerritoryRules.Duration(Terms(b.TermsRevision),b.Kind),b.Queue,b.ProductionProgress,b.Rally,b.SiteId,b.SlotId,b.ParentId,b.Phase,b.BlockedReason,b.Heading,orders:ProductionSnapshot(b),lifecycle:LifecycleSnapshot(b),research:b.Kind==PlayableBuildingKind.ScientificCenter?rs:null,exactHealth:b.Health)).ToArray();
+            var bs=buildings.Values.Where(b=>b.Owner==owner).Select(b=>new PlayableBuildingSnapshot(b.Id,b.Owner,b.Kind,b.Position,(int)Math.Ceiling(b.Health),b.Ready?1:b.Build/TerritoryRules.Duration(Terms(b.TermsRevision),b.Kind),b.Queue,b.ProductionProgress,b.Rally,b.SiteId,b.SlotId,b.ParentId,b.Phase,b.BlockedReason,b.Heading,orders:ProductionSnapshot(b),lifecycle:LifecycleSnapshot(b),research:b.Kind==PlayableBuildingKind.ScientificCenter?rs:null,exactHealth:b.Health,maxHealth:BuildingMaximumHealth(b.Owner,b.Kind))).ToArray();
             return PlayableAiObservation.From(new PlayableSnapshot(profile.ProfileId,profile.Revision,navigation.Generation,seed,0,Tick,RuntimeStatus.Running,false,Outcome,(int)Math.Floor(Balance(owner)),null,Array.Empty<PlayableEntitySnapshot>(),bs,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:SiteSnapshots().Where(s=>s.Owner==owner).ToArray(),ownerResearch:rs,activeProfile:profile,owner:owner,ownerId:id,homeSiteId:HomeSite(owner),settledIncome:SettledIncome(owner)));
         }
     }

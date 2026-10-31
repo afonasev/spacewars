@@ -28,7 +28,9 @@ namespace Spacewars.Input.Tests
         static T V<T>(object v,string n)=>(T)v.GetType().GetField(n).GetValue(v);
         [SetUp]public override void Setup(){base.Setup();go=new GameObject("actual offline marker renderer");hud=go.AddComponent<OfflineTwoLocalBootstrap>();hud.enabled=false;oldAudio=AudioListener.volume;AudioListener.volume=0;var audio=go.AddComponent<GameplayAudioPlayer>();audio.Initialize();Set("gameplayAudio",audio);}
         [TearDown]public override void TearDown(){UnityEngine.Object.DestroyImmediate(go);AudioListener.volume=oldAudio;base.TearDown();}
-        [UnityTest]public IEnumerator ActualTwoViewportMapsUseOwnEventsExpireAndRespectMirroredCamera()
+        [UnityTest]public IEnumerator ActualTwoViewportMapsUseOwnEventsExpireAndRespectMirroredCamera()=>CaptureTwoViewports(false);
+        [UnityTest]public IEnumerator ActualTwoViewportAcceptedPendingVectorAppearsBeforeRouteActivation()=>CaptureTwoViewports(true);
+        IEnumerator CaptureTwoViewports(bool pendingOnly)
         {
             var profile=PlayableProfile.Default;var starts=new[]{new OfflineStart("left",1,new NavPoint(-24,-24),new NavPoint(-10,-4),pin:1),new OfflineStart("right",2,new NavPoint(24,24),new NavPoint(2,-4),pin:2)};
             var config=new OfflineMatchConfiguration(profile,"two-seat-marker-fixture","flat-markers","authored-test-costs",7,new[]{new OfflineParticipant("owner-11",1,1,OfflineControl.Human),new OfflineParticipant("owner-28",2,2,OfflineControl.Human)},starts,starts.Select(s=>new TerritorySite(s.SiteId,PlayableBuildingKind.Headquarters,s.Position,Array.Empty<TerritorySlot>())).ToArray(),Array.Empty<NavObstacle>(),new double[,]{{0,1},{1,0}});
@@ -53,6 +55,17 @@ namespace Spacewars.Input.Tests
                 try
                 {
                     Resume();Render();for(int i=0;i<2;i++){var v=viewports[i];var own=V<PlayableSnapshot>(v,"View").Entities.Single(e=>e.Owner==V<PlayableSnapshot>(v,"View").Owner);V<HashSet<int>>(v,"Selection").Add(own.Id);Call("Submit",i,PlayableCommandKind.Move,new NavPoint(own.Position.X+2,own.Position.Z-6),0,PlayableOrderMode.Replace);}
+                    if(pendingOnly)
+                    {
+                        // Receipt + typed pending issuance is sufficient confirmation. This UI
+                        // scenario does not require navigation to activate the accepted order.
+                        double receiptDeadline=Time.realtimeSinceStartupAsDouble+3;
+                        while(viewports.Any(v=>V<PlayableOrderMarkerLayer>(v,"OrderLayer").VisibleCount!=1)&&Time.realtimeSinceStartupAsDouble<receiptDeadline){Call("Route");Render();yield return null;}
+                        foreach(var v in viewports){var marker=V<PlayableOrderMarkers>(v,"Orders").Visible(V<PlayableSnapshot>(v,"View"),Array.Empty<int>(),Time.unscaledTimeAsDouble).Single();Assert.GreaterOrEqual(marker.ConfirmationElapsed,0);}
+                        yield return new WaitForSecondsRealtime(.12f);yield return Frame("11-vector-accepted-two-owners",1);
+                        yield return new WaitForSecondsRealtime(1.08f);yield return Frame("12-vector-expired-two-owners",0);
+                        Assert.IsNull(runtime.Latest.Failure);File.WriteAllText(Path.Combine(folder,"vector-two-viewport-state.json"),Newtonsoft.Json.JsonConvert.SerializeObject(captures,Newtonsoft.Json.Formatting.Indented));yield break;
+                    }
                     double until=Time.realtimeSinceStartupAsDouble+5;while(!session.Frame.Views.Values.All(v=>v.Entities.Single(e=>e.Owner==v.Owner).Queue?.Active!=null)&&Time.realtimeSinceStartupAsDouble<until){Call("Route");Render();yield return null;}Assert.True(session.Frame.Views.Values.All(v=>v.Entities.Single(e=>e.Owner==v.Owner).Queue?.Active!=null),"paused="+session.Paused+" prepared="+runtime.IsPrepared+" tick="+session.Frame.Tick+" failure="+runtime.Latest.Failure+" notices="+string.Join(" / ",viewports.Select(v=>V<Label>(v,"Notice").text)));session.Pause();yield return null;Render();
                     for(int i=0;i<2;i++){Call("SelectionMarkerEvent",i);var v=viewports[i];var view=V<PlayableSnapshot>(v,"View");var selected=V<HashSet<int>>(v,"Selection");var ownId=view.Entities.Single(e=>e.Owner==view.Owner).Id;selected.Add(viewports[1-i].GetType().GetField("Selection").GetValue(viewports[1-i]) is HashSet<int> other?other.First():0);Call("SelectionMarkerEvent",i);Assert.AreEqual(1,V<PlayableOrderMarkers>(v,"Orders").Visible(view,selected,Time.unscaledTimeAsDouble).Count);selected.RemoveWhere(id=>id!=ownId);var location=view.Entities.Single(e=>e.Id==ownId).Queue.Active.Anchor.Value;var actual=PlayableOrderMarkerLayer.WorldPoint(root,cameras[i],profile,location,true).Value;var projected=cameras[i].WorldToViewportPoint(new Vector3((float)location.Position.X,.1f,(float)location.Position.Z));Assert.That(actual.x,Is.EqualTo((i*.5f+(1-projected.x)*.5f)*root.contentRect.width).Within(.01));}
                     yield return Frame("07-production-two-owner-selection",1);yield return new WaitForSecondsRealtime(1.08f);yield return Frame("08-production-two-owner-expired-still-selected",0);

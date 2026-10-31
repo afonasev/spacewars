@@ -17,10 +17,10 @@ namespace Spacewars.Tests.EditMode
             private readonly NavArrivalInput source;
 
             internal OwnedArrivalFixture(bool independent, bool samePoint = false, bool multipleCandidates = false,
-                bool certifiedFlat = false, int memberCount = 1, int flatCandidateCount = 0, bool unreachableFirst = false)
+                bool certifiedFlat = false, int memberCount = 1, int flatCandidateCount = 0, bool unreachableFirst = false, bool partition = false, NavArrivalOccupant[] occupants = null, bool variableRadii = false, Func<int,NavLocation,NavLocation> candidateAt = null)
             {
                 var blockers = new[] { new NavObstacle(-.35, unreachableFirst ? -12 : -3, .35, unreachableFirst ? 12 : 3) };
-                var provider = certifiedFlat ? NavigationAdmission.CertifiedFlatProvider(new NavGeometry(12, blockers, 1)) :
+                ILayeredNavigationProvider provider = partition ? new PartitionNavigationProvider(ThreeCrossingsMap.Default,new NavGeometry(ThreeCrossingsMap.Default.HalfExtent,Array.Empty<NavObstacle>(),1),null) : certifiedFlat ? NavigationAdmission.CertifiedFlatProvider(new NavGeometry(12, blockers, 1)) :
                     NavigationArrivalTestFactory.Layered("physical-arrival-work", 1, blockers);
                 string surface = certifiedFlat ? NavLocation.FlatSurface : "ground";
                 var origin = NavigationArrivalTestFactory.At(samePoint ? 2 : -5, 0, surface);
@@ -31,25 +31,28 @@ namespace Spacewars.Tests.EditMode
                     : new[] { endpoint };
                 if(flatCandidateCount>0)candidates=Enumerable.Range(0,flatCandidateCount).Select(i=>NavigationArrivalTestFactory.At(5+.2*(i%8),.2*(i/8),surface)).ToArray();
                 if(unreachableFirst)candidates[1]=NavigationArrivalTestFactory.At(-5,5,surface);
-                var originals=Enumerable.Range(0,memberCount).Select(i=>i==0?Member:NavigationArrivalTestFactory.Member(31+i,0,NavigationArrivalTestFactory.At(-5,-i,surface),.2)).ToArray();
+                if(partition){var clearance=NavigationArrivalTestFactory.Member(31,0,origin,.2).Clearance;Assert.True(((PartitionNavigationProvider)provider).TryLocate(new NavPoint(-24,0),clearance,out origin));Assert.True(((PartitionNavigationProvider)provider).TryLocate(new NavPoint(-22,0),clearance,out endpoint));candidates=Enumerable.Range(0,flatCandidateCount>0?flatCandidateCount:8).Select(i=>candidateAt!=null?candidateAt(i,endpoint):new NavLocation(new NavPoint(-22+2*(i%4),2*(i/4)),endpoint.SurfaceId)).ToArray();Member=NavigationArrivalTestFactory.Member(31,0,origin,.2);}
+                var originals=Enumerable.Range(0,memberCount).Select(i=>i==0?Member:NavigationArrivalTestFactory.Member(31+i,0,partition?origin:NavigationArrivalTestFactory.At(-5,-i,surface),variableRadii?.2+.07*i:.2)).ToArray();
                 var candidateSource = new NavArrivalCandidateSource("physical-arrival-work", 1, endpoint, candidates);
                 source = new NavArrivalInput("topology:" + provider.Binding, "profile:" + provider.Binding, provider,
                     new NavGraphProfile(NavigationArrivalTestFactory.Sha("physical-arrival-work-profile"), "distance", 1, 1),
                     new NavigationProfile(), new NavGraphCompileLimits(2000, 2000, 10000), candidateSource,
-                    originals, NavigationArrivalTestFactory.Occupancy(), 4096, null, independent);
+                    originals, occupants==null?NavigationArrivalTestFactory.Occupancy():new NavArrivalOccupancySnapshot(1,occupants), 4096, null, independent);
                 Assert.True(Budget.TryOpenScope(NavigationPreparationKind.Admission, 1, 1, out var birth));
                 var reservation = birth.OwnedReservation();
-                var ownedProvider = LayeredNavigationProvider.CopyOwned((LayeredNavigationProvider)source.Provider, reservation);
+                ILayeredNavigationProvider ownedProvider = partition ? PartitionNavigationProvider.CopyOwned((PartitionNavigationProvider)source.Provider,reservation) : (ILayeredNavigationProvider)LayeredNavigationProvider.CopyOwned((LayeredNavigationProvider)source.Provider, reservation);
                 var metadata = NavGraphMetadata.CopyOptionalUnowned(Member.Clearance, source.Profile, source.Limits, reservation);
                 var arrival = NavigationProfile.CopyOwned(source.ArrivalProfile, reservation);
                 var ownedSource = NavArrivalCandidateSource.CopyOwned(source.Source, reservation);
-                var occupancy = NavArrivalOccupancySnapshot.CopyOwned(source.Occupancy, Array.Empty<NavArrivalOccupant>(), reservation);
-                var ownedMembers = originals.Select(m=>NavArrivalMember.CopyOwned(m,metadata.Clearance,reservation)).ToArray();
+                var ownedOccupants=source.Occupancy.Occupants.Select(o=>NavArrivalOccupant.CopyOwned(o,reservation)).ToArray();
+                var occupancy = NavArrivalOccupancySnapshot.CopyOwned(source.Occupancy, ownedOccupants, reservation);
+                var ownedMembers = variableRadii ? originals.Select(m=>{var memberMetadata=NavGraphMetadata.CopyOptionalUnowned(m.Clearance,source.Profile,source.Limits,reservation);try{return NavArrivalMember.CopyOwned(m,memberMetadata.Clearance,reservation);}finally{memberMetadata.Release();}}).ToArray() : originals.Select(m=>NavArrivalMember.CopyOwned(m,metadata.Clearance,reservation)).ToArray();
                 var bindings = ownedMembers.Select(m=>NavArrivalWorkingBinding.CreateOwned(m.EntityId,ownedProvider,metadata.Profile,reservation)).ToArray();
                 Input = NavArrivalInput.CopyOwned(source, ownedProvider, metadata.Profile, arrival, metadata.Limits,
                     ownedSource, ownedMembers, occupancy, bindings, reservation);
-                ownedProvider.StorageRoot.ReleaseOwner(); metadata.Release(); arrival.StorageRoot.ReleaseOwner();
+                ((INavStorageFacade)ownedProvider).StorageRoot.ReleaseOwner(); metadata.Release(); arrival.StorageRoot.ReleaseOwner();
                 ownedSource.StorageRoot.ReleaseOwner(); occupancy.StorageRoot.ReleaseOwner();
+                foreach(var occupant in ownedOccupants)occupant.StorageRoot.ReleaseOwner();
                 foreach(var member in ownedMembers)member.StorageRoot.ReleaseOwner();foreach(var binding in bindings)binding.StorageRoot.ReleaseOwner();
                 birth.Attach(Input.StorageRoot); birth.Commit(Input.StorageRoot, _ => { });
                 IsIndependent = independent;

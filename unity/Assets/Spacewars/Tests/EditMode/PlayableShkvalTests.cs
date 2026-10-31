@@ -23,13 +23,87 @@ namespace Spacewars.Tests.EditMode
         private PlayableCommandStatus Send(PlayableCommandKind kind,int id,PlayableEntityKind unitKind=PlayableEntityKind.Tank,long order=0,int target=0)=>(PlayableCommandStatus)Call("Apply",new PlayableCommand(1,++sequence,"player-1",kind,new[]{id},unitKind:unitKind,productionOrderId:order,targetId:target),null);
         private void Set(int id,string field,object value)=>Units[id].GetType().GetField(field).SetValue(Units[id],value);
         private T Get<T>(int id,string field)=>(T)Units[id].GetType().GetField(field).GetValue(Units[id]);
+        // Rapid-fire/cell fixtures start already aimed; preparation has its own contract below.
+        private void Align(int gun,int target){
+            var e=View().Entities.Single(x=>x.Id==gun);var t=View().Entities.Single(x=>x.Id==target);
+            ShkvalLaunchGeometry.Aim(new BallisticPoint(e.Position.X,0,e.Position.Z),e.HullHeading,e.Upgraded,e.WeaponSequence,p.ShkvalModelRadius*p.ShkvalModelScale/2.05,p.ShkvalProjectileLength,default,new BallisticPoint(t.Position.X,0,t.Position.Z),p.ShkvalArcHeight,out double yaw,out double pitch);
+            Set(gun,"Turret",yaw);Set(gun,"ShkvalPitch",pitch);
+        }
         private int Factory(){Call("AddCredits",PlayableOwner.Player,10000d);Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,1,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));Call("AdvanceFoundations");Call("AdvanceBuildings",100d);return View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.Factory).Id;}
+        [TestCase(PlayableEntityKind.Shkval)]
+        [TestCase(PlayableEntityKind.Tank)]
+        [TestCase(PlayableEntityKind.Explorer)]
+        public void IdleWeaponTracksHullAndReturnsAfterTargetLoss(PlayableEntityKind kind)
+        {
+            int gun=Spawn(PlayableOwner.Player,kind,-12,0);
+            Nav.Crowd.TryGet(gun,out var actor);actor.Heading=1.2;
+            double speed=kind==PlayableEntityKind.Shkval?p.ShkvalTurretTurnSpeed:kind==PlayableEntityKind.Explorer?p.ExplorerTurretTurnSpeed:p.TankTurretTurnSpeed;
+            Combat(1);Assert.AreEqual(Math.Min(1.2,speed/30),Get<double>(gun,"Turret"),1e-10);
+            Combat(120);Assert.AreEqual(actor.Heading,Get<double>(gun,"Turret"),1e-10);
+            // A new chassis heading must carry the resting weapon along with it.
+            actor.Heading=-.7;Combat(120);Assert.AreEqual(actor.Heading,Get<double>(gun,"Turret"),1e-10);
+            int target=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-4,0);
+            Set(target,"Reload",999d);Set(gun,"Target",target);Set(gun,"ExplicitTarget",true);Set(gun,"Reload",999d);
+            Combat(90);Assert.Greater(Math.Abs(Get<double>(gun,"Turret")-actor.Heading),.2,"Combat must still aim away from the hull");
+            Nav.Remove(target);Units.Remove(target);
+            double before=Get<double>(gun,"Turret");Combat(1);
+            Assert.LessOrEqual(Math.Abs(Get<double>(gun,"Turret")-before),speed/30+1e-10,"No return snap");
+            Combat(120);var rest=View().Entities.Single(e=>e.Id==gun);
+            Assert.AreEqual(actor.Heading,rest.TurretHeading,1e-10);
+            Assert.AreEqual(kind==PlayableEntityKind.Shkval?ShkvalLaunchGeometry.NeutralPitch:0,rest.WeaponPitch,1e-10);
+            Assert.IsEmpty(View().Projectiles);
+        }
+        [Test]public void IdleAcquisitionRaisesBeforeFiringWithoutMovingRoot()
+        {
+            int gun=Spawn(PlayableOwner.Player,PlayableEntityKind.Shkval,-12,0),target=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-4,0);
+            Set(target,"Reload",999d);Set(gun,"StoppedSeconds",10d);Set(gun,"Target",target);Set(gun,"ExplicitTarget",true);Call("RefreshVision");
+            var before=View().Entities.Single(e=>e.Id==gun);Combat(1);var raised=View().Entities.Single(e=>e.Id==gun);
+            Assert.IsEmpty(View().Projectiles);Assert.Greater(raised.WeaponPitch,before.WeaponPitch);Assert.LessOrEqual(raised.WeaponPitch-before.WeaponPitch,p.ShkvalTurretTurnSpeed/30+1e-12);Assert.AreEqual(before.Position,raised.Position);
+            Combat(4);var shot=View().Projectiles.Single();Assert.NotNull(shot.Launch);Assert.Greater(shot.Launch.Pitch,ShkvalLaunchGeometry.NeutralPitch);Assert.AreEqual(before.Position,shot.Launch.Ground.Ground);
+        }
+        [Test]public void FourMuzzlesCyclePerUnitIndependentlyOfOtherWeapons()
+        {
+            int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Shkval,-12,0),b=Spawn(PlayableOwner.Player,PlayableEntityKind.Shkval,-12,3),target=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-4,0);
+            Set(target,"Reload",999d);Set(a,"StoppedSeconds",10d);Set(b,"StoppedSeconds",10d);
+            Set(a,"Target",target);Set(a,"ExplicitTarget",true);Set(b,"Reload",999d);Call("RefreshVision");
+            var seen=new System.Collections.Generic.List<int>();
+            for(int i=0;i<5;i++){
+                Set(a,"Reload",0d);Align(a,target);Call("AdvanceIndexedCombat",1d/30);
+                var shot=View().Projectiles.Where(x=>x.OwnerId==a).OrderByDescending(x=>x.Id).First();Assert.NotNull(shot.Launch);seen.Add(shot.Launch.Barrel);
+                Assert.AreEqual((i+1)%4,View().Entities.Single(x=>x.Id==a).WeaponSequence);
+            }
+            CollectionAssert.AreEqual(new[]{0,1,2,3,0},seen);Assert.Zero(View().Entities.Single(x=>x.Id==b).WeaponSequence);
+        }
+        [Test]public void FourLoadedCellsConsumeRefillOldestAndRecoverWithoutAmmoGate()
+        {
+            int gun=Spawn(PlayableOwner.Player,PlayableEntityKind.Shkval,-12,0),target=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-4,0);
+            Set(target,"Reload",999d);Set(gun,"StoppedSeconds",10d);Set(gun,"Target",target);Set(gun,"ExplicitTarget",true);Call("RefreshVision");
+            Assert.Null(View().Entities.Single(x=>x.Id==gun).ShkvalCells,"Unfired unit has four ready cells");
+            double interval=p.ShkvalFireIntervalMs/1000;
+            Align(gun,target);Call("AdvanceIndexedCombat",0d);
+            var first=View().Entities.Single(x=>x.Id==gun).ShkvalCells;
+            Assert.AreEqual(2*interval,first.Remaining(0));for(int c=1;c<4;c++)Assert.Zero(first.Remaining(c));
+            Call("AdvanceIndexedCombat",interval);
+            var second=View().Entities.Single(x=>x.Id==gun).ShkvalCells;
+            Assert.AreEqual(interval,second.Remaining(0),1e-9,"Oldest begins feeding when two remain");Assert.AreEqual(2*interval,second.Remaining(1));Assert.Zero(second.Remaining(2));Assert.Zero(second.Remaining(3));
+            Assert.AreEqual(2*interval,first.Remaining(0),"Earlier snapshot remains immutable");
+            for(int shot=2;shot<12;shot++){
+                Call("AdvanceIndexedCombat",interval);
+                var e=View().Entities.Single(x=>x.Id==gun);
+                Assert.AreEqual((shot+1)%4,e.WeaponSequence,"Visual supply never prevents a shot");
+                Assert.GreaterOrEqual(Enumerable.Range(0,4).Count(c=>e.ShkvalCells.Remaining(c)==0),2);
+            }
+            Set(gun,"Reload",999d);Call("AdvanceIndexedCombat",interval);
+            Assert.AreEqual(3,Enumerable.Range(0,4).Count(c=>View().Entities.Single(x=>x.Id==gun).ShkvalCells.Remaining(c)==0));
+            Call("AdvanceIndexedCombat",interval);
+            for(int c=0;c<4;c++)Assert.Zero(View().Entities.Single(x=>x.Id==gun).ShkvalCells.Remaining(c));
+        }
         [Test]public void MixedProductionKeepsShkvalPayloadAndTypedRepeat()
         {
             int f=Factory(),before=View().Credits;Send(PlayableCommandKind.QueueShkval,f);Send(PlayableCommandKind.QueueExplorer,f);Send(PlayableCommandKind.QueueTank,f);Call("AdvanceProduction",1d);
             var q=View().Buildings.Single(b=>b.Id==f).PrivateState.Orders;Assert.AreEqual(3,q.Count);Assert.AreEqual(PlayableEntityKind.Shkval,q[0].Kind);Assert.AreEqual(p.ShkvalCreditCost,q[0].PaidCost);Assert.AreEqual(p.ShkvalProductionDurationSec,q[0].Duration);Assert.AreEqual(p.ShkvalPopulationCost,View().Population.Reserved);
             Send(PlayableCommandKind.CancelProductionOrder,f,order:q[1].Id);Assert.AreEqual(before-p.ShkvalCreditCost-p.TankCreditCost,View().Credits);
-            Call("AdvanceProduction",100d);var unit=View().Entities.Single(e=>e.Kind==PlayableEntityKind.Shkval);Assert.AreEqual(p.ShkvalHealth,unit.Health);Assert.AreEqual(p.ShkvalPopulationCost,View().Population.Living);Assert.True(Nav.Crowd.TryGet(unit.Id,out var body));Assert.AreEqual(p.ShkvalCollisionRadius,body.Radius);
+            Call("AdvanceProduction",100d);Call("AdvanceProduction",p.FactoryGateSeconds);Call("AdvanceProduction",FactoryReleaseRules.Duration(p,PlayableEntityKind.Shkval));var unit=View().Entities.Single(e=>e.Kind==PlayableEntityKind.Shkval);Assert.AreEqual(p.ShkvalHealth,unit.Health);Assert.AreEqual(p.ShkvalPopulationCost,View().Population.Living);Assert.True(Nav.Crowd.TryGet(unit.Id,out var body));Assert.AreEqual(p.ShkvalCollisionRadius,body.Radius);
             Send(PlayableCommandKind.ToggleRepeatProduction,f,PlayableEntityKind.Shkval);Assert.AreEqual(PlayableEntityKind.Shkval,View().Buildings.Single(b=>b.Id==f).PrivateState.RepeatKind);
         }
         [Test]public void BaselineRangeAndPreparationAreIndependentFromTank()

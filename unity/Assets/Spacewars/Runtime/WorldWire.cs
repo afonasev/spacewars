@@ -286,7 +286,7 @@ namespace Spacewars.Runtime
             w.Write(v.Incarnation);
             w.Write(v.MobilityRevision);
             w.Write(v.Team);
-            w.Write(v.CanYield);
+            w.Write(v.CanYield);Number(w,v.ReverseDistance);Number(w,v.ReverseSpeedRatio);Number(w,v.ReverseConeRadians);
             w.Write(v.Id);
             w.Write(v.RouteIndex);
             w.Write(v.LocalIndex);
@@ -307,7 +307,7 @@ namespace Spacewars.Runtime
             });
             }
         internal static NavUnitSaveState ReadNavUnitSaveState(BinaryReader r) {if(!Boolean(r))return null;
-            return Record(r,()=>new NavUnitSaveState{Incarnation=r.ReadInt64(),MobilityRevision=r.ReadInt64(),Team=r.ReadInt32(),CanYield=Boolean(r),Id=r.ReadInt32(),RouteIndex=r.ReadInt32(),LocalIndex=r.ReadInt32(),NoProgressTicks=r.ReadInt32(),Position=ReadPoint(r),Goal=ReadPoint(r),Radius=Number(r),Speed=Number(r),TurnSpeed=Number(r),Heading=Number(r),BlockedSeconds=Number(r),Moving=Boolean(r),Held=Boolean(r),Outcome=EnumValue<NavigationOutcome>(r),Route=Array(r,()=>ReadPoint(r)),LocalRoute=Array(r,()=>ReadPoint(r))});
+            return Record(r,()=>new NavUnitSaveState{Incarnation=r.ReadInt64(),MobilityRevision=r.ReadInt64(),Team=r.ReadInt32(),CanYield=Boolean(r),ReverseDistance=Number(r),ReverseSpeedRatio=Number(r),ReverseConeRadians=Number(r),Id=r.ReadInt32(),RouteIndex=r.ReadInt32(),LocalIndex=r.ReadInt32(),NoProgressTicks=r.ReadInt32(),Position=ReadPoint(r),Goal=ReadPoint(r),Radius=Number(r),Speed=Number(r),TurnSpeed=Number(r),Heading=Number(r),BlockedSeconds=Number(r),Moving=Boolean(r),Held=Boolean(r),Outcome=EnumValue<NavigationOutcome>(r),Route=Array(r,()=>ReadPoint(r)),LocalRoute=Array(r,()=>ReadPoint(r))});
             }
         internal static void Write(BinaryWriter w,PlayableVisionState v) {w.Write(v!=null);
             if(v==null)return;
@@ -349,10 +349,10 @@ namespace Spacewars.Runtime
             Number(w,v.X);
             Number(w,v.Z);
             Number(w,v.Heading);
-            w.Write(v.RefineryUpgraded);
+            w.Write(v.RefineryUpgraded);w.Write(v.ScientificCenterUpgraded);
             }
         internal static KnownBuildingState ReadKnownBuildingState(BinaryReader r) {if(!Boolean(r))return null;
-            return Record(r,()=>new KnownBuildingState{Id=r.ReadInt32(),Team=r.ReadInt32(),Owner=EnumValue<PlayableOwner>(r),Kind=EnumValue<PlayableBuildingKind>(r),X=Number(r),Z=Number(r),Heading=Number(r),RefineryUpgraded=Boolean(r)});
+            return Record(r,()=>new KnownBuildingState{Id=r.ReadInt32(),Team=r.ReadInt32(),Owner=EnumValue<PlayableOwner>(r),Kind=EnumValue<PlayableBuildingKind>(r),X=Number(r),Z=Number(r),Heading=Number(r),RefineryUpgraded=Boolean(r),ScientificCenterUpgraded=Boolean(r)});
             }
         internal static void Write(BinaryWriter w,PlayableRallyIntentState v) {w.Write(v!=null);
             if(v==null)return;
@@ -425,7 +425,23 @@ namespace Spacewars.Runtime
         internal static byte[] BindingLegacyMarch(PlayableProfile p)=>BindingCore(p,false,true);
         private static byte[] BindingCore(PlayableProfile p,bool legacyQueue,bool legacyMarch)=>Pack(w=>WriteBinding(w,p,legacyQueue,legacyMarch));
         internal static NavigationCaptureBytes BindingOwned(PlayableProfile p,NavigationRetentionBudget budget)=>PackOwned(w=>WriteBinding(w,p,false,false),budget);
-        private static void WriteBinding(BinaryWriter w,PlayableProfile p,bool legacyQueue,bool legacyMarch){w.Write(legacyQueue?9:PlayableCommand.CurrentSchemaVersion);String(w,p.DisplayName);
+        private static void WriteBinding(BinaryWriter w,PlayableProfile p,bool legacyQueue,bool legacyMarch){w.Write(legacyQueue?9:PlayableCommand.CurrentSchemaVersion);String(w,p.DisplayName);String(w,BuildingCombatGeometry.Version);Number(w,p.DefaultCombatPursuitSeconds);Number(w,p.RepairTowerHealthPerSecond);foreach(var f in PlayableProfileMetadata.Fields.Where(f=>(f.Path.StartsWith("turret.",StringComparison.Ordinal)||f.Path.StartsWith("gauss.",StringComparison.Ordinal))))Number(w,f.Read(p.CopyData()));foreach(var f in PlayableProfileMetadata.WreckFields)Number(w,f.Read(p.CopyData()));
+            Number(w,p.WeaponSystemsLevel3Cost);
+            Number(w,p.WeaponSystemsLevel3Seconds);
+            Number(w,p.WeaponSystemsLevel3BonusPercent);
+            Number(w,p.DefensiveSystemsLevel3Cost);
+            Number(w,p.DefensiveSystemsLevel3Seconds);
+            Number(w,p.DefensiveSystemsLevel3BonusPercent);
+            Number(w,p.ProducerUpgradeCost(PlayableBuildingKind.Factory));Number(w,p.ProducerUpgradeSeconds(PlayableBuildingKind.Factory));
+            Number(w,p.ProducerUpgradeCost(PlayableBuildingKind.Hangar));Number(w,p.ProducerUpgradeSeconds(PlayableBuildingKind.Hangar));Number(w,p.UpgradedProducerSpeedMultiplier);
+            Number(w,p.ScientificCenterUpgradeCost);
+            Number(w,p.ScientificCenterUpgradeSeconds);
+            Number(w,p.ReinforcedConcreteCost);
+            Number(w,p.ReinforcedConcreteSeconds);
+            Number(w,p.ReinforcedConcreteBonusPercent);
+            Number(w,p.ReinforcedConcreteLevel2Cost);
+            Number(w,p.ReinforcedConcreteLevel2Seconds);
+            Number(w,p.ReinforcedConcreteLevel2BonusPercent);
             Number(w,p.WeaponSystemsLevel1Cost);
             Number(w,p.WeaponSystemsLevel1Seconds);
             Number(w,p.WeaponSystemsLevel1BonusPercent);
@@ -628,6 +644,7 @@ namespace Spacewars.Runtime
             Number(w,p.TankCollisionRadius);
             Number(w,p.TankModelRadius);
             Number(w,p.TankModelScale);
+            Number(w,p.TankReverseDistance);Number(w,p.TankReverseSpeedRatio);Number(w,p.TankReverseConeRadians);
             Number(w,p.TankSpeed);
             Number(w,p.TankTurnSpeed);
             Number(w,p.TankTurretTurnSpeed);
@@ -700,6 +717,7 @@ namespace Spacewars.Runtime
             Number(w,p.AttackApproachRangeRatio);
             Number(w,p.AttackRepathSeconds);
             Number(w,p.FactoryExitDistance);
+            Number(w,p.FactoryAssemblyGap);
             Number(w,p.DefaultRallyDistance);
             Number(w,p.TargetPickRadiusMultiplier);
             Number(w,p.BuildingPickRadius);
@@ -743,7 +761,8 @@ namespace Spacewars.Runtime
             WriteObstacleView(w,m.MovementBlockers);
             WriteObstacleView(w,m.Solids);
             WriteObstacleView(w,crossings.Water);
-            }else if(m is FoundryMap foundry){Number(w,foundry.Scale);Number(w,foundry.UpperHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is BasaltCrownMap basalt){String(w,basalt.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is MossHighlandMap moss){String(w,moss.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is WhiteMeridianMap meridian){Number(w,meridian.Scale);Number(w,meridian.TerraceHeight);Number(w,meridian.RidgeHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is CrimsonGroveMap grove){Number(w,grove.Scale);Number(w,grove.TerraceHeight);Number(w,grove.RidgeHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is AiTestMap||m is CampaignOpeningMap||m is ProvingGroundMap){Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else throw new ArgumentException("Unsupported native terrain binding.");
+            }else if(m is FoundryMap foundry){Number(w,foundry.Scale);Number(w,foundry.UpperHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is BasaltCrownMap basalt){String(w,basalt.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is MossHighlandMap moss){String(w,moss.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is WhiteMeridianMap meridian){Number(w,meridian.Scale);Number(w,meridian.TerraceHeight);Number(w,meridian.RidgeHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is CrimsonGroveMap grove){Number(w,grove.Scale);Number(w,grove.TerraceHeight);Number(w,grove.RidgeHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is NullDockMap dock){Number(w,dock.TerraceHeight);Number(w,dock.ModuleHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is StackedRampQualificationMap||m is AiTestMap||m is CampaignOpeningMap||m is ProvingGroundMap){Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else throw new ArgumentException("Unsupported native terrain binding.");
+            if(m is StackedRampQualificationMap physical)String(w,physical.Provider.Binding);
             w.Write(m.Supports.Count);
             foreach(var s in m.Supports){String(w,s.Id);
             Write(w,s.Bounds);
@@ -753,7 +772,132 @@ namespace Spacewars.Runtime
             Write(w,s.Origin);
             }}if(!legacyQueue){w.Write(p.UnitOrderQueueLimit);Number(w,p.CameraEdgePanSpeed);Number(w,p.CameraEdgePanZonePixels);}
             if(!legacyQueue&&!legacyMarch){Number(w,p.GroupMarchMaximumStretch);Number(w,p.IncomeMarkerFontPixels);Number(w,p.IncomeMarkerRisePixels);Number(w,p.IncomeMarkerDurationSeconds);Number(w,p.RallyFlagHeight);}
-            if(legacyQueue||legacyMarch){if(!p.Navigation.HasCrowdV1Defaults)throw new ArgumentException("Legacy binding requires v1 crowd defaults.");}else p.Navigation.WriteCrowdBinding(w);if(p.HasAccruedCreditExtension){w.Write(0x41434331);w.Write(p.MaxAccruedCredits);}}
+            if(legacyQueue||legacyMarch){if(!p.Navigation.HasCrowdV1Defaults)throw new ArgumentException("Legacy binding requires v1 crowd defaults.");}else p.Navigation.WriteCrowdBinding(w);if(p.HasAccruedCreditExtension){w.Write(0x41434331);w.Write(p.MaxAccruedCredits);}if(p.UsesRecastGroundRoutes){w.Write(0x52435331);w.Write(1);}if(!legacyQueue&&!legacyMarch)WriteEffectiveProfileBindingV1(w,p);}
+
+
+        // EPB1 is an append-only current-profile identity extension. Keep the old
+        // binding prefix and metadata slots unchanged. The fixed list is ordered;
+        // changes to its layout require a new extension version.
+        private static void WriteEffectiveProfileBindingV1(BinaryWriter w,PlayableProfile p)
+        {
+            w.Write(0x45504231); // EPB1
+            w.Write(1);
+            w.Write(114);
+            Number(w,p.TurretCreditCost);
+            Number(w,p.TurretBuildSeconds);
+            Number(w,p.TurretHealthMultiplier);
+            Number(w,p.TurretRangeMultiplier);
+            Number(w,p.TurretFootprintRadius);
+            Number(w,p.TurretPadOffset);
+            Number(w,p.TurretPassageWidth);
+            Number(w,p.TurretVision);
+            Number(w,p.TurretModelScale);
+            Number(w,p.TurretYawSpeed);
+            Number(w,p.TurretPitchSpeed);
+            Number(w,p.TurretDepression);
+            Number(w,p.TurretTurningSpread);
+            Number(w,p.TurretLaserWidth);
+            Number(w,p.TurretLaserIntensity);
+            Number(w,p.ConstructionInitialHealthRatio);
+            Number(w,p.BuildingDestructionSeconds);
+            Number(w,p.BuildingDestructionShake);
+            Number(w,p.BuildingDestructionTilt);
+            Number(w,p.BuildingDestructionFireScale);
+            Number(w,p.BuildingDestructionSmokeOpacity);
+            Number(w,p.HawkModelScale);
+            Number(w,p.HawkAimTolerance);
+            Number(w,p.HawkPreparationYawSpeed);
+            Number(w,p.HawkMissileLength);
+            Number(w,p.HawkMissileVisualScale);
+            Number(w,p.HawkDebrisSeconds);
+            Number(w,p.HawkDebrisSpeed);
+            Number(w,p.HawkDebrisGravity);
+            Number(w,p.HawkDebrisCount);
+            Number(w,p.HawkHealth);
+            Number(w,p.HawkCreditCost);
+            Number(w,p.HawkPopulationCost);
+            Number(w,p.HawkProductionSeconds);
+            Number(w,p.HawkRadius);
+            Number(w,p.HawkSpeed);
+            Number(w,p.HawkReverseSpeed);
+            Number(w,p.HawkStrafeSpeed);
+            Number(w,p.HawkAcceleration);
+            Number(w,p.HawkBraking);
+            Number(w,p.HawkShortSeconds);
+            Number(w,p.HawkShortDistance);
+            Number(w,p.HawkYawSpeed);
+            Number(w,p.HawkYawAcceleration);
+            Number(w,p.HawkCruisePitch);
+            Number(w,p.HawkAccelerationPitch);
+            Number(w,p.HawkBank);
+            Number(w,p.HawkAttitudeSpeed);
+            Number(w,p.HawkClearance);
+            Number(w,p.HawkClimbSpeed);
+            Number(w,p.HawkDescentSpeed);
+            Number(w,p.HawkLookahead);
+            Number(w,p.HawkSeparation);
+            Number(w,p.HawkRoofSeconds);
+            Number(w,p.HawkPlatformSeconds);
+            Number(w,p.HawkSpinSeconds);
+            Number(w,p.HawkRotorSpeed);
+            Number(w,p.HawkRange);
+            Number(w,p.HawkPreparationSeconds);
+            Number(w,p.HawkDamage);
+            Number(w,p.HawkSalvoDelay);
+            Number(w,p.HawkReloadSeconds);
+            Number(w,p.HawkSalvoResearchCost);
+            Number(w,p.HawkSalvoResearchSeconds);
+            Number(w,p.HawkUpgradedPreparationSeconds);
+            Number(w,p.HawkUpgradedSalvoDelay);
+            Number(w,p.HawkUpgradedReloadSeconds);
+            Number(w,p.HawkMissileSpeed);
+            Number(w,p.HawkMissileTurn);
+            Number(w,p.HawkMissileRadius);
+            Number(w,p.DirectImpactSparkWidth);
+            Number(w,p.DirectImpactGlow);
+            Number(w,p.DirectImpactSmokeOpacity);
+            Number(w,p.DirectImpactRadius);
+            Number(w,p.DirectImpactSeconds);
+            Number(w,p.DirectImpactSparkLength);
+            Number(w,p.ExplorerImpactScale);
+            Number(w,p.UnitWreckLifetimeSeconds);
+            Number(w,p.WreckSinkSeconds);
+            Number(w,p.WreckBurialMin);
+            Number(w,p.WreckBurialMax);
+            Number(w,p.WreckSinkDepth);
+            Number(w,p.HawkWreckChancePercent);
+            Number(w,p.HawkWreckFallSeconds);
+            Number(w,p.UnitDeathSmokeSeconds);
+            Number(w,p.WreckHitSmokeSeconds);
+            Number(w,p.WreckSmokeSize);
+            Number(w,p.WreckSmokeOpacity);
+            Number(w,p.WreckSmokeRise);
+            Number(w,p.ImpactEffectRadius);
+            Number(w,p.HealthBarWidth);
+            Number(w,p.HealthBarHeight);
+            Number(w,p.HealthBarModelGap);
+            Number(w,p.HealthBarCellGap);
+            Number(w,p.HealthBarCells);
+            Number(w,p.HealthBarOutlineWidth);
+            Number(w,p.BuildingSelectionPadding);
+            Number(w,p.BuildingSelectionWidth);
+            Number(w,p.GroundTrailLifetimeSeconds);
+            Number(w,p.SelectionFrameRed);
+            Number(w,p.SelectionFrameGreen);
+            Number(w,p.SelectionFrameBlue);
+            Number(w,p.SelectionFrameLineWidth);
+            Number(w,p.SelectionFrameCornerWidth);
+            Number(w,p.SelectionFrameCornerLength);
+            Number(w,p.SelectionFrameFillOpacity);
+            Number(w,p.SelectionFrameLineOpacity);
+            Number(w,p.SelectionRingPadding);
+            Number(w,p.SelectionRingWidth);
+            Number(w,p.SelectionRingLift);
+            Number(w,p.HawkSelectionRadius);
+            Number(w,p.IncomeSettlementSeconds);
+            Number(w,p.FactoryGateSeconds);
+            Number(w,p.FactoryRolloutSpeed);
+        }
 
 
     }

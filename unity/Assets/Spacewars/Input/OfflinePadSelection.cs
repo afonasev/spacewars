@@ -34,7 +34,7 @@ namespace Spacewars.Input
         }
         public static int[] Area(IReadOnlyList<OfflinePadSelectable> units,double x,double z,double radius,bool map)
         {
-            return units.Where(u=>u.Own&&(map||u.Visible)&&Math.Sqrt((u.X-x)*(u.X-x)+(u.Z-z)*(u.Z-z))<=radius).Select(u=>u.Id).ToArray();
+            return units.Where(u=>u.Own&&(map||u.Visible)&&(double.IsPositiveInfinity(radius)||Math.Sqrt((u.X-x)*(u.X-x)+(u.Z-z)*(u.Z-z))<=radius)).Select(u=>u.Id).ToArray();
         }
         public static bool InViewport(Camera camera,Vector3 point)
         {

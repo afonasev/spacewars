@@ -85,6 +85,7 @@ namespace Spacewars.Runtime
         internal NavigationRetentionBudget RestoreBudget;
         internal NavigationDecodeTransaction.PrivateValue<byte[]> DecodeHostOwner;
         internal bool HostPrepared;internal NavigationHostRoot PreparedHost;internal NavigationAuthorityOwners PreparedAuthority;
+        public int RecastCoordinationVersion;
         public byte[] ArrivalAuthority,HostAuthority; public int[] AllocationRequestIndices,RegisteredRequestIndices,DeliveredRequestIndices;
         public int TransportVersion;
         // Zero denotes a legacy wire without a durable admission publication.
@@ -157,6 +158,7 @@ namespace Spacewars.Runtime
     // bounded cross-thread surfaces.
     public sealed partial class NavigationSession
     {
+        internal bool UsesRecastGroundRoutes{get;set;}
         private NavigationInstalledExecutions installedExecutions;
         private HashSet<NavigationAnswer> countedCorridorAnswers=new HashSet<NavigationAnswer>();
         internal string LastCorridorFailure{get;private set;}
@@ -368,6 +370,7 @@ namespace Spacewars.Runtime
             var providers=new Dictionary<Tuple<NavGeometry,string>,ILayeredNavigationProvider>();
             foreach(var row in state.InstalledExecutions){
                 var descriptor=row?.Corridor;
+                if(state.RecastCoordinationVersion==2&&descriptor!=null)descriptor=RestoredRecastCorridor(descriptor,body,null);
                 if(descriptor==null||!seen.Add(row.Entity)||!Crowd.TryGet(row.Entity,out var actor)||
                     row.InstalledRoute==null||row.ExecutionGeometryIndex< -1||row.GeometryIndex<0||row.GeometryIndex>=geometryTable.Length||
                     (row.ExecutionGeometryIndex<0?row.BaseGeometryIndex!=state.NavigationGeometryIndex:row.ExecutionGeometryIndex!=state.NavigationGeometryIndex)||
@@ -452,7 +455,7 @@ namespace Spacewars.Runtime
             if(answer.Corridor==null)return NavigationHostAnswer.CreateLegacyProbeReady(input,answer.ReadOnlyRouteBacking,r);
             var descriptor=answer.Corridor;NavigationHostProvider provider=null;NavScheduledRequest recipe=null;NavPagedList<NavTypedLeg> legs=null;NavTypedRoute typed=null;NavigationHostCorridor corridor=null;
             using(NavStorageScratch.Reserve(r,checked(16384L+2048L*descriptor.Legs.Count)))try{
-                var raw=terrain==null?(ILayeredNavigationProvider)NavigationAdmission.CertifiedFlatProvider(input.Request.Geometry):new PartitionNavigationProvider(terrain,input.Request.Geometry,input.Request.HeldIdentity);
+                var raw=terrain is StackedRampQualificationMap physical?(ILayeredNavigationProvider)physical.ForGeometry(input.Request.Geometry,input.Request.HeldIdentity):terrain==null?(ILayeredNavigationProvider)NavigationAdmission.CertifiedFlatProvider(input.Request.Geometry):new PartitionNavigationProvider(terrain,input.Request.Geometry,input.Request.HeldIdentity);
                 provider=NavigationHostProvider.CopyOwned(raw,input.Request.Geometry,descriptor.SurfaceProviderId,1,r);
                 var d=descriptor;var subscription=new NavRouteSubscription(d.World,d.Group,d.RootRevision,d.CommandSequence,d.IssuedTick,d.ActivationRevision,d.Entity,d.Incarnation,d.ActivationRevision,d.Mobility,d.Request,d.Origin,d.Endpoint,d.HoldBinding,d.Provenance);
                 var unowned=NavScheduledRequest.ForSingleton(provider.Provider,new NavClearanceProfile("ground",1,"ground",checked((int)d.Mobility),d.Radius),new NavGraphProfile(d.ProfileBinding,"distance",1,d.GridCell),new NavGraphCompileLimits(1048576,300000,1200000),subscription,1048576);
@@ -468,7 +471,7 @@ namespace Spacewars.Runtime
         {
             var key=Tuple.Create(request.Geometry,request.HeldIdentity);
             if(cache.TryGetValue(key,out var provider))return provider;
-            provider=terrain==null
+            provider=terrain is StackedRampQualificationMap physical?physical.ForGeometry(request.Geometry,request.HeldIdentity):terrain==null
                 ?(ILayeredNavigationProvider)NavigationAdmission.CertifiedFlatProvider(request.Geometry)
                 :new PartitionNavigationProvider(terrain,request.Geometry,request.HeldIdentity);
             cache.Add(key,provider);return provider;
@@ -605,7 +608,8 @@ namespace Spacewars.Runtime
                         id.ActivationRevision!=member.OrderRevision)||
                     member!=null&&member.GroupId!=0&&(group==null||id.RootOrderRevision!=group.RootOrderRevision||
                         id.CommandSequence!=group.CommandSequence||id.IssuedTick!=group.IssuedTick)||
-                    terrain!=null&&!PartitionNavigationProvider.SupportsTerrain(terrain)||
+                    terrain!=null&&!PartitionNavigationProvider.SupportsTerrain(terrain)&&!(terrain is StackedRampQualificationMap)||
+                    terrain is StackedRampQualificationMap physical&&scheduled.Provider.Binding!=physical.ForGeometry(candidate.Geometry,candidate.HeldIdentity).Binding||
                     PartitionNavigationProvider.SupportsTerrain(terrain)&&
                     scheduled.Provider.Binding!=new PartitionNavigationProvider(terrain,candidate.Geometry,candidate.HeldIdentity).Binding)
                     throw new InvalidOperationException("Scheduler subscription differs from admitted request.");
@@ -716,6 +720,7 @@ namespace Spacewars.Runtime
         public NavCrowd Crowd {get;private set;}
         public NavMailbox<NavigationRequest> Requests {get;private set;} = new NavMailbox<NavigationRequest>(RouteRequestCapacity);
         public NavMailbox<NavigationAnswer> Answers {get;private set;} = new NavMailbox<NavigationAnswer>();
+        internal bool HasAnswersForPreparation{get{using(EnterTransport())return Answers.Count!=0||barrierAnswers.Count!=0;}}
         public int RejectedResults {get;private set;}
         public int AppliedResults {get;private set;}
         public NavSolveStatus? TechnicalFailureFor(int entity)
@@ -856,7 +861,7 @@ namespace Spacewars.Runtime
             var dto=NavigationCaptureDtoStorage.CreateOwned(CaptureDtoLayout(all,geometries,queuedRequests,queuedAnswers),reservation);
             NavigationSessionState state=null;
             try{
-            state=new NavigationSessionState{CaptureDto=dto,TransportVersion=1,CorridorWireVersion=1,InstalledExecutions=CaptureInstalledDirect(geometries),SurfaceSemanticsVersion=terrain?.SurfaceSemanticsVersion??1,SurfaceProviderId=terrain?.Id??NavLocation.FlatSurface,NavigationGeometryIndex=baseIndex,Generation=Generation,RequestSequence=requestSequence,GroupSequence=groupSequence,Groups=CaptureGroupsDirect(),GroupLayoutVersion=1,GroupKeys=CaptureKeys(groups),MemberGroupKeys=CaptureKeys(memberGroups),GroupLayouts=new[]{NavigationCommandLayout.Capture(groups),NavigationCommandLayout.Capture(memberGroups)},Geometry=SaveGeometry(geometry),NavigationGeometry=SaveGeometry(navigationGeometry),
+            state=new NavigationSessionState{RecastCoordinationVersion=UsesRecastGroundRoutes?2:0,CaptureDto=dto,TransportVersion=1,CorridorWireVersion=1,InstalledExecutions=CaptureInstalledDirect(geometries),SurfaceSemanticsVersion=terrain?.SurfaceSemanticsVersion??1,SurfaceProviderId=terrain?.Id??NavLocation.FlatSurface,NavigationGeometryIndex=baseIndex,Generation=Generation,RequestSequence=requestSequence,GroupSequence=groupSequence,Groups=CaptureGroupsDirect(),GroupLayoutVersion=1,GroupKeys=CaptureKeys(groups),MemberGroupKeys=CaptureKeys(memberGroups),GroupLayouts=new[]{NavigationCommandLayout.Capture(groups),NavigationCommandLayout.Capture(memberGroups)},Geometry=SaveGeometry(geometry),NavigationGeometry=SaveGeometry(navigationGeometry),
                 Crowd=Crowd.CaptureState(),Requests=new NavigationRequestState[all.Count],Orders=new NavigationEntityOrderState[orders.Count],
                 Reservations=new NavigationEntityPointState[reservations.Count],RetainedGoals=new NavigationEntityPointState[retainedGoals.Count],
                 MovementIdentities=new NavigationMovementIdentityState[movementIdentities.Count],ProbeRequestIndices=new int[probes.Count],ProbeAnswers=new NavigationAnswerState[ProbeAnswerCount],
@@ -923,6 +928,7 @@ namespace Spacewars.Runtime
             accruedCreditsEnabled=decodedHost?.AccruedCredits??false;
             if(accruedCreditsEnabled){if(decodedBank==null||!decodedBank.BelongsTo(physicalHostBudget))throw new ArgumentException("Saved bank belongs to another ledger.");NavigationAccruedCredits.Validate(decodedBank,decodedHost,Generation,state.RequestSequence,long.MaxValue-1);accruedCreditCap=(int)decodedBank[NavigationAccruedCredits.Cap];}else if(decodedBank!=null)throw new ArgumentException("Credit bank without accrued mode.");
             if(decodedPublication>0){if(state.AdmissionPublicationIdentity!=0&&state.AdmissionPublicationIdentity!=decodedPublication)throw new ArgumentException("Outer admission identity differs from BODY.");state.AdmissionPublicationIdentity=decodedPublication;}
+            if(state.RecastCoordinationVersion!=0&&state.RecastCoordinationVersion!=2||state.RecastCoordinationVersion==2&&!UsesRecastGroundRoutes)throw new ArgumentException("Recast save backend/version mismatch.");
             ValidateBodyGroupCatalog(decodedAuthority,state);
             AdoptDecodedAuthority(decodedAuthority);AdoptTerrainNames(decodedAuthority);
             var geometryTable=BodyFirstGeometryCatalog(decodedHost,decodedAuthority,state);
@@ -975,7 +981,7 @@ namespace Spacewars.Runtime
                 var actor=state.Crowd.Units.FirstOrDefault(u=>u.Id==failure.Entity);
                 if(!failureIds.Add(failure.Entity)||actor==null||actor.FailedRequest!=failure.Request||
                     actor.LastFailure!=NavigationOutcome.Rejected||
-                    (failure.Status!=NavSolveStatus.InvalidEndpoint&&failure.Status!=NavSolveStatus.BlockedConnector&&failure.Status!=NavSolveStatus.CapacityExceeded))
+                    (failure.Status!=NavSolveStatus.InvalidEndpoint&&failure.Status!=NavSolveStatus.BlockedConnector&&failure.Status!=NavSolveStatus.CapacityExceeded&&failure.Status!=NavSolveStatus.Partial))
                     throw new ArgumentException("Invalid technical route failure.");
             }
             if(decodedAuthority?.ActorGlobalCatalog!=null&&(decodedAuthority.ActorGlobalCatalog.Count!=state.Crowd.Units.Length||decodedAuthority.ActorLocalCatalog.Count!=state.Crowd.Units.Length||decodedAuthority.InstalledCatalog.Count!=state.InstalledExecutions.Length))throw new ArgumentException("Actor/installed BODY role counts differ from DTO.");
@@ -1012,12 +1018,13 @@ namespace Spacewars.Runtime
             foreach(var savedAnswer in (state.ProbeAnswers??Array.Empty<NavigationAnswerState>())
                 .Concat(state.AnswerMailbox).Concat(savedBarrier)){
                 var original=restored[savedAnswer.RequestIndex];
-                if(savedAnswer.Corridor==null){
+                var restoredCorridor=state.RecastCoordinationVersion==2&&savedAnswer.Corridor!=null?RestoredRecastCorridor(savedAnswer.Corridor,decodedAuthority,decodedHost):savedAnswer.Corridor;
+                if(restoredCorridor==null){
                     if(savedAnswer.Status==NavSolveStatus.Ready&&original.CertifiedProviderBinding!=null)
                         throw new ArgumentException("Missing certified corridor sidecar.");
                 }else if(savedAnswer.Status!=NavSolveStatus.Ready||
-                    original.CertifiedProviderBinding!=savedAnswer.Corridor.ProviderBinding||
-                    !QualifyCorridor(original,savedAnswer.Route,savedAnswer.Corridor,corridorProviders,
+                    original.CertifiedProviderBinding!=restoredCorridor.ProviderBinding||
+                    !QualifyCorridor(original,savedAnswer.Route,restoredCorridor,corridorProviders,
                         nextPending.TryGetValue(original.Entity,out var active)&&
                         Object.ReferenceEquals(active,original)))
                     throw new ArgumentException("Invalid restored corridor answer.");
@@ -1030,6 +1037,7 @@ namespace Spacewars.Runtime
             // Legacy formats deliberately receive a fresh identity and replay.
             InstallRestoredHost(decodedHost,state,restored);
             OwnRestoredCommandBacking(decodedAuthority,state.AdmissionPublicationIdentity,restored);
+            ValidatePhysicalRestoredRoutes();
             // Catalog directories stage cold hydration; runtime maps now retain
             // each surviving request/group owner. Keep the same lean core shape
             // as the hot Session, rather than retaining decode-only directories.
@@ -1183,11 +1191,13 @@ namespace Spacewars.Runtime
         }
         public void ChangeGeometry(NavGeometry next)
         {if(!TryChangeGeometry(next))throw new InvalidOperationException("Owned geometry replacement preparation refused.");}
+        internal Exception LastGeometryPreparationFailure{get;private set;}
         internal bool TryChangeGeometry(NavGeometry next,PlayableDomain domain=null)
         {
+            LastGeometryPreparationFailure=null;
             if(next==null)throw new ArgumentNullException(nameof(next));
-            var owned=TryOwnedOrdinaryRebind(profile,geometryTarget:next,geometryDomain:domain);if(owned.HasValue)return owned.Value;
-            if(physicalArrivalEnabled&&groupCommandBacking!=null)return false;
+            var owned=TryOwnedOrdinaryRebind(profile,geometryTarget:next,geometryDomain:domain);if(owned.HasValue){if(!owned.Value&&LastGeometryPreparationFailure==null)LastGeometryPreparationFailure=new InvalidOperationException("Geometry rebind source changed during preparation.");return owned.Value;}
+            if(physicalArrivalEnabled&&groupCommandBacking!=null){LastGeometryPreparationFailure=LastGeometryPreparationFailure??new InvalidOperationException("Owned geometry rebind source is not eligible.");return false;}
             AdmissionBatch(()=>ChangeGeometryLocked(next));return true;
         }
         private void ChangeGeometryLocked(NavGeometry next)
@@ -1302,7 +1312,7 @@ namespace Spacewars.Runtime
                 if(effectiveStatus!=NavSolveStatus.Ready){
                     var outcome=effectiveStatus==NavSolveStatus.UnreachableInGraph?NavigationOutcome.Unreachable:NavigationOutcome.Rejected;
                     RecordFailure(r,outcome,nameWrite);MovementCancelled?.Invoke(r.Entity);
-                    if(effectiveStatus==NavSolveStatus.InvalidEndpoint||effectiveStatus==NavSolveStatus.BlockedConnector||effectiveStatus==NavSolveStatus.CapacityExceeded)
+                    if(effectiveStatus==NavSolveStatus.InvalidEndpoint||effectiveStatus==NavSolveStatus.BlockedConnector||effectiveStatus==NavSolveStatus.CapacityExceeded||effectiveStatus==NavSolveStatus.Partial)
                         technicalFailures[r.Entity]=effectiveStatus;
                     if(outcome==NavigationOutcome.Unreachable)UnreachableResults++;
                     CancelArrival(r.Entity,false);reservations.Remove(r.Entity);retainedGoals.Remove(r.Entity);

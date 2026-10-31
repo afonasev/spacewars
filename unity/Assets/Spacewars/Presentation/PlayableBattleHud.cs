@@ -25,9 +25,20 @@ namespace Spacewars.Presentation
         private int battleContextClosedFrame=-1;
         private void CreateArmyComposition()
         {
-            armyComposition=new VisualElement{name="army-composition"};armyComposition.style.position=Position.Absolute;armyComposition.style.right=20;armyComposition.style.top=82;armyComposition.style.width=100;armyComposition.style.minWidth=100;armyComposition.style.maxWidth=100;StyleRegion(armyComposition);armyComposition.style.display=DisplayStyle.None;root.Add(armyComposition);
-            OrbitalPrecision.Frame(armyComposition);
-            for(int i=0;i<armyCounts.Length;i++){armyCounts[i]=new Label();armyCounts[i].style.fontSize=16;armyCounts[i].style.marginBottom=8;armyCounts[i].style.paddingLeft=38;var icon=new OrbitalGlyph(i==0?"explorer":i==1?"tank":i==2?"shkval":"hawk");icon.style.position=Position.Absolute;icon.style.left=0;icon.style.top=0;armyCounts[i].Add(icon);armyComposition.Add(armyCounts[i]);}
+            // Use the existing resource-row height, font and glyph grid; this is fixed HUD packing.
+            armyComposition=new VisualElement{name="army-composition"};armyComposition.style.position=Position.Absolute;
+            armyComposition.style.flexDirection=FlexDirection.Row;armyComposition.style.flexWrap=Wrap.NoWrap;armyComposition.style.alignItems=Align.Center;
+            armyComposition.style.height=26;armyComposition.style.paddingTop=armyComposition.style.paddingBottom=2;
+            armyComposition.style.display=DisplayStyle.None;root.Add(armyComposition);
+            for(int i=0;i<armyCounts.Length;i++)
+            {
+                var count=armyCounts[i]=new Label();count.style.fontSize=12;count.style.height=24;count.style.flexShrink=0;
+                count.style.marginLeft=count.style.marginRight=count.style.marginTop=count.style.marginBottom=0;
+                count.style.paddingTop=count.style.paddingBottom=0;count.style.whiteSpace=WhiteSpace.NoWrap;count.style.unityTextAlign=TextAnchor.MiddleLeft;
+                count.style.color=Ink;count.style.unityTextOutlineWidth=.15f;count.style.unityTextOutlineColor=PanelColor;
+                var icon=new OrbitalGlyph(i==0?"explorer":i==1?"tank":i==2?"shkval":"hawk");icon.style.position=Position.Absolute;icon.style.left=0;icon.style.top=0;
+                icon.Q<ModelPortrait>("glyph-model").SetOutlineColor(Ink);count.Add(icon);armyComposition.Add(count);
+            }
             hudFocusButton.RegisterCallback<PointerEnterEvent>(_=>{armyCompositionHovered=true;ShowArmyComposition(true);});
             hudFocusButton.RegisterCallback<PointerLeaveEvent>(_=>{armyCompositionHovered=false;ShowArmyComposition(root.focusController?.focusedElement==hudFocusButton);});
             hudFocusButton.RegisterCallback<FocusInEvent>(_=>ShowArmyComposition(true));hudFocusButton.RegisterCallback<FocusOutEvent>(_=>ShowArmyComposition(false));
@@ -37,8 +48,51 @@ namespace Spacewars.Presentation
         {
             if(view==null)return;
             var kinds=new[]{PlayableEntityKind.Explorer,PlayableEntityKind.Tank,PlayableEntityKind.Shkval,PlayableEntityKind.Hawk};
-            for(int i=0;i<kinds.Length;i++){int count=view.Entities.Count(e=>e.Owner==view.Owner&&e.Kind==kinds[i]);armyCounts[i].text=count.ToString();armyCounts[i].style.display=mapOpen||count>0||!view.Entities.Any(e=>e.Owner==view.Owner)?DisplayStyle.Flex:DisplayStyle.None;}
-            armyComposition.style.top=top.worldBound.yMax-root.worldBound.y+8;
+            for(int i=0;i<kinds.Length;i++){int count=view.Entities.Count(e=>e.Owner==view.Owner&&e.Kind==kinds[i]);armyCounts[i].text=count.ToString();armyCounts[i].style.display=count>0?DisplayStyle.Flex:DisplayStyle.None;}
+            LayoutArmyComposition();
+        }
+        private void LayoutArmyComposition()
+        {
+            if(root==null||armyComposition==null||root.resolvedStyle.width<=0)return;
+            bool resourcesLeft=localHumanCount>1&&localViewportIndex%2==0;
+            float left=6,right=root.resolvedStyle.width-6,y=6;
+            if(top.worldBound.width>0)
+            {
+                y=top.worldBound.yMin-root.worldBound.yMin;
+                if(resourcesLeft)left=Mathf.Max(left,top.worldBound.xMax-root.worldBound.xMin+8);
+                else right=Mathf.Min(right,top.worldBound.xMin-root.worldBound.xMin-8);
+            }
+            var fps=root.panel?.visualTree.Q<Label>("device-fps");
+            if(NativeDevicePreferences.ShowFps&&fps!=null&&fps.worldBound.height>0)
+            {
+                var bounds=fps.worldBound;bounds.position-=root.worldBound.position;
+                if(bounds.yMin<y+26&&bounds.yMax>y)
+                {
+                    if(resourcesLeft)right=Mathf.Min(right,bounds.xMin-8);
+                    else left=Mathf.Max(left,bounds.xMax+8);
+                }
+            }
+            // Reuse normal 24 px icons, or the existing 16 px resource glyph size when space is tight.
+            float textWidth=0;int visibleCount=0;
+            foreach(var count in armyCounts)
+            {
+                if(count.style.display.value==DisplayStyle.None)continue;
+                float measured=count.MeasureTextSize(count.text??"0",0,VisualElement.MeasureMode.Undefined,0,VisualElement.MeasureMode.Undefined).x;
+                textWidth+=float.IsNaN(measured)||float.IsInfinity(measured)?12:Mathf.Ceil(measured);visibleCount++;
+            }
+            float glyphSize=textWidth+visibleCount*(24+4+8)<=right-left?24:16;
+            float gap=glyphSize==24?8:4,total=0;
+            foreach(var count in armyCounts)
+            {
+                if(count.style.display.value==DisplayStyle.None)continue;
+                float measured=count.MeasureTextSize(count.text??"0",0,VisualElement.MeasureMode.Undefined,0,VisualElement.MeasureMode.Undefined).x;
+                float width=(float.IsNaN(measured)||float.IsInfinity(measured)?12:Mathf.Ceil(measured))+glyphSize+4+gap;
+                count.style.width=width;count.style.paddingLeft=glyphSize+4;
+                var icon=count.Q<OrbitalGlyph>();icon.style.width=icon.style.height=glyphSize;icon.style.top=(24-glyphSize)/2;
+                total+=width;
+            }
+            armyComposition.style.width=total;armyComposition.style.left=resourcesLeft?right-total:left;
+            armyComposition.style.right=StyleKeyword.Auto;armyComposition.style.top=y;
         }
         private void CreateSelectionRoster(VisualElement parent)
         {selectionRoster=new VisualElement{name="selection-roster"};selectionRoster.style.flexDirection=FlexDirection.Row;selectionRoster.style.flexWrap=Wrap.Wrap;parent.Add(selectionRoster);}
@@ -59,9 +113,9 @@ namespace Spacewars.Presentation
         private OfflinePadAction[] CurrentBattleActions()
         {
             if(spectatorMode||view==null||paused||restarting||quitting||mapOpen||view.Outcome!=PlayableMatchOutcome.Playing)return Array.Empty<OfflinePadAction>();
-            if(selectedSite!=0)return OfflinePadWorldActions.Build(view,profile,selectedSite,selectedSlot);
+            if(selectedSite!=0)return OfflinePadWorldActions.Build(view,profile,selectedSite,selectedSlot,freeEconomy:provingGround!=null);
             if(selection.Count!=1)return Array.Empty<OfflinePadAction>();
-            return OfflinePadWorldActions.Building(view,profile,selection.First());
+            return OfflinePadWorldActions.Building(view,profile,selection.First(),battleController,freeEconomy:provingGround!=null);
         }
         private void UpdateBattleHud(PlayableBuildingSnapshot building)
         {
@@ -69,13 +123,6 @@ namespace Spacewars.Presentation
             if(paused||view.Outcome!=PlayableMatchOutcome.Playing)ShowArmyComposition(false);
             var population=view.Population;hudFocusButton.text=""+(population==null?view.Entities.Count(e=>e.Owner==view.Owner).ToString():population.Living+" / "+population.Capacity);PackResourceRow();
             UpdateArmyCompositionCounts();
-            var units=view.Entities.Where(e=>e.Owner==view.Owner&&selection.Contains(e.Id)).ToArray();
-            foreach(var id in selectionTiles.Keys.Where(id=>!units.Any(e=>e.Id==id)).ToArray()){selectionTiles[id].RemoveFromHierarchy();selectionTiles.Remove(id);}
-            int columns=Mathf.Max(4,(int)((armyRegion.resolvedStyle.width>0?armyRegion.resolvedStyle.width:500)/50));float width=units.Length>columns*2?Mathf.Max(18,Mathf.Floor((armyRegion.resolvedStyle.width-30)/Mathf.Ceil(units.Length/2f))):46;
-            foreach(var entity in units){if(!selectionTiles.TryGetValue(entity.Id,out var tile)){int id=entity.Id;tile=Button("",()=>{runtime?.RecordHumanAction(LocalOwnerId);if((input?.AssignedKeyboard??Keyboard.current)?.shiftKey.isPressed==true||(input?.AssignedKeyboard??Keyboard.current)?.ctrlKey.isPressed==true)selection.Remove(id);else{primarySelection=id;}SelectionMarkerEvent();});tile.name="selection-unit-"+id;tile.style.paddingLeft=2;tile.style.paddingRight=2;tile.style.marginRight=2;tile.style.marginBottom=2;tile.style.unityTextAlign=TextAnchor.MiddleCenter;var hp=new VisualElement{name="unit-health",pickingMode=PickingMode.Ignore};hp.style.position=Position.Absolute;hp.style.left=2;hp.style.bottom=2;hp.style.height=4;hp.style.backgroundColor=Cyan;tile.Add(hp);selectionRoster.Add(tile);selectionTiles.Add(id,tile);}
-                tile.text=UnitSymbol(entity.Kind);tile.style.width=width;tile.style.height=28;tile.style.minHeight=28;tile.style.fontSize=width<30?12:18;tile.tooltip=UnitName(entity.Kind)+" · HP "+entity.Health+" / "+PlayableUnitRules.MaximumHealth(profile,entity).ToString("0.#");tile.Q("unit-health").style.width=Length.Percent((float)(100*PlayableUnitRules.HealthRatio(profile,entity)));
-            }
-            selectionRoster.style.display=units.Length>1?DisplayStyle.Flex:DisplayStyle.None;
             if(building==null&&selectedSite!=0)selectionLabel.text=siteLabel.text;
             // Transactions move to the ring; queues and cancellations remain in context.
             var row=armyRegion.Q("production-actions");if(row!=null)row.style.display=DisplayStyle.None;
@@ -85,11 +132,12 @@ namespace Spacewars.Presentation
             noticeLabel.text=notice;noticeLabel.style.display=string.IsNullOrEmpty(notice)?DisplayStyle.None:DisplayStyle.Flex;noticeLabel.style.maxWidth=Mathf.Min(320,root.resolvedStyle.width-12);
             UpdatePrecisionContext(building);
             int anchor=building?.Id??0;if(anchor!=battleAnchor||selectedSite!=battleSite||selectedSlot!=battleSlot){battleDismissed=false;battleAnchor=anchor;battleSite=selectedSite;battleSlot=selectedSlot;confirmSaleBuilding=0;battleGestures.SetMode("buildingWheel");}
-            battleActions=CurrentBattleActions();foreach(var action in battleActions)if(action.Sector.Hold=="sell"&&confirmSaleBuilding==battleAnchor&&battleAnchor!=0)action.Label="✓ Подтвердить продажу";bool show=battleActions.Length>0&&!battleDismissed&&!battleRally;
+            battleActions=CurrentBattleActions();foreach(var action in battleActions)if(action.Sector.Hold=="sell"&&confirmSaleBuilding==battleAnchor&&battleAnchor!=0)action.Label=provingGround!=null?"✓ Подтвердить удаление":"✓ Подтвердить продажу";bool show=battleActions.Length>0&&!battleDismissed&&!battleRally;
             battleRing.style.display=show?DisplayStyle.Flex:DisplayStyle.None;
             if(!show)return;
+            battleRing.BringToFront();
             var point=building?.Position??view.Sites.First(s=>s.Site.Id==selectedSite).Site.Position;
-            if(selectedSite!=0&&selectedSlot!=0)point=view.Sites.First(s=>s.Site.Id==selectedSite).Site.Slots.First(s=>s.Id==selectedSlot).Position;
+            if(selectedSite!=0&&selectedSlot!=0)point=view.Sites.First(s=>s.Site.Id==selectedSite).Site.Slots.Concat(view.Sites.First(s=>s.Site.Id==selectedSite).Site.DefenseSlots(profile)).First(s=>s.Id==selectedSlot).Position;
             Vector2 at=cameraView==null?new Vector2(root.resolvedStyle.width/2,root.resolvedStyle.height/2):PanelPoint(cameraView.WorldToScreenPoint(world.Point(point)));
             float w=root.resolvedStyle.width>0?root.resolvedStyle.width:1280,h=root.resolvedStyle.height>0?root.resolvedStyle.height:800;
             // Radius/gestures remain designer-owned by NativeLocalInputProfile. Pixel margins below
@@ -98,7 +146,8 @@ namespace Spacewars.Presentation
             // Short local viewports reserve the measured header rather than a spare fixed row.
             float minY=Mathf.Max(h<500?32:58,top.worldBound.yMax-root.worldBound.y+(h<500?6:8));
             float maxDiameter=Mathf.Min(battleInputProfile.radialRadius*2,Mathf.Max(100,deck-minY-12));
-            float diameter=Mathf.Min(battleActions.Length<=2?210:280,maxDiameter);battleRing.Resize(diameter);
+            // The single-action disc packs one icon, a full build label and price; this is layout, not simulation tuning.
+            float diameter=Mathf.Min(OrbitalBattleRing.IsCapturedSiteBuild(battleActions)?132:battleActions.Length<=2?210:280,maxDiameter);battleRing.Resize(diameter);
             float maxY=Mathf.Max(minY,Mathf.Min(h-diameter-10,deck-diameter-10));
             float left=Mathf.Clamp(at.x-diameter/2,8,Mathf.Max(8,w-diameter-8));battleRing.style.left=left;battleRing.style.top=Mathf.Clamp(at.y-diameter/2,minY,maxY);
             var shared=(localCoordinator??this).sharedMapFrame;
@@ -108,7 +157,10 @@ namespace Spacewars.Presentation
                 if(occluder.Overlaps(new Rect(left,battleRing.style.top.value.value,diameter,diameter)))
                 {left=localViewportIndex%2==0?Mathf.Min(left,occluder.xMin-diameter-8):Mathf.Max(left,occluder.xMax+8);battleRing.style.left=left=Mathf.Clamp(left,8,Mathf.Max(8,w-diameter-8));}
             }
-            battleRing.Set(battleActions,building==null?"Строительство":BuildingName(building.Kind),battleController?battleSector:null,battleGestures.Progress,building==null?"building":OrbitalPrecision.BuildingGlyph(building.Kind));battleRing.PositionDetail(left>w-left-diameter,left>w-left-diameter?left:w-left-diameter);
+            // Reserve a complete side-by-side pair before positioning the card; no overlap fallback.
+            if(w>=diameter+254){float reserve=Mathf.Min(battleRing.PreferredDetailWidth+12,w-diameter-12);bool cardLeft=left>w-left-diameter;left=cardLeft?Mathf.Max(left,reserve):Mathf.Min(left,w-diameter-reserve);battleRing.style.left=left;}
+            battleRing.ConfigureInput(battleController,SeatPad);
+            battleRing.Set(battleActions,building==null?"Строительство":BuildingName(building.Kind),battleController?battleSector:null,battleGestures.Progress,building==null?"building":building.RefineryUpgraded?"refineryUpgraded":OrbitalPrecision.BuildingGlyph(building.Kind));battleRing.PositionDetail(left>w-left-diameter,left>w-left-diameter?left:w-left-diameter,deck-6,battleRing.style.top.value.value,minY);
             if(!MouseBuildingMenuVisible(at,new Rect(left,battleRing.style.top.value.value,diameter,diameter)))battleRing.style.display=DisplayStyle.None;
         }
         private int primarySelection;
@@ -122,7 +174,7 @@ namespace Spacewars.Presentation
             if(id=="rally"){BeginRallyPlacement(controller);return;}
             if(hold&&action.Sector.Hold!= "repeat"&&controller==false)return;
             var command=hold?action.HoldCommand:action.Command;
-            if(!controller&&action.Sector.Hold=="sell"&&!hold){if(confirmSaleBuilding!=battleAnchor){confirmSaleBuilding=battleAnchor;notice="Нажмите «Продать здание» ещё раз для подтверждения";return;}command=action.HoldCommand;confirmSaleBuilding=0;}
+            if(!controller&&action.Sector.Hold=="sell"&&!hold){if(confirmSaleBuilding!=battleAnchor){confirmSaleBuilding=battleAnchor;notice=provingGround!=null?"Нажмите «Убрать здание» ещё раз для подтверждения":"Нажмите «Продать здание» ещё раз для подтверждения";return;}command=action.HoldCommand;confirmSaleBuilding=0;}
             if(command==null)return;
             if(action.Sector.Hold!="sell")confirmSaleBuilding=0;
             if(runtime==null)return;

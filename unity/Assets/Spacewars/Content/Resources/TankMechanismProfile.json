@@ -1,0 +1,15 @@
+{
+  "id": "tank-mechanism-v1",
+  "revision": 3,
+  "recoilTravel": 0.14,
+  "recoilSeconds": 0.24,
+  "flashSeconds": 0.1,
+  "flashSize": 0.17,
+  "rotorDegreesPerMeter": 540,
+  "shellLength": 0.38,
+  "tracerLength": 0.65,
+  "modelScale": 1.12,
+  "impactSeconds": 0.3,
+  "distantEnterScreenHeight": 0.04,
+  "distantExitScreenHeight": 0.05
+}

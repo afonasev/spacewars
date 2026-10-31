@@ -185,13 +185,23 @@ namespace Spacewars.Tests.EditMode
             Assert.True((bool)method.Invoke(null,new object[]{original,default(NavPoint),escape,p.TankCollisionRadius,p}),"This departure is safe against the initial frontline");
             Assert.False((bool)method.Invoke(null,new object[]{o,default(NavPoint),escape,p.TankCollisionRadius,p}),"A separate initially unexposed weapon envelope cannot be crossed");
         }
+        private static OfflineMatchConfiguration A5DeliveryConfig()
+        {
+            var c=A4NativeConfig();var home=new NavPoint(-28,0);var factory=new NavPoint(-28,-9);var refinery=new NavPoint(-28,10);
+            // Authored post-opening battle: economic anchors stay behind both the frontline and crossing envelope.
+            var starts=c.Starts.Select((start,i)=>i==0?new OfflineStart(start.Id,start.SiteId,home,new NavPoint(-28,6),start.Heading,start.PinnedLogicalPlayer):start).ToArray();
+            var sites=c.Sites.Select(site=>site.Id!=1?site:new TerritorySite(site.Id,site.Kind,home,new[]{new TerritorySlot(1,factory,0),new TerritorySlot(2,refinery,0)})).ToArray();
+            var buildings=c.ScenarioBuildings.Select(b=>b.LogicalPlayer!=1?b:new OfflineScenarioBuilding(1,b.Kind,b.SiteId,b.SlotId,b.Kind==PlayableBuildingKind.Factory?factory:refinery,b.Heading)).ToArray();
+            return new OfflineMatchConfiguration(c.Profile,c.SourceIdentity,c.MapIdentity,c.RouteProvenance,c.Seed,c.Roster.ToArray(),starts,sites,c.Obstacles.ToArray(),new double[,]{{0,100},{100,0}},scenario:c.ScenarioUnits.ToArray(),scenarioBuildings:buildings);
+        }
         [TestCase(false)][TestCase(true)] public void Retreat_ActualPendingWithdrawalRechecksMovingVisibleEnemyBeforeSequence(bool intrusion)
         {
-            var c=A4NativeConfig();var a=new PlayableAuthorityTick(c,71);var owner=Owners(a).Single();var domain=Field(a,"domain");var registry=(AiArmyRegistry)Field(owner,"armies");var planner=(AiArmyPlanner)Field(owner,"armyPlanner");
+            var c=A5DeliveryConfig();var a=new PlayableAuthorityTick(c,71);var owner=Owners(a).Single();var domain=Field(a,"domain");var registry=(AiArmyRegistry)Field(owner,"armies");var planner=(AiArmyPlanner)Field(owner,"armyPlanner");
+            typeof(AiOpeningExecutor).GetField("phase",F).SetValue(Field(owner,"openingExecutor"),PlayableAiOpeningPhase.Aborted);
             using(var routes=new UnityHostRouteService())
             {
-                for(int i=0;i<300&&(!planner.Active||planner.Capture().Phase!=AiArmyPhase.Advancing);i++)NativeStep(a,routes);
-                Assert.True(planner.Active);var front=a.ParticipantView("player-1").Entities.Where(u=>registry.ArmyFor(u.Id)==planner.Capture().ArmyId).OrderBy(u=>u.Id).First().Position;
+                for(int i=0;i<300&&(!planner.Active||planner.Capture().Phase!=AiArmyPhase.Advancing&&planner.Capture().Phase!=AiArmyPhase.Engaging);i++)NativeStep(a,routes);
+                Assert.True(planner.Active);var front=a.ParticipantView("player-1").Entities.Where(u=>registry.ArmyFor(u.Id)==planner.Capture().ArmyId).OrderByDescending(u=>u.Position.X).ThenBy(u=>u.Id).First().Position;
                 for(int i=0;i<6;i++)domain.GetType().GetMethod("SpawnUnit",F).Invoke(domain,new object[]{new NavPoint(front.X+c.Profile.TankRange/2,front.Z+(i-3)*2),PlayableOwner.Enemy,PlayableEntityKind.Tank});
                 object pending=null;
                 for(int i=0;i<150&&pending==null;i++)
@@ -200,6 +210,8 @@ namespace Spacewars.Tests.EditMode
                 var actor=a.ParticipantView("player-1").Entities.Single(u=>u.Id==action.EntityIds.Single());var origin=actor.Position;var delta=new NavPoint(action.Target.X-origin.X,action.Target.Z-origin.Z);double length=Math.Sqrt(delta.X*delta.X+delta.Z*delta.Z);var middle=new NavPoint(origin.X+delta.X*.1,origin.Z+delta.Z*.1);var normal=new NavPoint(-delta.Z/length,delta.X/length);
                 var start=new NavPoint(middle.X+normal.X*(c.Profile.TankRange+2*c.Profile.TankCollisionRadius+1),middle.Z+normal.Z*(c.Profile.TankRange+2*c.Profile.TankCollisionRadius+1));
                 int enemy=(int)domain.GetType().GetMethod("SpawnUnit",F).Invoke(domain,new object[]{start,PlayableOwner.Enemy,PlayableEntityKind.Tank});
+                Assert.True(a.Domain.Navigation.Crowd.TryGet(enemy,out var intruderActor));
+                typeof(NavUnit).GetProperty("Heading").SetValue(intruderActor,Math.Atan2(-normal.Z,-normal.X));
                 Assert.True((bool)domain.GetType().GetMethod("ArmyWithdrawalSafe",F).Invoke(domain,new object[]{action}),"The newly visible intruder starts outside this accepted escape path");
                 if(intrusion)
                 {
@@ -209,6 +221,7 @@ namespace Spacewars.Tests.EditMode
                 var b=PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c);ExactByteAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes());
                 while(a.Tick<due){NativeStep(a,routes);NativeStep(b,routes);ExactByteAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes());}
                 var before=PlayableAiObservation.From(a.ParticipantView("player-1"));Assert.True(before.Entities.Any(u=>u.Id==enemy));Assert.IsEmpty(AiDefensePlanner.Threats(before,c.Profile),"The path intrusion must remain outside base-defense preemption");
+                TestContext.WriteLine("INTRUSION_PROOF "+Newtonsoft.Json.JsonConvert.SerializeObject(new{intrusion,due,a.Tick,origin,action.Target,start,middle,Enemy=before.Entities.Single(u=>u.Id==enemy),Actor=before.Entities.Single(u=>u.Id==actor.Id)}));
                 Assert.AreEqual(!intrusion,(bool)domain.GetType().GetMethod("ArmyWithdrawalSafe",F).Invoke(domain,new object[]{action}));
                 while(a.Tick<=due+1){NativeStep(a,routes);NativeStep(b,routes);ExactByteAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes());}
                 var terminal=a.CaptureDiagnosticCheckpoints().Single().Records.Single(r=>r.ActionId==action.ActionId&&r.Policy==AiArmyPlanner.Policy&&r.Status!=PlayableAiDeliveryStatus.Scheduled);
@@ -220,6 +233,37 @@ namespace Spacewars.Tests.EditMode
                     Assert.False(a.ParticipantView("player-1").Entities.Single(u=>u.Id==actor.Id).Position.Equals(origin),"Safe control must physically move through native navigation");
                 }
                 TestContext.WriteLine("A5 withdrawal due "+Newtonsoft.Json.JsonConvert.SerializeObject(new{intrusion,due,a.Tick,Action=action,Terminal=terminal,Before=before.Entities}));b.Stop();
+            }
+            a.Stop();
+        }
+        [Test] public void Retreat_FlankDeliveryUsesItsOwnWithdrawalMission()
+        {
+            var c=A5DeliveryConfig();var a=new PlayableAuthorityTick(c,71);var owner=Owners(a).Single();var domain=Field(a,"domain");
+            var registry=(AiArmyRegistry)Field(owner,"armies");var primary=(AiArmyPlanner)Field(owner,"armyPlanner");var flank=(AiArmyPlanner)Field(owner,"flankPlanner");
+            // This delivery fixture starts after opening; the three scenario Tanks are its full combat force.
+            typeof(AiOpeningExecutor).GetField("phase",F).SetValue(Field(owner,"openingExecutor"),PlayableAiOpeningPhase.Aborted);
+            using(var routes=new UnityHostRouteService())
+            {
+                for(int i=0;i<300&&(!primary.Active||primary.Capture().Phase!=AiArmyPhase.Advancing&&primary.Capture().Phase!=AiArmyPhase.Engaging);i++)NativeStep(a,routes);
+                Assert.True(primary.Active);var front=a.ParticipantView("player-1").Entities.Where(u=>registry.ArmyFor(u.Id)==primary.Capture().ArmyId).OrderByDescending(u=>u.Position.X).ThenBy(u=>u.Id).First().Position;
+                for(int i=0;i<6;i++)domain.GetType().GetMethod("SpawnUnit",F).Invoke(domain,new object[]{new NavPoint(front.X+c.Profile.TankRange/2,front.Z+(i-3)*2),PlayableOwner.Enemy,PlayableEntityKind.Tank});
+                object pending=null;
+                for(int i=0;i<150&&pending==null;i++)
+                {NativeStep(a,routes);if(primary.Capture().Phase==AiArmyPhase.Retreating)pending=((System.Collections.IEnumerable)Field(owner,"pendingItems")).Cast<object>().FirstOrDefault(x=>(string)Field(x,"PolicyName")==AiArmyPlanner.Policy&&((PlayableAiAction)Field(x,"Action")).Kind==PlayableCommandKind.Move);}
+                Assert.NotNull(pending,"Use a genuinely accepted native escape, then bind its delivery to the second planner");
+                var action=(PlayableAiAction)Field(pending,"Action");var intent=(AiIntent)Field(pending,"Intent");var mission=primary.Capture();
+                Assert.True((bool)domain.GetType().GetMethod("ArmyWithdrawalSafe",F).Invoke(domain,new object[]{action}));
+                Assert.False((bool)domain.GetType().GetMethod("ArmyMoveSafe",F).Invoke(domain,new object[]{action}),"This regression needs an escape from an existing threat envelope");
+                Assert.True(registry.TryClaim(mission.ArmyId,AiArmyPlanner.Policy,AiArmyPlanner.FlankPolicy));
+                typeof(AiArmyPlanner).GetField("state",F).SetValue(flank,mission);
+                typeof(AiArmyPlanner).GetField("state",F).SetValue(primary,new AiArmyMissionState{Phase=AiArmyPhase.Disbanded,Reason="fixture transferred to flank"});
+                pending.GetType().GetField("PolicyName",F).SetValue(pending,AiArmyPlanner.FlankPolicy);
+                pending.GetType().GetField("Intent",F).SetValue(pending,new AiIntent(intent.Id,AiArmyPlanner.FlankPolicy,action,intent.ExpiresTick,intent.Credits,intent.Population,intent.Claims,intent.Priority,intent.Utility,intent.Conditions,intent.Reason,intent.StartupFund,intent.ReservationId,intent.Overdue));
+                pending.GetType().GetField("Receipt",F).SetValue(pending,new Action<PlayableAiTraceRecord>(_=>{}));
+                pending.GetType().GetField("DueTick",F).SetValue(pending,a.Tick);
+                owner.GetType().GetMethod("DeliverOne",F).Invoke(owner,new object[]{domain,0L,false});
+                var terminal=a.CaptureDiagnosticCheckpoints().Single().Records.Single(r=>r.ActionId==action.ActionId&&r.Policy==AiArmyPlanner.FlankPolicy&&r.Status!=PlayableAiDeliveryStatus.Scheduled);
+                Assert.AreEqual(PlayableAiDeliveryStatus.Applied,terminal.Status);Assert.Greater(terminal.CommandSequence,0);
             }
             a.Stop();
         }

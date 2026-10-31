@@ -127,6 +127,7 @@ namespace Spacewars.Presentation
                 throw new NotSupportedException("Checkpoint release requires a quiesced synchronous certified host.");
             certified.ReleaseForWorldCheckpoint(binding.RoutePort);
         }
+        internal bool StopDiagnosticWorker(){CheckThread();worker?.Dispose();return worker==null||worker.IsStopped;}
         public void Dispose(){CheckThread();worker?.Dispose();worker=null;workerPort=null;certified.Clear();router?.Dispose();router=null;smallRouter=null;routedGeometry=null;routedProfile=null;deferredRequest=null;deferredAnswer=null;}
     }
 }

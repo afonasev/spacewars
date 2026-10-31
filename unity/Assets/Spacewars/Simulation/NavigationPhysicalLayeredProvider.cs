@@ -52,7 +52,7 @@ namespace Spacewars.Simulation
                     estimate=checked(estimate+1024+surface.Area.EstimatedRetainedBytes);
                 }
                 for(int n=0;n<links.Count;n++){
-                    var portal=links[n];if(portal==null||n>0&&StringComparer.Ordinal.Compare(links[n-1].Id,portal.Id)>=0||!portalIndex.TryGetValue(portal.Id,out var indexed)||!ReferenceEquals(indexed,portal)||!surfaceIndex.TryGetValue(portal.Entry.SurfaceId,out var entry)||!surfaceIndex.TryGetValue(portal.Exit.SurfaceId,out var exit)||!entry.Area.Contains(portal.Entry.Position,0)||!exit.Area.Contains(portal.Exit.Position,0)||!portal.Corridor.Sweep(portal.Entry.Position,portal.Exit.Position,0))throw new ArgumentException("Physical provider portal geometry/order/alias contradiction.");
+                    var portal=links[n];if(portal==null||n>0&&StringComparer.Ordinal.Compare(links[n-1].Id,portal.Id)>=0||!portalIndex.TryGetValue(portal.Id,out var indexed)||!ReferenceEquals(indexed,portal)||!surfaceIndex.TryGetValue(portal.Entry.SurfaceId,out var entry)||!surfaceIndex.TryGetValue(portal.Exit.SurfaceId,out var exit)||!entry.Area.Boundary.Contains(portal.Entry.Position)||!exit.Area.Boundary.Contains(portal.Exit.Position)||!portal.Corridor.DeclarationSweep(portal.Entry.Position,portal.Exit.Position))throw new ArgumentException("Physical provider portal geometry/order/alias contradiction.");
                     estimate=checked(estimate+2048+512L*portal.MobilityClasses.Count+portal.Corridor.EstimatedRetainedBytes);
                 }
                 using(var scratch=NavStorageScratch.Reserve(reader.Reservation,8192))NavPhysicalDigestStream.Require(w=>{

@@ -89,6 +89,33 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(b.ReservationLifetimeTicks,created.ExpiresTick-created.CreatedTick,"the first post-home goal receives the existing reservation lifetime");
             Validate(f,b,a,homeReadyTick,p);
         }
+        [TestCase(0L)][TestCase(1L)]
+        public void DetachedReviewCannotPublishAcrossOriginalSiteFundingExpiry(long afterExpiry)
+        {
+            var p=PlayableProfile.Default;
+            var opening=PlayableAiOpeningComposition.Initialize(41,"player-1",aiProfile:AiProfile.Initial,forcedOpening:PlayableAiOpening.GreedySafe);
+            var owner=new PlayableAiOwnerLoop(p,opening,71,null,AiProfile.Initial,AiDifficulty.Fighter);
+            var f=Get(owner,"expansionFinancial");var b=owner.Budget;var arbiter=(AiDecisionArbiter)Get(owner,"arbiter");var expansion=(AiExpansionPlanner)Get(owner,"expansion");
+            const long observed=900;
+            Observe(f,b,arbiter,expansion,View(observed,500,p:p),p:p);
+            var initial=b.Capture();var hold=initial.Reserved.Single();
+            Assert.AreEqual("expansion-financial",hold.Purpose);Assert.AreEqual(observed,hold.CreatedTick);
+            Validate(f,b,arbiter,hold.ExpiresTick-1,p);
+            var timely=owner.CreateReviewClone(observed);
+            Assert.True(timely.MergeReviewBudget(initial,b.Capture(),hold.ExpiresTick-1));
+            var stale=owner.CreateReviewClone(observed);
+            var invalid=Assert.Throws<ArgumentException>(()=>Validate(Get(stale,"expansionFinancial"),stale.Budget,(AiDecisionArbiter)Get(stale,"arbiter"),hold.ExpiresTick+afterExpiry,p));
+            StringAssert.Contains("site financial ledger desired target/terms/real clocks",invalid.Message);
+            Assert.False(stale.MergeReviewBudget(initial,b.Capture(),hold.ExpiresTick+afterExpiry),"A detached result cannot publish a finance hold whose original real clock expired while the world continued.");
+            Assert.AreSame(hold,b.Capture().Reserved.Single());Assert.AreEqual(500,b.Liquid,"Rejecting a stale clone cannot spend authority funds or extend its reservation.");
+            owner.ReconcileReviewClocks(hold.ExpiresTick+afterExpiry);
+            Validate(f,b,arbiter,hold.ExpiresTick+afterExpiry,p);
+            Assert.IsEmpty(b.Capture().Reserved,"The retained authority must also have valid clocks for an immediate capture after rejecting a stale review.");
+            Observe(f,b,arbiter,expansion,View(hold.ExpiresTick+afterExpiry,500,p:p),p:p);
+            Validate(f,b,arbiter,hold.ExpiresTick+afterExpiry,p);
+            Assert.False(b.Capture().Reserved.Any(e=>e.Id==hold.Id&&e.CreatedTick==hold.CreatedTick),"The next ordinary finance observation retires the original expired obligation.");
+        }
+
         [Test] public void AllocationProtectsHigherBandsAndGrowthAloneRenewsSerializedClock()
         {
             var f=Start();var b=new AiBudgetLedger("player-1",71);var a=new AiDecisionArbiter(AiProfile.Initial);var ex=new AiExpansionPlanner("player-1");

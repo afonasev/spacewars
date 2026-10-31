@@ -11,21 +11,30 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class NativeAiTechnologyFundingTests
     {
-        private static PlayableAiObservation View(long tick,int cash,double income=0,bool center=false,double progress=1,PlayableProfile p=null,bool prerequisite=true,bool occupied=false,PlayableEntityKind unit=PlayableEntityKind.Tank,bool secondCenter=false)
+        private static PlayableAiObservation View(long tick,int cash,double income=0,bool center=false,double progress=1,PlayableProfile p=null,bool prerequisite=true,bool occupied=false,PlayableEntityKind unit=PlayableEntityKind.Tank,bool secondCenter=false,int? unitCount=null,bool blocked=false)
         {
-            p=p??PlayableProfile.Default;var site=TerritoryRules.Sites(p).First(s=>s.Kind==PlayableBuildingKind.Headquarters);
-            var bs=new[]{new PlayableBuildingSnapshot(1,PlayableOwner.Player,PlayableBuildingKind.Headquarters,site.Position,400,1,0,0,default(NavPoint),siteId:site.Id),new PlayableBuildingSnapshot(2,PlayableOwner.Player,PlayableBuildingKind.Factory,site.Slots[0].Position,250,1,0,0,default(NavPoint),siteId:site.Id,slotId:site.Slots[0].Id,parentId:1)};
+            p=p??PlayableProfile.Default;int count=unitCount??(int)AiProfile.Initial.Value("technology.minimumUnitsForScienceCenter");var site=TerritoryRules.Sites(p).First(s=>s.Kind==PlayableBuildingKind.Headquarters);
+            var bs=new[]{new PlayableBuildingSnapshot(1,PlayableOwner.Player,PlayableBuildingKind.Headquarters,site.Position,400,1,0,0,default(NavPoint),siteId:site.Id),new PlayableBuildingSnapshot(2,PlayableOwner.Player,PlayableBuildingKind.Factory,site.Slots[0].Position,250,1,0,0,default(NavPoint),siteId:site.Id,slotId:site.Slots[0].Id,parentId:1,orders:blocked?new[]{new PlayableProductionOrderSnapshot(1,PlayableEntityKind.Tank,p.TankCreditCost,3,p.TankProductionSeconds,0,true)}:null)};
             if(!prerequisite)bs=bs.Where(b=>b.Kind!=PlayableBuildingKind.Factory).ToArray();
             if(occupied)bs=bs.Concat(new[]{new PlayableBuildingSnapshot(3,PlayableOwner.Player,PlayableBuildingKind.Refinery,site.Slots[1].Position,p.RefineryHealth,1,0,0,default(NavPoint),siteId:site.Id,slotId:site.Slots[1].Id,parentId:1)}).ToArray();
             if(center)bs=bs.Concat(new[]{new PlayableBuildingSnapshot(3,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,site.Slots[1].Position,250,progress,0,0,default(NavPoint),siteId:site.Id,slotId:site.Slots[1].Id,parentId:1,phase:progress<1?ConstructionPhase.Constructing:ConstructionPhase.Ready)}).ToArray();
             if(secondCenter)bs=bs.Concat(new[]{new PlayableBuildingSnapshot(4,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,site.Slots[2].Position,250,1,0,0,default(NavPoint),siteId:site.Id,slotId:site.Slots[2].Id,parentId:1,phase:ConstructionPhase.Ready)}).ToArray();
-            var units=Enumerable.Range(10,3).Select(i=>new PlayableEntitySnapshot(i,PlayableOwner.Player,unit,new NavPoint(i,0),PlayableUnitRules.Health(p,unit),false,0,0,0)).ToArray();
-            return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,41,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,cash,null,units,bs,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,1,true)},population:new PlayablePopulationSnapshot(9,0,p.ArmyCapacity),researchAvailability:AiResearchCatalog.All.Select(d=>new PlayableResearchAvailabilitySnapshot(d.Kind,d.Cost(p),true)).ToArray(),activeProfile:p,homeSiteId:site.Id,settledIncome:income));
+            var units=Enumerable.Range(10,count).Select(i=>new PlayableEntitySnapshot(i,PlayableOwner.Player,unit,new NavPoint(i,0),PlayableUnitRules.Health(p,unit),false,0,0,0)).ToArray();
+            return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,41,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,cash,null,units,bs,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,PlayableOwner.Player,1,false,1,true)},population:new PlayablePopulationSnapshot(count*PlayableUnitRules.Population(p,unit),0,p.ArmyCapacity),researchAvailability:AiResearchCatalog.All.Select(d=>new PlayableResearchAvailabilitySnapshot(d.Kind,d.Cost(p),true)).ToArray(),activeProfile:p,homeSiteId:site.Id,settledIncome:income));
         }
         private static void Observe(AiTechnologyFunding f,AiBudgetLedger b,AiDecisionArbiter a,PlayableAiObservation o,int protect=0,bool allowed=true,PlayableProfile p=null)
         {p=p??PlayableProfile.Default;b.ObserveBank(o.Credits);b.Expire(o.Tick,e=>!AiTechnologyFunding.IsFunding(e)||f.Valid(e,o,p,b,a));f.Reconcile(o,b,a);var plan=new AiTechnologyPlanner().Plan(o,p,AiProfile.Initial,b.Capture(),preferredFunding:f.Preferred(a));f.Observe(o,p,AiProfile.Initial,b,a,plan,allowed,protect);}
         private static (AiTechnologyFunding f,AiBudgetLedger b,AiDecisionArbiter a) Start(int cash=176)
         {var o=View(0,cash);var b=new AiBudgetLedger(o.OwnerId,71);return(new AiTechnologyFunding(o.OwnerId,71),b,new AiDecisionArbiter(AiProfile.Initial));}
+        [Test] public void ScienceWithoutProducerHasNoInfrastructureOrFundingEvenForHeadquartersCompatibleResearch()
+        {
+            var p=PlayableProfile.Default;var o=View(0,10000,prerequisite:false,unit:PlayableEntityKind.Explorer,unitCount:50);
+            var x=Start(10000);Observe(x.f,x.b,x.a,o);
+            var plan=new AiTechnologyPlanner().Plan(o,p,AiProfile.Initial,x.b.Capture());
+            Assert.IsNull(plan.Infrastructure);Assert.IsNull(plan.FundingGoal);Assert.IsNull(plan.Action);Assert.IsEmpty(x.b.Capture().Reserved);
+            var candidates=new AiEconomyPlanner().InfrastructureRequests(o,p,new InfrastructureRequest(PlayableResearchKind.ExplorerAssaultGuns,1));
+            Assert.IsNotEmpty(candidates);Assert.True(candidates.All(c=>!c.Legal&&c.Reason=="ready factory or hangar prerequisite"));
+        }
         [Test] public void PartialCurrentMoney_ProtectsScoutAndRenewsOnlyActualGrowth()
         {
             var x=Start();Observe(x.f,x.b,x.a,View(0,176),100);var e=x.b.Capture().Reserved.Single();Assert.AreEqual(76,e.Amount);Assert.AreEqual(100,x.b.Available);Assert.AreEqual(0,x.b.PaidTotal);
@@ -41,15 +50,15 @@ namespace Spacewars.Tests.EditMode
             Observe(x.f,x.b,x.a,View(expiry*3,176));Assert.IsEmpty(x.b.Capture().Reserved);
             Observe(x.f,x.b,x.a,View(expiry*3+1,196,20));Assert.AreEqual(196,x.b.Capture().Reserved.Single().Amount);
         }
-        [Test] public void AtomicScienceInvoice_RetainsResearchRemainderAndRejectsForeignConsumption()
+        [Test] public void AtomicScienceInvoice_ReservesOnlyCenterAndRejectsForeignConsumption()
         {
             var x=Start(600);var o=View(0,600);Observe(x.f,x.b,x.a,o);var held=x.b.Capture().Reserved.Single();
             var action=held.Action;var intent=new AiIntent("science","economy",action,30,300,0,new[]{"slot:"+action.SiteId+":"+action.SlotId},1,reservationId:held.Id);
             var bad=new AiIntent("foreign","economy",new PlayableAiAction(1,"foreign",o.ProfileId,o.ProfileRevision,71,0,PlayableCommandKind.BuildAt,siteId:action.SiteId,slotId:action.SlotId,parentId:1,buildingKind:PlayableBuildingKind.ScientificCenter),30,300,0,Array.Empty<string>(),reservationId:held.Id);
-            Assert.IsEmpty(x.a.Select(new[]{bad},0,600,10,1,x.b));Assert.AreEqual(600,x.b.Reserved);
+            Assert.IsEmpty(x.a.Select(new[]{bad},0,600,10,1,x.b));Assert.AreEqual(300,x.b.Reserved);
             Assert.AreEqual(intent,x.a.Select(new[]{intent},0,600,10,1,x.b).Single());var receipt=new AiReceiptIdentity(71,o.OwnerId,1,1);
-            Assert.True(x.f.Accept(intent,receipt,o,PlayableProfile.Default,x.b,x.a));Assert.AreEqual(300,x.b.Unpaid);Assert.AreEqual(300,x.b.Reserved);Assert.AreEqual(0,x.b.Available);Assert.AreEqual(0,x.b.PaidTotal);
-            Assert.False(x.f.Accept(intent,receipt,o,PlayableProfile.Default,x.b,x.a));Assert.AreEqual(600,x.b.Unpaid+x.b.Reserved);
+            Assert.True(x.f.Accept(intent,receipt,o,PlayableProfile.Default,x.b,x.a));Assert.AreEqual(300,x.b.Unpaid);Assert.Zero(x.b.Reserved);Assert.AreEqual(300,x.b.Available);Assert.AreEqual(0,x.b.PaidTotal);
+            Assert.False(x.f.Accept(intent,receipt,o,PlayableProfile.Default,x.b,x.a));Assert.AreEqual(300,x.b.Unpaid+x.b.Reserved);Assert.AreEqual(300,x.b.Available);
             x.b.Reconcile(intent.Id,receipt,PlayableAiDeliveryStatus.Applied);Observe(x.f,x.b,x.a,View(1,300,center:true,progress:.1));Assert.AreEqual(300,x.b.PaidTotal);Assert.AreEqual(300,x.b.Reserved);Assert.AreEqual(0,x.b.Available);
             Observe(x.f,x.b,x.a,View(601,300,center:true));var remaining=x.b.Capture().Reserved.Single();Assert.AreEqual(PlayableCommandKind.QueueResearch,remaining.Action.Kind);Assert.AreEqual(3,remaining.Action.EntityIds.Single());
             var research=new AiIntent("research","research",remaining.Action,630,300,0,new[]{"recipient:3"},reservationId:remaining.Id);
@@ -126,7 +135,7 @@ namespace Spacewars.Tests.EditMode
             var p=PlayableProfile.Default;var baseView=View(60,176);var factory=baseView.Buildings.Single(b=>b.Kind==PlayableBuildingKind.Factory);int health=Math.Max(1,(int)(p.FactoryHealth*AiProfile.Initial.Value("economy.repairPriorityHealthRatio"))/2);
             var life=new PlayableBuildingLifecycleSnapshot(false,0,false,false,0,0,null,null,1,0,false,p.FactoryCreditCost*p.BuildingRepairCostRatio*(1-health/(double)p.FactoryHealth),p.Revision);
             var bs=baseView.Buildings.Where(b=>b.Id!=factory.Id).Concat(new[]{new PlayableBuildingSnapshot(factory.Id,factory.Owner,factory.Kind,factory.Position,health,1,0,0,default(NavPoint),factory.SiteId,factory.SlotId,factory.ParentId,lifecycle:life)}).Concat(new[]{new PlayableBuildingSnapshot(4,PlayableOwner.Player,PlayableBuildingKind.Refinery,default(NavPoint),p.RefineryHealth,1,0,0,default(NavPoint),factory.SiteId,3,1),new PlayableBuildingSnapshot(5,PlayableOwner.Player,PlayableBuildingKind.Refinery,default(NavPoint),p.RefineryHealth,1,0,0,default(NavPoint),factory.SiteId,4,1)}).ToArray();
-            var units=Enumerable.Range(10,(int)AiProfile.Initial.Value("opening.forceUnits")+2).Select(id=>new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(id,0),p.TankHealth,false,0,0,0)).ToArray();
+            var units=Enumerable.Range(10,Math.Max((int)AiProfile.Initial.Value("opening.forceUnits")+2,(int)AiProfile.Initial.Value("technology.minimumUnitsForScienceCenter"))).Select(id=>new PlayableEntitySnapshot(id,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(id,0),p.TankHealth,false,0,0,0)).ToArray();
             var opening=Enumerable.Range(1,10000).Select(seed=>PlayableAiOpeningComposition.Initialize(seed,baseView.OwnerId,aiProfile:AiProfile.Initial)).First(v=>v.Opening==PlayableAiOpening.Safe);
             var snapshot=new PlayableSnapshot(p.ProfileId,p.Revision,71,opening.MatchSeed,60,60,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,176,null,units,bs,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:baseView.Sites.ToArray(),population:new PlayablePopulationSnapshot(units.Length*PlayableUnitRules.Population(p,PlayableEntityKind.Tank),0,p.ArmyCapacity),researchAvailability:baseView.ResearchAvailability.ToArray(),activeProfile:p,homeSiteId:baseView.HomeSiteId);
             var o=PlayableAiObservation.From(snapshot);var x=Start();Observe(x.f,x.b,x.a,o);Assert.Greater(x.b.Reserved,0);
@@ -142,7 +151,7 @@ namespace Spacewars.Tests.EditMode
             {var i=new AiIntent("recovery-science","economy",original.Action,30,300,0,Array.Empty<string>(),reservationId:original.Id);var receipt=new AiReceiptIdentity(71,o.OwnerId,1,1);Assert.True(x.f.Accept(i,receipt,o,PlayableProfile.Default,x.b,x.a));x.b.Reconcile(i.Id,receipt,PlayableAiDeliveryStatus.Rejected);x.f.Terminal(i,PlayableAiDeliveryStatus.Rejected,x.b,x.a);}
             Observe(x.f,x.b,x.a,View(31,cash,occupied:!rejected));Assert.IsEmpty(x.b.Capture().Reserved);Assert.AreEqual(cash,x.b.Available);
             Observe(x.f,x.b,x.a,View(600,cash,occupied:!rejected));Assert.IsEmpty(x.b.Capture().Reserved,"reselection/free cash alone cannot renew at later cadence");x.b=LedgerRoundTrip(x.b,600);x.a=Restore(Wire(x.a),600,o.OwnerId);
-            var fresh=View(601,cash+20,20,occupied:!rejected);Observe(x.f,x.b,x.a,fresh);Assert.IsNotEmpty(x.b.Capture().Reserved,"genuine observed new income must recover a legal goal after loss/rejection");var replacement=x.b.Capture().Reserved.Single();Assert.AreEqual(Math.Min(cash+20,600),replacement.Amount);Assert.AreEqual(601,replacement.CreatedTick);Assert.AreEqual(601+x.b.ReservationLifetimeTicks,replacement.ExpiresTick);if(!rejected)Assert.AreNotEqual(original.Action.SlotId,replacement.Action.SlotId);Assert.True(x.f.Valid(replacement,fresh,PlayableProfile.Default,x.b,x.a));Validate(x.f,fresh,x.b,x.a);
+            var fresh=View(601,cash+20,20,occupied:!rejected);Observe(x.f,x.b,x.a,fresh);Assert.IsNotEmpty(x.b.Capture().Reserved,"genuine observed new income must recover a legal goal after loss/rejection");var replacement=x.b.Capture().Reserved.Single();Assert.AreEqual(Math.Min(cash+20,(int)PlayableProfile.Default.ScienceCreditCost),replacement.Amount);Assert.AreEqual(601,replacement.CreatedTick);Assert.AreEqual(601+x.b.ReservationLifetimeTicks,replacement.ExpiresTick);if(!rejected)Assert.AreNotEqual(original.Action.SlotId,replacement.Action.SlotId);Assert.True(x.f.Valid(replacement,fresh,PlayableProfile.Default,x.b,x.a));Validate(x.f,fresh,x.b,x.a);
         }
         [Test] public void LostUsefulBranch_OnlyActualIncomePermitsReplacement()
         {
@@ -215,15 +224,60 @@ namespace Spacewars.Tests.EditMode
         [Test] public void AtomicAccept_RejectsOverlappingInvoiceAndRemainderClaimsWithoutMutation()
         {
             var x=Start(600);var o=View(0,600);Observe(x.f,x.b,x.a,o);var held=x.b.Capture().Reserved.Single();
-            var invoice=new AiBudgetEntry("invoice","economy",held.Action,300,1,0,30,"terminal",new[]{"same"},held.Terms,new AiReceiptIdentity(71,o.OwnerId,1,1));
-            var remainder=new AiBudgetEntry("remainder","research",held.Action,300,1,0,held.ExpiresTick,"expiry",new[]{"same"},held.Terms);
-            Assert.False(x.b.AcceptReserved(invoice,held.Id,remainder));Assert.AreEqual(600,x.b.Reserved);Assert.AreEqual(0,x.b.Unpaid);Assert.AreEqual(0,x.b.Capture().AdmittedDecision);
+            var invoice=new AiBudgetEntry("invoice","economy",held.Action,held.Amount/2,1,0,30,"terminal",new[]{"same"},held.Terms,new AiReceiptIdentity(71,o.OwnerId,1,1));
+            var remainder=new AiBudgetEntry("remainder","research",held.Action,held.Amount-invoice.Amount,1,0,held.ExpiresTick,"expiry",new[]{"same"},held.Terms);
+            Assert.AreEqual(held.Amount,invoice.Amount+remainder.Amount,"money fits; overlapping claims must cause the refusal");
+            Assert.False(x.b.AcceptReserved(invoice,held.Id,remainder));Assert.AreEqual(300,x.b.Reserved);Assert.AreEqual(0,x.b.Unpaid);Assert.AreEqual(0,x.b.Capture().AdmittedDecision);
+        }
+        [Test] public void CurrentCombinedScienceQuote_RoundTripsExactlyThenCapsAtStageCost()
+        {
+            var p=PlayableProfile.Default;var x=Start(600);var o=View(0,600);Observe(x.f,x.b,x.a,o);var held=x.b.Capture().Reserved.Single();
+            // Recreate the previous producer's quote in the unchanged current wire format.
+            int combined=held.Amount+(int)AiResearchCatalog.For(PlayableResearchKind.TankChassis).Cost(p);
+            var memo=Memo(x.a);memo.GetType().GetField("Amount",Private).SetValue(memo,combined);Save(x.a,memo);
+            Assert.True(x.b.Release(held.Id));Assert.True(x.b.Reserve(new AiBudgetEntry(held.Id,held.Purpose,held.Action,combined,held.Priority,held.CreatedTick,held.ExpiresTick,held.ReleaseCondition,held.Claims,held.Terms)));
+            var wire=Wire(x.a);x.a=Restore(wire,0,o.OwnerId);CollectionAssert.AreEqual(wire,Wire(x.a));x.b=LedgerRoundTrip(x.b,0);Validate(x.f,o,x.b,x.a);Assert.AreEqual(combined,x.b.Reserved);
+            Observe(x.f,x.b,x.a,View(45,600));var capped=x.b.Capture().Reserved.Single();Assert.AreEqual((int)p.ScienceCreditCost,capped.Amount);
+            Assert.AreEqual(held.CreatedTick,capped.CreatedTick);Assert.AreEqual(held.ExpiresTick,capped.ExpiresTick);Assert.Zero(x.b.Unpaid);Assert.Zero(x.b.PaidTotal);Validate(x.f,View(45,600),x.b,x.a);
         }
         [Test] public void MemoOutsidePruning_RetainsFull128OrdinaryHistories()
         {
             var x=Start();Observe(x.f,x.b,x.a,View(0,176));
             for(int n=0;n<160;n++){var o=View(n+1,176);x.a.Select(new[]{new AiIntent("ordinary-"+n,"scout",new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,71,0,PlayableCommandKind.Stop),2000,0,0,Array.Empty<string>())},o.Tick,176,0,1,x.b);}
             var history=(System.Collections.IDictionary)typeof(AiDecisionArbiter).GetField("history",Private).GetValue(x.a);Assert.AreEqual(129,history.Count);Assert.NotNull(Memo(x.a));
+        }
+        [Test] public void ScienceCostsOnlyCenterThenResearchAccumulatesThroughExactCurrentMemo()
+        {
+            var p=PlayableProfile.Default;int cost=(int)p.ScienceCreditCost;var x=Start(cost);var o=View(0,cost,unitCount:10);
+            Observe(x.f,x.b,x.a,o);var plan=new AiTechnologyPlanner().Plan(o,p,AiProfile.Initial,x.b.Capture());
+            Assert.NotNull(plan.Infrastructure);Assert.IsNull(plan.Action);Assert.AreEqual(cost,x.b.Reserved);Assert.Zero(x.b.Available);
+            var held=x.b.Capture().Reserved.Single();var i=new AiIntent("science","economy",held.Action,30,cost,0,new[]{"slot:"+held.Action.SiteId+":"+held.Action.SlotId},1,reservationId:held.Id);
+            Assert.AreSame(i,x.a.Select(new[]{i},0,cost,100,1,x.b).Single());var receipt=new AiReceiptIdentity(71,o.OwnerId,1,1);
+            Assert.True(x.f.Accept(i,receipt,o,p,x.b,x.a));Assert.AreEqual(cost,x.b.Unpaid);Assert.Zero(x.b.Reserved);Assert.Zero(x.b.Available);
+            var wire=Wire(x.a);x.a=Restore(wire,0,o.OwnerId);CollectionAssert.AreEqual(wire,Wire(x.a));x.b=LedgerRoundTrip(x.b,0);Validate(x.f,o,x.b,x.a);
+            Assert.False(x.f.Accept(i,receipt,o,p,x.b,x.a),"one center invoice cannot be consumed twice");
+            x.b.Reconcile(i.Id,receipt,PlayableAiDeliveryStatus.Applied);Observe(x.f,x.b,x.a,View(1,0,center:true,progress:.1,unitCount:10));
+            Assert.AreEqual(cost,x.b.PaidTotal);Assert.Zero(x.b.Unpaid);Assert.Zero(x.b.Reserved);
+            Observe(x.f,x.b,x.a,View(301,100,income:100,center:true,progress:.5,unitCount:10));Assert.AreEqual(100,x.b.Reserved);
+            Observe(x.f,x.b,x.a,View(601,300,income:300,center:true,unitCount:10));Assert.AreEqual(300,x.b.Reserved);
+            var ready=View(601,300,income:300,center:true,unitCount:10);var research=new AiTechnologyPlanner().Plan(ready,p,AiProfile.Initial,x.b.Capture());
+            Assert.NotNull(research.Action);Assert.AreEqual(PlayableCommandKind.QueueResearch,research.Action.Kind);
+            wire=Wire(x.a);x.a=Restore(wire,601,o.OwnerId);CollectionAssert.AreEqual(wire,Wire(x.a));x.b=LedgerRoundTrip(x.b,601);Validate(x.f,ready,x.b,x.a);
+        }
+        [Test] public void TemporaryExitDelayKeepsTechnologyFundingWithoutRenewingClock()
+        {
+            var x=Start();var o=View(0,176,unitCount:10);Observe(x.f,x.b,x.a,o);var first=x.b.Capture().Reserved.Single();
+            var blocked=View(45,176,unitCount:10,blocked:true);Observe(x.f,x.b,x.a,blocked);
+            Assert.NotNull(new AiTechnologyPlanner().Plan(blocked,PlayableProfile.Default,AiProfile.Initial,x.b.Capture()).FundingGoal);
+            var held=x.b.Capture().Reserved.Single();Assert.AreEqual(first.Id,held.Id);Assert.AreEqual(first.Amount,held.Amount);Assert.AreEqual(first.ExpiresTick,held.ExpiresTick);
+            Observe(x.f,x.b,x.a,View(90,176,prerequisite:false,unitCount:10));Assert.IsEmpty(x.b.Capture().Reserved);
+        }
+        [Test] public void IndependentScienceStillHonorsArmySafetyAndActualThreat()
+        {
+            var p=PlayableProfile.Default;var x=Start(300);var small=View(0,300,unitCount:9);Observe(x.f,x.b,x.a,small);Assert.IsEmpty(x.b.Capture().Reserved);
+            var enough=View(45,300,unitCount:10);Observe(x.f,x.b,x.a,enough);Assert.AreEqual(300,x.b.Reserved);
+            x.b.SetSafetyReserve(1);var plan=new AiTechnologyPlanner().Plan(enough,p,AiProfile.Initial,x.b.Capture());Assert.IsNull(plan.Infrastructure);
+            x.b.SetSafetyReserve(0);Observe(x.f,x.b,x.a,View(90,300,unitCount:10),allowed:false);Assert.IsEmpty(x.b.Capture().Reserved);Assert.Zero(x.b.PaidTotal);
         }
     }
 }

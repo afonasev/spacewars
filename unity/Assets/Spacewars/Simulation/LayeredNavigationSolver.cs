@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace Spacewars.Simulation
 {
-    public enum NavSolveStatus { Pending, Ready, InvalidEndpoint, BlockedConnector, UnreachableInGraph, CapacityExceeded, Stale }
+    public enum NavSolveStatus { Pending, Ready, InvalidEndpoint, BlockedConnector, UnreachableInGraph, CapacityExceeded, Stale, Partial }
     public enum NavTypedLegKind { Surface, Portal }
     public sealed partial class NavTypedLeg : NavOwnedStorage
     {
@@ -55,6 +55,7 @@ namespace Spacewars.Simulation
     public sealed partial class NavTypedRoute : NavOwnedStorage
     {
         private NavOwnedStorage ownedSubscription;
+        internal NavRecastMemberPlan RecastPlan;
         internal NavTypedRoute(NavRouteSubscription subscription,IReadOnlyList<NavTypedLeg> legs,double cost,Func<long,bool> reserve=null,bool alreadyReserved=false):base(128)
         {
             if(subscription==null||legs==null)throw new ArgumentNullException();
@@ -66,17 +67,17 @@ namespace Spacewars.Simulation
                 }catch{ReleaseStorage();throw;}
             }
         }
-        internal static NavTypedRoute CopySubscriptionAndCreateOwned(NavRouteSubscription subscription,IReadOnlyList<NavTypedLeg> legs,double cost,INavStorageReservation reservation)
+        internal static NavTypedRoute CopySubscriptionAndCreateOwned(NavRouteSubscription subscription,IReadOnlyList<NavTypedLeg> legs,double cost,INavStorageReservation reservation,NavRecastMemberPlan recastPlan=null)
         {
             if(subscription==null||legs==null)throw new ArgumentNullException();if(subscription.MetadataOwner!=null)NavMetadataOwnership.Require(subscription,reservation);
             if(legs is NavOwnedStorage root)NavStorageAdmission.RequireOwned(reservation,root);else foreach(var leg in legs)NavStorageAdmission.RequireOwned(reservation,leg);
             var copied=subscription.MetadataOwner==null?NavRouteSubscription.CopyOwned(subscription,reservation):null;
-            try{return new NavTypedRoute(copied??subscription,legs,cost,NavStorageLayout.Before(reservation.TryReserve,128),true);}finally{copied?.MetadataOwner.Release();}
+            try{var route=new NavTypedRoute(copied??subscription,legs,cost,NavStorageLayout.Before(reservation.TryReserve,128),true);try{if(recastPlan!=null){recastPlan.Validate(route);route.RecastPlan=NavPhysicalMacro.Acquire(route,recastPlan);}return route;}catch{route.ReleaseStorage();throw;}}finally{copied?.MetadataOwner.Release();}
         }
         private bool released;
         internal void ReleaseStorage(){if(released)return;released=true;Release();}
         internal override void ReleaseOwner()=>ReleaseStorage();
-        protected override void ReleaseEdges(){(Legs as NavOwnedStorage)?.Release();ownedSubscription?.Release();}
+        protected override void ReleaseEdges(){(Legs as NavOwnedStorage)?.Release();ownedSubscription?.Release();RecastPlan?.Release();}
         public NavRouteSubscription Subscription { get; } public IReadOnlyList<NavTypedLeg> Legs { get; } public double Cost { get; }
     }
     public sealed class NavWorkResult

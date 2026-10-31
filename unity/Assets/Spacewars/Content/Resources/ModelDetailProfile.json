@@ -1,0 +1,14 @@
+{
+  "id": "model-detail-v1",
+  "revision": 5,
+  "normalEnter": 0.1,
+  "normalExit": 0.12,
+  "farEnter": 0.055,
+  "farExit": 0.06,
+  "trailCrowdThreshold": 20,
+  "trailLargeCrowdThreshold": 40,
+  "trailCrowdDivisor": 2,
+  "trailLargeCrowdDivisor": 4,
+  "trailHideZoom": 18,
+  "healthHideZoom": 20
+}

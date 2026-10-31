@@ -47,7 +47,7 @@ namespace Spacewars.Presentation
             scroll.contentViewport.RegisterCallback<GeometryChangedEvent>(evt =>
             {
                 float width=evt.newRect.width;var asset=image.image;
-                if(width>0&&asset!=null)image.style.height=Mathf.Max(220,width*asset.height/asset.width);
+                if(width>0&&asset!=null)image.style.height=Mathf.Max(220,width*asset.height/asset.width,scroll.contentViewport.resolvedStyle.height);
             });
 
             var equivalents = OrbitalTheme.Text("", "orbital-muted");
@@ -62,7 +62,7 @@ namespace Spacewars.Presentation
                 scroll.scrollOffset = Vector2.zero;
                 var texture = Resources.Load<Texture2D>("ControlsHelp/" + Images[selected]);
                 image.image = texture;
-                if(texture!=null&&scroll.contentViewport.resolvedStyle.width>0)image.style.height=Mathf.Max(220,scroll.contentViewport.resolvedStyle.width*texture.height/texture.width);
+                if(texture!=null&&scroll.contentViewport.resolvedStyle.width>0)image.style.height=Mathf.Max(220,scroll.contentViewport.resolvedStyle.width*texture.height/texture.width,scroll.contentViewport.resolvedStyle.height);
                 image.style.display = texture == null ? DisplayStyle.None : DisplayStyle.Flex;
                 equivalents.style.display = selected < 4 && texture != null ? DisplayStyle.Flex : DisplayStyle.None;
 

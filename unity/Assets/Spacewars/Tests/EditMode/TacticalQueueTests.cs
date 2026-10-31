@@ -354,6 +354,35 @@ namespace Spacewars.Tests.EditMode
         {
             int id=Spawn(-14,-26),enemy=Spawn(-2,-26,PlayableOwner.Enemy);Send(new[]{id},default,PlayableCommandKind.Attack,target:enemy);Send(new[]{id},new NavPoint(-12,-26),append:true);Step();Assert.True(nav.IsPending(id));Restore();Deliver();Assert.True(nav.Crowd.Units.Single(u=>u.Id==id).Moving);Call("Damage",enemy,10000);Step();Assert.AreEqual(2,Queue(id).Pending.CommandSequence);
         }
+        [Test]public void NativeAttackWithoutReplacementKeepsOriginalChaseIdentityAcrossRestore()
+        {
+            UseActualRoutes();
+            actualHost.Service(new PlayableRouteBinding((NavGeometry)D.GetProperty("Geometry",F).GetValue(domain),PlayableProfile.Default,nav.Admission,nav.RoutePort),4);
+            int id=Spawn(-14,-26),enemy=Spawn(-2,-26,PlayableOwner.Enemy);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(new[]{id},default,PlayableCommandKind.Attack,target:enemy));
+            var original=Queue(id).Active;Assert.NotNull(original);Assert.Null(Queue(id).Pending);
+            Assert.True((bool)Call("CombatMove",id,new NavPoint(-8,-26)));Deliver();
+            Call("CombatStop",id);Assert.False(nav.Crowd.Units.Single(u=>u.Id==id).Moving);
+            Assert.True((bool)Call("CombatMove",id,new NavPoint(-6,-26)));Deliver();
+            var actor=nav.Crowd.Units.Single(u=>u.Id==id);Assert.True(actor.Moving);
+            Assert.AreEqual(original.GroupId,actor.InstalledGroupId,"Ordinary attack chase must retain its active issuance rather than create an unrelated movement root.");
+            Assert.AreEqual(original.ActivationRevision,actor.InstalledRevision);Assert.AreEqual(original.CommandSequence,Queue(id).Active.CommandSequence);
+            Restore();Assert.AreEqual(original.GroupId,Queue(id).Active.GroupId);Assert.True(nav.Crowd.Units.Single(u=>u.Id==id).Moving);
+        }
+        [Test]public void FoundationEvacuationRetiresReplacedAttackAndRestoresExactly()
+        {
+            UseActualRoutes();
+            actualHost.Service(new PlayableRouteBinding((NavGeometry)D.GetProperty("Geometry",F).GetValue(domain),PlayableProfile.Default,nav.Admission,nav.RoutePort),4);
+            var site=((TerritorySiteSnapshot[])Call("SiteSnapshots")).Single(s=>s.Site.Id==1);var pad=site.Site.Slots.Single(s=>s.Id==1).Position;
+            int id=Spawn(pad.X,pad.Z),enemy=Spawn(pad.X+8,pad.Z,PlayableOwner.Enemy);
+            using(nav.RoutePort.AcquireCapture(()=>false))Assert.AreEqual(PlayableCommandStatus.Applied,Send(new[]{id},default,PlayableCommandKind.Attack,target:enemy));
+            Assert.NotNull(Queue(id).Active);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,1,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));
+            using(nav.RoutePort.AcquireCapture(()=>false))Call("AdvanceFoundations");Deliver();
+            Assert.True(nav.Crowd.Units.Single(u=>u.Id==id).Moving,"Accepted foundation evacuation must produce ordinary physical movement.");
+            Assert.Null(Queue(id),"Evacuation replaced the native movement root, so the retired attack/deferred queue cannot remain active.");
+            Restore();Assert.Null(Queue(id));Assert.True(nav.Crowd.Units.Single(u=>u.Id==id).Moving);
+        }
         [Test]public void FailedReplacementKeepsAttackChaseOnOriginalIdentityAcrossRestore()
         {
             UseArrivalFailureFixture();
@@ -547,6 +576,7 @@ namespace Spacewars.Tests.EditMode
         }
         [Test]public void NonAnchorAttackMoveMemberResumesInstalledRouteAfterContactLossAndRestore()
         {
+            UseActualRoutes();
             int a=Spawn(-14,-14),b=Spawn(-18,-14);var anchor=new NavPoint(-8,-14);Send(new[]{a,b},anchor,PlayableCommandKind.AttackMove);Deliver();
             object Execution(int entity){var queues=(System.Collections.IDictionary)D.GetField("tacticalQueues",F).GetValue(domain);return queues[entity].GetType().GetField("Active",F).GetValue(queues[entity]);}
             var assignedA=(NavLocation?)Execution(a).GetType().GetField("Assigned",F).GetValue(Execution(a));int id=assignedA.HasValue&&!assignedA.Value.Position.Equals(anchor)?a:b;

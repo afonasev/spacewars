@@ -7,7 +7,8 @@ namespace Spacewars.Runtime
 {
     internal sealed class AiTeamAssignment
     {
-        internal int TargetId; internal bool Helping; internal long WaitUntilTick;
+        internal int TargetId,SecondaryTargetId; internal bool Helping; internal long WaitUntilTick;
+        internal HashSet<string> GreedyAllies=new HashSet<string>(StringComparer.Ordinal);
         internal string Reason; internal HashSet<int> DeniedSites=new HashSet<int>();
     }
     // A phase-local projection of durable owner commitments. Rebuilt before ANY
@@ -16,7 +17,7 @@ namespace Spacewars.Runtime
     // pause and restart need no second mutable copy of the same commitments.
     internal sealed class AiTeamPublication
     {
-        internal string Owner; internal int Team; internal long Tick;
+        internal string Owner; internal PlayableAiOpening Opening; internal int Team; internal long Tick;
         internal AiArmyMissionState Mission; internal AiOpponentAssessment[] Targets;
         internal int ExpansionSite; internal long ExpansionExpires;
         internal int[] RequestedSites; internal int[] ThreatTargets=Array.Empty<int>(); internal bool HomeThreatened;
@@ -30,6 +31,7 @@ namespace Spacewars.Runtime
             foreach(var team in all.GroupBy(p=>p.Team))
             {
                 var members=team.ToArray();
+                foreach(var p in members)result[p.Owner].GreedyAllies=new HashSet<string>(members.Where(m=>m.Owner!=p.Owner&&m.Opening==PlayableAiOpening.GreedySafe).Select(m=>m.Owner),StringComparer.Ordinal);
                 if(members.Length<2)continue;
                 var claims=new Dictionary<int,string>();
                 foreach(var p in members.Where(p=>p.ExpansionSite>0&&p.ExpansionExpires>p.Tick).OrderBy(p=>p.Owner,StringComparer.Ordinal))
@@ -53,7 +55,7 @@ namespace Spacewars.Runtime
                 var leader=members.Where(p=>p.Mission.ArmyId>0&&p.Mission.TargetId==objective.Key&&p.Mission.TargetKind==PlayableRouteTargetKind.VisibleEnemy&&p.Tick-p.Mission.ProgressTick<AiProfile.SecondsToTicks(profile.Value("team.claimTtlSeconds"),30)).OrderBy(p=>p.Mission.StartedTick).ThenBy(p=>p.Owner,StringComparer.Ordinal).FirstOrDefault();
                 foreach(var p in members.Where(p=>p.Targets.Any(t=>t.TargetId==objective.Key)))
                 {
-                    var a=result[p.Owner];a.TargetId=objective.Key;a.Helping=members.Any(m=>m.Owner!=p.Owner&&m.HomeThreatened&&m.ThreatTargets.Contains(objective.Key));a.Reason=p.HomeThreatened?"own survival takes priority":a.Helping?"allied support with home reserve":"shared pressure";
+                    var a=result[p.Owner];a.TargetId=objective.Key;a.SecondaryTargetId=p.Targets.Where(t=>t.TargetId!=objective.Key&&helpTargets.Contains(t.TargetId)).OrderByDescending(t=>t.Score).Select(t=>t.TargetId).FirstOrDefault();a.Helping=members.Any(m=>m.Owner!=p.Owner&&m.HomeThreatened&&m.ThreatTargets.Contains(objective.Key));a.Reason=p.HomeThreatened?"own survival takes priority":a.Helping?"allied support with home reserve":"shared pressure";
                     if(leader!=null&&leader.Owner!=p.Owner&&p.Mission.ArmyId==0)
                     {
                         double eta=leader.Targets.FirstOrDefault(t=>t.TargetId==objective.Key)?.ArrivalSeconds??0;

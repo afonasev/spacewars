@@ -146,6 +146,22 @@ namespace Spacewars.Tests.EditMode
         }
 
         [Test]
+        public void DetachedReviewBoundaryExpiresDormantClockWithoutRetargetingLiveFinance()
+        {
+            var p=MapProfile();var f=Start();var b=new AiBudgetLedger("player-1",71);var a=new AiDecisionArbiter(AiProfile.Initial);var ex=new AiExpansionPlanner("player-1");
+            Observe(f,b,a,ex,View(315,0,new[]{9}),p);Observe(f,b,a,ex,View(415,100,new[]{21}),p);
+            var active=b.Capture().Reserved.Single();Assert.AreEqual(1765,active.ExpiresTick);
+            Assert.True((bool)Call(f,"ReviewClocksCurrent",b,a,1664L));
+            Assert.False((bool)Call(f,"ReviewClocksCurrent",b,a,1665L),"A dormant deadline also bounds publication of the detached memo.");
+            Call(f,"ReconcileReviewClocks",b,a,1665L);
+            Assert.AreSame(active,b.Capture().Reserved.Single(),"Expiry of dormant Site9 cannot spend, extend or retarget live Site21.");
+            Assert.True((bool)Call(f,"IsExpiredFingerprint",View(1665,100,new[]{9}).Sites.Single(s=>s.Site.Id==9),a));
+            Assert.True((bool)Call(f,"ReviewClocksCurrent",b,a,1665L));Validate(f,b,a,1665,p);
+            var bytes=ArbiterBytes(a);Call(f,"ReconcileReviewClocks",b,a,1665L);CollectionAssert.AreEqual(bytes,ArbiterBytes(a),"Repeated publication checks preserve exact memo state.");
+            var restored=RestoreArbiter(bytes,1665,p);CollectionAssert.AreEqual(bytes,ArbiterBytes(restored));Validate(f,b,restored,1665,p);
+        }
+
+        [Test]
         public void ReturnedTargetKeepsSwitchClockUntilRealAmountGrowthRenewsIt()
         {
             var p=MapProfile();var f=Start();var b=new AiBudgetLedger("player-1",71);var a=new AiDecisionArbiter(AiProfile.Initial);var ex=new AiExpansionPlanner("player-1");

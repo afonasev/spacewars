@@ -191,5 +191,77 @@ public sealed class PlayableSpectatorHudTests
         }
         finally{panel.targetTexture=null;camera.targetTexture=null;texture.Release();backdrop.Release();UnityEngine.Object.DestroyImmediate(texture);UnityEngine.Object.DestroyImmediate(backdrop);UnityEngine.Object.DestroyImmediate(camera.gameObject);Set("cameraView",null);foreach(var light in UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None).Where(x=>!priorLights.Contains(x.GetInstanceID())))UnityEngine.Object.DestroyImmediate(light.gameObject);}
     }
+    [UnityTest] public IEnumerator FpsPlacementInSpectatorOverviewAndPerspective()
+    {
+        bool saved=NativeDevicePreferences.ShowFps;NativeDevicePreferences.ShowFps=true;
+        var root=Get<VisualElement>("root");var panel=host.GetComponent<UIDocument>().panelSettings;
+        var texture=new RenderTexture(1280,800,24);texture.Create();panel.targetTexture=texture;
+        var folder=Environment.GetEnvironmentVariable("SPACEWARS_FPS_EVIDENCE");
+        try
+        {
+            root.style.backgroundColor=new Color(.055f,.08f,.1f);
+            foreach(var size in new[]{new Vector2Int(1280,800),new Vector2Int(800,620),new Vector2Int(640,620)})
+            {
+                panel.targetTexture=null;texture.Release();texture.width=size.x;texture.height=size.y;texture.Create();panel.targetTexture=texture;
+                root.style.width=size.x;root.style.height=size.y;Set("spectatorMode",true);Show(Fixture(8));Call("ApplyResponsiveHud",(float)size.x);
+                foreach(bool perspective in new[]{false,true})foreach(bool collapsed in new[]{false,true})
+                {
+                    Set("spectatorPerspective",perspective?(PlayableOwner?)PlayableOwner.Player:null);
+                    Set("spectatorSequence",-1L);Call("UpdateHud");Call("UpdateSpectatorHud");
+                    var table=root.Q("spectator-summary");var fold=table.Q<Button>("spectator-collapse");
+                    if(Get<bool>("spectatorCollapsed")!=collapsed)
+                        using(var submit=NavigationSubmitEvent.GetPooled()){submit.target=fold;fold.SendEvent(submit);}
+                    yield return new WaitForSecondsRealtime(.6f);yield return null;
+                    Assert.AreEqual(collapsed,Get<bool>("spectatorCollapsed"));
+                    var fps=root.panel.visualTree.Q<Label>("device-fps");Assert.NotNull(fps);
+                    Assert.AreEqual(DisplayStyle.Flex,fps.resolvedStyle.display);StringAssert.EndsWith(" FPS",fps.text);
+                    Assert.AreEqual(Color.white,fps.resolvedStyle.color);Assert.AreEqual(Color.black,fps.style.textShadow.value.color);
+                    Assert.Greater(fps.style.textShadow.value.blurRadius,0);Assert.AreEqual(PickingMode.Ignore,fps.pickingMode);
+                    Assert.AreEqual(table.worldBound.xMin+8,fps.worldBound.xMin,.5f,"FPS keeps its inner panel gutter when expanded or collapsed");
+                    Assert.GreaterOrEqual(fps.worldBound.yMin,root.worldBound.yMin+8);
+                    Assert.AreEqual(root.worldBound.xMin+8,table.worldBound.xMin,.5f,"Table keeps its outer gutter");
+                    Assert.LessOrEqual(table.worldBound.xMax,root.worldBound.xMax-7.5f);
+                    Assert.AreEqual(root.worldBound.yMin+8,table.worldBound.yMin,.5f,"FPS never pushes the table down");
+                    var header=root.Q("match-header");if(perspective)
+                    {
+
+                        Assert.AreEqual(root.worldBound.yMin+8,header.worldBound.yMin,.5f);Assert.AreEqual(root.worldBound.xMax-8,header.worldBound.xMax,.5f);
+                    }
+                    var controls=table.Q("spectator-controls");var buttons=controls.Query<Button>().ToList();
+                    var speedPositions=buttons.Select(button=>button.worldBound.position).ToArray();
+                    foreach(var reading in new[]{"9 FPS","99 FPS","999 FPS","9999 FPS"})
+                    {
+                        fps.text=reading;OrbitalTheme.LayoutDeviceDiagnostics(root);yield return null;yield return null;
+                        Assert.AreEqual(64,fps.resolvedStyle.width,.5f,"FPS owns a fixed-width column");
+                        for(int i=0;i<buttons.Count;i++)Assert.AreEqual(speedPositions[i],buttons[i].worldBound.position,"Changing FPS digits must not move controls");
+                    }
+                    Assert.AreEqual(fps.worldBound.xMax+8,buttons[0].worldBound.xMin,1f);
+                    Assert.AreEqual(buttons[0].worldBound.center.y,fps.worldBound.center.y,.5f,"FPS and speeds share one row");
+                    Assert.AreEqual(controls.worldBound.xMax-controls.resolvedStyle.paddingRight,fold.worldBound.xMax,.5f);
+                    Assert.AreEqual(controls.worldBound.yMin+8,buttons[0].worldBound.yMin,.5f);Assert.AreEqual(controls.worldBound.yMax-8,buttons[0].worldBound.yMax,.5f);
+                    foreach(var button in buttons)
+                    {
+                        Assert.GreaterOrEqual(button.worldBound.xMin,table.worldBound.xMin+7.5f);Assert.LessOrEqual(button.worldBound.xMax,table.worldBound.xMax-7.5f);
+                        Assert.AreEqual(buttons[0].worldBound.yMin,button.worldBound.yMin,.5f,"All speed/fold buttons share their vertical alignment");
+                        Assert.False(fps.worldBound.Overlaps(button.worldBound));
+                        if(perspective)Assert.False(header.worldBound.Overlaps(button.worldBound));
+                        Assert.AreSame(button,root.panel.Pick(button.worldBound.center),"FPS must not intercept a spectator button");
+                    }
+                    Assert.AreEqual(collapsed?DisplayStyle.None:DisplayStyle.Flex,Get<VisualElement>("spectatorRows").resolvedStyle.display);
+                    if(!string.IsNullOrEmpty(folder)){System.IO.Directory.CreateDirectory(folder);Capture(texture,System.IO.Path.Combine(folder,"spectator-"+(perspective?"perspective":"overview")+"-"+(collapsed?"collapsed":"expanded")+"-"+size.x+"x"+size.y+".png"));}
+                }
+                Set("spectatorMode",false);Call("UpdateSpectatorHud");yield return new WaitForSecondsRealtime(.6f);yield return null;
+                var overlay=root.panel.visualTree.Q<Label>("device-fps");Assert.AreEqual(DisplayStyle.None,root.Q("spectator-summary").resolvedStyle.display);
+                Assert.AreEqual(root.worldBound.xMin+8,overlay.worldBound.xMin,.5f);Assert.AreEqual(root.worldBound.yMin+8,overlay.worldBound.yMin,.5f);
+                Assert.Zero(overlay.resolvedStyle.backgroundColor.a,"Without the table FPS remains a transparent field overlay");Assert.AreEqual(PickingMode.Ignore,overlay.pickingMode);
+                if(!string.IsNullOrEmpty(folder))Capture(texture,System.IO.Path.Combine(folder,"fps-without-table-"+size.x+"x"+size.y+".png"));
+            }
+            Set("spectatorMode",true);Set("spectatorPerspective",null);Call("UpdateSpectatorHud");NativeDevicePreferences.ShowFps=false;
+            yield return new WaitForSecondsRealtime(.6f);yield return null;
+            Assert.AreEqual(DisplayStyle.None,root.panel.visualTree.Q("device-fps").resolvedStyle.display);
+            Assert.AreEqual(root.worldBound.yMin+8,root.Q("spectator-summary").worldBound.yMin,.5f,"Disabling FPS releases the diagnostic row");
+        }
+        finally{NativeDevicePreferences.ShowFps=saved;panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);}
+    }
     static void Capture(RenderTexture texture,string path){var old=RenderTexture.active;RenderTexture.active=texture;var pixels=new Texture2D(texture.width,texture.height,TextureFormat.RGB24,false);pixels.ReadPixels(new Rect(0,0,texture.width,texture.height),0,0);pixels.Apply();RenderTexture.active=old;System.IO.File.WriteAllBytes(path,pixels.EncodeToPNG());UnityEngine.Object.DestroyImmediate(pixels);}
 }

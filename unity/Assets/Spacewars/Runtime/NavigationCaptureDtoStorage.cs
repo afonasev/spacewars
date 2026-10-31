@@ -285,7 +285,7 @@ namespace Spacewars.Runtime
         private static GroupOrderState CaptureGroupVersion(NavigationAuthorityGroup version)
         {
             var d=version.Data;var group=new GroupOrderState{WorldGeneration=d.WorldGeneration,GroupId=d.GroupId,OrderRevision=d.OrderRevision,CommandSequence=d.CommandSequence,IssuedTick=d.IssuedTick,MembershipRevision=d.MembershipRevision,MarchVersion=d.MarchVersion,MarchProfileRevision=d.MarchProfileRevision,MarchStretch=d.MarchStretch,MarchAnchor=d.MarchAnchor,MarchInitialized=d.MarchInitialized,OwnerId=version.OwnerId,Source=version.Source,TeamId=d.TeamId,TargetId=d.TargetId,Origin=d.Origin,Kind=d.Kind,JobId=d.JobId,ActionId=d.ActionId,OriginalGoal=d.OriginalGoal,OriginalLocation=version.OriginalLocation,Members=new GroupMemberState[version.Members.Count]};
-            for(int i=0;i<group.Members.Length;i++){var member=(NavigationAuthorityMember)version.Members[i];var m=member.Data;group.Members[i]=new GroupMemberState{Entity=m.Entity,Slot=m.Slot,Incarnation=m.Incarnation,OrderRevision=m.OrderRevision,MobilityRevision=m.MobilityRevision,Phase=m.Phase,Goal=m.Goal,GoalLocation=member.GoalLocation,HasGoal=m.HasGoal,FormationReleased=m.FormationReleased,Branch=m.Branch,Reservation=m.Reservation,ContactTick=m.ContactTick,ContactPhase=member.ContactPhase,ProgressRequest=m.ProgressRequest,Progress=m.Progress,ProgressVersion=m.ProgressVersion,ProgressOffset=m.ProgressOffset};}return group;
+            for(int i=0;i<group.Members.Length;i++){var member=(NavigationAuthorityMember)version.Members[i];var m=member.Data;group.Members[i]=new GroupMemberState{Entity=m.Entity,Slot=m.Slot,Incarnation=m.Incarnation,OrderRevision=m.OrderRevision,MobilityRevision=m.MobilityRevision,Phase=m.Phase,Goal=m.Goal,GoalLocation=member.GoalLocation,HasGoal=m.HasGoal,FormationReleased=m.FormationReleased,Branch=m.Branch,Reservation=m.Reservation,ContactTick=m.ContactTick,ContactPhase=member.ContactPhase,ProgressRequest=m.ProgressRequest,Progress=m.Progress,ProgressVersion=m.ProgressVersion,ProgressOffset=m.ProgressOffset,Recast=m.Recast};}return group;
         }
         private void PrepareCaptureGroupRefresh(NavigationPreparedCapture c,NavigationRetentionBudget.Scope scope)
         {
@@ -304,7 +304,7 @@ namespace Spacewars.Runtime
             if(!c.Observed||c.State!=null)throw new InvalidOperationException("Capture shapes are not ready.");
             var source=c.Source;c.DtoBytes=CapturePreparedDtoLayout(c);var dto=NavigationCaptureDtoStorage.CreateOwned(c.DtoBytes,reservation);NavigationSessionState state=null;
             try{
-                state=new NavigationSessionState{CaptureDto=dto};c.State=state;dto.Bind(state);
+                state=new NavigationSessionState{RecastCoordinationVersion=UsesRecastGroundRoutes?2:0,CaptureDto=dto};c.State=state;dto.Bind(state);
                 state.TransportVersion=1;state.CorridorWireVersion=1;state.Generation=Generation;state.RequestSequence=source.RequestSequence;state.GroupSequence=source.GroupSequence;state.AppliedResults=source.Applied;state.RejectedResults=source.Rejected;state.UnreachableResults=source.Unreachable;state.SurfaceSemanticsVersion=terrain?.SurfaceSemanticsVersion??1;state.SurfaceProviderId=terrain?.Id??NavLocation.FlatSurface;state.NavigationGeometryIndex=c.BaseGeometry;state.GroupLayoutVersion=1;
                 state.Geometry=SaveGeometry(c.Geometries[0]);state.NavigationGeometry=SaveGeometry(c.Geometries[c.BaseGeometry]);
                 var crowdGeometry=c.CrowdGeometryFacade;var crowdProfile=c.CrowdProfileFacade;

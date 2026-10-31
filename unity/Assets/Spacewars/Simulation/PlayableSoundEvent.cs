@@ -35,9 +35,10 @@ namespace Spacewars.Simulation
         public readonly bool Building;
         // Permitted transient unit-death pose. Not an authority entity or checkpoint.
         public readonly int UnitId;
+        public readonly int ShotSide; // Transient Hawk launch articulation; never authority state.
         public readonly double HullHeading; public readonly double Altitude;public readonly PlayableOwner? Owner;
         public readonly PlayableDirectContact Contact;
-        public PlayableSoundEvent(long id,long tick,PlayableSoundKind kind,NavPoint position,PlayableEntityKind weapon,bool building=false,int unitId=0,double hullHeading=0,PlayableDirectContact contact=null,double altitude=0,PlayableOwner? owner=null)
-        {Altitude=altitude;Owner=owner;Contact=contact;Id=id;Tick=tick;Kind=kind;Position=position;Weapon=weapon;Building=building;UnitId=unitId;HullHeading=hullHeading;}
+        public PlayableSoundEvent(long id,long tick,PlayableSoundKind kind,NavPoint position,PlayableEntityKind weapon,bool building=false,int unitId=0,double hullHeading=0,PlayableDirectContact contact=null,double altitude=0,PlayableOwner? owner=null,int shotSide=-1)
+        {ShotSide=shotSide;Altitude=altitude;Owner=owner;Contact=contact;Id=id;Tick=tick;Kind=kind;Position=position;Weapon=weapon;Building=building;UnitId=unitId;HullHeading=hullHeading;}
     }
 }

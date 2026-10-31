@@ -19,20 +19,26 @@ namespace Spacewars.Editor
         const string Content="Assets/Spacewars/Content/StyleA/";
         static readonly string[] Keys={"mine-armored"};
         static readonly Color Owner=new Color(.19f,.72f,.77f);
-        static string Evidence=>Path.GetFullPath("../.local/armored-mine/previews");
+        static string Evidence=>Environment.GetEnvironmentVariable("SPACEWARS_BUILDING_EVIDENCE") ?? Path.GetFullPath("../.local/armored-mine/previews");
         static void Require(bool value,string message){if(!value)throw new InvalidOperationException(message);}
 
         [MenuItem("Spacewars/Assets/Armored Mine/Prepare and Render")]
         public static void Prepare()
         {
             if(!Application.isBatchMode&&!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())return;
-            Directory.CreateDirectory(Evidence);
-            foreach(string key in Keys)Import(key);
-            AssetDatabase.SaveAssets();
+            PreparePrefab();
             Render();
             Debug.Log("ARMORED_MINE_NATIVE_PASS imports, geometry, pivots, materials, owner colors and saved renders");
         }
-        static void Import(string key)
+        // Reimport maintained geometry without replacing approved material assets.
+        public static void RefreshPrefab(){PreparePrefab(false);}
+        public static void PreparePrefab(bool refreshMaterials=true)
+        {
+            Directory.CreateDirectory(Evidence);
+            foreach(string key in Keys)Import(key,refreshMaterials);
+            AssetDatabase.SaveAssets();
+        }
+        static void Import(string key,bool refreshMaterials)
         {
             string path=Content+key+".glb";
             AssetDatabase.ImportAsset(path,ImportAssetOptions.ForceSynchronousImport);
@@ -44,12 +50,21 @@ namespace Spacewars.Editor
                 foreach(var renderer in model.GetComponentsInChildren<Renderer>(true))
                 {
                     var materials=renderer.sharedMaterials;
-                    for(int i=0;i<materials.Length;i++)materials[i]=Material(materials[i].name);
+                    for(int i=0;i<materials.Length;i++)
+                    {
+                        materials[i]=refreshMaterials?Material(materials[i].name):AssetDatabase.LoadAssetAtPath<Material>(Folder+"mine-armored-"+materials[i].name+".mat");
+                        Require(materials[i],"Missing existing approved material");
+                    }
                     renderer.sharedMaterials=materials;
                 }
                 model.AddComponent<ArmoredMinePresentation>();
+                var expected=StaticBuildingMeshes.CombineMinePerimeter(model,Folder);
                 Validate(model,key);
-                PrefabUtility.SaveAsPrefabAsset(model,Folder+key+".prefab");
+                string prefabPath=Folder+key+".prefab";
+                PrefabUtility.SaveAsPrefabAsset(model,prefabPath);
+                AssetDatabase.SaveAssets();
+                AssetDatabase.ImportAsset(prefabPath,ImportAssetOptions.ForceSynchronousImport);
+                StaticBuildingMeshes.ValidateSaved(AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath),expected);
             }
             finally{Object.DestroyImmediate(model);}
         }

@@ -156,11 +156,11 @@
 #lab-profiles > .unity-base-field__label, #lab-revisions > .unity-base-field__label, #lab-search > .unity-base-field__label { width: 76px; min-width: 76px; max-width: 76px; flex-shrink: 0; margin-left: 0; margin-right: 6px; padding-left: 0; padding-right: 0; }
 #lab-profiles > .unity-base-field__input, #lab-revisions > .unity-base-field__input, #lab-search > .unity-base-field__input { margin-left: 0; margin-right: 0; }
 
-/* Selected-building Soft Dock: one surface, quiet circular queue wells. */
+/* Compact selection console A: common clipped frame, rectangular queue cells. */
 .soft-building-dock {
     background-color: rgba(13, 23, 29, 0.94);
     border-width: 1px; border-color: rgba(150, 189, 205, 0.30);
-    border-radius: 32px;
+    border-radius: 0;
 }
 .soft-building-dock #production-slots, .soft-building-dock #research-slots { align-items: center; min-width: 0; }
 .soft-building-dock .dock-order:hover { background-color: rgba(73, 133, 155, 0.20); border-color: rgba(150, 218, 230, 0.70); }
@@ -168,3 +168,9 @@
 .soft-building-dock .dock-order:disabled { opacity: 0.65; }
 .soft-building-dock .dock-spare:disabled { opacity: 0.28; }
 .high-contrast .soft-building-dock { background-color: rgb(4, 10, 14); border-color: white; }
+
+/* Same high-contrast checkmark as game settings. */
+#proving-ground .unity-toggle > .unity-base-field__input { background-color: transparent; border-width: 0; padding: 0; }
+#proving-ground .unity-toggle__checkmark { width: 24px; height: 24px; min-width: 24px; min-height: 24px; flex-shrink: 0; border-width: 2px; border-radius: 3px; border-color: rgb(135,163,179); background-color: rgb(18,32,41); -unity-background-image-tint-color: white; }
+#proving-ground .unity-toggle:checked .unity-toggle__checkmark { background-color: rgb(24,91,108); border-color: rgb(69,217,240); }
+#proving-ground .unity-toggle:focus .unity-toggle__checkmark { border-color: white; }

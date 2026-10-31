@@ -11,7 +11,7 @@ using Spacewars.Simulation;
 
 namespace Spacewars.Tests.EditMode
 {
-    public sealed class PreparedTacticalCommitTests
+    public sealed partial class PreparedTacticalCommitTests
     {
         private const BindingFlags F=BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public;
         private static object Field(object o,string n)=>o.GetType().GetField(n,F).GetValue(o);
@@ -66,6 +66,21 @@ namespace Spacewars.Tests.EditMode
         {
             Assert.True(nav.PhysicalHostBudget.TryOpenScope(NavigationPreparationKind.Capture,nav.Generation,nav.Admission.PublicationIdentity,out var scope));
             using(scope)using(var output=NavigationCaptureBytes.Write(scope.OwnedReservation(),writer=>NavPhysicalBodyWire.WriteTo(writer,root,scope.OwnedReservation())))return output.TransferPublic();
+        }
+        [TestCase(false)][TestCase(true)] public void RejectedProposalAndFinalDomainProvenancePreserveCurrentAtomicOutcome(bool finalBoundary)
+        {
+            byte[] withoutDiagnostics=null;string originalMessage=null;
+            foreach(bool enabled in new[]{false,true})using(var w=new World()){
+                w.Nav.CommandAdmissionDiagnosticsForQa=enabled;int hits=0;
+                void Change(){hits++;var unit=Unit(w.Domain,3);Set(unit,"Health",(double)Field(unit,"Health")-1);}
+                if(finalBoundary)w.Domain.AfterTacticalPreparationForQa=_=>Change();else w.Nav.AfterMovementObservationForQa=Change;
+                Assert.AreEqual(PlayableCommandStatus.Rejected,w.Domain.Apply(w.Command(1,PlayableCommandKind.Move),out string message));Assert.AreEqual(1,hits);Assert.IsNull(Field(Unit(w.Domain,3),"LastOrder"));
+                var diagnostic=w.Nav.CommandAdmissionForQa(1);
+                if(enabled)StringAssert.StartsWith(finalBoundary?"tactical-final:ReadsetChanged:Tactical domain source changed.;":"tactical-proposal-domain-inputs-current=false;",diagnostic);
+                else Assert.IsNull(diagnostic);
+                var bytes=w.Bytes();if(withoutDiagnostics==null){withoutDiagnostics=bytes;originalMessage=message;}else{CollectionAssert.AreEqual(withoutDiagnostics,bytes);Assert.AreEqual(originalMessage,message);}
+                w.Cold(bytes);CollectionAssert.AreEqual(bytes,w.Bytes(),"QA provenance cannot enter CURRENT continuation.");
+            }
         }
         private static void StartAccruedScan(World w)
         {

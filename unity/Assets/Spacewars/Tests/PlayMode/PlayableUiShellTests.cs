@@ -76,7 +76,7 @@ public sealed class PlayableUiShellTests
         Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>("modal").style.display.value);
         Assert.AreEqual(canContinue?DisplayStyle.Flex:DisplayStyle.None,Get<Button>("resumeButton").style.display.value);
         if(canContinue){Assert.AreEqual("",Get<Label>("modalCaption").text);Assert.AreEqual(DisplayStyle.None,Get<Label>("modalCaption").style.display.value);Assert.AreEqual(DisplayStyle.None,Get<VisualElement>("root").Q("match-menu-eyebrow").style.display.value);}
-        else Assert.True(Get<Label>("modalCaption").text.Contains("Профиль: "+PlayableProfile.Default.DisplayName+" · 1"));
+        else Assert.AreEqual(outcome==PlayableMatchOutcome.PlayerWon?"Противник побеждён":"Ваши центры уничтожены",Get<Label>("modalCaption").text);
         Assert.AreSame(canContinue?Get<Button>("resumeButton"):Get<Button>("modalRestartButton"),Get<VisualElement>("root").focusController.focusedElement);
     }
 
@@ -281,7 +281,7 @@ public sealed class PlayableUiShellTests
             Assert.AreEqual(DisplayStyle.Flex,modal.style.display.value,context);
             Assert.AreEqual(DisplayStyle.None,resume.style.display.value,context);
             Assert.AreEqual(outcome==PlayableMatchOutcome.PlayerWon?"ПОБЕДА":"ЦЕНТРЫ ПОТЕРЯНЫ",title.text,context);
-            StringAssert.Contains("Профиль: "+PlayableProfile.Default.DisplayName+" · 1",caption.text,context);
+            Assert.AreEqual(outcome==PlayableMatchOutcome.PlayerWon?"Противник побеждён":"Ваши центры уничтожены",caption.text,context);
             Assert.AreSame(restart,root.focusController.focusedElement,context);
             AssertInside(root.worldBound,card.worldBound,"card "+context);
             AssertInside(card.worldBound,title.worldBound,"title "+context);

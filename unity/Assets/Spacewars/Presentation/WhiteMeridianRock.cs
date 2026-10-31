@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Spacewars.Simulation;
 using UnityEngine;
 namespace Spacewars.Presentation
@@ -226,10 +227,20 @@ namespace Spacewars.Presentation
             minZ=Mathf.Floor((minZ-margin)/step)*step;maxZ=Mathf.Ceil((maxZ+margin)/step)*step;
             int nx=Mathf.RoundToInt((maxX-minX)/step)+1,nz=Mathf.RoundToInt((maxZ-minZ)/step)+1;
             var heights=new float[nx*nz];
+            // Reuse exact projected edges; Footprint can allocate/triangulate a
+            // rectangle and the same edges serve every heightfield sample.
+            var edges=supports.Select(s=>{
+                var polygon=s.Bounds.Footprint;
+                return Enumerable.Range(0,polygon.Vertices.Count).Select(i=>{
+                    var a=polygon.Vertices[i];var b=polygon.Vertices[(i+1)%polygon.Vertices.Count];
+                    var start=new Vector2((float)a.X,(float)a.Z);var delta=new Vector2((float)(b.X-a.X),(float)(b.Z-a.Z));
+                    return (start,delta,length:delta.sqrMagnitude);
+                }).ToArray();
+            }).ToArray();
             float Height(float x,float z){
-                float height=0;
-                foreach(var support in supports){
-                    var b=support.Bounds;
+                float height=0;float? pointWeather=null;var sample=new Vector2(x,z);
+                for(int supportIndex=0;supportIndex<supports.Count;supportIndex++){
+                    var support=supports[supportIndex];var b=support.Bounds;
                     if(x<b.MinX-margin||x>b.MaxX+margin||z<b.MinZ-margin||z>b.MaxZ+margin)continue;
                     var point=new NavPoint(x,z);
                     if(support.Contains(point)){
@@ -243,16 +254,15 @@ namespace Spacewars.Presentation
                     // Euclidean distance rounds convex corners at every contour level.
                     // Use the nearest boundary height, so a ramp toe dies into the basin
                     // continuously instead of collapsing the width of a separate wall.
-                    var polygon=b.Footprint;float distance=float.MaxValue;var nearest=Vector2.zero;
-                    for(int i=0;i<polygon.Vertices.Count;i++){
-                        var a=polygon.Vertices[i];var c=polygon.Vertices[(i+1)%polygon.Vertices.Count];
-                        var start=new Vector2((float)a.X,(float)a.Z);var delta=new Vector2((float)(c.X-a.X),(float)(c.Z-a.Z));
-                        var q=start+delta*Mathf.Clamp01(Vector2.Dot(new Vector2(x,z)-start,delta)/delta.sqrMagnitude);
-                        float d=(new Vector2(x,z)-q).sqrMagnitude;if(d<distance){distance=d;nearest=q;}
+                    float distance=float.MaxValue;var nearest=Vector2.zero;
+                    foreach(var edge in edges[supportIndex]){
+                        var q=edge.start+edge.delta*Mathf.Clamp01(Vector2.Dot(sample-edge.start,edge.delta)/edge.length);
+                        float d=(sample-q).sqrMagnitude;if(d<distance){distance=d;nearest=q;}
                     }
                     distance=Mathf.Sqrt(distance);
                     float top=Mathf.Max(0,(float)support.HeightAt(new NavPoint(nearest.x,nearest.y)));
-                    float weather=Mathf.PerlinNoise(x*.38f+43,z*.38f+19);
+                    if(!pointWeather.HasValue)pointWeather=Mathf.PerlinNoise(x*.38f+43,z*.38f+19);
+                    float weather=pointWeather.Value;
                     float width=Mathf.Max(.01f,art.cliffShoulder+art.rimWander*weather); // Numeric floor for the zero-width art preset.
                     if(!support.Id.EndsWith("ramp")){
                         // Narrow the RAW shelf collar beside a physical ramp, before

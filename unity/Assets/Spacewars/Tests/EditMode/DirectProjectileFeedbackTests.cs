@@ -42,7 +42,7 @@ namespace Spacewars.Tests.EditMode
             Call("AdvanceProjectiles",.2d);
             var view=View();var hits=view.Sounds.Where(e=>e.Kind==PlayableSoundKind.Impact).ToArray();
             Assert.AreEqual(3,hits.Length);Assert.AreEqual(3,hits.Select(e=>e.Contact.ProjectileId).Distinct().Count());
-            foreach(var hit in hits){Assert.AreEqual(target,hit.Contact.TargetId);Assert.AreEqual(kind,hit.Weapon);Assert.AreEqual(-9,hit.Contact.From.X);}
+            foreach(var hit in hits){Assert.AreEqual(target,hit.Contact.TargetId);Assert.AreEqual(kind,hit.Weapon);Assert.AreEqual(-9,hit.Contact.From.X);Assert.True(hit.Contact.Impact.HasValue);Assert.AreEqual(1,hit.Contact.Impact.Value.Y);Assert.AreEqual(0,hit.Contact.Impact.Value.Z);Assert.Greater(hit.Contact.Impact.Value.X,-9);Assert.Less(hit.Contact.Impact.Value.X,-7);}
             Assert.AreEqual(PlayableProfile.Default.TankHealth-3,view.Entities.Single(e=>e.Id==target).Health);
             Assert.AreEqual(104,view.Projectiles.Single().Id);
             var hidden=View(PlayableOwner.Enemy); // target owns vision at the contact; both projections preserve the same event identity.

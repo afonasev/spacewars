@@ -35,7 +35,7 @@ namespace Spacewars.Simulation
                 case PlayableEntityKind.Tank:return p.TankWeaponDamage/p.TankWeaponReloadSeconds;
                 case PlayableEntityKind.Explorer:
                     int burst=assault?p.ExplorerAssaultBurstSize:p.ExplorerBurstSize;
-                    return p.ExplorerDamage*burst*1000d/(p.ExplorerBurstPauseMs+burst*p.ExplorerBurstShotIntervalMs);
+                    return p.ExplorerDamage*burst*1000d/(p.ExplorerBurstPauseMs+(burst-1)*p.ExplorerBurstShotIntervalMs);
                 case PlayableEntityKind.Shkval:return p.ShkvalDamage*1000d/p.ShkvalFireIntervalMs;
                 default:throw new ArgumentException("Unknown damage mechanic");
             }

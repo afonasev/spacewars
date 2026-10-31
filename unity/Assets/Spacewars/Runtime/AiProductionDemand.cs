@@ -60,7 +60,7 @@ namespace Spacewars.Runtime
             double busyTime=0,lineTime=0;
             for(int i=1;i<samples.Count;i++){long dt=samples[i].Tick-samples[i-1].Tick;busyTime+=samples[i-1].Busy*dt;lineTime+=samples[i-1].Lines*dt;}
             double utilization=lineTime==0?0:busyTime/lineTime;
-            long fund=(long)TerritoryRules.Cost(p,PlayableBuildingKind.Factory)+(long)ai.Value("economy.factoryLaunchCycles")*PlayableUnitRules.Cost(p,PlayableEntityKind.Tank);
+            long fund=(long)TerritoryRules.Cost(p,PlayableBuildingKind.Factory)+(long)ai.Value("economy.factoryLaunchCycles")*PlayableUnitRules.Cost(p,productionKind);
             bool constructing=o.Buildings.Any(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.Factory&&b.Health>0&&b.Phase!=ConstructionPhase.Ready);
             string reason=lines.Length==0?"no existing live line":blocked>0?"producer exit blocked":waiting>0||free<pop?"population capacity":constructing?"factory construction pending":lines.Any(b=>b.PrivateState.QueueCount==0)?"fill existing idle line":span<window?"income window warming":utilization<ai.Value("economy.factoryUtilization")?"line utilization below scaling threshold":income<=capacity?"income within sustained spend capacity":o.Credits<=samples[0].Bank?"bank not growing":available<fund?"factory startup fund unavailable":null;
             return new AiProductionCapacity(income,capacity,utilization,span,blocked,waiting,fund,reason);

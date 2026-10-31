@@ -32,11 +32,12 @@ namespace Spacewars.Presentation
                 else{var mesh=TerrainMesh.Prism(obstacle,0,2);bakeMeshes.Add(mesh);sources.Add(new NavMeshBuildSource{shape=NavMeshBuildSourceShape.Mesh,sourceObject=mesh,transform=Matrix4x4.identity,area=1});}
             }
             var settings = NavMesh.GetSettingsByIndex(0);
-            // One bake voxel of conservative clearance absorbs NavMesh rasterization; domain radius stays identical.
+            // Preserve the existing conservative agent clearance. A finer raster keeps
+            // narrow diagonal passages from disappearing during voxel erosion.
             settings.agentRadius = (float)(profile.Radius+profile.GridCell/4);
             // Technical flat-fixture bake envelope; no ramps, stairs, or standing characters.
             settings.agentHeight = 1; settings.agentClimb = 0; settings.agentSlope = 0;
-            settings.overrideVoxelSize = true; settings.voxelSize = (float)profile.GridCell/4;
+            settings.overrideVoxelSize = true; settings.voxelSize = (float)profile.GridCell/8;
             data = NavMeshBuilder.BuildNavMeshData(settings,sources,
                 new Bounds(Vector3.zero,new Vector3((float)geometry.HalfExtent*2,8,(float)geometry.HalfExtent*2)),Vector3.zero,Quaternion.identity);
             if (data == null) throw new InvalidOperationException("NavMesh bake failed");

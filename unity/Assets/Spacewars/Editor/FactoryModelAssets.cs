@@ -18,12 +18,19 @@ namespace Spacewars.Editor
         const string Folder = "Assets/Spacewars/Content/Resources/StyleA/";
         const string ScenePath = "Assets/Spacewars/Content/StyleA/Preview/FactoryArmoredContext.unity";
         static readonly Color Owner = new Color(.19f, .72f, .77f);
-        static string Evidence => Path.GetFullPath("../design/factory-armored/previews");
+        static string Evidence => Environment.GetEnvironmentVariable("SPACEWARS_BUILDING_EVIDENCE") ?? Path.GetFullPath("../design/factory-armored/previews");
 
         [MenuItem("Spacewars/Assets/Factory A/Prepare and Render Context")]
         public static void Prepare()
         {
             if (!Application.isBatchMode && !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
+            PreparePrefab();
+            Render();
+        }
+
+        // Asset-only route for affected checks; does not rewrite the preview scene.
+        public static void PreparePrefab(bool refreshMaterials=true)
+        {
             Directory.CreateDirectory(Evidence);
             AssetDatabase.ImportAsset(Source, ImportAssetOptions.ForceSynchronousImport);
             var source = AssetDatabase.LoadAssetAtPath<GameObject>(Source);
@@ -39,6 +46,11 @@ namespace Spacewars.Editor
                         string role = materials[i].name;
                         string path = Folder + "factory-armored-" + role + ".mat";
                         var material = AssetDatabase.LoadAssetAtPath<Material>(path);
+                        if(!refreshMaterials)
+                        {
+                            Require(material,"Missing existing approved material "+role);
+                            materials[i]=material;continue;
+                        }
                         if (!material)
                         {
                             material = new Material(Shader.Find("Universal Render Pipeline/Lit")) { name = "factory-armored-" + role };
@@ -107,7 +119,6 @@ namespace Spacewars.Editor
                 AssetDatabase.SaveAssets();
             }
             finally { Object.DestroyImmediate(model); }
-            Render();
         }
 
         static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }

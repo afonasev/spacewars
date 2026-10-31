@@ -19,9 +19,8 @@ public sealed class PlayableRallyFlagTests
         =>new PlayableBuildingSnapshot(id,owner,kind,new NavPoint(-3,0),health,1,0,0,rally??new NavPoint(2,1),includePrivateState:privateState,phase:phase,hasRally:hasRally,pendingRally:pending,lifecycle:selling?new PlayableBuildingLifecycleSnapshot(true,0,false,false,0,0,null,null,0,0,false):null);
     private static PlayableSnapshot View(params PlayableBuildingSnapshot[] buildings)
         =>new PlayableSnapshot("fixture",1,1,7,0,0,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,0,null,Array.Empty<PlayableEntitySnapshot>(),buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null);
-    [TestCase(PlayableBuildingKind.Headquarters)]
-    [TestCase(PlayableBuildingKind.Outpost)]
     [TestCase(PlayableBuildingKind.Factory)]
+    [TestCase(PlayableBuildingKind.Hangar)]
     public void SelectedOwnProducerShowsApprovedFlagAtAcceptedPoint(PlayableBuildingKind kind)
     {
         var snapshot=View(Building(kind:kind));world.RenderRallyFlags(snapshot,new HashSet<int>{7});

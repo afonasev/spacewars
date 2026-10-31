@@ -16,9 +16,64 @@ namespace Spacewars.Tests.EditMode
         [SetUp]public void Setup(){domain=Activator.CreateInstance(D,F,null,new object[]{PlayableProfile.Default,1L,false},null);nav=(NavigationSession)D.GetProperty("Navigation",F).GetValue(domain);}
         int Spawn(double x,double z,PlayableOwner owner=PlayableOwner.Player)=>(int)Call("SpawnUnit",new NavPoint(x,z),owner,PlayableEntityKind.Tank);
         void Send(int[] ids,NavPoint point,PlayableCommandKind kind=PlayableCommandKind.Move,bool append=false,int target=0)=>Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",new PlayableCommand(1,++seq,"player-1",kind,ids,point,targetId:target,mode:append?PlayableOrderMode.Append:PlayableOrderMode.Replace),null));
-        void Deliver(){while(nav.Requests.TryDequeue(out var r))nav.Answers.TryEnqueue(new NavigationAnswer(r,new SharedFlowRouter(r.Geometry,r.Profile).FindPath(r.Start,r.Goal)));nav.ApplyResults();Call("Step",1d/30);}
+        void Deliver()
+        {
+            // Current arrival-owned orders need host preparation before ordinary route delivery.
+            // Drain preparation without adding simulation time or relaxing marker assertions.
+            using(var host=new UnityHostRouteService())
+            {
+                var binding=new PlayableRouteBinding((NavGeometry)D.GetProperty("Geometry",F).GetValue(domain),PlayableProfile.Default,nav.Admission,nav.RoutePort);
+                for(int pump=0;pump<20000&&nav.PendingCount>0;pump++){host.Service(binding,4);nav.ApplyResults();}
+                Assert.Zero(nav.PendingCount,"marker fixture route preparation: "+host.LastProjectionFailure);
+            }
+            Call("Step",1d/30);
+        }
         PlayableSnapshot View(PlayableOwner owner=PlayableOwner.Player,bool paused=false)=>(PlayableSnapshot)Call("PlayerSnapshot",seq,RuntimeStatus.Running,paused,new PlayableRuntimeMetrics(0,0,0,0,0),null,7,owner);
         PlayableCommandReceipt Apply(PlayableCommand command){var args=new object[]{command,null};var status=(PlayableCommandStatus)D.GetMethod("Apply",F).Invoke(domain,args);return new PlayableCommandReceipt(command.Sequence,(long)D.GetProperty("Tick",F).GetValue(domain),status,(string)args[1],0,command.PlayerId);}
+        [Test]public void VectorTimingRequiresAppliedIssuanceAndDoesNotRenewOrReplayOnSelection()
+        {
+            int a=Spawn(-14,-14),b=Spawn(-18,-14);var model=new PlayableOrderMarkers();
+            var command=new PlayableCommand(1,++seq,"player-1",PlayableCommandKind.Move,new[]{a,b},new NavPoint(-8,-14));
+            model.Submitted(View(),command);Assert.Zero(model.Visible(View(),new[]{a,b},10).Count);
+            var receipt=Apply(command);model.Observe(View(),new[]{receipt},10);
+            var marker=model.Visible(View(),Array.Empty<int>(),10.2).Single();Assert.That(marker.ConfirmationElapsed,Is.EqualTo(.2).Within(.0001));
+            model.Observe(View(),Array.Empty<PlayableCommandReceipt>(),10.4);
+            Assert.That(model.Visible(View(),Array.Empty<int>(),10.5).Single().ConfirmationElapsed,Is.EqualTo(.5).Within(.0001));
+            model.Selected(View(),new[]{a,b},10.6);Assert.True(model.Visible(View(),new[]{a,b},10.7).All(m=>m.ConfirmationElapsed<0));
+        }
+        [Test]public void VectorDirectAttackTracksLiveTargetAndNeverCachesHiddenPosition()
+        {
+            int a=Spawn(-14,-14),enemy=Spawn(-10,-10,PlayableOwner.Enemy);var model=new PlayableOrderMarkers();
+            var command=new PlayableCommand(1,++seq,"player-1",PlayableCommandKind.Attack,new[]{a},targetId:enemy);
+            model.Submitted(View(),command);var receipt=Apply(command);model.Observe(View(),new[]{receipt},10);
+            Assert.True(model.Visible(View(),Array.Empty<int>(),10.1).Single().Attack);
+            var target=nav.Crowd.Units.Single(u=>u.Id==enemy);var point=new NavPoint(-9,-10);
+            typeof(NavUnit).GetProperty("Position").SetValue(target,point);typeof(NavUnit).GetProperty("Location").SetValue(target,new NavLocation(point,NavLocation.FlatSurface));
+            Assert.AreEqual(point,model.Visible(View(),Array.Empty<int>(),10.2).Single().Location.Value.Position);
+            point=new NavPoint(26,26);typeof(NavUnit).GetProperty("Position").SetValue(target,point);typeof(NavUnit).GetProperty("Location").SetValue(target,new NavLocation(point,NavLocation.FlatSurface));
+            Assert.Zero(model.Visible(View(),Array.Empty<int>(),10.3).Count);
+        }
+        [Test]public void VectorNearbyRepeatedClickReplacesPreviousGroupFlash()
+        {
+            int a=Spawn(-14,-14),b=Spawn(-18,-14);var model=new PlayableOrderMarkers();
+            foreach(int id in new[]{a,b})
+            {
+                var command=new PlayableCommand(1,++seq,"player-1",PlayableCommandKind.Move,new[]{id},new NavPoint(-8,-14));
+                model.Submitted(View(),command);var receipt=Apply(command);model.Observe(View(),new[]{receipt},10+seq*.1);
+            }
+            var shown=model.Visible(View(),Array.Empty<int>(),10.3);Assert.AreEqual(1,shown.Count);Assert.AreEqual(seq,shown[0].CommandSequence);
+        }
+        [Test]public void VectorRejectedReceiptAndStopDoNotLeaveConfirmation()
+        {
+            int a=Spawn(-14,-14);var model=new PlayableOrderMarkers();
+            var invalid=new PlayableCommand(1,++seq,"player-1",PlayableCommandKind.Move,new[]{a},new NavPoint(10000,10000));
+            model.Submitted(View(),invalid);var receipt=Apply(invalid);Assert.AreNotEqual(PlayableCommandStatus.Applied,receipt.Status);
+            model.Observe(View(),new[]{receipt},10);Assert.Zero(model.Visible(View(),Array.Empty<int>(),10.1).Count);
+            var move=new PlayableCommand(1,++seq,"player-1",PlayableCommandKind.Move,new[]{a},new NavPoint(-8,-14));model.Submitted(View(),move);var moved=Apply(move);model.Observe(View(),new[]{moved},11);
+            Assert.AreEqual(1,model.Visible(View(),Array.Empty<int>(),11.1).Count);
+            var stop=new PlayableCommand(1,++seq,"player-1",PlayableCommandKind.Stop,new[]{a});model.Submitted(View(),stop);var stopped=Apply(stop);model.Observe(View(),new[]{stopped},11.2);
+            Assert.Zero(model.Visible(View(),Array.Empty<int>(),11.3).Count);
+        }
         [Test]public void ExplicitSelectionExpiresEvenWhileSelectedAndPollingOrTargetMotionCannotRenew()
         {
             int a=Spawn(-14,-14),enemy=Spawn(-10,-10,PlayableOwner.Enemy);Send(new[]{a},default,PlayableCommandKind.Attack,target:enemy);Send(new[]{a},new NavPoint(-12,-14),append:true);

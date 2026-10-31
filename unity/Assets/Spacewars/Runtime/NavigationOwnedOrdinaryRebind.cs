@@ -69,6 +69,7 @@ namespace Spacewars.Runtime
         {
             int actors,retries,obstacles,fifo,barrier,requests,answers,attempts,leases,allocatingRows,pendingRows,registered;long publication;
             using(EnterTransport()){
+                if(geometryTarget!=null&&!RebindHostBoundaryQuiescent())LastGeometryPreparationFailure=new InvalidOperationException("Geometry rebind waits for the active navigation host allocation boundary.");
                 if(groupCommandBacking==null||commandGroup!=null||admissionBatchDepth!=0||!RebindHostBoundaryQuiescent()||!(pending is NavigationCommandSlots<int,NavigationRequest> source)||!(allocating is NavigationCommandSlots<int,NavigationRequest>)||!(orders is NavigationCommandSlots<int,long>)||!(reservations is NavigationCommandSlots<int,NavPoint>)||!(retainedGoals is NavigationCommandSlots<int,NavPoint>)||!(movementIdentities is NavigationCommandSlots<int,string>)||!(technicalFailures is NavigationCommandSlots<int,NavSolveStatus>)||countedCorridorAnswers.Count!=0||probeAnswers.Count!=0||probes.Count>0&&ownedProbes==null)return null;
                 if(geometryTarget==null&&pending.Count==0&&probes.Count==0&&ProbeAnswerCount==0&&barrierAnswers.Count==0&&Requests.Count==0&&Answers.Count==0)return null;
                 for(int i=0;i<source.Capacity;i++)if(source.TryReadSlot(i,out _,out var row)&&(row?.StorageOwner==null||row.MemberIdentity==null||Member(row.Entity)==null))return null;
@@ -77,7 +78,9 @@ namespace Spacewars.Runtime
                 if(!CanRebind)throw new InvalidOperationException("Navigation still has too many in-flight routes to rebind atomically.");
                 registered=RegisteredRouteCount;actors=Crowd.Units.Count;pendingRows=pending.Count;allocatingRows=allocating.Count;retries=geometryTarget==null?checked(pendingRows+allocatingRows):retainedGoals.Count;attempts=liveArrivalTables?.Count??0;leases=liveArrivalLeaseTable?.Count??0;obstacles=Math.Max(navigationGeometry.Obstacles.Count,geometryTarget?.Obstacles.Count??0);fifo=ProbeAnswerCount;barrier=barrierAnswers.Count;requests=Requests.Count;answers=Answers.Count;publication=admissionPublicationIdentity;
             }
-            if(target==null)throw new ArgumentNullException(nameof(target));if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,Generation,publication,out var scope))return false;
+            if(target==null)throw new ArgumentNullException(nameof(target));if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,Generation,publication,out var scope,null,out bool resolvingRefusal)){
+                if(geometryTarget!=null)LastGeometryPreparationFailure=new InvalidOperationException(resolvingRefusal?"Geometry admission waits for navigation scope resolution.":"Geometry admission scope capacity refused.");return false;
+            }
             using(scope){PreparedRebind c=null;try{
                 var r=scope.OwnedReservation();c=PreparedRebind.Create(actors,retries,r,fifo,barrier,requests,answers,balanceDomain?.PreparedBalanceRallyCount??0,attempts,leases,groupCapacity:geometryTarget==null?retries:Math.Max(retries,actors),foundations:geometryDomain?.PreparedGeometryFoundationCount??0);c.GeometryDomain=geometryDomain;c.GeometryDomainSource=geometryDomain?.Geometry;c.GeometryChange=geometryTarget!=null;c.PendingRows=pendingRows;c.AllocatingRows=allocatingRows;c.Ordinary=true;BindPreparedBalance(c,balanceDomain,balanceProfile);
                 using(NavStorageScratch.Reserve(r,checked(RebindStagingScratchBound(actors,retries,obstacles)+retries*(NavStorageLayout.ObjectBytesBound(typeof(GroupOrderState))+NavStorageLayout.ObjectBytesBound(typeof(GroupMemberState)))))){
@@ -124,7 +127,12 @@ namespace Spacewars.Runtime
                         if(c.NextLedger!=null&&!PrepareRebindCancellation(c,row.Entity,scope))return null;
                         ref var group=ref c.RebindGroups[row.GroupIndex];var actor=c.Actors[row.ActorIndex];var old=row.Source?.Request;GroupOrderState metadata;GroupMemberState member;
                         using(EnterTransport()){if(!OrdinaryRebindSourceCurrent(c))return false;metadata=groups[c.Actors[row.ActorIndex].Version.Data.GroupId].CopyHeader();member=metadata.Members[row.MemberIndex].Copy();}
-                        if(!Crowd.Locate(row.Goal,actor.Radius,out var goalLocation)||!basis.IsFree(row.Goal,actor.Radius)||c.GeometryChange&&geometryQueued+registered>=RouteRequestCapacity){
+                        NavLocation goalLocation;bool goalValid;
+                        if(UsesRecastGroundRoutes&&member.GoalLocation.HasValue){
+                            goalLocation=member.GoalLocation.Value;
+                            goalValid=goalLocation.Position.Equals(row.Goal)&&terrain!=null&&terrain.IsValidLocation(goalLocation,actor.Radius);
+                        }else goalValid=Crowd.Locate(row.Goal,actor.Radius,out goalLocation);
+                        if(!goalValid||!basis.IsFree(row.Goal,actor.Radius)||c.GeometryChange&&geometryQueued+registered>=RouteRequestCapacity){
                             if(!c.GeometryChange)return null;row.GeometryRejected=true;c.OrdinaryCount--;if(old!=null){c.NextFailures.Remove(row.Entity);int nameIndex=c.Backing.CrowdNames.Find(row.Entity);if(nameIndex<0)return false;row.ArrivalFailureNames=NavigationPreparedCrowdNameWrite.CreateOwned(c.Backing.CrowdNames,nameIndex,old,r);}continue;
                         }
                         row.Next=NavigationHostRequest.CreateOwned(Generation,checked(++c.NextSequence),row.Entity,checked(c.SourceOrders[row.Entity]+1),nextProfile.ForUnit(actor.Radius,actor.TargetSpeed,actor.TargetTurn),RebindMovementGeometry(c,actor,basis),actor.Position,row.Goal,basis,RebindHeldIdentity(c,actor),new NavigationMemberIdentity(actor.Incarnation,actor.Mobility,metadata.GroupId,member.OrderRevision,metadata.MembershipRevision),actor.Location,goalLocation,null,r);
@@ -154,8 +162,8 @@ namespace Spacewars.Runtime
                     if(c.FifoCount>0){c.RetiredQueue=liveProbeAnswers;liveProbeAnswers=c.SourceQueue.TakeResetNoThrow();}c.RetiredBarrier=TakeAllBarrierAnswersNoThrow();mailbox.TakeBatchNoThrow(c.RetiredRequests);answers.TakeBatchNoThrow(c.RetiredAnswers);answerCorridorBytes=c.PostAnswerBytes;
                     foreach(var row in c.Retries)if(!row.Assigned&&!row.GeometryRejected&&!row.GeometryCarried)mailbox.AppendOneNoThrow(row.Next.Request,row.Next);requestSequence=c.NextSequence;if(PublishAdmissionOwnerNoThrow(c.Admission))c.Admission=null;authorityOperationIdentity=c.Operation+(c.BalanceDomain==null?1:2);OwnedRebindPublications++;c.TransferNoThrow();LastOwnedRebindPublicationAllocatedBytes=GC.GetAllocatedBytesForCurrentThread()-before;
                 }};
-                using(EnterTransport())scope.Publish(c,publish);scope.ResolveCommitted();FinishPreparedBalance(c);foreach(var row in c.Retries){if(row.GeometryCarried)continue;if(row.GeometryRejected){if(row.Source!=null)RouteFailed?.Invoke(row.Source.Request,NavigationOutcome.Rejected);MovementCancelled?.Invoke(row.Entity);}else if(row.Assigned)EndpointAssigned?.Invoke(row.Next.Request);else RouteRequested?.Invoke(row.Next.Request);}SignalHost();return true;
-            }catch(InvalidOperationException){if(c?.Published==true)throw;return false;}finally{c?.Dispose();}}
+                using(EnterTransport())scope.Publish(c,publish);scope.ResolveCommitted();NavArrivalDiagnostic.Buffer?.Transition(c.GeometryChange?"geometry-rebind":"profile-rebind",((NavGeometry)c.SourceCore.Geometry.Facade).Revision,geometry.Revision,c.Operation,c.NextSequence,c.AllocatingRows,c.Sequence,((long)((NavigationProfile)c.SourceCore.Profile.Facade).Revision<<32)|(uint)profile.Revision);FinishPreparedBalance(c);foreach(var row in c.Retries){if(row.GeometryCarried)continue;if(row.GeometryRejected){if(row.Source!=null)RouteFailed?.Invoke(row.Source.Request,NavigationOutcome.Rejected);MovementCancelled?.Invoke(row.Entity);}else if(row.Assigned)EndpointAssigned?.Invoke(row.Next.Request);else RouteRequested?.Invoke(row.Next.Request);}SignalHost();return true;
+            }catch(InvalidOperationException error){if(c?.Published==true)throw;if(geometryTarget!=null)LastGeometryPreparationFailure=error;return false;}finally{c?.Dispose();}}
         }
     }
 }

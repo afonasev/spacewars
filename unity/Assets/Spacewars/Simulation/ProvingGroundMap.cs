@@ -30,8 +30,14 @@ namespace Spacewars.Simulation
         }
         // Authored map coordinates, not combat tuning. Mirror the same ordinary slots.
         public NavPoint Headquarters(PlayableOwner owner) => new NavPoint(owner==PlayableOwner.Player?-40:40,0);
-        public NavPoint AttackDestination(PlayableOwner owner)
-        {var enemy=Headquarters(owner==PlayableOwner.Player?PlayableOwner.Enemy:PlayableOwner.Player);return new NavPoint(Math.Sign(enemy.X)*(Math.Abs(enemy.X)+HalfExtent)/2,enemy.Z);}
+        public NavPoint AttackDestination(PlayableOwner owner,PlayableProfile balance=null)
+        {
+            var enemy=Headquarters(owner==PlayableOwner.Player?PlayableOwner.Enemy:PlayableOwner.Player);
+            // A collinear rear goal forces every ground unit through the solid HQ footprint.
+            // Keep the rear objective, using the open lane beside it for the initial encounter.
+            double flank=(balance??PlayableProfile.Default).ProvingGroundAttackRearLaneOffset;
+            return new NavPoint(Math.Sign(enemy.X)*(Math.Abs(enemy.X)+HalfExtent)/2,enemy.Z+Math.Sign(enemy.X)*flank);
+        }
         public TerritorySite[] Sites(PlayableProfile p) => new[] {
             new TerritorySite(1,PlayableBuildingKind.Headquarters,Headquarters(PlayableOwner.Player),p),
             new TerritorySite(2,PlayableBuildingKind.Headquarters,Headquarters(PlayableOwner.Enemy),p),

@@ -68,6 +68,21 @@ namespace Spacewars.Simulation
         }
     }
 
+    public static class HawkWeaponGeometry
+    {
+        // Authored muzzleLeft/muzzleRight socket coordinates, not balance controls.
+        // Match Unity Quaternion.Euler(pitch, 90-heading, roll): Z, then X, then Y.
+        public static BallisticPoint Muzzle(NavPoint position, double altitude, double heading, double pitch, double roll, double scale, int side)
+        {
+            double radians = Math.PI / 180, p = pitch * radians, r = roll * radians, yaw = Math.PI / 2 - heading;
+            double x = (side == 0 ? .99 : -.99) * scale, y = .56 * scale, z = .74 * scale;
+            double rx = x * Math.Cos(r) - y * Math.Sin(r), ry = x * Math.Sin(r) + y * Math.Cos(r);
+            double py = ry * Math.Cos(p) - z * Math.Sin(p), pz = ry * Math.Sin(p) + z * Math.Cos(p);
+            return new BallisticPoint(position.X + rx * Math.Cos(yaw) + pz * Math.Sin(yaw), altitude + py,
+                position.Z - rx * Math.Sin(yaw) + pz * Math.Cos(yaw));
+        }
+    }
+
     public sealed class HawkRocketFlight
     {
         public int Target { get; }
@@ -91,14 +106,15 @@ namespace Spacewars.Simulation
             if(Math.Abs(Length(direction)-1)>1e-9)throw new ArgumentException("Saved rocket direction must be normalized.");
             result.Direction=direction;return result;
         }
-        public void Advance(double dt, BallisticPoint? target)
+        public void Advance(double dt, BallisticPoint? target, BallisticPoint targetVelocity = default)
         {
-            if (!Finite(dt) || dt < 0 || (target.HasValue && !Finite(target.Value))) throw new ArgumentException("Invalid rocket step");
+            if (!Finite(dt) || dt < 0 || (target.HasValue && !Finite(target.Value)) || !Finite(targetVelocity)) throw new ArgumentException("Invalid rocket step");
             dt = Math.Min(dt, RemainingLife);
             if (target.HasValue)
             {
                 var delta = Sub(target.Value, Position);
-                if (Length(delta) > 1e-12)
+                // Positive radial target motion means it is moving away; missile closing speed is irrelevant.
+                if (Length(delta) > 1e-12 && Dot(targetVelocity, delta) > 0)
                 {
                     var desired = Normal(delta);
                     double dot = Math.Max(-1, Math.Min(1, Dot(Direction, desired)));

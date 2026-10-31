@@ -162,23 +162,23 @@ public sealed class PlayableFogTests
             Assert.Less(map.PaintedPixels,32L*size*size/2,"Unchanged map colors must be reused.");
         }
     }
-    [Test] public void RememberedModelHasNoLiveFeedbackAndIsRemovedOnVisibleConfirmation()
+    [TestCase(PlayableBuildingKind.Factory)] [TestCase(PlayableBuildingKind.Mine)] public void RememberedModelHasNoLiveFeedbackAndIsRemovedOnVisibleConfirmation(PlayableBuildingKind kind)
     {
         var p=PlayableProfile.Default;var parent=new GameObject("memory test");PlayableWorld world=null;
         try
         {
             world=new PlayableWorld(parent.transform,p);var vision=new PlayableVision(0,32,32,4,p.FogEdgeFeather);
-            var building=new KnownBuilding(22,1,PlayableOwner.Enemy,PlayableBuildingKind.Factory,new NavPoint(10,0),.7);
+            var building=new KnownBuilding(22,1,PlayableOwner.Enemy,kind,new NavPoint(10,0),.7);
             vision.Refresh(new[]{new VisionSource(new NavPoint(0,0),13)},new[]{building});
             vision.Refresh(new[]{new VisionSource(new NavPoint(-25,0),3)},Empty);
             Func<PlayableSnapshot> snapshot=()=>new PlayableSnapshot(p.ProfileId,p.Revision,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,0,new NavGeometry(32,Array.Empty<NavObstacle>(),1),Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:vision.Snapshot());
             world.RenderMemories(snapshot());Assert.AreEqual(1,world.MemoryCount);Assert.IsEmpty(world.Actors);
             var root=parent.GetComponentsInChildren<Transform>().Single(t=>t.name=="Remembered building 22");
             Assert.False(root.GetComponentsInChildren<Transform>().Any(t=>t.name=="Health"||t.name=="Selection"));
-            var expected=new Vector3((float)p.CameraOffsetX,0,(float)p.CameraOffsetZ);expected=expected==Vector3.zero?Vector3.back:expected.normalized;
-            Assert.That(Vector3.Dot(root.GetChild(0).forward,expected),Is.GreaterThan(.999),"Fog memories face the approved current camera regardless of remembered domain heading.");
-            var live=world.Building(23,"Factory",false);world.FaceBuilding(live);
-            Assert.That(Vector3.Dot(root.GetChild(0).forward,live.Hull.forward),Is.GreaterThan(.999),"Memory and actual live model use the same current presentation front.");
+            var expected=kind==PlayableBuildingKind.Mine?Quaternion.Euler(0,ArmoredMineProfile.Load().facingYawDegrees,0)*Vector3.back:Vector3.back;
+            Assert.That(Vector3.Dot(root.GetChild(0).forward,expected),Is.GreaterThan(.999),"Fog memories keep the approved visual front regardless of remembered domain heading.");
+            var live=world.Building(23,kind.ToString(),false);world.FaceBuilding(live);
+            Assert.That(Vector3.Dot(root.GetChild(0).forward,live.Hull.forward),Is.GreaterThan(.999),"Memory and actual live model use the same visual front.");
             vision.Refresh(new[]{new VisionSource(new NavPoint(0,0),13)},Empty);world.RenderMemories(snapshot());Assert.Zero(world.MemoryCount);
             var shader=Resources.Load<Shader>("TerritoryFog");Assert.IsNotNull(shader);Assert.True(shader.isSupported);
         }

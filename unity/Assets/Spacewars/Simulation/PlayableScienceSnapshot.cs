@@ -2,7 +2,7 @@ using System;
 
 namespace Spacewars.Simulation
 {
-    public enum PlayableResearchKind { TankChassis, ExplorerAssaultGuns, ShkvalGuidance, ImprovedWeaponSystems, AdvancedWeaponSystems, ImprovedDefensiveSystems, AdvancedDefensiveSystems, HawkSalvoSystems }
+    public enum PlayableResearchKind { TankChassis, ExplorerAssaultGuns, ShkvalGuidance, ImprovedWeaponSystems, AdvancedWeaponSystems, ImprovedDefensiveSystems, AdvancedDefensiveSystems, HawkSalvoSystems, ReinforcedConcrete, UltimateWeaponSystems, UltimateDefensiveSystems, ScientificCenterUpgrade, AdvancedReinforcedConcrete }
 
     // Save/replay code owns this authority-only payload. It deliberately is not
     // projected to opponents: research progress is private until its effect is visible.

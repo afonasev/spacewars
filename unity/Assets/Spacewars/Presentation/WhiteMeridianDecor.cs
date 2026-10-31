@@ -15,6 +15,7 @@ namespace Spacewars.Presentation
                 Vector3 origin,Vector3 tangent,Vector3 inward,float scale=1,Func<Vector3,float> ground=null)
             {
                 var mesh=part.Mesh(name);var vertices=mesh.vertices;
+                var footprint=solid.Footprint;var sites=map.Sites(profile);
                 for(int i=0;i<vertices.Length;i++){
                     var v=vertices[i];vertices[i]=origin+(tangent*v.x+Vector3.up*v.y+inward*v.z)*scale;
                     if(ground!=null)vertices[i].y+=ground(vertices[i]);
@@ -23,9 +24,9 @@ namespace Spacewars.Presentation
                         // Selected concept places small equipment on the sand at rock feet.
                         // Keep it within the narrow dressing apron, away from tire routes
                         // and sites; it has no colliders or simulation identity.
-                        if(solid.Footprint.DistanceSquared(point)>4||map.Sites(profile).Any(site=>Math.Pow(site.Position.X-point.X,2)+Math.Pow(site.Position.Z-point.Z,2)<64))
+                        if(footprint.DistanceSquared(point)>4||sites.Any(site=>Math.Pow(site.Position.X-point.X,2)+Math.Pow(site.Position.Z-point.Z,2)<64))
                             throw new InvalidOperationException("Expedition prop leaves rock apron or enters a track/site: "+name);
-                    }else if(solid.Footprint.DistanceSquared(point)>0.000001)
+                    }else if(footprint.DistanceSquared(point)>0.000001)
                         throw new InvalidOperationException("Decoration outside existing solid: "+name);
                 }
                 mesh.vertices=vertices;mesh.RecalculateNormals();mesh.RecalculateBounds();

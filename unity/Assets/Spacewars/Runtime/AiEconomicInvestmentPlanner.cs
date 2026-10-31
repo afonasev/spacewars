@@ -55,11 +55,13 @@ namespace Spacewars.Runtime
             int science=o.Buildings.Any(b=>b.Owner==o.Owner&&b.Health>0&&b.Kind==PlayableBuildingKind.ScientificCenter)?0:(int)ai.Value("economy.reservedScienceSlots");
             return free>science+(int)ai.Value("economy.reservedProductionSlots");
         }
-        public static AiEconomicInvestment Plan(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiProductionCapacity capacity,bool homeReady,bool emergency,AiBudgetEntry demand=null,bool initialOpeningCommitmentPending=false,int additionalProductionProtection=0,long availableCredits=-1)
+        public static AiEconomicInvestment Plan(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiProductionCapacity capacity,bool homeReady,bool emergency,AiBudgetEntry demand=null,bool initialOpeningCommitmentPending=false,int additionalProductionProtection=0,long availableCredits=-1,PlayableEntityKind startupKind=PlayableEntityKind.Tank)
         {
             if(additionalProductionProtection<0||availableCredits< -1)throw new ArgumentOutOfRangeException();
+            bool qualifiedDemand=demand!=null&&IsDemand(demand)&&demand.Amount==0&&demand.CreatedTick<=o.Tick&&demand.ExpiresTick>=o.Tick&&
+                demand.Terms==p.ProfileId+"@"+p.Revision&&demand.Action.PlayerId==o.OwnerId&&demand.Action.Generation==o.Generation;
             if(!homeReady||emergency||initialOpeningCommitmentPending||capacity==null||
-                capacity.SustainedSpendPerSecond<=0||capacity.BlockedExits>0||capacity.PopulationWaitingLines>0||o.Population==null||o.Population.Capacity-o.Population.Living-o.Population.Reserved<PlayableUnitRules.Population(p,PlayableEntityKind.Tank))return null;
+                capacity.SustainedSpendPerSecond<=0&&capacity.BlockedExits==0||capacity.BlockedExits>0&&!qualifiedDemand||capacity.PopulationWaitingLines>0||o.Population==null||o.Population.Capacity-o.Population.Living-o.Population.Reserved<PlayableUnitRules.Population(p,startupKind))return null;
             // Let each already paid investment finish before quoting its successor. Paid
             // unit queues also finish normally; pausing means withholding NEW orders.
             if(HasPendingConstruction(o,p))return null;
@@ -68,7 +70,7 @@ namespace Spacewars.Runtime
             // Factory launch commitments are Tank cycles. A temporarily cheaper scout
             // or support head must not classify income sufficient for those cycles as
             // overflow and divert the replacement scout's money into another factory.
-            double launchSpend=AiProductionDemand.Lines(o).Count()*PlayableUnitRules.Cost(p,PlayableEntityKind.Tank)/PlayableUnitRules.Duration(p,PlayableEntityKind.Tank);
+            double launchSpend=AiProductionDemand.Lines(o,productionKind:startupKind).Count()*PlayableUnitRules.Cost(p,startupKind)/PlayableUnitRules.Duration(p,startupKind);
             double spend=Math.Max(capacity.SustainedSpendPerSecond,launchSpend);
             bool income=o.IncomePerSecond<=spend;
             if(!income&&capacity.MeasuredTicks<AiProfile.SecondsToTicks(ai.Value("economy.incomeWindowSeconds"),30))return null;
@@ -81,15 +83,16 @@ namespace Spacewars.Runtime
                     siteId:site.Site.Id,slotId:slot.Id,parentId:site.CenterId,buildingKind:kind,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
                 string rejection=AiEconomyAdmission.Reject(o,p,action);
                 if(rejection!=null&&rejection!="insufficient credits")continue;
-                int quote=TerritoryRules.Cost(p,kind)+(income?0:checked((int)ai.Value("economy.factoryLaunchCycles")*PlayableUnitRules.Cost(p,PlayableEntityKind.Tank)));
+                int quote=TerritoryRules.Cost(p,kind)+(income?0:checked((int)ai.Value("economy.factoryLaunchCycles")*PlayableUnitRules.Cost(p,startupKind)));
                 long spendable=availableCredits<0?o.Credits:availableCredits;
                 bool canKeepProtectedProductionQuote=additionalProductionProtection==0||spendable>=(long)quote+additionalProductionProtection;
                 // Funding can precede utilization: spare money still loads old lines.
                 // Actual factory construction retains every existing scaling guard.
-                bool witnessed=demand!=null&&IsDemand(demand)&&demand.Amount==0&&demand.CreatedTick<=o.Tick&&demand.ExpiresTick>=o.Tick&&demand.Terms==p.ProfileId+"@"+p.Revision&&
-                    demand.Action.PlayerId==o.OwnerId&&demand.Action.Generation==o.Generation&&demand.Action.SiteId==action.SiteId&&demand.Action.SlotId==action.SlotId;
+                bool witnessed=qualifiedDemand&&demand.Action.SiteId==action.SiteId&&demand.Action.SlotId==action.SlotId&&demand.Action.ParentId==action.ParentId;
                 bool qualified=income||witnessed||capacity.CanScale||capacity.ScalingReason=="factory startup fund unavailable";
-                string reason=!canKeepProtectedProductionQuote?"useful scout replacement takes priority over discretionary investment":rejection??(qualified?null:capacity.ScalingReason);
+                // Keep the bounded saving quote through a temporary release delay,
+                // but do not buy another producer while an existing exit is blocked.
+                string reason=!canKeepProtectedProductionQuote?"useful scout replacement takes priority over discretionary investment":rejection??(capacity.BlockedExits>0?capacity.ScalingReason:qualified?null:capacity.ScalingReason);
                 var candidate=new AiEconomyCandidate("economy",action,reason,1);
                 return new AiEconomicInvestment(candidate,qualified&&canKeepProtectedProductionQuote?quote:0,income?"fund income for existing productive capacity":qualified?"fund factory from previously qualified sustained demand":"load existing lines to qualify sustained factory demand",additionalProductionProtection);
             }

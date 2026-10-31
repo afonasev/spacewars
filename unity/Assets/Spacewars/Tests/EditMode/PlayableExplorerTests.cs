@@ -37,6 +37,14 @@ namespace Spacewars.Tests.EditMode
             Assert.True(Nav.DeliveryBarrierReady,"fixture route preparation must finish without consuming a game tick");
             Nav.ApplyResults();Call("Step",1d/30);
         }}
+        [Test] public void AiCapturerGuardBlocksNewFireUntilReleasedAndLeavesOrdinaryExplorerCombatAvailable()
+        {
+            Clear();int scout=Spawn(PlayableOwner.Player,PlayableEntityKind.Explorer,-10,0);Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-4,0);
+            Domain.GetField("ProtectedAiCapturer",Flags).SetValue(domain,new Func<PlayableOwner,int>(owner=>owner==PlayableOwner.Player?scout:0));
+            Tick(2);Assert.False(View().Projectiles.Any(p=>p.Kind==PlayableEntityKind.Explorer),"protected capturer must not auto-fire at nearby hostile");
+            Domain.GetField("ProtectedAiCapturer",Flags).SetValue(domain,new Func<PlayableOwner,int>(_=>0));
+            Tick(2);Assert.True(View().Projectiles.Any(p=>p.Kind==PlayableEntityKind.Explorer),"ordinary/human Explorer combat is available when no AI protection role is bound");
+        }
         [Test] public void StartsHaveFreeTypedScoutAndOwnPopulation()
         {
             var p=View();var e=View(PlayableOwner.Enemy);Assert.AreEqual(1,p.Entities.Count);Assert.AreEqual(PlayableEntityKind.Explorer,p.Entities.Single().Kind);Assert.AreEqual(profile.ExplorerHealth,p.Entities.Single().Health);

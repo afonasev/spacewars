@@ -1,0 +1,1331 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: df6c6128918cc41599b46973b17cdf54, type: 3}
+  m_Name: WhiteMeridian
+  m_EditorClassIdentifier: Spacewars.Presentation::Spacewars.Presentation.ModelDetailCatalog
+  exemptions:
+  - hash: 93a12eb3c2305ce95c0e95515b217c34922efe81be9201cfc033822b25994750
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 91b19cc9ecd71747faa90199ae59bab787f2b658c5915f2e5a087dcd0314eee9
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 284bbeb71e91064ef60a624dc7fb2a661cc0e3af7f6c5f1ed54e921652ae8ee6
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 343f645187daa6adc420fd8039ca5cb112aa32333f6c728ee4681d8b8acdc3a4
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 3608de2f599d65221d16e1d7b4fc57dc0dc2f8f7281e60ad88420faab3df7df9
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 0bcab152eb1f21f2def7e2fe9e14bb03fae84bc90756af5295ce5b06bf7a2e00
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: afc7b4820b4d47e86814ea6b5bc6e7986e8563e0bdbf67d57cc02c5e5125874c
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: b57057f011b60d59d7d30d60579e11c8fddb61b19fc3cff7bdab958b199ea091
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 82cf3cf708a6d522a7c1ea0e041d088517daa4a1bc938acd90e328850f886fbf
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 36837d3d6cf257edaba341dce01db356994ac022cbe5484728e0cfe288b79b6d
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: df1c0e890deec47627caa507bfb484a09d2195a5cd80743203a39445bd7e7941
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: fd7a4414dbeac2783bfb4d6da2f0f2daaeea6dd2ba7a41b777d575f6788a8b62
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: d9ae89b65f01fff43a7efe1905f899e1b69fe3f155db12b3365f4098893f7948
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 45c13a360907b5fa7daf517cf195278cd8c737966cac94e6af9a60bc3e4eadf0
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: e7fbf5ac9a5253cfeecdf19957df65e2aab577970a9c03656ad8099f81c07f0a
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: e150c441c22624b08b15fc89151ca17627843c2e777c278429417c88b41f5bce
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 818fef332ffb0e58636cfcf18914878bbda8ba99000479b32a5fd960b710280b
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 64bab9b7512f1851adfc87b416892de59a24038eaa07e86a1b5c59073a18cc00
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 31a041b6c239cb5011a193fff790e00141e5f3cee345436bffae2bc8b9760b0e
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: c3093c93fbb13ffff06f7187e22969a86576e8a3852632d2644a06e55b8af481
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 0a4d7119ee0afa3464de54dcbf36cae647f7b1cb06cfca52c9643ec851e89ada
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 306f5a9201594d6a57ad0f2e3674daaba731edeee3a9a39125a9011505e7dbc7
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 7d31f6c95cdad9157772bdd08051a79bac9da52b1b871a08d2479db4ebae075c
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: e5bcd5f932e3b9e037ede83e464f84fb24b4f651761bd44f293ad93d9e9eef1d
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 65639dd3ccc34c3ce2514b69ac86281cde22525b6c14776446a10efa58b08429
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 53f9e402cabcbd0740170be835d8a41a874b36c56bd822e6db5cbdce934b199e
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 54ae4c69205bce2cb19a16458e48d7350c9320708cb26bc8d4c61433b70b62bb
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: e0793692277adf73653fb669aa6ebb5cf41e74199f2a2f2f3681cdde70cea8be
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 343bf60d2514161d8dfd2bf8b6c90e07cf8f1740a14863f1398bfd12e8468878
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: fd67dfb31195bcf34b704de73b2fcab24f541ce715fdb86ea793a19ff5d52b9e
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: ca23154c47ec5cd5291180fffc5c28c67e1ca2d645a0206ec004c8462f0abcc5
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: cdb534bfd933c7ae6719bd8844a19c0b758990a45dd79f03983ae9d2d02132ec
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: ded7050205148029a57b8938b4da04cb5a31f6343b693f105dc12469352677ec
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: ae1eccca4e5370bccfc50435f4bea01d89ae37038bf5548d448d9edbfd8d7f7d
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 482c4258625f77c7370c2492055ef11458f5dcb16aa8598cbdd69fa9963dd721
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: c6d6cdcd5d1a47d62b8bb691638197d27e778f8756162f63a21958c021790324
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 9f3ab9bed9d5cb1a206ce545506e16d9cf982df61d8ccf0049781169b620cd7a
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: b95e18cd976c635290467b642ac6e27d096b8a3cba624d8d352b1c77aa5a846d
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 1551fc882050d3ce7e938aa7f62089881318ed9e04245cc51d1d1c1ba19a5b88
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: d8dd37c370cd4fdc26e7567ca75456e8d501a055e4b5da4ad7a5a8a5438e22d5
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: deb4139c49e7ea10cf9820a0155254c5eafb06685ffd76606757295c42a6fd10
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 299e2f0d4f9b36eb6cdf8f3d240673df400dbe4119d5027cf114e0aa278fd3e6
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 7ee94e79ac670ed819c62dc8e65942a9815be8851104001f19e7c55e8aaf72f6
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 8e24b0d6fda2a4e04dcb01183d8d16805245c0629b19192e0af107c3f912760c
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 12abe728371d58f2c6891b9db99f41bc7855d26267ee6272421f3fbae2d23725
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 6f04491bbf270ace40eff566baa44f829faa3e9eda214fd787bc9fbee949f7cf
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: c23914cbc373992e9e9f8cbd1d3f6a8450bee8e9744d50115aa2a4dbd0403664
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 4ac07ff3a1774f94148392f1181ffea75c379fe365b0db1d84fdba9a18f5e11d
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 2a8341a0c1fc49495df3c80a04030f5d67402f79147466bf8c22730f86c47cf0
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 4ce37b9c736a68de8e8a6863099224a3e7916daf9042e932f06f7d154c44e0f8
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: e8e7a2856fbfc52586bdf3e1f9a604e7397cb8d4d165bbb47ebd64db64d79483
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: d06a1535eba0b861f4df4e03c91ebf7f2d4834188b3f0ecf155359ac1cece82b
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 5b22cffe0308064d16306926f001bb78d51edeb34ec088c9ff6f811f503397d6
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 28c0901b04d1ea45c0e39057d404a5ba84a0bcbfbd75770ce86319d184824631
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 0150d97350de7e2571b7841e2a648f7abc2f27094a3937b0f6fd053a2b4bbc9d
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 6de3d93a1a7f82f14b38f0cb4a6597f070aed5c59910c94ced3bf4afa1f34659
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 448fe07dd1add6660aaa561d1128ef0f89648976a82a8a139dbc5599aa9adbc1
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 010cec532ea6358f285f7bb3b6a56efe566c5cff9338c7956772c8e453ff2f65
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: cc652f575b6484fba824756821821743bd4dff4448cd23bac9c4d567e12f9d35
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: b1308d8445ea0ff2bc5d2cd7d578bf721b2adb63025ec37e89d0c5b784341df9
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: dcba7ce72b60f696fee8ab306dbc6e489e65186f98b0a6ff89e45b0efcc68297
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 87ea87887dcc1229736367d1b4acc9fc7b2f14dab271e42c618b80013038d638
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 7c6653e717f3bd730d722cffb96d16ea9bcebbe53de69c50a25c364f4bf39b2d
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: d9f53f9ed50a3c48dbd941a20128947633f54500f6deb6111aa658274a1f75a7
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 7869f554cae0de4dbdc1bbea95e698272c26b381b3cc3b7c1192fad04ae13d80
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: a9dc1f53d36c008d398680506c1aed0008c2076041e1ea2660c4e01e7f768f67
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: b25dd2c06a3848687a994738618d87a572e8b1e67b7d305d28657b1ab84f43a9
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 11c3b118498048d7ad3fca518887ce62ffdbba0d9d77b1061a1738b6b5b2bf3c
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 5e89fa4a3d95d5c2006952af7f77c51dadcd43676f56c0942289df2f189d91dc
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: c51e78019cfcdc900a86b30da731e90917401e1522d7e1b323eedc7bee23258f
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: bf092119c8549dbba18df74f59910321e4cf669efa27aa5296d94785c54d7262
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 607536169f22906e1be3ee86d9e29661d9a0d610a83178a6aebf9261b9f38126
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 3bd18164c74f569c2375c5b0f7db49983afaa24230f185198c17736689ce65f9
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: ab47946535bfea3ad45fc499bcb4005aaf61e461eef69058533c72efe28b7fec
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 257becfb3a54b7f02784277c57f351723e79afed4739cb1aa01b9e3eee55ae89
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 7001d9e8a06eb1c98ee9903b5b9d7546728b0528465a42db8e02896ba468dcc9
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 222d9eed9fa721f5488de0cb890847ce30453b77e58d65369ee0974b6e4146d6
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: d5fbc01195cee3149d0aefcd3e34d2fca08ef51ec3ca826a9d3da6e0366d39b1
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: e15dc3182661271b6c314eac3173538a93d82f334e4b6f6f40ab2bf9a360b1ef
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 502d261ff8d149579981d7c0a77a203164d7db5726f107fc440a10cd2c47f86d
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: df2a68610a183e6972b8c44fe1da3b75b54721c4408c9b3e4581d7d7154c5d2d
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 74898b993ede09ffe8e0b34ac43db2a23c5f6748fefe6875e3767bb86295c112
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: b87fd5a715832e40257058ba4f88815fb01d6bd3fc1c196e20591000e13d259f
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 0b46ee4a1b6ba67f2a759754c29248ed2690c1a8773b0157979b053055858147
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 78c17e8badad52c0d5987ae23ec9f921ac817674408401aa4c5985a3528470a0
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: aef6f85a84e88e9b589461ed6f643150d77c91016a112f7611b3bc35cbe7b859
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 8fe5339f261d4328d7522ddf6e5b651afbd4bd746c06f116faab5d980cbc7ce3
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 6af3bfbb2c9d521e84ea4e6dd4fdb51d7b4c3b5140e0ddb9d3bffefbdb107943
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 9d17c5cd506d38268ba8fb4b2f0ce89d6c10bca0deb7b354db9413c7a448eace
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 87708d670e932e3a6b6f7fb809d72134ac278d66144f0c56313d39eb0cc1a955
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 3407fcfc53e69339f50ecb76811c1f51174bd519c73bf24364c8abaac3711bd1
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 0960c6603c8225e0e8ccd59b66d7f4502280e2e409fe364d3002e09e893b63bf
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 7c7f094e25ffc0c0dde4c3cdee12b7d58303cf3ff8d87fab44248dd1bd6b65d5
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 3f741a651019553b4744db4704c2a7ca23569608c9a24fc0d36cc6af24a65b68
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 8de0f3a00d79433cf82978d088b589a8f0d07d618a15326a04824d91ccc7326f
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: df7bf85ff47990e5679ec9334f5e68b20f11fab18b2f3a3627dab8e1c5a54177
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 109704ef178c21757936ef5343dc269491b1bec0fdc13ac4e2a82d99d69ea629
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 765c9e726e42627358585512fc2530a4fcdb31c10e84fb11a67ec110b27f4965
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: f2f005e97de2d17b2411a769e256bbd9047b520e6df2cfd9edd1fc6220952bf2
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 728f83e7ef9664fb4868c1c2e1d89bdd23f515d08395c16af80eea2108ebb520
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 217521eff1ed423da5e6b222a270269e47b3720402ba4b7606bf62f063a86228
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: baf06b6d0f893c188fd5a0aa36509d832571d24ac1eb0f932c9b90661e3e456a
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: c7d7863f5dcc6ae8539f66a694b3e645cd3917f2fe441ac947a5f84225776d43
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 7666a9b919cf23bd25a3c706ab5dfef9d90fef3cb3c33a40c908a3cfc9a74abf
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 7cc1ac99100767fe9b92bb26b77bec46cebcee38c4b8b5469e93aaacad34ab44
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: daa843f02d32b025867debad562676bd466aa5b9e1c41ec38962282b94a795d7
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 562b50049254de2f3ffc5a61eefb5d87b41bd6768b53c64529475a6d580c12ce
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 35ba9dc6133dcaedad0eb023d3510451cb8c45ffc89b67db48f915a25f787e5e
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: d2a10f4228ff27945c1fc4ba51ad499cca152b7cefb1a93baeb67463fb3f63bf
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: d63494df0d1936db3a76096c03c08af6724f880c5de10a874bed7e8dbb36d421
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: dd34edd724a30964b7ae6e19a10bb339ab930853b7ce4a29fb18c67f35f34579
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 3a210ad56432bf232c0de1d6bc20fa8022e4f928de96a36a092dda39d095924f
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 5edd4a51c9f0732c21df571f6012376697a52e5b07af1d3196a2a35f19564306
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 76965ef1233a7d5d4e3f19492e0955cb40e6e44722fc008273246a7d3542b7d6
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 13115b47a04223f89fc72fbc1e56ff71836a70de32ffe9e4fda8840f13810222
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 706904a73a791928b4625b45cbf1433d9d6a945708b1d57667093b596c031bb3
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 390102cec854a13f5172678759630c9916abc82b9e163f2271c765609bf6b43a
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: f964b228986e472385fd92148b807668d482198735cbdd849242ecf3cec85dd3
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 079e728783c8d32534a634e10d90af67abfe4e61599cca945347b8b7143fc571
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 30c1b6e502186c8a878e4843922242269dd0741620325815ad88ba83b8ee6310
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: bda83592bb1eeea0e96464d12346f62a0430cc074d0e51c90080b65e3f0f7866
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 8bb09c890841b6154f1d07160167e3c76a6a663457f804838968b839ddd03574
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: dbf151ddfe4657d6ac8218ef8439be14cb5d4ee5ec2001ad8711080efbd7684a
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 2c748bf8475d5d2eae25be0f2f6e1bb0e3fd71cc013d3f26f4178bb55f804cc3
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 5d1aace96046994f8994e69a446bb99df83d295e734715d412dd5484fc62f4d7
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 5460d71b15b1097cbbafc5c1e5563a358f0508bb236caf61fdc29e54b3c68613
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: c33067ae94b50c66878b55ea9cf6efb8164c5e30fdac5669e2a565437788f138
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 9180d414cb281de7ae2ff7a4b405fe19111eff56af38b7d73eb36762321bb612
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 81736764f9634387855e096cf9df43cf2ad6923e0ebf381af7a76f4f4afc4956
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 1f4375a8d7d514b9d5c7b5d22560e5a8e1b58a2ba28b722943024dc05c6c9968
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: c85ac398383032d389c8f7f29ca6e58a2672f78f4673c2085d6983b7c176b8a3
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 6f4847669239ff7827402f7bcfc3852cb781e923f9f25f9a233f9f5a55bb3d96
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 1daf3be6b96397a4d563b28c769455226d3b63d6e6f815f18d128eeefd3e45c3
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 1dc14bc7cc1ead72c1d0579af3c45645ea7498b426b00fc02c455131f9db467a
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 17d55c7e25e00393f0a98bc0796295da83620a9652a5d291c59003d1795a1444
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 0908737dc4d5010f635ffbce678fcd1a39e31e8a65bc01bfda39cffe5d43415a
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 8868a2b4e2fb0c6d96d35ff7ccaa82bae34a116e1cfddb2d27b164dc30e48f77
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 6fa733e080b616b991ff91a5f339326ad0ceefb868d8f924d6c68b6de352736a
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 762665a2b72b1d799e98362ba49979277fc869faf88ade2da9dff30b01e3f0cf
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 36f0b4964f0e28b11a59b1f7738b29324b6f5c2b355f7aadb2b8df475127eeee
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 0a1f0cfff714d95908b537b35f39349a3b16c16f7d5e4d5be2aa186960c55d17
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 442ba6dcd69e1b89b9ca756a3c1291f6976d8e0a56f87b6eea70c6442decb92b
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: a1e82cc7780b32d1e9ad21f256f95d749cb5f88da1dbed4ad9d5bd8d80ded977
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: d0b4fea92d5fe16788c9d632956007b71a8c3fcb1fd835304063712be06e8375
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 389da32eaf18eee466e033593a8434a63ac6a0818548c6cf0dc92eea466a3f54
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 9d4ccb2b2647d8b8ea4328dce493b29102f862f580a13b77b81591bf341cf2ee
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: e9d000a8b75dae1bde16bf2743ca2b2e3ce0e066e1133a304d24b8615f6a6c20
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: fad04cf3e06f48c92c3f21e71449c06db2dfccc1baec06f611cdb331d7e02330
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: a846c40939dd1b1ec53d4e2358a481d6fb1dd6c8fd97347f31c591f3a79ac4e5
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 648e0b779cb37dc09837928fceec31fa5e22600dc830dee6fc668fa61516f783
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 070e9d56855d2dd04683d0dbb90b81abd97aa281700483ebfe777e7ce622c5dc
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 9dea5cbeedb4516397c9615c981c43d7fc893cbaec6bccb442a2740a62ff4c4f
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: aa0a6f759f66d599f427db77a14e29ebbd5e90b1bea8c5ca88d68143fbcbd0ac
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 53d0aa223623d22e230ff90f7be750dd6d15cf00103dcde43086f8d115bf07bc
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 7191b4e9f63ee10700f5e2f881cea2c13977d4484bdeaf960670fc7aa6382d9f
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 7b5956cc78e7a67f0f56bc7354056806d308982888f12d140e19fd82ffbf08d1
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: edeec45dd8c1517c050b11495ea5467722aa79b73b6bc849f0b08ff800c61208
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 03fe84c735c661f8d49c543705594a3b5ba231ac68587de37292265c53eb76f1
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 3392b9d04ac6a3ed5e9e238086764034dacb0c2be20b3498b36058b1f02e02cd
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: 489768475ced9b8449538cd2252f4f1f5e501e1499bf1993a16d0a9a677abfe7
+    reason: already-small-protected-solids
+    vertices: 4
+    indices: 6
+    submeshes: 1
+  - hash: e5305e18846837e9e470d19f0c06072c58745e1142b5caf2a742b20a57dba11f
+    reason: no-safe-further-solid-reduction
+    vertices: 2940
+    indices: 3780
+    submeshes: 1
+  - hash: b18648c3d5a4a4d38fdf0650208b81b79c567860a38669dc42c9f4758dce2b0d
+    reason: no-safe-further-solid-reduction
+    vertices: 2940
+    indices: 3780
+    submeshes: 1
+  - hash: bbeb6c79864963be8d303c2cdfd9ac7cc340dc893a7e8c9b68c971667e5ceb4d
+    reason: already-small-protected-solids
+    vertices: 228
+    indices: 228
+    submeshes: 1
+  - hash: 832990f4cfa8e48edd44095ecfe6bf95a4c1e040bbcd2417eb1ade0b4d51f51a
+    reason: already-small-protected-solids
+    vertices: 228
+    indices: 228
+    submeshes: 1
+  - hash: 7964c22d187238958d07ea409bfb4e14bb4b2f7066eabbd8c6a018fc731096d5
+    reason: no-safe-further-solid-reduction
+    vertices: 2450
+    indices: 3150
+    submeshes: 1
+  - hash: 59a8061e8bb871d5b1889492b1a0393c702a726729e986f176f61a9a8bb2059c
+    reason: no-safe-further-solid-reduction
+    vertices: 1519
+    indices: 1953
+    submeshes: 1
+  - hash: 9e71bcde676cdbfa195741ee86f4bd3772a65c93fe14c2d02fd0c34c4c908431
+    reason: no-safe-further-solid-reduction
+    vertices: 1519
+    indices: 1953
+    submeshes: 1
+  - hash: c9a8088cab386626bc39857abe73e4acc6253e993495ce124d98254d9e7c2c72
+    reason: no-safe-further-solid-reduction
+    vertices: 980
+    indices: 1260
+    submeshes: 1
+  - hash: 54fbb698ddf23b48eca01c4351fd04dd1a6b1bd676d40436446c77835c463941
+    reason: no-safe-further-solid-reduction
+    vertices: 2450
+    indices: 3150
+    submeshes: 1
+  - hash: 102109f4e334d018d32d1de8095c2017a49f643e26fd47daff92a64a2f5ba163
+    reason: no-safe-further-solid-reduction
+    vertices: 1519
+    indices: 1953
+    submeshes: 1
+  - hash: 0253954c52dc69613f8c4da626674dde06eccb8d7c1957ba22edd462ce488eb0
+    reason: no-safe-further-solid-reduction
+    vertices: 1470
+    indices: 1890
+    submeshes: 1
+  - hash: 8c1e6d342b0887cabeb34f05cab928c4dce40b0601d97a44cb05074870a9be1b
+    reason: no-safe-further-solid-reduction
+    vertices: 1029
+    indices: 1323
+    submeshes: 1
+  - hash: db8e0083afd164b2e0fdbd8b89e8576c68f91d9079fb239e63a6a6d64698432d
+    reason: no-safe-further-solid-reduction
+    vertices: 2646
+    indices: 3402
+    submeshes: 1
+  - hash: 8977cb0d651a843911864c1e04d3af97f7d46901e3241a18226fab8d07405ad3
+    reason: no-safe-further-solid-reduction
+    vertices: 1617
+    indices: 2079
+    submeshes: 1
+  - hash: 39231642da21b13debb07b5fe3fc019aa8b321087d49c7b32e0030c737c58f2e
+    reason: no-safe-further-solid-reduction
+    vertices: 1519
+    indices: 1953
+    submeshes: 1
+  - hash: 76ebf6a2412aae7de8200f3fbed724164591d173eaff8a31b493f914575f67f8
+    reason: no-safe-further-solid-reduction
+    vertices: 931
+    indices: 1197
+    submeshes: 1
+  - hash: ddf7fae2cf84beb4b720e0c7d358fa533dbe7f5994be084a0393ff7d6b155991
+    reason: no-safe-further-solid-reduction
+    vertices: 2597
+    indices: 3339
+    submeshes: 1
+  - hash: 65921e3260dc6570e831de07eca82bc3fcc9471db82d5d6f183ba99ba64b28e7
+    reason: no-safe-further-solid-reduction
+    vertices: 1666
+    indices: 2142
+    submeshes: 1
+  - hash: 656689f4203470c0d5aea288de43fe2554c4f4ac75bed186ede8cfe4ee36408e
+    reason: no-safe-further-solid-reduction
+    vertices: 1617
+    indices: 2079
+    submeshes: 1
+  - hash: 48ccd884c170e3b07d05e6c8621b2b11848a1bcec16377438e02f535aa3b6c1e
+    reason: no-safe-further-solid-reduction
+    vertices: 1029
+    indices: 1323
+    submeshes: 1
+  - hash: 31f01f4b6ba7ad70bbc08f7fbab4607a8a70f2310df457e295edb3d9bd8941bb
+    reason: no-safe-further-solid-reduction
+    vertices: 3626
+    indices: 4662
+    submeshes: 1
+  - hash: bcec64d3ae96a8d53a39c9b837595de0269162c05def529d9487c21dc96c7c87
+    reason: no-safe-further-solid-reduction
+    vertices: 2254
+    indices: 2898
+    submeshes: 1
+  - hash: 4c0b379fdba597ef518e332e6f92fe886b77fb39bf8280376e2d97137baa3213
+    reason: no-safe-further-solid-reduction
+    vertices: 3528
+    indices: 4536
+    submeshes: 1
+  - hash: fa8b695d865fd8e13d7115eb0cfde072ad66c678d0ac2e7466c0d8084ca4f385
+    reason: no-safe-further-solid-reduction
+    vertices: 2254
+    indices: 2898
+    submeshes: 1
+  - hash: da62124b4aff9de4aa24bb97b8dcccdf7d559eec2f5eecd4e98e70c11dec4ffc
+    reason: no-safe-further-solid-reduction
+    vertices: 1470
+    indices: 1890
+    submeshes: 1
+  - hash: 3ede401741557b8f89daa9b31befd4fb7d98afa5ec836548571a9a3f5972f8e7
+    reason: no-safe-further-solid-reduction
+    vertices: 882
+    indices: 1134
+    submeshes: 1
+  - hash: 38f751281f59af38b64b60e0f329d9b07c1c5d25ae2770cef7535c22e4ac7c9f
+    reason: no-safe-further-solid-reduction
+    vertices: 1568
+    indices: 2016
+    submeshes: 1
+  - hash: f153b58ccac3ac604f5a94ce24f56700cbf823a1e411d8130151f19a49c00ae8
+    reason: no-safe-further-solid-reduction
+    vertices: 931
+    indices: 1197
+    submeshes: 1
+  - hash: a26e4d7541753c994c07aa102db712025bc6a61ac6a61fb85d72abca95ea24bf
+    reason: no-safe-further-solid-reduction
+    vertices: 2352
+    indices: 3024
+    submeshes: 1
+  - hash: a10d01ed741d37549351957b15caca0acfeb91590bcc515e432703c016f017b5
+    reason: no-safe-further-solid-reduction
+    vertices: 1568
+    indices: 2016
+    submeshes: 1
+  - hash: f9c760ae8e0bd75fb1bf5ba16fabf103f47ea2851edc1246d5c358e5b56e68a6
+    reason: no-safe-further-solid-reduction
+    vertices: 2401
+    indices: 3087
+    submeshes: 1
+  - hash: d53a57f53e8a492657f36c3e20cf121ee2a32731dc8f569a3ef9c3b5e717a41f
+    reason: no-safe-further-solid-reduction
+    vertices: 1568
+    indices: 2016
+    submeshes: 1
+  - hash: 077ca4eba9f032b8f3a71677e81904ba2339bff4772826c34ccc7f67c4200568
+    reason: no-safe-further-solid-reduction
+    vertices: 2401
+    indices: 3087
+    submeshes: 1
+  - hash: c6e67e4a96a91831671d7fad35be93eecfc2f04167c80f24abe509d6454284ab
+    reason: no-safe-further-solid-reduction
+    vertices: 1617
+    indices: 2079
+    submeshes: 1
+  - hash: f4a2c24946129eb56889fc40d2aafedbd4713a3c1030e93430b7fba8a768cc78
+    reason: no-safe-further-solid-reduction
+    vertices: 2352
+    indices: 3024
+    submeshes: 1
+  - hash: cdd15bdc2071c426ddb76fb0daf763239e1be2a78d55320fe3c94018f537e577
+    reason: no-safe-further-solid-reduction
+    vertices: 1617
+    indices: 2079
+    submeshes: 1
+  - hash: 2b9b68ab7b255c12be4ca0fbeb8032c9479cf3d0928cbdc7465a7cd03427a1e3
+    reason: already-small-protected-solids
+    vertices: 112
+    indices: 168
+    submeshes: 1
+  - hash: eec8de85f0953193f4ec1e39f561df56d37a0c3231d124ccd5792e681e01c256
+    reason: no-safe-further-solid-reduction
+    vertices: 424
+    indices: 636
+    submeshes: 1
+  - hash: fdceac298e33970a108141afb817afb77390f141c665b7d0da03b784535b1b07
+    reason: no-safe-further-solid-reduction
+    vertices: 568
+    indices: 852
+    submeshes: 1
+  - hash: 7241b84487cb0c6429f7960c2f9e82749ef82a32b8ff1fd1c76c4eb19e6438a0
+    reason: already-small-protected-solids
+    vertices: 152
+    indices: 228
+    submeshes: 1
+  - hash: 10fa870679d8e9153e2ebaaad32b6ce02d54daa61a8169a14308bed2aa0f72ba
+    reason: no-safe-further-solid-reduction
+    vertices: 408
+    indices: 612
+    submeshes: 1
+  - hash: 5eb80fb65928cd9eda6461c0975641072eacb8cd77fd1bc0e53af3a27bbf01a1
+    reason: no-safe-further-solid-reduction
+    vertices: 568
+    indices: 852
+    submeshes: 1
+  - hash: 75ab730d7a632ca6c0a11f796e6dfdc9e76ac0447b4e9395be15470950b8f81a
+    reason: already-small-protected-solids
+    vertices: 112
+    indices: 168
+    submeshes: 1
+  - hash: 66865d6eae6f2132be21fa6ac7117a6d83805b7aba625d06ae54526e2229223c
+    reason: no-safe-further-solid-reduction
+    vertices: 400
+    indices: 600
+    submeshes: 1
+  - hash: a3e4ae4a7d8a64ebbec6b7881a2473d2cd18e2fe272a0290f88b3f90ea25682c
+    reason: no-safe-further-solid-reduction
+    vertices: 512
+    indices: 768
+    submeshes: 1
+  - hash: 68b6d7e6c82b1d2d58602a84bb2b296fe26071037d5c1e5ef9afdda50f447b4c
+    reason: already-small-protected-solids
+    vertices: 80
+    indices: 120
+    submeshes: 1
+  - hash: 2557304730eca7768d5cb932c4927a4be2c8d4d596767407188fa610dc5703d7
+    reason: no-safe-further-solid-reduction
+    vertices: 252
+    indices: 378
+    submeshes: 1
+  - hash: 6165350f6b6145407c277b903b133d04710c6ff5ef2284f50c8ac92f99c48194
+    reason: already-small-protected-solids
+    vertices: 80
+    indices: 120
+    submeshes: 1
+  - hash: 8f75b485d336f8de395657482bc745fd1f459596d943929983d0fbac9ae99a20
+    reason: no-safe-further-solid-reduction
+    vertices: 252
+    indices: 378
+    submeshes: 1
+  - hash: 46e8ff38d1fff5b89f917f49610db1bcc03b18158ab82c2ece230a794587aef3
+    reason: already-small-protected-solids
+    vertices: 128
+    indices: 192
+    submeshes: 1
+  - hash: 3af34086333ce65ea48270f0866961146e4f3243610963ba4b4544cdea35a694
+    reason: no-safe-further-solid-reduction
+    vertices: 512
+    indices: 768
+    submeshes: 1
+  - hash: 4455b4ea3c5969b6f6943795470584b18a3c3aadcb5e1b457a812a3185b6f832
+    reason: no-safe-further-solid-reduction
+    vertices: 4320
+    indices: 6480
+    submeshes: 1
+  - hash: b1efbda7ed9e68dbdbd8230fa38594a2699470b76722c5eac94274b43b170de7
+    reason: no-safe-further-solid-reduction
+    vertices: 1270
+    indices: 1890
+    submeshes: 1
+  - hash: ea1367280d7bd8941ec4653d70112cf19e9a80134fd10142f9e0adc8d2870e6d
+    reason: already-small-protected-solids
+    vertices: 166
+    indices: 246
+    submeshes: 1
+  - hash: 19f218191167d69f71982bb8321fb67750c3a3540d26efb6b803feb8d9a753da
+    reason: no-safe-further-solid-reduction
+    vertices: 552
+    indices: 828
+    submeshes: 1
+  - hash: ca07828643844478356aaa6bb125a06e57966b7ca3f9f6dc0250de3fbe5f3c90
+    reason: already-small-protected-solids
+    vertices: 63
+    indices: 93
+    submeshes: 1
+  - hash: 7f0490200a7b7459b7aacb6d09ccdb700e0977694e8545a8bdbed59390ec54e2
+    reason: already-small-protected-solids
+    vertices: 27
+    indices: 39
+    submeshes: 1
+  - hash: 98e50a4849e247a1a92b258732afd944a1b6023243f0c0563f4333ccd2470117
+    reason: no-safe-further-solid-reduction
+    vertices: 8099
+    indices: 10269
+    submeshes: 1
+  - hash: 05fda6f0730f339b30a113d97f182000af13e94760c4e61ac74bb1594f33a72c
+    reason: no-safe-further-solid-reduction
+    vertices: 640
+    indices: 960
+    submeshes: 1
+  - hash: db06b1675f8366028b9846af802958a7af19367a6d677b035071d73d2020c92f
+    reason: no-safe-further-solid-reduction
+    vertices: 1000
+    indices: 1500
+    submeshes: 1
+  - hash: 02d68e39c0241d7b070a6b3000fa6ccfad99cb4e4d75affd3c45aaefc537f486
+    reason: no-safe-further-solid-reduction
+    vertices: 11104
+    indices: 16656
+    submeshes: 1
+  - hash: 5c4128accaea480b2c48dd6f367bf1729c399c55d5f49f574dd3ec6c5d605837
+    reason: no-safe-further-solid-reduction
+    vertices: 2120
+    indices: 3180
+    submeshes: 1
+  - hash: 21928ba0e7241d0dfdb7b75fca7389276204c58c56b2d643f2f272089813076c
+    reason: no-safe-further-solid-reduction
+    vertices: 452
+    indices: 678
+    submeshes: 1
+  - hash: ad0f4a9f7d9efd6b6a0681d139b197a8da950c9a04adc06bfaef5a39c3532883
+    reason: no-safe-further-solid-reduction
+    vertices: 2440
+    indices: 3660
+    submeshes: 1
+  - hash: eb33472c11afdcc530eb5cd89334d413b6dc8f8494289de001d77629577931b0
+    reason: no-safe-further-solid-reduction
+    vertices: 7595
+    indices: 9765
+    submeshes: 1
+  - hash: a26af1031dc5b09c65e4bec3ae51f9e09ea6a24fcefa1a7de97784ccc2eac9dc
+    reason: no-safe-further-solid-reduction
+    vertices: 320
+    indices: 480
+    submeshes: 1
+  - hash: 9f7d7cd7fe3678cd2208fabcf1e21c7b013b8b58433edce3dfdf64138751a463
+    reason: no-safe-further-solid-reduction
+    vertices: 7744
+    indices: 11616
+    submeshes: 1
+  - hash: 83e5e3b4ca0f59887fb44b43d9197dca2fd6f5b3ebeb2ea1c154add9af889437
+    reason: no-safe-further-solid-reduction
+    vertices: 920
+    indices: 1380
+    submeshes: 1
+  - hash: 8836d9a99ba3982cfd670bc4f9e588e16a54c99fc5019fb22c6e29436c024c72
+    reason: no-safe-further-solid-reduction
+    vertices: 1096
+    indices: 1644
+    submeshes: 1
+  - hash: d82de9c445ac417c43fc5f2124fe92e4a811b70c868066cda2c12dde44f74c66
+    reason: no-safe-further-solid-reduction
+    vertices: 2760
+    indices: 4140
+    submeshes: 1
+  - hash: 2496172cf8534ede6d9952c3ba3765986c7f230c61c0dd878d7c06f447d93f4a
+    reason: no-safe-further-solid-reduction
+    vertices: 292
+    indices: 432
+    submeshes: 1
+  - hash: b69a316c3f042687c30cdd2751ba972fe790e70c6246ab7adf0b43dde33edd41
+    reason: no-safe-further-solid-reduction
+    vertices: 8099
+    indices: 10269
+    submeshes: 1
+  entries:
+  - hash: f15fd41b27b15762f95296d6cc7bcd14bb89f8b0ff1bf831f7a6ab9754b3cd3f
+    vertices: 1440
+    indices: 1440
+    submeshes: 1
+    normal: {fileID: 4300000, guid: d4c3d83c385444b80867d2d0a7601d2c, type: 2}
+    far: {fileID: 4300000, guid: 768393f0d5a4246e6a1b9cc26d884102, type: 2}
+    compactBounds:
+    - m_Center: {x: -29, y: 2.2387657, z: -40.5}
+      m_Extent: {x: 15, y: 2.3587656, z: 6.5}
+  - hash: 92ea22e93ad19d729beb3f6b5c1588e396a5ac27935343b1b44d193ed3e8b62a
+    vertices: 1440
+    indices: 1440
+    submeshes: 1
+    normal: {fileID: 4300000, guid: 4e8ea880017c0436c871ff5ccdf1eca4, type: 2}
+    far: {fileID: 4300000, guid: a8c2239e40d994a978b7dcd3feccbcad, type: 2}
+    compactBounds:
+    - m_Center: {x: -29, y: 2.2677965, z: 40.5}
+      m_Extent: {x: 15, y: 2.3877964, z: 6.5}
+  - hash: abe99d95ef0a3cc8f39da17b7a3aca9e0dff3bb09d8b9663c398f52915ddefdd
+    vertices: 1440
+    indices: 1440
+    submeshes: 1
+    normal: {fileID: 4300000, guid: fa46432ec4d2741a097c3846ae6956e8, type: 2}
+    far: {fileID: 4300000, guid: 89f91931c71384a64bb336a58642443b, type: 2}
+    compactBounds:
+    - m_Center: {x: 29, y: 2.1932936, z: -40.5}
+      m_Extent: {x: 15, y: 2.3132935, z: 6.5}
+  - hash: 2da3483e1b52f5893b8f403cd1253d3784154184552fb3eef959018a7e98b6af
+    vertices: 1440
+    indices: 1440
+    submeshes: 1
+    normal: {fileID: 4300000, guid: c77ca23301a8e40949b151ab567ce603, type: 2}
+    far: {fileID: 4300000, guid: 5ce83d8bb2912426eb39f4fd3175457e, type: 2}
+    compactBounds:
+    - m_Center: {x: 29, y: 2.2095146, z: 40.5}
+      m_Extent: {x: 15, y: 2.3295145, z: 6.5}
+  - hash: f1314fba0cd16412e19849cac6b9d1388ec6b8e12da1be53255bd1c957ed79af
+    vertices: 1248
+    indices: 1248
+    submeshes: 1
+    normal: {fileID: 4300000, guid: 1a708d8f08a0448878a96bab444eceb9, type: 2}
+    far: {fileID: 4300000, guid: dd84a3f3e1f1f461cb9f4a4c9a25c150, type: 2}
+    compactBounds:
+    - m_Center: {x: -55.25, y: 2.2851615, z: -1.5}
+      m_Extent: {x: 14.75, y: 2.4051614, z: 8.5}
+  - hash: 6b37b65e2dbfb17301b8e8202216dff1d9e5c1d7a649b131d51ccb914d5ec793
+    vertices: 1248
+    indices: 1248
+    submeshes: 1
+    normal: {fileID: 4300000, guid: b09ea77fde8c2407d966f63bbf483e6d, type: 2}
+    far: {fileID: 4300000, guid: 847f2b697d2364e38b794009411592ee, type: 2}
+    compactBounds:
+    - m_Center: {x: 55.25, y: 2.2735014, z: 1.5}
+      m_Extent: {x: 14.75, y: 2.3935013, z: 8.5}
+  - hash: 05ef2afceef85f5a595bbbb9810b69407a838f2857233447297e73395ede62f1
+    vertices: 576
+    indices: 576
+    submeshes: 1
+    normal: {fileID: 4300000, guid: c1a197ffaf4434ba0a7b94e05a9c11da, type: 2}
+    far: {fileID: 4300000, guid: e258017e541044628b1b6724af1c34f1, type: 2}
+    compactBounds:
+    - m_Center: {x: -29.5, y: 2.30229, z: -67}
+      m_Extent: {x: 12.5, y: 2.4222898, z: 5}
+  - hash: 07a7695b605a6ec0a8b77b793dc62ecf62f69b9ef817d2e4b00e37aa70857087
+    vertices: 576
+    indices: 576
+    submeshes: 1
+    normal: {fileID: 4300000, guid: c3b3929e1ff3143b7a403ecaa4b57cdf, type: 2}
+    far: {fileID: 4300000, guid: a4233cb3867a74548981535af740c232, type: 2}
+    compactBounds:
+    - m_Center: {x: -29.5, y: 2.2266254, z: 67}
+      m_Extent: {x: 12.5, y: 2.3466253, z: 5}
+  - hash: a46f19c89103b9e3e4ab05991b47876262ff0f9b0ba347e47add56ab9e0e6221
+    vertices: 576
+    indices: 576
+    submeshes: 1
+    normal: {fileID: 4300000, guid: 07541c8877973441aa3095c213b5866e, type: 2}
+    far: {fileID: 4300000, guid: dfe25a019d2f04b07bccfb423b746b54, type: 2}
+    compactBounds:
+    - m_Center: {x: 29.5, y: 2.1867337, z: -67}
+      m_Extent: {x: 12.5, y: 2.3067336, z: 5}
+  - hash: 7426e34d30faf2ef9aa6c2b001ff3092f05e0516ea2f99fe9f37feb3190e524b
+    vertices: 576
+    indices: 576
+    submeshes: 1
+    normal: {fileID: 4300000, guid: 7cfce3a0c3272483480b4d75d25d4ee3, type: 2}
+    far: {fileID: 4300000, guid: 90a6501708a184d7ba43374439f4debe, type: 2}
+    compactBounds:
+    - m_Center: {x: 29.5, y: 2.328003, z: 67}
+      m_Extent: {x: 12.5, y: 2.4480028, z: 5}
+  - hash: 04bc5afd64be20c1db6925bb0253d2f8229562d905775ddeb7bbe82c1dedf8ed
+    vertices: 7680
+    indices: 7680
+    submeshes: 1
+    normal: {fileID: 4300000, guid: 537d6c52c019a44a6a44cdedefafd196, type: 2}
+    far: {fileID: 4300000, guid: c83a94c52ed9f403294b7fed679020da, type: 2}
+    compactBounds:
+    - m_Center: {x: -79, y: 3.904017, z: 0}
+      m_Extent: {x: 1, y: 4.024017, z: 72}
+  - hash: 29e7ed91b5b924785e51b915d6d1f31a5ee920b215b9447a2f7d74bd38ebf5f8
+    vertices: 7616
+    indices: 7680
+    submeshes: 1
+    normal: {fileID: 4300000, guid: dde3a037db05747069e6f255fcf49e5b, type: 2}
+    far: {fileID: 4300000, guid: 45abe64ca0e2c440abf5bad5a88c74dc, type: 2}
+    compactBounds:
+    - m_Center: {x: 79, y: 3.9180923, z: 0}
+      m_Extent: {x: 1, y: 4.038092, z: 72}
+  - hash: f33ccc1b3cfff5c4dca789edc845b9c13802d4d641740bbe185deac1450a8bb1
+    vertices: 7680
+    indices: 7680
+    submeshes: 1
+    normal: {fileID: 4300000, guid: 8c858c50bbb6d42b2af3be4cc54ceed6, type: 2}
+    far: {fileID: 4300000, guid: da720c57ba68140ab8f4342c9e5ee146, type: 2}
+    compactBounds:
+    - m_Center: {x: 0, y: 2.347013, z: 76}
+      m_Extent: {x: 80, y: 2.467013, z: 4}
+  - hash: adabc7197494db3d23901e3c62bcaaa06fb6faf57645d77ac44872377c52a5e3
+    vertices: 7680
+    indices: 7680
+    submeshes: 1
+    normal: {fileID: 4300000, guid: c47ead26fc9ff4e338335f4a6fb6b706, type: 2}
+    far: {fileID: 4300000, guid: 2f77c66ea179e4fee9f3720f57999cd7, type: 2}
+    compactBounds:
+    - m_Center: {x: 0, y: 2.2739596, z: -76}
+      m_Extent: {x: 80, y: 2.3939595, z: 4}
+  - hash: 65836fe7958c83f03ef6a461b2a2923c0b4bd1b884467b99dfec69814d4d88ba
+    vertices: 4000
+    indices: 6000
+    submeshes: 1
+    normal: {fileID: 4300000, guid: de8f6dc3875b8437e9763640d88ada81, type: 2}
+    far: {fileID: 4300000, guid: d6f382323ea38418097c82988957a4da, type: 2}
+    compactBounds:
+    - m_Center: {x: -30.492981, y: 1.3541806, z: -6.607324}
+      m_Extent: {x: 4.699074, y: 1.165736, z: 3.3138452}
+    - m_Center: {x: -32.9273, y: 0.5690343, z: -10.080257}
+      m_Extent: {x: 0.10499573, y: 0.36478823, z: 0.15677834}
+  - hash: 90fecb3921794f32475ef87705d6e1a1d4c884f66b6970ebf30d3f995fef5106
+    vertices: 8760
+    indices: 13140
+    submeshes: 1
+    normal: {fileID: 4300000, guid: 82ba872817f76462aa304f35f3e12a25, type: 2}
+    far: {fileID: 4300000, guid: 95dd1b5668b264014b2810255d3e23cd, type: 2}
+    compactBounds:
+    - m_Center: {x: -0.0000009536743, y: 1.5937854, z: -0.11608124}
+      m_Extent: {x: 11.164016, y: 1.6127232, z: 6.165946}
+  - hash: 44df77362cde5f9af42970efa5b29f2efe1767b68c73b721d6a3fe9e7970d982
+    vertices: 8360
+    indices: 12540
+    submeshes: 1
+    normal: {fileID: 4300000, guid: d8486c76db9bb434b94fa4741ab7c00f, type: 2}
+    far: {fileID: 4300000, guid: 3b4bdb8783e6b4e94bd0df2315fb773c, type: 2}
+    compactBounds:
+    - m_Center: {x: 30.474714, y: 1.680935, z: 6.9455395}
+      m_Extent: {x: 4.680811, y: 1.4783177, z: 3.6621284}

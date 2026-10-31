@@ -80,7 +80,11 @@ namespace Spacewars.Simulation
                     if(level==0){if(!(child is Page))throw new ArgumentException("Wrong physical directory leaf kind.");Mark(child);actualPages++;maximumPage=Math.Max(maximumPage,position);}
                     else {if(!(child is Block nested))throw new ArgumentException("Wrong physical directory branch kind.");Validate(nested,level-1,position);}
                 }
-                if(!populated)throw new ArgumentException("Empty allocated physical directory block.");
+                // Writable creates the initial leaf block before growing the
+                // root to reach a first sparse page. That leaf can remain empty
+                // on the zero prefix; it is still owned/charged physical state.
+                // No other empty block can result from a successful write.
+                if(!populated&&!(depth>0&&level==0&&first==0))throw new ArgumentException("Empty allocated physical directory block.");
             }
             try{
                 Validate(root,depth,0);

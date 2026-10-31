@@ -1,0 +1,10 @@
+{
+  "generator": "tools/tank_distant_geometry.py",
+  "blender": "5.2.1 LTS",
+  "source_sha256": "0f98a2982baa964e953355e2d83d5a4d2bd975cf52991220feba97f9d8ab354f",
+  "ratio_large_meshes": 0.5,
+  "source_triangles": 51612,
+  "distant_triangles": 25802,
+  "sha256": "cdc1f00f87993d0b564a9b8735c883d7ad03852ad77de98c93e0398d04a2f075",
+  "approval": "smooth-eight-player-400 Q1: distant only, full current model near"
+}

@@ -8,7 +8,7 @@ SPACEWARS_REMOTE_NSIS=1 python3 tools/native-release/publish.py --version 0.6.6 
 
 Use a new unpublished version and strictly increasing sequence on every subsequent release. Test means GitHub prerelease, never latest. Production requires the separately authorized `--channel production --production-approved`. Never promote the same already published tag or overwrite assets; rebuild a new version with production-pinned helpers. Without `--publish`, the command builds/packages/verifies locally only. `--reuse-builds` still verifies exact source/version/byte inventories.
 
-Dependencies: Unity6000.3.23f1 with Windows and Mac standalone modules, host unity-run guard, Go, GitHub CLI authentication with repository write permission, Git authentication able to push the exported source (including `.github/workflows`), macOS codesign/hdiutil/lipo, NSIS. This host uses the existing remote NSIS compiler because local NSIS aborts: SPACEWARS_REMOTE_NSIS=1 creates/removes an isolated compiler directory; releases/updates never use that server. The public source clone preserves only public history and exports current Unity/tooling/landing, never private Git history.
+Dependencies: Unity6000.3.23f1 with Windows and Mac standalone modules, host unity-run guard, Go, GitHub CLI authentication with repository write permission, Git authentication able to push the exported source (including `.github/workflows`), macOS codesign/hdiutil/lipo, NSIS. This host uses the existing remote NSIS compiler because local NSIS aborts: SPACEWARS_REMOTE_NSIS=1 creates/removes an isolated compiler directory under disk-backed /var/tmp and pins NSIS TMPDIR there, so payloads and compressor intermediates do not exhaust the small /tmp tmpfs; releases/updates never use that server. The public source clone preserves only public history and exports current Unity/tooling/landing, never private Git history.
 
 The publisher uses the existing `gh config get git_protocol --host github.com` setting for both tag lookup and source clone/push. On this host it is SSH; no global Git rewrite or token-scope change is needed. Use `--git-protocol ssh` or `--git-protocol https` to override for one invocation. HTTPS OAuth pushes that change workflow files require the workflow scope; an already authorized SSH identity avoids that OAuth limitation. API operations still use GitHub CLI authentication.
 
@@ -59,3 +59,27 @@ Release descriptions are generated on publication from the previous channel rele
 ### Release from committed playable assets
 
 Set `SPACEWARS_RELEASE_COMMITTED_ASSETS=1` when publishing the saved Playable scene and native Resources already committed in the selected clean revision. Both release builds retain the normal version/date/icon configuration, source/byte binding and signed production packaging; only asset/scene regeneration is skipped. The default build still regenerates assets. This is appropriate when shipping the existing playable content, and does not repair the separate material-catalog regeneration failure. The build log records `RELEASE_ASSETS committed`.
+
+### Illustrated release notes
+
+Pass `--notes tools/native-release/notes/<name>.json` to `publish.py` when preparing an illustrated release. The manifest and screenshot files must be committed in the exact source revision being released. Preparation reads Git blobs, so unrelated local files cannot silently enter a release. Without `--notes`, the existing conservative Git-range summary remains available. Author concrete player-facing changes, one bullet per item, with matching RU/EN categories and meaning:
+
+```json
+{
+  "schema": 1,
+  "entries": [{
+    "category_ru": "Интерфейс", "category_en": "Interface",
+    "ru": "История версий показывает иллюстрации рядом с изменениями.",
+    "en": "Release history shows illustrations beside their changes.",
+    "images": [{
+      "path": "tools/native-release/notes/media/history.png",
+      "source_commit": "<exact 40-character game revision captured>",
+      "ru": "История версий с иллюстрациями", "en": "Illustrated release history"
+    }]
+  }]
+}
+```
+
+Use real screenshots of the identified revision. Images are optional for text-only fixes; add two ordered images captioned before/after when useful. PNG inputs must be noninterlaced 8-bit grayscale/RGB/RGBA, at most 4096 pixels per side and 8 MiB. Paths must be relative to the repository; the source revision must be an ancestor of the release. Missing, corrupt, oversized or uncommitted assets reject preparation. Caption/text fields are plain single lines.
+
+Preparation copies images to content-addressed `notes-<sha256>.png` assets **before signing the release inventory**, and writes matching Markdown in the release body. Existing draft readback verifies every image's size/hash before publication. Keep published attachments with their release. The updater accepts only images explicitly attached to the same release, serves them via the authenticated menu-only `/history-image` endpoint and stores verified images/history under the installed root's `history/<channel>/` directory. No automatic cache deletion is performed. A successfully viewed release can be reopened offline; images are requested only for the selected release. Failed media leaves the caption and text usable. In-game preview activation enlarges the image; Back restores the same history focus and scroll.

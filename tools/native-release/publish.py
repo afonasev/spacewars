@@ -60,7 +60,7 @@ def restore_build_generation():
  if any(not allowed(n) for n in names):raise ValueError('unexpected source changes during build; preserving all')
  if names:run(['git','restore','--',*names],cwd=ROOT)
 def main():
- p=argparse.ArgumentParser();p.add_argument('--version',required=True);p.add_argument('--sequence',type=int,required=True);p.add_argument('--channel',choices=['test','production'],required=True);p.add_argument('--production-approved',action='store_true');p.add_argument('--reuse-builds',action='store_true');p.add_argument('--publish',action='store_true');p.add_argument('--git-protocol',choices=['auto','ssh','https'],default='auto',help='use existing gh Git protocol by default; never change global Git authentication');p.add_argument('--output',type=pathlib.Path,help='fresh empty directory; default .local/github-release/<channel>/<version>');a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--notes',help='repository-relative committed bilingual notes JSON; images become release assets');p.add_argument('--version',required=True);p.add_argument('--sequence',type=int,required=True);p.add_argument('--channel',choices=['test','production'],required=True);p.add_argument('--production-approved',action='store_true');p.add_argument('--reuse-builds',action='store_true');p.add_argument('--publish',action='store_true');p.add_argument('--git-protocol',choices=['auto','ssh','https'],default='auto',help='use existing gh Git protocol by default; never change global Git authentication');p.add_argument('--output',type=pathlib.Path,help='fresh empty directory; default .local/github-release/<channel>/<version>');a=p.parse_args()
  if a.channel=='production' and not a.production_approved:raise ValueError('production requires explicit --production-approved; test is the approved default delivery')
  head=run(['git','rev-parse','HEAD'],cwd=ROOT)
  if run(['git','status','--porcelain'],cwd=ROOT):raise ValueError('clean committed source required')
@@ -74,7 +74,7 @@ def main():
  out=prepare_output(a.output or ROOT/'.local/github-release'/a.channel/a.version)
  for platform in PLATFORMS:
   if not a.reuse_builds:
-   subprocess.check_call([sys.executable,str(ROOT/'tools/native-release/build.py'),'--version',a.version,'--platform',platform]);restore_build_generation()
+   subprocess.check_call([sys.executable,str(ROOT/'tools/native-release/build.py'),'--version',a.version,'--platform',platform,'--channel',a.channel]);restore_build_generation()
   subprocess.check_call([sys.executable,str(ROOT/'tools/native-release/package.py'),'--version',a.version,'--sequence',str(a.sequence),'--channel',a.channel,'--platform',platform,'--output',str(out),'--prepare-legacy-bridge'])
  feed=out/'public/native/v1';assets=feed/'github';catalog=json.loads((feed/'downloads.json').read_text());validate_catalog(catalog,a.version,a.channel,head)
  shutil.copy2(feed/'downloads.json',assets/'downloads.json')
@@ -88,6 +88,22 @@ def main():
   for platform in PLATFORMS:zip.write(out/f'legacy-bridge-{platform}.json',f'bridge-{platform}.json')
  pub=json.loads((ROOT/'tools/native-release/trust.json').read_text())['public_key'];go=['go','run','-ldflags','-X main.publicKey='+pub,'.'];module=ROOT/'tools/native-release/updater'
  for platform in PLATFORMS:run([*go,'--verify-package',assets/f'Spacewars-{a.version}-{platform}.json',platform,assets/f'Spacewars-{a.version}-{platform}.pack'],cwd=module)
+ previous=release_notes.previous_release(json.loads(run(['gh','api',f'repos/{REPO}/releases?per_page=100'])),a.channel)
+ if previous:
+  # Public snapshot history differs from private build history: release inventory records build identity.
+  previous_inventory=json.loads(run(['gh','release','download',previous,'--repo',REPO,'--pattern','release.json','--output','-']))
+  previous_payload=previous_inventory.get('payload',{})
+  if isinstance(previous_payload,str):
+   import base64
+   previous_payload=json.loads(base64.b64decode(previous_payload))
+  baseline=previous_payload.get('commit')
+  if not baseline:raise ValueError('previous release has no source baseline; do not invent a changelog')
+ else:baseline=None
+ body,provenance=release_notes.generate(ROOT,head,baseline)
+ if a.notes:
+  body,authored=release_notes.authored(ROOT,head,a.notes,a.version,assets);provenance['authored']=authored
+ notes=out/'release-notes.md';notes.write_text(body.replace('\n\n## English','\n\nТестовая поставка без подписи издателя: возможны предупреждения Windows SmartScreen и macOS Gatekeeper.\n\n## English')+'\nUnsigned dev/test distribution: Windows SmartScreen and macOS Gatekeeper notices may appear. OS publisher signing is pending.\n')
+ (out/'release-notes-source.json').write_text(json.dumps(provenance,indent=2)+'\n')
  # Signed release-wide inventory authenticates installer hashes, build identity and channel.
  inventory={x.name:{'size':x.stat().st_size,'sha256':hashfile(x)} for x in sorted(assets.iterdir()) if x.is_file() and x.name not in ('release.json','release-payload.json')}
  payload=assets/'release-payload.json';payload.write_text(json.dumps({'schema':1,'version':a.version,'sequence':a.sequence,'channel':a.channel,'commit':head,'assets':inventory},sort_keys=True)+'\n')
@@ -102,20 +118,6 @@ def main():
  payload.write_text(json.dumps({'schema':1,'version':a.version,'sequence':a.sequence,'channel':a.channel,'commit':head,'assets':inventory},sort_keys=True)+'\n')
  run([*go,'--sign-document',payload,pathlib.Path.home()/'.local/share/spacewars-release/native-ed25519.key',assets/'release.json'],cwd=module);payload.unlink()
  files=sorted(x for x in assets.iterdir() if x.is_file());expected={x.name:{'size':x.stat().st_size,'sha256':hashfile(x)} for x in files}
- previous=release_notes.previous_release(json.loads(run(['gh','api',f'repos/{REPO}/releases?per_page=100'])),a.channel)
- if previous:
-  # Public snapshot history differs from private build history: release inventory records build identity.
-  previous_inventory=json.loads(run(['gh','release','download',previous,'--repo',REPO,'--pattern','release.json','--output','-']))
-  previous_payload=previous_inventory.get('payload',{})
-  if isinstance(previous_payload,str):
-   import base64
-   previous_payload=json.loads(base64.b64decode(previous_payload))
-  baseline=previous_payload.get('commit')
-  if not baseline:raise ValueError('previous release has no source baseline; do not invent a changelog')
- else:baseline=None
- body,provenance=release_notes.generate(ROOT,head,baseline)
- notes=out/'release-notes.md';notes.write_text(body.replace('\n\n## English','\n\nТестовая поставка без подписи издателя: возможны предупреждения Windows SmartScreen и macOS Gatekeeper.\n\n## English')+'\nUnsigned dev/test distribution: Windows SmartScreen and macOS Gatekeeper notices may appear. OS publisher signing is pending.\n')
- (out/'release-notes-source.json').write_text(json.dumps(provenance,indent=2)+'\n')
  args=['gh','release','create',tag,'--repo',REPO,'--target',public_commit,'--draft','--title',f'Spacewars {a.version} ({a.channel})','--notes-file',notes]
  if a.channel=='test':args+=['--prerelease','--latest=false']
  run(args);run(['gh','release','upload',tag,*files,'--repo',REPO])

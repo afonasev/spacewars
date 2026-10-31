@@ -25,6 +25,35 @@ namespace Spacewars.Tests.EditMode
             }
             Assert.True(PlayableVision.Visible(new[]{center},new NavPoint(edge,0)));Assert.False(PlayableVision.Visible(new[]{center},new NavPoint(above,0)));
         }
+        [Test] public void ConservativeBoundsKeepCirclesAtEdgesExtremesAndAfterRefreshRestore()
+        {
+            var groups=new[]{
+                Enumerable.Range(0,50).Select(i=>new VisionSource(new NavPoint(70+i%7*2.2,70+i/7*2.2),18)).ToArray(),
+                Enumerable.Repeat(default(VisionSource),4).ToArray(),
+                Enumerable.Repeat(new VisionSource(new NavPoint(1048576,-1048576),1048576),4).ToArray(),
+                Enumerable.Repeat(new VisionSource(new NavPoint(1e300,1e300),1e300),4).ToArray(),
+                Enumerable.Repeat(new VisionSource(default,double.Epsilon),4).ToArray()};
+            var points=new List<NavPoint>{default,new NavPoint(double.MaxValue,0),new NavPoint(double.NaN,0),new NavPoint(double.PositiveInfinity,0),new NavPoint(-1048576,1048576)};
+            var random=new Random(87231);for(int i=0;i<4000;i++)points.Add(new NavPoint(random.NextDouble()*400-200,random.NextDouble()*400-200));
+            foreach(var sources in groups){
+                foreach(var source in sources){double edge=source.Position.X+source.Radius+.0001;
+                    points.Add(new NavPoint(edge,source.Position.Z));points.Add(new NavPoint(BitConverter.Int64BitsToDouble(BitConverter.DoubleToInt64Bits(edge)+1),source.Position.Z));
+                    points.Add(new NavPoint(edge+1.000001,source.Position.Z));}
+                var snapshot=Snapshot(sources);foreach(var point in points)Assert.AreEqual(PlayableVision.VisibleArray(sources,point),snapshot.IsVisible(point));
+            }
+            var live=new PlayableVision(1,128,128,4,1.5);live.Refresh(groups[0],Array.Empty<KnownBuilding>());var prior=live.Snapshot();
+            var cold=new PlayableVision(1,128,128,4,1.5);cold.RestoreState(live.CaptureState());
+            var moved=groups[0].Select(x=>new VisionSource(new NavPoint(-x.Position.X,-x.Position.Z),x.Radius)).ToArray();live.Refresh(moved,Array.Empty<KnownBuilding>());
+            foreach(var point in points){Assert.AreEqual(PlayableVision.VisibleArray(groups[0],point),cold.IsVisible(point));Assert.AreEqual(prior.IsVisible(point),cold.Snapshot().IsVisible(point));Assert.AreEqual(PlayableVision.VisibleArray(moved,point),live.IsVisible(point));}
+        }
+        [Test] public void ReportEightCohortVisibilityBoundsAba()
+        {
+            var sources=Enumerable.Range(0,8).Select(group=>Enumerable.Range(0,50).Select(i=>new VisionSource(new NavPoint(Math.Cos(group*Math.PI/4)*88+i%7*2.2,Math.Sin(group*Math.PI/4)*88+i/7*2.2),18)).ToArray()).ToArray();
+            var snapshots=sources.Select(Snapshot).ToArray();var points=sources.SelectMany(x=>x.Select(y=>y.Position)).ToArray();
+            long Run(bool bounds,out double ms){long hits=0;var watch=Stopwatch.StartNew();for(int repeat=0;repeat<500;repeat++)for(int owner=0;owner<8;owner++)foreach(var point in points)if(bounds?snapshots[owner].IsVisible(point):PlayableVision.VisibleArray(sources[owner],point))hits++;watch.Stop();ms=watch.Elapsed.TotalMilliseconds;return hits;}
+            Run(false,out _);Run(true,out _);long a=Run(false,out double ams),b=Run(true,out double bms),c=Run(false,out double cms);Assert.AreEqual(a,b);Assert.AreEqual(a,c);
+            TestContext.WriteLine($"VISION_BOUNDS_ABA queries=1600000 original_ms={ams:R} bounds_ms={bms:R} original2_ms={cms:R} hits={b}");
+        }
         sealed class EnumerationOnly : IReadOnlyList<VisionSource>
         {
             public int Count=>throw new InvalidOperationException("Generic visibility never indexed this collection.");

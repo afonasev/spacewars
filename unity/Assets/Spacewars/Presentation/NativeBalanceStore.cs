@@ -5,6 +5,7 @@ using System.Reflection;
 using Newtonsoft.Json.Linq;
 using Spacewars.BalanceLab;
 using Spacewars.Simulation;
+using Spacewars.Simulation.Ai;
 using UnityEngine;
 
 namespace Spacewars.Presentation
@@ -13,8 +14,9 @@ namespace Spacewars.Presentation
     public sealed class NativeBalanceStore
     {
         public const string DefaultId="spacewars-default";
+        public const string AiProfileId="ai-openings-midgame-v1";
         public const string NewMatchProfileId="spacewars-certified-group-corridor115-v1";
-        public const int NewMatchProfileVersion=1;
+        public const int NewMatchProfileVersion=2;
         public const string ProjectRelativePath="design/native-lab/profiles.json";
         private readonly AtomicStore disk;
         private readonly PlayableProfile baseline;
@@ -23,6 +25,8 @@ namespace Spacewars.Presentation
         private string selectedId,activeId;
         private PlayableProfile activeProfile;
         private GameplayAudioProfile activeAudio;
+        private ModelDetailProfile activeModelDetail;
+        private AiProfile activeAiProfile;
         private int selectedVersion,activeVersion;
         public bool Authoring {get;}
         public string StoragePath=>disk.Path;
@@ -56,7 +60,11 @@ namespace Spacewars.Presentation
         public PlayableProfile Selected=>Compile(SelectedRow);
         public PlayableProfile Active=>HasActive?activeProfile:throw new InvalidOperationException("Выберите корректную сохранённую версию или восстановите релизный Default.");
         public GameplayAudioProfile SelectedAudio=>Audio(SelectedRow);
+        public ModelDetailProfile SelectedModelDetail=>Detail(SelectedRow);
+        public ModelDetailProfile ActiveModelDetail=>HasActive?activeModelDetail.Copy():throw new InvalidOperationException("Нет активной версии LOD.");
         public GameplayAudioProfile ActiveAudio=>HasActive?JsonUtility.FromJson<GameplayAudioProfile>(JsonUtility.ToJson(activeAudio)):throw new InvalidOperationException("Нет активной версии.");
+        public AiProfile ActiveAiProfile=>HasActive?new AiProfile(activeAiProfile.CopyData()):throw new InvalidOperationException("Нет активной версии.");
+        public AiProfile SelectedAiProfile=>ReadAiProfile(SelectedRow);
         private static JObject Empty()=>new JObject{["schema"]=2,["defaultId"]=DefaultId,["profiles"]=new JArray()};
         public static NativeBalanceStore ForApplication(PlayableProfile baseline,string qaPath=null)
         {
@@ -69,7 +77,7 @@ namespace Spacewars.Presentation
             // The application selects the new immutable version only when creating
             // its menu store. Existing runtimes retain their own profile objects.
             if(result.PackagedNewMatchProfile!=null)result.Select(NewMatchProfileId,NewMatchProfileVersion);
-            if(result.HasActive)NativeGameplayAudioProfile.UseSession(result.ActiveAudio);
+            if(result.HasActive){NativeGameplayAudioProfile.UseSession(result.ActiveAudio);ModelDetailProfile.UseSession(result.ActiveModelDetail);}
             return result;
         }
         public NativeBalanceStore(PlayableProfile baseline,string path=null,bool authoring=true,JObject package=null,string legacyPath=null)
@@ -124,9 +132,11 @@ namespace Spacewars.Presentation
             if(p==null||!p["release"].Any())throw new InvalidOperationException("Нет релизной версии Default. Поставьте отметку у корректной версии Default.");
             int version=p["release"].Max(v=>(int)v);return (JObject)p["versions"].Single(v=>(int)v["revision"]==version);
         }
-        public string ReleaseProblem {get{try{Compile(ReleaseRow(),DefaultId);Audio(ReleaseRow());return null;}catch(Exception e){return e.Message;}}}
+        public string ReleaseProblem {get{try{Compile(ReleaseRow(),DefaultId);Audio(ReleaseRow());Detail(ReleaseRow());ReadAiProfile(ReleaseRow());return null;}catch(Exception e){return e.Message;}}}
         private void ResetInitial()
         {
+            try{var selection=Document["selection"] as JObject;string id=(string)selection?["id"];int? version=(int?)selection?["version"];if(id!=null&&version.HasValue&&Profiles.Any(p=>(string)p["id"]==id&&p["versions"].Any(v=>(int)v["revision"]==version.Value))){Select(id,version.Value);return;}}
+            catch(Exception e){Problem=Problem??"Последняя сохранённая версия недоступна: "+e.Message;}
             try{var row=ReleaseRow();Select(DefaultId,(int)row["revision"]);}
             catch(Exception e){Problem=Problem??e.Message;var p=Profiles.FirstOrDefault();if(p!=null){selectedId=(string)p["id"];selectedVersion=p["versions"].Max(v=>(int)v["revision"]);}activeId=null;}
         }
@@ -156,6 +166,21 @@ namespace Spacewars.Presentation
                 if(p.Name==nameof(PlayableProfileData.navigationMaxAccruedCredits)&&((double)p.Value<PlayableProfileMetadata.AccruedCreditField.Minimum||(double)p.Value>PlayableProfileMetadata.AccruedCreditField.Maximum))throw new FormatException("Недопустимый лимит накопленного бюджета навигации.");
                 defaults[p.Name]=p.Value.DeepClone();
             }
+            // Import old relative profiles once into explicit independent terms.
+            // Saved copies include these fields, so subsequent mobile tuning is isolated.
+            void TowerDefault(string field,double value){if(values.Property(field)==null&&released?.Property(field)==null)defaults[field]=value;}
+            double Number(string field)=>(double)defaults[field];
+            TowerDefault("turretHealth",Number("tankHealth")*Number("turretHealthMultiplier"));
+            TowerDefault("turretRange",Number("explorerRange")*Number("turretRangeMultiplier"));
+            TowerDefault("turretDamage",Number("explorerDamage"));
+            TowerDefault("turretBurstSize",Number("explorerAssaultBurstSize"));
+            TowerDefault("turretBurstShotIntervalMs",Number("explorerBurstShotIntervalMs"));
+            TowerDefault("turretBurstPauseMs",Number("explorerBurstPauseMs"));
+            TowerDefault("turretSpreadDeg",Number("explorerAssaultSpreadDeg"));
+            TowerDefault("turretProjectileSpeed",Number("explorerProjectileSpeed"));
+            TowerDefault("gaussDamage",Number("tankHealth")*Number("gaussTankDamageFraction"));
+            double oldRange=Number("explorerRange")*Number("turretRangeMultiplier");
+            TowerDefault("gaussRange",oldRange+(Number("shkvalBaseRange")-oldRange)*Number("gaussRangeBlend"));
             var data=JsonUtility.FromJson<PlayableProfileData>(defaults.ToString());data.revision=(int)row["revision"];
             foreach(var f in PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable))CheckStep(f.Read(data),f.Read(baseline.CopyData()),f.Step,f.Path);
             var result=PlayableProfile.Create(data,baseline.AuthoredMap,Name(id)+" · "+id+" @"+(int)row["revision"]);
@@ -172,9 +197,46 @@ namespace Spacewars.Presentation
             }
             var result=JsonUtility.FromJson<GameplayAudioProfile>(values.ToString());result.Validate();foreach(var f in GameplayAudioMetadata.Fields)f.Validate(f.Read(result));return result;
         }
+        private ModelDetailProfile Detail(JToken row)
+        {
+            var values=JObject.Parse(Resources.Load<TextAsset>("ModelDetailProfile").text);
+            void Apply(JToken data){if(data==null)return;if(!(data is JObject obj))throw new FormatException("Неверный профиль modelDetail.");foreach(var pair in obj.Properties()){
+                var field=typeof(ModelDetailProfile).GetField(pair.Name);if(field==null||field.IsStatic)throw new FormatException("Неизвестный параметр modelDetail."+pair.Name);
+                if(field.FieldType==typeof(string)){if(pair.Value.Type!=JTokenType.String)throw new FormatException("Ожидается строка modelDetail."+pair.Name);}
+                else if(pair.Value.Type!=JTokenType.Float&&pair.Value.Type!=JTokenType.Integer)throw new FormatException("Ожидается число modelDetail."+pair.Name);
+                if(field.FieldType==typeof(int)&&(double)pair.Value!=Math.Truncate((double)pair.Value))throw new FormatException("Ожидается целое modelDetail."+pair.Name);
+                values[pair.Name]=pair.Value.DeepClone();
+            }}
+            JToken release=null;try{release=ReleaseRow()["modelDetail"];}catch(InvalidOperationException){}Apply(release);Apply(row["modelDetail"]);
+            var profile=JsonUtility.FromJson<ModelDetailProfile>(values.ToString());profile.Validate();return profile;
+        }
+        private static JObject AiJson(AiProfileData data)=>JObject.Parse(JsonUtility.ToJson(data));
+        private AiProfile ReadAiProfile(JToken row)
+        {
+            var data=NativeBalanceFields.InitialAiOpeningProfile().CopyData();data.id=AiProfileId;
+            var saved=row["aiProfile"] as JObject;
+            if(saved==null)return new AiProfile(data);
+            if(saved["schemaVersion"]!=null&&(int)saved["schemaVersion"]!=data.schemaVersion)throw new FormatException("Неподдерживаемая схема AI-профиля.");
+            if(saved["id"]!=null&&(string)saved["id"]!=AiProfileId)throw new FormatException("Сохранён другой AI-профиль.");
+            if(saved["revision"]!=null)data.revision=(int)saved["revision"];
+            var values=(saved["fields"] as JArray)?.ToDictionary(v=>(string)v["path"],v=>v,StringComparer.Ordinal);
+            if(saved["fields"]!=null&&values==null)throw new FormatException("Повреждены параметры AI-профиля.");
+            if(values!=null)
+            {
+                var fields=AiProfileMetadata.Fields.ToDictionary(f=>f.Path,StringComparer.Ordinal);
+                if(values.Keys.Any(path=>!fields.ContainsKey(path)))throw new FormatException("Сохранён неизвестный параметр AI-профиля.");
+                foreach(var field in data.fields)
+                {
+                    if(!values.TryGetValue(field.path,out var token))continue;
+                    var value=token["value"];if(value==null||(value.Type!=JTokenType.Integer&&value.Type!=JTokenType.Float))throw new FormatException("Некорректное значение AI-профиля: "+field.path);
+                    field.value=(double)value;fields[field.path].Validate(field.value);
+                }
+            }
+            return new AiProfile(data);
+        }
         public void Select(string id,int version)
         {
-            var row=Row(id,version);selectedId=id;selectedVersion=version;var compiled=Compile(row,id);var sound=Audio(row);activeId=id;activeVersion=version;activeProfile=compiled;activeAudio=sound;
+            var row=Row(id,version);selectedId=id;selectedVersion=version;var compiled=Compile(row,id);var sound=Audio(row);var detail=Detail(row);var ai=ReadAiProfile(row);activeModelDetail=detail;activeId=id;activeVersion=version;activeProfile=compiled;activeAudio=sound;activeAiProfile=ai;
         }
         public void SelectProfile(string id){var p=Profiles.Single(v=>(string)v["id"]==id);Select(id,p["versions"].Max(v=>(int)v["revision"]));}
         public void Select(int version)=>Select(selectedId,version);
@@ -184,20 +246,24 @@ namespace Spacewars.Presentation
             if(read==null)throw new InvalidOperationException(Problem);if(!CanEdit)throw new InvalidOperationException("Профиль поставки защищён. Создайте независимую копию.");doc=Document;return (JObject)doc["profiles"].Single(p=>(string)p["id"]==selectedId);
         }
         private void Commit(JObject doc){if(read==null)throw new InvalidOperationException(Problem);ValidateShape(doc);read=disk.Commit(read.Token,doc);Problem=null;}
-        public PlayableProfile Save(PlayableProfileData draft,GameplayAudioProfile audio)
+        public PlayableProfile Save(PlayableProfileData draft,GameplayAudioProfile audio,AiProfileData aiDraft=null,ModelDetailProfile modelDetail=null)
         {
-            var p=Mutable(out var doc);var baseData=Selected.CopyData();var baseAudio=SelectedAudio;if(PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable).All(f=>f.Read(draft)==f.Read(baseData))&&GameplayAudioMetadata.Fields.All(f=>f.Read(audio)==f.Read(baseAudio)))throw new ArgumentException("Нет изменений для новой версии.");var data=NativeBalanceFields.Copy(draft);data.revision=p["versions"].Max(v=>(int)v["revision"])+1;
-            var row=new JObject{["revision"]=data.revision,["date"]=DateTime.Now.ToString("yyyy-MM-dd"),["data"]=ProfileJson(data),["audio"]=JObject.Parse(JsonUtility.ToJson(audio))};
-            var compiled=Compile(row);Audio(row);
+            var p=Mutable(out var doc);var baseData=Selected.CopyData();var baseAudio=SelectedAudio;var baseDetail=SelectedModelDetail;var detail=(modelDetail??baseDetail).Copy();var detailFields=detail.Parameters().ToArray();var baseDetailFields=baseDetail.Parameters().ToArray();bool detailChanged=detailFields.Where((v,i)=>v.Read()!=baseDetailFields[i].Read()).Any();var baseAi=SelectedAiProfile;var ai=aiDraft==null?baseAi:new AiProfile(aiDraft);if(ai.Id!=AiProfileId)throw new ArgumentException("Ожидается профиль "+AiProfileId+".");bool aiChanged=NativeBalanceFields.AiOpeningFields.Any(f=>ai.Value(f.Path)!=baseAi.Value(f.Path));if(PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable).All(f=>f.Read(draft)==f.Read(baseData))&&GameplayAudioMetadata.Fields.All(f=>f.Read(audio)==f.Read(baseAudio))&&!aiChanged&&!detailChanged)throw new ArgumentException("Нет изменений для новой версии.");var data=NativeBalanceFields.Copy(draft);data.revision=p["versions"].Max(v=>(int)v["revision"])+1;
+            aiDraft=ai.CopyData();aiDraft.revision=data.revision;
+            ai=new AiProfile(aiDraft);
+            var row=new JObject{["revision"]=data.revision,["date"]=DateTime.Now.ToString("yyyy-MM-dd"),["data"]=ProfileJson(data),["audio"]=JObject.Parse(JsonUtility.ToJson(audio)),["aiProfile"]=AiJson(aiDraft),["modelDetail"]=JObject.Parse(JsonUtility.ToJson(detail))};
+            var compiled=Compile(row);Audio(row);Detail(row);
+            for(int i=0;i<detailFields.Length;i++)CheckStep(detailFields[i].Read(),baseDetailFields[i].Read(),detailFields[i].Step,detailFields[i].Path);
             foreach(var f in PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable))CheckStep(f.Read(data),f.Read(baseData),f.Step,f.Path);
             foreach(var f in GameplayAudioMetadata.Fields)CheckStep(f.Read(audio),f.Read(baseAudio),f.Step,f.Path);
-            ((JArray)p["versions"]).Add(row);Commit(doc);Select(selectedId,data.revision);return compiled;
+            foreach(var f in NativeBalanceFields.AiOpeningFields)CheckStep(ai.Value(f.Path),baseAi.Value(f.Path),f.Step,f.Path);
+            ((JArray)p["versions"]).Add(row);doc["selection"]=new JObject{["id"]=selectedId,["version"]=data.revision};Commit(doc);Select(selectedId,data.revision);return compiled;
         }
         public static void CheckStep(double value,double origin,double step,string key){double n=(value-origin)/step;if(double.IsNaN(n)||double.IsInfinity(n)||Math.Abs(n-Math.Round(n))>1e-4)throw new ArgumentException(key+": значение не соответствует шагу "+step);}
         public PlayableProfile Save(string name,PlayableProfileData draft){if(name!=SelectedName)Copy(name);return Save(draft,SelectedAudio);}
         public void Copy(string name)
         {
-            ValidateName(name);var id="local-"+Guid.NewGuid().ToString("N");var row=(JObject)SelectedRow.DeepClone();row["revision"]=1;row["date"]=DateTime.Now.ToString("yyyy-MM-dd");row["data"]=ProfileJson(Selected.CopyData());row["audio"]=JObject.Parse(JsonUtility.ToJson(SelectedAudio));
+            ValidateName(name);var id="local-"+Guid.NewGuid().ToString("N");var row=(JObject)SelectedRow.DeepClone();row["revision"]=1;row["date"]=DateTime.Now.ToString("yyyy-MM-dd");row["data"]=ProfileJson(Selected.CopyData());row["audio"]=JObject.Parse(JsonUtility.ToJson(SelectedAudio));row["modelDetail"]=JObject.Parse(JsonUtility.ToJson(SelectedModelDetail));
             var doc=Document;((JArray)doc["profiles"]).Add(new JObject{["id"]=id,["name"]=name.Trim(),["release"]=new JArray(),["versions"]=new JArray(row)});Commit(doc);Select(id,1);
         }
         public void Rename(string name){ValidateName(name);var p=Mutable(out var doc);p["name"]=name.Trim();Commit(doc);if(activeId==selectedId&&activeProfile!=null)activeProfile=PlayableProfile.Create(activeProfile.CopyData(),activeProfile.AuthoredMap,name.Trim()+" · "+activeId+" @"+activeVersion);}
@@ -208,14 +274,14 @@ namespace Spacewars.Presentation
         public bool IsMarked=>SelectedProfile["release"].Any(v=>(int)v==selectedVersion);
         public void Mark(bool marked)
         {
-            if(!Authoring)throw new InvalidOperationException("Релизные отметки доступны только автору.");if(marked){Compile(SelectedRow);Audio(SelectedRow);}var p=Mutable(out var doc);var marks=(JArray)p["release"];
+            if(!Authoring)throw new InvalidOperationException("Релизные отметки доступны только автору.");if(marked){Compile(SelectedRow);Audio(SelectedRow);Detail(SelectedRow);ReadAiProfile(SelectedRow);}var p=Mutable(out var doc);var marks=(JArray)p["release"];
             if(marked&&!IsMarked)marks.Add(selectedVersion);if(!marked)marks.Where(v=>(int)v==selectedVersion).ToList().ForEach(v=>v.Remove());Commit(doc);
         }
         public JObject ExportPackage()
         {
             if(!Authoring)throw new InvalidOperationException("Экспорт доступен только автору.");if(Problem!=null)throw new InvalidOperationException(Problem);if(ReleaseProblem!=null)throw new InvalidOperationException(ReleaseProblem);
             var result=Empty();foreach(var p in Profiles.Where(p=>p["release"].Any()))
-            {var copy=(JObject)p.DeepClone();copy["versions"]=new JArray(p["versions"].Where(v=>p["release"].Any(m=>(int)m==(int)v["revision"])).Select(v=>v.DeepClone()));foreach(var v in copy["versions"]){Compile(v,(string)p["id"]);Audio(v);}((JArray)result["profiles"]).Add(copy);}return result;
+            {var copy=(JObject)p.DeepClone();copy["versions"]=new JArray(p["versions"].Where(v=>p["release"].Any(m=>(int)m==(int)v["revision"])).Select(v=>v.DeepClone()));foreach(var v in copy["versions"]){Compile(v,(string)p["id"]);Audio(v);Detail(v);ReadAiProfile(v);}((JArray)result["profiles"]).Add(copy);}return result;
         }
         public void ImportLegacyAudio(string text)
         {

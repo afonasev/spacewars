@@ -52,11 +52,11 @@ public sealed class HeadquartersGameModelTests
             RenderSettings.ambientMode=AmbientMode.Flat;RenderSettings.ambientLight=new Color(.6f,.62f,.65f);
             var light=new GameObject("Witness daylight").AddComponent<Light>();light.transform.SetParent(host.transform);light.type=LightType.Directional;light.intensity=1.6f;light.transform.rotation=Quaternion.Euler(50,-35,0);
             var camera=new GameObject("Shared world witness camera").AddComponent<Camera>();camera.transform.SetParent(host.transform);camera.orthographic=true;camera.orthographicSize=4.5f;camera.cullingMask=1<<30;camera.nearClipPlane=.05f;camera.farClipPlane=100;
-            camera.clearFlags=CameraClearFlags.SolidColor;camera.backgroundColor=new Color(.30f,.32f,.34f);camera.transform.position=new Vector3(1,7,12);camera.transform.LookAt(new Vector3(0,1,0));camera.GetUniversalAdditionalCameraData().renderPostProcessing=false;
+            camera.clearFlags=CameraClearFlags.SolidColor;camera.backgroundColor=new Color(.30f,.32f,.34f);camera.transform.position=new Vector3(1,7,-12);camera.transform.LookAt(new Vector3(0,1,0));camera.GetUniversalAdditionalCameraData().renderPostProcessing=false;
             foreach(var actor in new[]{friendly,enemy})
             {
                 world.FaceBuilding(actor,camera);
-                var expected=Vector3.ProjectOnPlane(-camera.transform.forward,Vector3.up).normalized;
+                var expected=Vector3.back;
                 Assert.That(Vector3.Dot(actor.Hull.forward,expected),Is.GreaterThan(.9999));
             }
             yield return null;

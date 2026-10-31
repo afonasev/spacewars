@@ -40,7 +40,10 @@ namespace Spacewars.Simulation
                 // hash slots can overlap. Typed leg objects coexist with rounded
                 // result backing storage, ToArray and wrapper. Incident sorting,
                 // visited/prior dictionaries, queue and path lists use E/R/S.
-                long cutScratch=checked(2*(16*Rounded(cuts)+64*(3*cuts+4)+32*edges.Length+256));
+                // A bucket query may repeat an edge. Its per-query List capacity is
+                // bounded by all index entries; include old/new backing overlap at growth.
+                long candidateScratch=checked(128+8*Rounded(edgeIndex?.Entries??0));
+                long cutScratch=checked(2*(16*Rounded(cuts)+64*(3*cuts+4)+Math.Max(32L*edges.Length,candidateScratch)+256));
                 long trace=checked(256*legs+8*Rounded(legs)+8*legs+256);
                 long incident=checked(32*Seams.Count+128*(3L*regions.Length+4)+64L*regions.Length+8*Rounded(regions.Length)+512);
                 return checked(cutScratch+trace+incident+16*Rounded(portals)+16*portals+256);
@@ -76,7 +79,11 @@ namespace Spacewars.Simulation
         }
         private readonly SegmentIndex edgeIndex,boundaryIndex,seamIndex;
         private readonly Seam[] blockedBoundaries;
-        private readonly List<int> cutCandidates;
+#if UNITY_INCLUDE_TESTS
+        internal static Action<TerrainLocations> IndexedCutCandidateForTests;
+        [ThreadStatic] internal static bool DisableFootprintOwnerReuseForTests;
+        [ThreadStatic] internal static long OwnerIndexCallsForTests;
+#endif
         private const int RegionGridWidth=16;
         private readonly int[][] regionGrid;
         internal long RegionIndexRetainedBytes{get;}
@@ -89,14 +96,29 @@ namespace Spacewars.Simulation
             public override int GetHashCode()=>unchecked((x.GetHashCode()*397^z.GetHashCode())*397^r.GetHashCode());
         }
         private const int FootprintCacheLimit=4096;
-        // Owner-confined derived values, including failed footprints; every exact input
-        // remains bound to this immutable geometry/support/transition arrangement.
-        private readonly Dictionary<FootprintKey,bool> footprints;
+        private static bool ReuseFootprintOwner
+        {
+            get{
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                if(OwnerReusePredecessorForQa)return false;
+#endif
+#if UNITY_INCLUDE_TESTS
+                if(DisableFootprintOwnerReuseForTests)return false;
+#endif
+                return true;
+            }
+        }
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private static readonly bool OwnerReusePredecessorForQa=Environment.GetEnvironmentVariable("SPACEWARS_FOOTPRINT_OWNER_PREDECESSOR")=="1";
+#endif
+        // Profiles share immutable terrain across the live authority and cold restores.
+        // Only bounded memo bookkeeping is locked; geometric predicates stay independent.
+        private readonly Dictionary<FootprintKey,int> footprints;
         private readonly Queue<FootprintKey> footprintOrder;
         internal long FootprintCacheRetainedBytes=>footprints==null?0:128L*FootprintCacheLimit;
         internal TerrainLocations(NavGeometry geometry,IEnumerable<MapSupport> authoredPrecedence,IEnumerable<NavSurfaceTransition> declared)
         {
-            cutCandidates=new List<int>();footprints=new Dictionary<FootprintKey,bool>();footprintOrder=new Queue<FootprintKey>();
+            footprints=new Dictionary<FootprintKey,int>();footprintOrder=new Queue<FootprintKey>();
             this.geometry=geometry;var buildingSeams=new List<Seam>();var buildingExterior=new List<Seam>();seams=buildingSeams;exterior=buildingExterior;var supports=authoredPrecedence.ToArray();
             if(supports.Any(s=>string.IsNullOrWhiteSpace(s.SurfaceId)||s.SurfaceId==NavLocation.FlatSurface)||supports.Select(s=>s.SurfaceId).Distinct().Count()!=supports.Length)throw new ArgumentException("Provider must author unique surface keys.");
             regions=supports;
@@ -146,7 +168,7 @@ namespace Spacewars.Simulation
             seams=arrangement.seams;exterior=arrangement.exterior;Transitions=arrangement.Transitions;Seams=arrangement.Seams;
             edgeIndex=arrangement.edgeIndex;boundaryIndex=arrangement.boundaryIndex;seamIndex=arrangement.seamIndex;
             blockedBoundaries=arrangement.blockedBoundaries;regionGrid=arrangement.regionGrid;RegionIndexRetainedBytes=arrangement.RegionIndexRetainedBytes;
-            cutCandidates=new List<int>();footprints=new Dictionary<FootprintKey,bool>();footprintOrder=new Queue<FootprintKey>();
+            footprints=new Dictionary<FootprintKey,int>();footprintOrder=new Queue<FootprintKey>();
         }
         // Values, order and precedence all participate. Equal provider binding
         // text or terrain ID alone never establishes shared storage identity.
@@ -165,32 +187,41 @@ namespace Spacewars.Simulation
         // Canonical ownership is the same declared precedence partition: one
         // support containing p with no earlier bounds containing p. Keep only
         // the source support array, rather than duplicate every prefix graph.
-        private MapSupport Owner(NavPoint p)
+        private int OwnerIndex(NavPoint p)
         {
-            if(double.IsNaN(p.X)||double.IsNaN(p.Z)||double.IsInfinity(p.X)||double.IsInfinity(p.Z))return null;
-            if(regionGrid==null){foreach(var support in regions)if(support.Contains(p))return support;return null;}
+#if UNITY_INCLUDE_TESTS
+            OwnerIndexCallsForTests++;
+#endif
+            if(double.IsNaN(p.X)||double.IsNaN(p.Z)||double.IsInfinity(p.X)||double.IsInfinity(p.Z))return -1;
+            if(regionGrid==null){for(int i=0;i<regions.Length;i++)if(regions[i].Contains(p))return i;return -1;}
             var candidates=regionGrid[RegionBucket(p.X)*RegionGridWidth+RegionBucket(p.Z)];
-            // Buckets retain authored precedence order. MapSupport.Contains is exactly
-            // Bounds.Contains, so the first containing support is the original owner.
-            if(candidates!=null)for(int i=0;i<candidates.Length;i++){var support=regions[candidates[i]];if(support.Contains(p))return support;}
-            return null;
+            if(candidates!=null)for(int i=0;i<candidates.Length;i++)if(regions[candidates[i]].Contains(p))return candidates[i];
+            return -1;
         }
-        private bool Footprint(NavPoint point,double radius)
+        private MapSupport Owner(NavPoint p){int index=OwnerIndex(p);return index<0?null:regions[index];}
+        private bool Footprint(NavPoint point,double radius)=>FootprintOwner(point,radius)>=0;
+        private int FootprintOwner(NavPoint point,double radius)
         {
-            if(footprints==null)return UncachedFootprint(point,radius);
-            var key=new FootprintKey(point,radius);if(footprints.TryGetValue(key,out bool result))return result;
-            result=UncachedFootprint(point,radius);
-            if(footprints.Count==FootprintCacheLimit)footprints.Remove(footprintOrder.Dequeue());
-            footprints.Add(key,result);footprintOrder.Enqueue(key);return result;
+            if(footprints==null)return UncachedFootprintOwner(point,radius);
+            var key=new FootprintKey(point,radius);int result;
+            lock(footprints)if(footprints.TryGetValue(key,out result))return result;
+            result=UncachedFootprintOwner(point,radius);
+            lock(footprints){
+                if(footprints.TryGetValue(key,out int published))return published;
+                if(footprints.Count==FootprintCacheLimit)footprints.Remove(footprintOrder.Dequeue());
+                footprints.Add(key,result);footprintOrder.Enqueue(key);
+            }
+            return result;
         }
-        private bool UncachedFootprint(NavPoint point,double radius)
+        private bool UncachedFootprint(NavPoint point,double radius)=>UncachedFootprintOwner(point,radius)>=0;
+        private int UncachedFootprintOwner(NavPoint point,double radius)
         {
-            if(radius<0||double.IsNaN(radius)||double.IsInfinity(radius)||Owner(point)==null||!geometry.IsFree(point,radius))return false;
-            double r2=radius*radius;
-            double reach=radius+1e-9;
-            if(boundaryIndex==null)return !exterior.Any(e=>Distance2(point,e.From,e.To)<r2-1e-9)&&!seams.Any(e=>!e.Allowed&&Distance2(point,e.From,e.To)<r2-1e-9);
-            foreach(int i in boundaryIndex.Candidates(point.X-reach,point.Z-reach,point.X+reach,point.Z+reach)){var e=blockedBoundaries[i];if(NearPoint(point,radius,e.From,e.To)&&Distance2(point,e.From,e.To)<r2-1e-9)return false;}
-            return true;
+            if(radius<0||double.IsNaN(radius)||double.IsInfinity(radius))return -1;
+            int owner=OwnerIndex(point);if(owner<0||!geometry.IsFree(point,radius))return -1;
+            double r2=radius*radius,reach=radius+1e-9;
+            if(boundaryIndex==null)return !exterior.Any(e=>Distance2(point,e.From,e.To)<r2-1e-9)&&!seams.Any(e=>!e.Allowed&&Distance2(point,e.From,e.To)<r2-1e-9)?owner:-1;
+            foreach(int i in boundaryIndex.Candidates(point.X-reach,point.Z-reach,point.X+reach,point.Z+reach)){var e=blockedBoundaries[i];if(NearPoint(point,radius,e.From,e.To)&&Distance2(point,e.From,e.To)<r2-1e-9)return -1;}
+            return owner;
         }
         internal bool TryLocate(NavPoint point,double radius,out NavLocation location)
         {location=default;var region=Owner(point);if(region==null||!Footprint(point,radius))return false;location=region.OwnedLocation(point);return true;}
@@ -203,10 +234,12 @@ namespace Spacewars.Simulation
         {if(location.SurfaceId==null)return location;if(!byId.TryGetValue(new NavNameKey(location.SurfaceId),out int index))throw new ArgumentException("Unknown partition checkpoint surface.");return regions[index].OwnedLocation(location.Position);}
         internal bool Valid(NavLocation location,double radius)
         {
-            if(location.SurfaceId==null||!byId.TryGetValue(new NavNameKey(location.SurfaceId),out var regionIndex)||!Footprint(location.Position,radius))return false;
+            if(location.SurfaceId==null||!byId.TryGetValue(new NavNameKey(location.SurfaceId),out var regionIndex))return false;
+            int canonicalIndex=FootprintOwner(location.Position,radius);if(canonicalIndex<0)return false;
             // At shared seams an explicitly bound incident region remains valid. A
             // hidden background interior can never be selected by a saved reference.
-            var canonical=Owner(location.Position);if(canonical==regions[regionIndex])return true;
+            if(!ReuseFootprintOwner)canonicalIndex=OwnerIndex(location.Position);
+            if(canonicalIndex==regionIndex)return true;
             double reach=1e-8+1e-9;var p=location.Position;
             if(seamIndex==null)return Seams.Any(seam=>seam.Allowed&&(seam.FromSurface==location.SurfaceId||seam.ToSurface==location.SurfaceId)&&NearPoint(p,1e-8,seam.From,seam.To)&&Distance2(p,seam.From,seam.To)<=1e-16);
             foreach(int i in seamIndex.Candidates(p.X-reach,p.Z-reach,p.X+reach,p.Z+reach)){var seam=Seams[i];if(seam.Allowed&&(seam.FromSurface==location.SurfaceId||seam.ToSurface==location.SurfaceId)&&NearPoint(p,1e-8,seam.From,seam.To)&&Distance2(p,seam.From,seam.To)<=1e-16)return true;}
@@ -233,11 +266,11 @@ namespace Spacewars.Simulation
             =>TraverseCore(from,to,radius,out location,out cuts,out crossed,out _,certifiedEndpoints);
         private bool TraverseCore(NavLocation from,NavPoint to,double radius,out NavLocation location,out List<double> cuts,out bool crossed,out int blocker,bool certifiedEndpoints=false)
         {
-            cuts=null;crossed=false;location=default;blocker=-1;
+            cuts=null;crossed=false;location=default;blocker=-1;int endIndex=-1;
             if(certifiedEndpoints){if(!geometry.SegmentFreeBetweenFreeEndpoints(from.Position,to,radius,out blocker))return false;}
             // Valid and Footprint both prove IsFree for these exact endpoints,
             // radius and immutable geometry. Keep the segment/blocker predicate.
-            else if(!Valid(from,radius)||!Footprint(to,radius)||!geometry.SegmentFreeBetweenFreeEndpoints(from.Position,to,radius,out blocker))return false;
+            else if(!Valid(from,radius)||(endIndex=FootprintOwner(to,radius))<0||!geometry.SegmentFreeBetweenFreeEndpoints(from.Position,to,radius,out blocker))return false;
             double r2=radius*radius;
             double reach=radius+1e-9;
             if(boundaryIndex==null){if(exterior.Any(e=>SegmentDistance2(from.Position,to,e.From,e.To)<r2-1e-9)||seams.Any(e=>!e.Allowed&&SegmentDistance2(from.Position,to,e.From,e.To)<r2-1e-9))return false;}
@@ -248,7 +281,8 @@ namespace Spacewars.Simulation
                 var owner=Owner(Lerp(from.Position,to,(cuts[i]+cuts[i-1])/2));if(owner==null)return false;
                 if(owner.SurfaceId!=current){crossed=true;if(!Cross(current,owner.SurfaceId,Lerp(from.Position,to,cuts[i-1])))return false;current=owner.SurfaceId;}
             }
-            var end=Owner(to);if(end==null)return false;
+            if(!ReuseFootprintOwner)endIndex=-1;
+            var end=endIndex<0?Owner(to):regions[endIndex];if(end==null)return false;
             if(current!=end.SurfaceId){crossed=true;if(!Cross(current,end.SurfaceId,to))return false;}
             location=end.OwnedLocation(to);return true;
         }
@@ -364,10 +398,51 @@ namespace Spacewars.Simulation
             if(edgeIndex==null)return Cuts(a,b,edges);
             var cuts=new List<double>{0,1};double dx=b.X-a.X,dz=b.Z-a.Z,length=dx*dx+dz*dz;if(length==0)return cuts;
             double margin=1e-7+(1e-10+1e-12)/Math.Sqrt(length),reach=margin+1e-9;
-            cutCandidates.Clear();foreach(int i in edgeIndex.Candidates(Math.Min(a.X,b.X)-reach,Math.Min(a.Z,b.Z)-reach,Math.Max(a.X,b.X)+reach,Math.Max(a.Z,b.Z)+reach))cutCandidates.Add(i);
+            bool original=edges.Length>4096;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            original|=SortedCutCandidatesForQa;
+#endif
+#if UNITY_INCLUDE_TESTS
+            // Preserve even duplicate observer callbacks in the diagnostic path.
+            original|=DisableCutBitmapForTests||IndexedCutCandidateForTests!=null;
+#endif
+            if(!original){
+                // The old sorted list invokes AddCuts once for each distinct
+                // index in ascending order. Reproduce precisely that sequence,
+                // using at most512B of private stack, with no geometry changes.
+                Span<ulong> seen=stackalloc ulong[(edges.Length+63)/64];seen.Clear();
+                foreach(int i in edgeIndex.Candidates(Math.Min(a.X,b.X)-reach,Math.Min(a.Z,b.Z)-reach,Math.Max(a.X,b.X)+reach,Math.Max(a.Z,b.Z)+reach))seen[i>>6]|=1UL<<(i&63);
+                for(int word=0;word<seen.Length;word++){
+                    ulong pending=seen[word];while(pending!=0){int i=word*64+LowestSetBit(pending);AddCuts(cuts,a,b,dx,dz,length,margin,edges[i]);pending&=pending-1;}
+                }
+                return SortUniqueCuts(cuts);
+            }
+            // Scratch belongs to this query, including while another caller restores a world.
+            var cutCandidates=new List<int>();foreach(int i in edgeIndex.Candidates(Math.Min(a.X,b.X)-reach,Math.Min(a.Z,b.Z)-reach,Math.Max(a.X,b.X)+reach,Math.Max(a.Z,b.Z)+reach))cutCandidates.Add(i);
             cutCandidates.Sort();int previous=-1;
-            foreach(int i in cutCandidates){if(i==previous)continue;previous=i;AddCuts(cuts,a,b,dx,dz,length,margin,edges[i]);}
+            foreach(int i in cutCandidates){
+#if UNITY_INCLUDE_TESTS
+                IndexedCutCandidateForTests?.Invoke(this);
+#endif
+                if(i==previous)continue;previous=i;AddCuts(cuts,a,b,dx,dz,length,margin,edges[i]);}
             return SortUniqueCuts(cuts);
+        }
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private static readonly bool SortedCutCandidatesForQa=Environment.GetEnvironmentVariable("SPACEWARS_SORT_CUT_CANDIDATES")=="1";
+#endif
+#if UNITY_INCLUDE_TESTS
+        internal static bool DisableCutBitmapForTests;
+#endif
+        private static int LowestSetBit(ulong value)
+        {
+            int bit=0;
+            if((value&0xffffffffUL)==0){bit+=32;value>>=32;}
+            if((value&0xffffUL)==0){bit+=16;value>>=16;}
+            if((value&0xffUL)==0){bit+=8;value>>=8;}
+            if((value&0xfUL)==0){bit+=4;value>>=4;}
+            if((value&3UL)==0){bit+=2;value>>=2;}
+            if((value&1UL)==0)bit++;
+            return bit;
         }
         private static List<double> SortUniqueCuts(List<double> cuts)
         {

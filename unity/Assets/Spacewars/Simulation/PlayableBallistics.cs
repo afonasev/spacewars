@@ -25,8 +25,9 @@ namespace Spacewars.Simulation
     {
         public readonly int Id; public readonly PlayableOwner Owner; public readonly NavPoint Position,Velocity;
         public readonly double Radius,Height,Health,BaseHeight; public readonly bool Building;
-        public BallisticBody(int id,PlayableOwner owner,NavPoint position,NavPoint velocity,double radius,double height,double health,bool building,double baseHeight=0){BaseHeight=baseHeight;Id=id;Owner=owner;Position=position;Velocity=velocity;Radius=radius;Height=height;Health=health;Building=building;}
-        public BallisticBody Predict(double time,Func<NavPoint,double> terrain=null){var point=new NavPoint(Position.X+Velocity.X*time,Position.Z+Velocity.Z*time);return new BallisticBody(Id,Owner,point,Velocity,Radius,Height,Health,Building,terrain?.Invoke(point)??BaseHeight);}
+        public readonly BuildingCombatPose? Combat;
+        public BallisticBody(int id,PlayableOwner owner,NavPoint position,NavPoint velocity,double radius,double height,double health,bool building,double baseHeight=0,BuildingCombatPose? combat=null){Combat=combat;BaseHeight=baseHeight;Id=id;Owner=owner;Position=position;Velocity=velocity;Radius=radius;Height=height;Health=health;Building=building;}
+        public BallisticBody Predict(double time,Func<NavPoint,double> terrain=null){var point=new NavPoint(Position.X+Velocity.X*time,Position.Z+Velocity.Z*time);return new BallisticBody(Id,Owner,point,Velocity,Radius,Height,Health,Building,terrain?.Invoke(point)??BaseHeight,Combat);}
     }
     public readonly struct BallisticContact
     {
@@ -70,8 +71,10 @@ namespace Spacewars.Simulation
             // IReadOnlyList foreach boxes array/list enumerators on this hot per-sample
             // path. Index in the same order; keep every exact contact predicate.
             for(int i=0;i<solids.Count;i++){var s=solids[i];if(p.Y+radius>=s.Bottom&&p.Y-radius<=(double.IsNaN(s.Top)?wallHeight:s.Top)&&Overlap(s,p,radius))return -1;}
-            for(int i=0;i<bodies.Count;i++){var b=bodies[i];if(b.Building&&b.Id!=ignored&&p.Y+radius>=b.BaseHeight&&p.Y-radius<=b.BaseHeight+b.Height)
-                {double x=p.X-b.Position.X,z=p.Z-b.Position.Z,r=b.Radius+radius;if(x*x+z*z<=r*r)return b.Id;}}
+            for(int i=0;i<bodies.Count;i++){var b=bodies[i];if(!b.Building||b.Id==ignored)continue;
+                if(b.Combat.HasValue){if(b.Combat.Value.Overlaps(p,radius))return b.Id;continue;}
+                if(p.Y+radius>=b.BaseHeight&&p.Y-radius<=b.BaseHeight+b.Height){double x=p.X-b.Position.X,z=p.Z-b.Position.Z,r=b.Radius+radius;if(x*x+z*z<=r*r)return b.Id;}}
+
             return 0;
         }
         public static BallisticContact? FirstContact(BallisticFlight f,double radius,IReadOnlyList<NavObstacle> solids,double wallHeight,IReadOnlyList<BallisticBody> bodies,int source,double from=0,double to=1,Func<NavPoint,double> terrain=null)
@@ -79,7 +82,7 @@ namespace Spacewars.Simulation
             var middle=new BallisticPoint((f.Start.X+f.End.X)/2,0,(f.Start.Z+f.End.Z)/2);
             double reach=Math.Sqrt((f.End.X-f.Start.X)*(f.End.X-f.Start.X)+(f.End.Z-f.Start.Z)*(f.End.Z-f.Start.Z))/2+radius;
             solids=solids.Where(s=>Overlap(s,middle,reach)).ToArray();
-            bodies=bodies.Where(b=>b.Building&&b.Id!=source&&Math.Sqrt((b.Position.X-middle.X)*(b.Position.X-middle.X)+(b.Position.Z-middle.Z)*(b.Position.Z-middle.Z))<=reach+b.Radius).ToArray();
+            bodies=bodies.Where(b=>b.Building&&b.Id!=source&&Math.Sqrt((b.Position.X-middle.X)*(b.Position.X-middle.X)+(b.Position.Z-middle.Z)*(b.Position.Z-middle.Z))<=reach+(b.Combat?.Reach??b.Radius)).ToArray();
             if(solids.Count==0&&bodies.Count==0&&terrain==null)
             {
                 BallisticContact? first=null;double a=-4*f.ArcHeight,b=f.End.Y-f.Start.Y+4*f.ArcHeight;
@@ -97,7 +100,7 @@ namespace Spacewars.Simulation
             for(int i=1;i<=steps;i++)
             {
                 double u=from+(to-from)*i/steps;var p=f.Point(u);int hit=Cover(p,radius,solids,wallHeight,bodies,source);
-                if(hit!=0)return new BallisticContact(u,p,Math.Max(0,hit));
+                if(hit!=0){var at=p;for(int j=0;j<bodies.Count;j++)if(bodies[j].Id==hit&&bodies[j].Combat.HasValue){at=bodies[j].Combat.Value.Closest(p);break;}return new BallisticContact(u,at,Math.Max(0,hit));}
                 double ground=terrain?.Invoke(p.Ground)??0,previousGround=terrain?.Invoke(prev.Ground)??0;
                 if((prev.Y-radius>previousGround+Eps&&p.Y-radius<=ground+Eps)||(prev.Y+radius<previousGround-Eps&&p.Y+radius>=ground-Eps))return new BallisticContact(u,new BallisticPoint(p.X,ground,p.Z));
                 prev=p;
@@ -130,8 +133,9 @@ namespace Spacewars.Simulation
         public static bool BlastHits(BallisticPoint impact,double radius,BallisticBody target,IReadOnlyList<NavObstacle> solids,double wallHeight,IReadOnlyList<BallisticBody> bodies,Func<NavPoint,double> terrain=null)
         {
             double x=target.Position.X-impact.X,z=target.Position.Z-impact.Z,y=Math.Max(target.BaseHeight,Math.Min(target.BaseHeight+target.Height,impact.Y));
+            if(target.Combat.HasValue){var nearest=target.Combat.Value.Closest(impact);double dx=nearest.X-impact.X,dy0=nearest.Y-impact.Y,dz=nearest.Z-impact.Z;if(dx*dx+dy0*dy0+dz*dz>(radius+Eps)*(radius+Eps))return false;}
             double horizontal=Math.Max(0,Math.Sqrt(x*x+z*z)-target.Radius);
-            if(Math.Sqrt(horizontal*horizontal+(y-impact.Y)*(y-impact.Y))>radius+Eps)return false;
+            if(!target.Combat.HasValue&&Math.Sqrt(horizontal*horizontal+(y-impact.Y)*(y-impact.Y))>radius+Eps)return false;
             double destY=Math.Max(target.BaseHeight+Eps,Math.Min(target.BaseHeight+target.Height,impact.Y+Eps)),dy=destY-impact.Y;
             int steps=Math.Max(1,(int)Math.Ceiling(Math.Sqrt(x*x+z*z+dy*dy)/.025));
             for(int i=1;i<steps;i++){double u=(double)i/steps;var p=new BallisticPoint(impact.X+x*u,impact.Y+Eps+dy*u,impact.Z+z*u);if(Cover(p,0,solids,wallHeight,bodies,target.Id)!=0||(terrain!=null&&p.Y<terrain(p.Ground)-Eps))return false;}

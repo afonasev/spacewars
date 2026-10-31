@@ -60,5 +60,23 @@ namespace Spacewars.Tests.EditMode
             watch.Restart();for(int i=0;i<100000;i++)using(PerformanceProfile.Sample(ProfileStage.ExactCompare)){}watch.Stop();
             TestContext.WriteLine("PROFILE_SAMPLE_100K enabled="+PerformanceProfile.Enabled+" wall_ms="+watch.Elapsed.TotalMilliseconds);
         }
+        [Test] public void StageSelectionExcludesUnselectedMeasurementsAndSampleAttempts()
+        {
+            var output=new StringWriter();var previous=Console.Out;Exception failure=null;
+            try{Console.SetOut(output);var worker=new Thread(()=>{try{
+                for(int i=0;i<(int)ProfileStage.Count;i++){using(PerformanceProfile.Measure((ProfileStage)i)){}using(PerformanceProfile.Sample((ProfileStage)i)){}}
+                PerformanceProfile.Flush();
+            }catch(Exception ex){failure=ex;}});worker.Start();Assert.True(worker.Join(5000));}
+            finally{Console.SetOut(previous);}
+            Assert.Null(failure);string text=output.ToString();
+            if(!PerformanceProfile.Enabled){Assert.AreEqual("",text);return;}
+            var filter=Environment.GetEnvironmentVariable("SPACEWARS_PROFILE_STAGES");var selected=string.IsNullOrWhiteSpace(filter)?null:new System.Collections.Generic.HashSet<string>(Array.ConvertAll(filter.Split(new[]{','},StringSplitOptions.RemoveEmptyEntries),s=>s.Trim()));int expected=0;
+            for(int i=0;i<(int)ProfileStage.Count;i++){
+                string name=((ProfileStage)i).ToString();
+                if(selected==null||selected.Contains(name)){StringAssert.Contains("stage="+name+" calls=2",text);expected++;}
+                else StringAssert.DoesNotContain("stage="+name+" ",text);
+            }
+            Assert.AreEqual(expected,text.Split(new[]{Environment.NewLine},StringSplitOptions.RemoveEmptyEntries).Length);
+        }
     }
 }

@@ -24,6 +24,18 @@ namespace Spacewars.Tests.EditMode
         void Until(Func<bool> condition,int limit=900){for(int i=0;i<limit&&!condition();i++)Tick();Assert.True(condition(),"Fixed combat horizon exhausted");}
         [SetUp] public void Setup(){p=PlayableProfile.Default;d=new PlayableDomain(p,1,false);foreach(int id in Units.Keys.Cast<int>().ToArray()){d.Navigation.Remove(id);Units.Remove(id);}}
         [TearDown] public void Cleanup(){d.Navigation.ReleaseCommittedHostRoot();d.DestroyOwnedNavigation();}
+        [Test] public void ResearchAppearanceAndLaunchFactsReachOwnerSnapshot()
+        {
+            int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);
+            Assert.False(Entity(a).Upgraded);CompleteSalvoResearch();Assert.True(Entity(a).Upgraded);
+            var observed=d.PlayerSnapshot(1,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+            Assert.True(observed.Entities.Single(e=>e.Id==a).Upgraded);
+            int future=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-12,15);Assert.True(Entity(future).Upgraded);
+            Call("LaunchHawk",Unit(a),b,0);Call("LaunchHawk",Unit(a),b,1);
+            var facts=View.Sounds.Where(e=>e.Kind==PlayableSoundKind.Shot&&e.UnitId==a).ToArray();
+            CollectionAssert.AreEqual(new[]{0,1},facts.Select(e=>e.ShotSide).ToArray());
+            Assert.AreEqual(2,View.Projectiles.Count(e=>e.Kind==PlayableEntityKind.Hawk));
+        }
         [Test] public void PairUsesFixedTargetAndSixHitsKillPeerWithoutGroundWreckAuthority()
         {
             int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);Set(b,"Reload",1000d);
@@ -54,9 +66,87 @@ namespace Spacewars.Tests.EditMode
             try{CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,"hawk-combat"));for(int i=0;i<60;i++){original.Step(1d/30);restored.Step(1d/30);}CollectionAssert.AreEqual(original.CaptureWorldBytes(7,"hawk-combat"),restored.CaptureWorldBytes(7,"hawk-combat"));}
             finally{restored.Navigation.ReleaseCommittedHostRoot();restored.DestroyOwnedNavigation();}
         }
+        [TestCase(false,false)] [TestCase(true,false)] [TestCase(false,true)] [TestCase(true,true)]
+        public void OrdinaryRocketSteersOnlyWhenTargetMovesAway(bool receding,bool upgraded)
+        {
+            if(upgraded)CompleteSalvoResearch();
+            int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);
+            Call("LaunchHawk",Unit(a),b,0);
+            var shots=(IList)typeof(PlayableDomain).GetField("projectiles",Hidden).GetValue(d);
+            var shot=shots[0];var rocket=(HawkRocketFlight)shot.GetType().GetField("Hawk").GetValue(shot);
+            var heading=rocket.Direction;
+            // A small lateral displacement exposes steering even before physical contact.
+            var air=Get<object>(b,"Air");var actor=(NavUnit)air.GetType().GetField("Actor").GetValue(air);
+            actor.Position=new NavPoint(-3,16);
+            Set(b,"Velocity",receding?new NavPoint(1,0):default(NavPoint));
+            Assert.False((bool)Call("AdvanceAirProjectile",shot,.01d));
+            if(receding&&upgraded)Assert.AreNotEqual(heading,rocket.Direction);
+            else Assert.AreEqual(heading,rocket.Direction,"Steering requires completed research and a receding target");
+        }
+        [Test] public void ResearchDoesNotUpgradeAnInFlightMissileAndLaunchTermsRestoreExactly()
+        {
+            int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);
+            Call("LaunchHawk",Unit(a),b,0);CompleteSalvoResearch();Call("LaunchHawk",Unit(a),b,1);
+            var shots=(IList)typeof(PlayableDomain).GetField("projectiles",Hidden).GetValue(d);
+            HawkRocketFlight Rocket(object shot)=>(HawkRocketFlight)shot.GetType().GetField("Hawk").GetValue(shot);
+            Assert.Zero(Rocket(shots[0]).TurnSpeed);Assert.AreEqual(p.HawkMissileTurn,Rocket(shots[1]).TurnSpeed);
+            var bytes=d.CaptureWorldBytes(7,"research-flight");var restored=PlayableDomain.RestoreWorldBytes(bytes,p,7,"research-flight");
+            try{CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,"research-flight"));for(int n=0;n<10;n++){d.Step(1d/30);restored.Step(1d/30);}CollectionAssert.AreEqual(d.CaptureWorldBytes(7,"research-flight"),restored.CaptureWorldBytes(7,"research-flight"));}
+            finally{restored.Navigation.ReleaseCommittedHostRoot();restored.DestroyOwnedNavigation();}
+        }
+        static object Read(object value,string name)=>value.GetType().GetField(name).GetValue(value);
+        static void Write(object value,string name,object data)=>value.GetType().GetField(name).SetValue(value,data);
+        void PlaceAir(int id,BallisticPoint center)
+        {
+            var air=Get<object>(id,"Air");var actor=(NavUnit)Read(air,"Actor");
+            actor.Position=center.Ground;actor.Goal=center.Ground;actor.Moving=false;
+            double height=center.Y-1.8145018368959427*p.HawkModelScale/2;
+            Write(air,"Height",height);Write(air,"PreviousHeight",height);Set(id,"PreviousPosition",center.Ground);Set(id,"Velocity",default(NavPoint));
+        }
+        [TestCase(false,false)] [TestCase(false,true)] [TestCase(true,false)] [TestCase(true,true)]
+        public void FullWeaponRangeBudgetCanHitSecondaryAirTargetButNeverBeyondEnd(bool explorer,bool beyond)
+        {
+            int a=Spawn(PlayableOwner.Player,explorer?PlayableEntityKind.Explorer:PlayableEntityKind.Hawk,-10,15),initial=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-6,15);
+            if(explorer){Set(a,"Target",initial);Set(a,"BurstSize",4);Set(a,"BurstRemaining",4);Set(a,"BurstSpread",p.ExplorerSpreadDeg);Call("FireTracer",Unit(a),Entity(a).Position,Entity(initial).Position);}
+            else Call("LaunchHawk",Unit(a),initial,0);
+            var shots=(IList)typeof(PlayableDomain).GetField("projectiles",Hidden).GetValue(d);Assert.AreEqual(1,shots.Count);var shot=shots[0];
+            var rocket=Read(shot,"Hawk") as HawkRocketFlight;
+            var ground=(NavPoint)Read(shot,"Position");var start=new BallisticPoint(ground.X,(double)Read(shot,"Height"),ground.Z);
+            var direction=rocket?.Direction??new BallisticPoint((double)Read(shot,"DirectionX"),(double)Read(shot,"DirectionY"),(double)Read(shot,"DirectionZ"));
+            double remaining=rocket!=null?rocket.RemainingLife*rocket.Speed:(double)Read(shot,"Remaining");
+            double offset=explorer?p.ExplorerMuzzleOffset:HawkRocketFlight.Length(HawkRocketFlight.Sub(start,new BallisticPoint(-10,Entity(a).Altitude+1.8145018368959427*p.HawkModelScale/2,15)));
+            Assert.AreEqual(12,offset+remaining,1e-9,"Budget derives from range 10, not initial target distance 4");
+            PlaceAir(initial,new BallisticPoint(-6,3.4,22));
+            var next=HawkRocketFlight.Add(start,HawkRocketFlight.Scale(direction,remaining+(beyond?p.HawkRadius+.3:-.15)));
+            int secondary=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,next.X,next.Z);PlaceAir(secondary,next);
+            Assert.True((bool)Call("AdvanceAirProjectile",shot,2d),"Large step expires exactly at the travel boundary or a prior contact");
+            Assert.AreEqual(p.HawkHealth-(beyond?0:explorer?p.ExplorerDamage:p.HawkDamage),Entity(secondary).ExactHealth.Value,1e-9);
+            Assert.AreEqual(p.HawkHealth,Entity(initial).ExactHealth.Value);
+        }
+        [TestCase(false)] [TestCase(true)]
+        public void FirstEffectiveSalvoReportsRealLaunchAndDamageTiming(bool upgraded)
+        {
+            if(upgraded)CompleteSalvoResearch();
+            int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);Set(b,"Reload",1000d);
+            long start=d.Tick;double first=-1,second=-1,damage=-1;int launches=0;
+            for(int tick=0;tick<300;tick++)
+            {
+                Tick();double seconds=(d.Tick-start)/30d;
+                // Persistent burst state gives launch timestamps without depending on sound history retention.
+                if(first<0&&Get<int>(a,"BurstSequence")>0){first=seconds;launches=1;}
+                if(first>=0&&second<0&&Get<int>(a,"BurstRemaining")==0){second=seconds;launches=2;}
+                if(damage<0&&Entity(b).Health<p.HawkHealth)damage=seconds;
+                if(second>=0&&damage>=0)break;
+            }
+            TestContext.WriteLine($"HAWK_FIRST_SALVO upgraded={upgraded} distance=7 target=stationary-air dt=0.03333333333333333 firstLaunch={first:R} secondLaunch={second:R} firstDamage={damage:R} targetHp={Entity(b).ExactHealth:R}");
+            Assert.AreEqual(2,launches);Assert.GreaterOrEqual(first,upgraded?p.HawkUpgradedPreparationSeconds:p.HawkPreparationSeconds);
+            Assert.Greater(second,first);Assert.Greater(damage,first);Assert.Less(damage,10);
+        }
         void CompleteSalvoResearch()
         {
             Call("AddCredits",PlayableOwner.Player,10000d);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,5,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));
+            Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
             Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,2,PlayableBuildingKind.ScientificCenter,1,PlayableOwner.Player,null));
             Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
             int center=View.Buildings.Single(b=>b.Owner==PlayableOwner.Player&&b.Kind==PlayableBuildingKind.ScientificCenter).Id;
@@ -111,10 +201,10 @@ namespace Spacewars.Tests.EditMode
         [Test] public void SweptRocketMeetsRockAndEarliestBodyBeforeBuilding()
         {
             var rock=PlayableMap.SolidObstacles(p).First();double z=(rock.MinZ+rock.MaxZ)/2;
-            var args=new object[]{new BallisticPoint(rock.MinX-1,.5,z),new BallisticPoint(rock.MaxX+1,.5,z),.07d,0,null,false,0,default(BallisticPoint),0d};
+            var args=new object[]{new BallisticPoint(rock.MinX-1,.5,z),new BallisticPoint(rock.MaxX+1,.5,z),.07d,0,null,false,0,default(BallisticPoint),0d,0};
             Assert.True((bool)typeof(PlayableDomain).GetMethod("AirContact",Hidden).Invoke(d,args));Assert.Zero((int)args[6]);
             var hq=View.Buildings.First(b=>b.Kind==PlayableBuildingKind.Headquarters);double x=hq.Position.X,z2=hq.Position.Z;int near=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Explorer,x-8,z2);
-            args=new object[]{new BallisticPoint(x-10,.5,z2),new BallisticPoint(x+5,.5,z2),.07d,0,null,false,0,default(BallisticPoint),0d};Assert.True((bool)typeof(PlayableDomain).GetMethod("AirContact",Hidden).Invoke(d,args));Assert.AreEqual(near,(int)args[6],"First unit in front of the building receives physical contact");
+            args=new object[]{new BallisticPoint(x-10,.5,z2),new BallisticPoint(x+5,.5,z2),.07d,0,null,false,0,default(BallisticPoint),0d,0};Assert.True((bool)typeof(PlayableDomain).GetMethod("AirContact",Hidden).Invoke(d,args));Assert.AreEqual(near,(int)args[6],"First unit in front of the building receives physical contact");
             Call("Damage",near,10000);args[6]=0;Assert.True((bool)typeof(PlayableDomain).GetMethod("AirContact",Hidden).Invoke(d,args));Assert.AreEqual(hq.Id,(int)args[6],"Building stops the same 3D ray");
         }
         [Test] public void VerticalMotionPreservesPreparationAndSubstantialYawResetsIt()

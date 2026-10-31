@@ -11,6 +11,7 @@ namespace Spacewars.Simulation
             if(movementGeometry==null)throw new ArgumentNullException(nameof(movementGeometry));
             if(terrain==null)return checked(4096L+1024+2048+512+
                 movementGeometry.Obstacles.Sum(o=>512L+128L*(o.Polygon?.Vertices.Count??4))+4096);
+            if(terrain is StackedRampQualificationMap physical)return checked(8192L+2L*(physical.Provider.EstimatedRetainedBytes+6L*movementGeometry.Obstacles.Sum(o=>512L+128L*(o.Polygon?.Vertices.Count??4)))+movementGeometry.SpatialIndexRetainedBytes);
             if(!PartitionNavigationProvider.SupportsTerrain(terrain)||!(terrain is INavArrivalPointTerrain authored))
                 throw new ArgumentException("No construction bound for this authored terrain.",nameof(terrain));
             var locations=authored.ArrivalLocations;

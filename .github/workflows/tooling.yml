@@ -1,0 +1,49 @@
+name: Affected tooling contracts
+on:
+  pull_request:
+    paths:
+      - 'tools/**'
+      - 'Makefile'
+      - 'unity/Assets/Spacewars/Runtime/**'
+      - 'unity/Assets/Spacewars/Simulation/**'
+      - '.github/workflows/tooling.yml'
+permissions:
+  contents: read
+jobs:
+  tooling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Select affected contracts
+        id: selection
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 tools/select_tooling_tests.py --base "$BASE_SHA" --github-output "$GITHUB_OUTPUT"
+      - name: Run selected Python tooling tests
+        if: steps.selection.outputs.modules != ''
+        env:
+          PYTHONPATH: tools
+          SELECTED_TESTS: ${{ steps.selection.outputs.modules }}
+        run: python3 -m unittest $SELECTED_TESTS
+      - uses: actions/setup-dotnet@v6
+        if: steps.selection.outputs.decision_lab == 'true'
+        with:
+          dotnet-version: '8.0.x'
+      - name: Check production decision contracts and runner failure contracts
+        if: steps.selection.outputs.decision_lab == 'true'
+        run: |
+          python3 tools/ai-decision-lab/run.py --output .local/tooling-ci/decision-lab
+          python3 tools/ai-decision-lab/test_runner.py
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.selection.outputs.decision_lab == 'true'
+        with:
+          name: decision-lab-evidence
+          path: .local/tooling-ci/decision-lab/
+          include-hidden-files: true
+          retention-days: 14

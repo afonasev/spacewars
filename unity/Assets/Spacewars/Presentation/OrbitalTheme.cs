@@ -17,20 +17,60 @@ namespace Spacewars.Presentation
         public static readonly Color Line = new Color(.23f,.33f,.39f);
         // One scale authority for installed menu routes and HUD, including Retina backing pixels.
         public static float ReadableScale(int width,int height)=>Mathf.Max(1f,Mathf.Min(width/1280f,height/800f));
+        private const float DeviceFpsWidth=64;
         public static void ConfigurePanel(PanelSettings panel,VisualElement root)
         {
             panel.scaleMode=PanelScaleMode.ConstantPixelSize;
+            // A fixed device overlay gutter; no HUD panel or gameplay tuning belongs to the FPS label.
+            var fps=new Label(){name="device-fps",pickingMode=PickingMode.Ignore};
+            fps.style.position=Position.Absolute;fps.style.left=8;fps.style.top=8;fps.style.display=NativeDevicePreferences.ShowFps?DisplayStyle.Flex:DisplayStyle.None;
+            fps.style.marginLeft=fps.style.marginRight=fps.style.marginTop=fps.style.marginBottom=0;fps.style.paddingLeft=fps.style.paddingRight=0;
+            fps.style.width=DeviceFpsWidth;fps.style.whiteSpace=WhiteSpace.NoWrap;fps.style.overflow=Overflow.Hidden;
+            fps.style.color=Color.white;fps.style.fontSize=12;fps.style.unityTextAlign=TextAnchor.UpperLeft;
+            fps.style.textShadow=new TextShadow{color=Color.black,offset=new Vector2(0,1),blurRadius=2};root.Add(fps);
             void Resize()
             {
                 var target=panel.targetTexture;
                 float scale=ReadableScale(target!=null?target.width:UnityEngine.Screen.width,target!=null?target.height:UnityEngine.Screen.height);
                 scale*=NativeDevicePreferences.UiScale;root.EnableInClassList("high-contrast",NativeDevicePreferences.HighContrast);
                 if(!Mathf.Approximately(panel.scale,scale))panel.scale=scale;
+                LayoutDeviceDiagnostics(root);
             }
-            var fps=new Label(){name="device-fps",pickingMode=PickingMode.Ignore};fps.style.position=Position.Absolute;fps.style.left=8;fps.style.top=4;root.Add(fps);
             float last=Time.realtimeSinceStartup;int frames=Time.frameCount;
             root.schedule.Execute(()=>{fps.style.display=NativeDevicePreferences.ShowFps?DisplayStyle.Flex:DisplayStyle.None;float now=Time.realtimeSinceStartup;fps.text=Mathf.RoundToInt((Time.frameCount-frames)/Mathf.Max(.001f,now-last))+" FPS";last=now;frames=Time.frameCount;fps.BringToFront();}).Every(500);
+            fps.RegisterCallback<GeometryChangedEvent>(_=>LayoutDeviceDiagnostics(root));
             Resize();root.RegisterCallback<GeometryChangedEvent>(_=>Resize());root.schedule.Execute(Resize).Every(100);
+        }
+        public static void LayoutDeviceDiagnostics(VisualElement root)
+        {
+            if(root==null)return;
+            var fps=root.Q<Label>("device-fps");if(fps==null)return;
+            fps.style.display=NativeDevicePreferences.ShowFps?DisplayStyle.Flex:DisplayStyle.None;
+            fps.style.left=8;fps.style.top=8;fps.style.marginLeft=0;
+            fps.style.backgroundColor=Color.clear;fps.style.unityTextAlign=TextAnchor.UpperLeft;
+            if(root.ClassListContains("local-split-screen"))
+            {
+                fps.style.left=Length.Percent(50);fps.style.marginLeft=-DeviceFpsWidth/2;
+                fps.style.backgroundColor=new Color(Panel.r,Panel.g,Panel.b,1);fps.style.unityTextAlign=TextAnchor.MiddleCenter;
+                fps.BringToFront();return;
+            }
+            var table=root.Q("spectator-summary");if(table==null||table.resolvedStyle.display==DisplayStyle.None||table.parent==null)return;
+            const float gutter=8;
+            var parent=table.parent;float width=parent.resolvedStyle.width;
+            table.style.left=gutter;table.style.top=gutter;
+            if(width>0)table.style.maxWidth=Mathf.Max(0,width-2*gutter);
+            var controls=table.Q("spectator-controls");if(controls==null)return;
+            fps.style.left=root.WorldToLocal(controls.worldBound.min).x+gutter;
+            // Reserve the same inner gutter before FPS and between FPS and speeds.
+            controls.style.paddingLeft=NativeDevicePreferences.ShowFps?DeviceFpsWidth+2*gutter:gutter;
+            if(NativeDevicePreferences.ShowFps&&controls.worldBound.height>0)
+                fps.style.top=root.WorldToLocal(controls.worldBound.center).y-fps.resolvedStyle.height/2;
+            var resources=root.Q("match-header");float rightPadding=gutter;
+            if(resources!=null&&resources.resolvedStyle.display!=DisplayStyle.None&&resources.worldBound.height>0
+                &&resources.worldBound.Overlaps(controls.worldBound))
+                rightPadding=Mathf.Max(gutter,controls.worldBound.xMax-resources.worldBound.xMin+gutter);
+            controls.style.paddingRight=rightPadding;
+            if(resources!=null&&resources.resolvedStyle.display!=DisplayStyle.None)resources.BringToFront();
         }
         public static void Install(VisualElement root)
         {

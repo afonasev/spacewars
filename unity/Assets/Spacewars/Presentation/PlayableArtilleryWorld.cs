@@ -9,7 +9,10 @@ namespace Spacewars.Presentation
     {
         private readonly Dictionary<int,GameObject> impactMarkers=new Dictionary<int,GameObject>(),impactEffects=new Dictionary<int,GameObject>();
         private Material artilleryTransparent;
+        private ShkvalArtProfile shkvalArt;
+        private ShkvalArtProfile ShkvalArt=>shkvalArt??(shkvalArt=ShkvalArtProfile.Load());
         private readonly WebProjectileVisuals projectileVisuals=new WebProjectileVisuals();
+        private HawkVisualProfile hawkVisual;
         private Material TransparentArtillery
         {
             get
@@ -28,12 +31,13 @@ namespace Spacewars.Presentation
         }
         private void ClearArtilleryEffects()
         {
-            ClearDirectContacts();
+            ClearDirectContacts();observedShkvalLaunches.Clear();shkvalLaunchFrames.Clear();
             foreach(var g in impactMarkers.Values)Destroy(g);impactMarkers.Clear();foreach(var g in impactEffects.Values)Destroy(g);impactEffects.Clear();
         }
         private void RenderProjectiles()
         {
             var live=new HashSet<int>();var markerIds=new HashSet<int>();
+            UpdateShkvalLaunchPresentation();
             foreach(var p in view.Projectiles)
             {
                 // Ground offset and wafer thickness avoid depth fighting; they do not size the danger area.
@@ -50,26 +54,31 @@ namespace Spacewars.Presentation
                 if(!shells.TryGetValue(p.Id,out var shell))
                 {
                     if(p.Kind==PlayableEntityKind.Hawk)
-                    {shell=projectileVisuals.Rocket(transform,(float)profile.HawkMissileRadius,(float)profile.HawkMissileLength,ShotColor(p.Faction));}
+                    {shell=projectileVisuals.HawkRocket(transform,(float)profile.HawkMissileRadius,(float)profile.HawkMissileLength,ShotColor(p.Faction));}
                     else if(p.Kind==PlayableEntityKind.Shkval)
                     {
-                        shell=projectileVisuals.Rocket(transform,(float)profile.ShkvalProjectileRadius,(float)profile.ShkvalProjectileLength,ShotColor(p.Faction));
+                        shell=CreateShkvalFlight(p);
                     }
-                    else if(p.Kind==PlayableEntityKind.Tank&&profile.TankProjectileType=="kinetic-shell")shell=projectileVisuals.Tank(transform);
+                    else if(p.Kind==PlayableEntityKind.Tank&&profile.TankProjectileType=="kinetic-shell")shell=projectileVisuals.Tank(transform,world.HybridTanks);
                     else if(p.Kind==PlayableEntityKind.Explorer)shell=projectileVisuals.Tracer(transform,(float)profile.ExplorerTracerLength,(float)profile.ExplorerTracerThickness);
                     else shell=world.Part("Energy orb",transform,Vector3.zero,Vector3.one*.36f,new Color(.498f,.965f,1),PrimitiveType.Sphere);
                     world.Layer(shell);shells[p.Id]=shell;
                 }
                 shell.transform.position=new Vector3((float)p.Position.X,(float)p.Height,(float)p.Position.Z);
                 shell.transform.rotation=Quaternion.Euler(0,-(float)p.Heading*Mathf.Rad2Deg,0)*Quaternion.Euler(0,0,(float)p.Pitch*Mathf.Rad2Deg);
-                if(p.Kind==PlayableEntityKind.Hawk)projectileVisuals.Exhaust(shell,(float)profile.HawkMissileLength,(float)profile.HawkMissileRadius,(float)profile.WeaponMuzzleCoreRatio,(float)profile.ShkvalExhaustOpacity);
+                if(p.Kind==PlayableEntityKind.Hawk)shell.transform.localScale=Vector3.one*(float)profile.HawkMissileVisualScale;
+                if(p.Kind==PlayableEntityKind.Hawk)
+                {hawkVisual=hawkVisual??HawkVisualProfile.Load();projectileVisuals.Exhaust(shell,(float)profile.HawkMissileLength*hawkVisual.exhaustLength,(float)profile.HawkMissileRadius*hawkVisual.exhaustWidth,(float)profile.WeaponMuzzleCoreRatio,(float)profile.ShkvalExhaustOpacity);}
                 if(p.Kind==PlayableEntityKind.Shkval)
                 {
-                    float boost=1+(float)(profile.ShkvalExhaustStartBoost-1)*Mathf.Clamp01(1-(float)(p.Age/profile.ShkvalExhaustStartupSec));
+                    ApplyShkvalMuzzlePose(p,shell.transform);
+                    float pulse=1+ShkvalArt.flamePulse*Mathf.Sin((float)p.Age*ShkvalArt.flameFrequency*Mathf.PI*2);
+                    float boost=pulse*(1+(float)(profile.ShkvalExhaustStartBoost-1)*Mathf.Clamp01(1-(float)(p.Age/profile.ShkvalExhaustStartupSec)));
                     projectileVisuals.Exhaust(shell,(float)profile.ShkvalExhaustLength*boost,(float)profile.ShkvalExhaustRadius*boost,(float)profile.WeaponMuzzleCoreRatio,(float)profile.ShkvalExhaustOpacity);
+                    UpdateShkvalExhaustClip(p,shell);
                 }
             }
-            foreach(var id in shells.Keys.Where(id=>!live.Contains(id)).ToArray()){Destroy(shells[id]);shells.Remove(id);}
+            foreach(var id in shells.Keys.Where(id=>!live.Contains(id)).ToArray()){Destroy(shells[id]);shells.Remove(id);observedShkvalLaunches.Remove(id);shkvalLaunchFrames.Remove(id);}
             foreach(var id in impactMarkers.Keys.Where(id=>!markerIds.Contains(id)).ToArray()){Destroy(impactMarkers[id]);impactMarkers.Remove(id);}
             var effects=new HashSet<int>();foreach(var p in view.Impacts)
             {

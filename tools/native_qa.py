@@ -6,8 +6,10 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 from check_qa import plan, validate_results
+from qa_project_settings import ProjectSettingsGuard
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -55,12 +57,18 @@ def main():
         row = {'step': step, 'command': command, 'exit_code': None}
         manifest['steps'].append(row)
         if not args.dry_run:
+            settings = ProjectSettingsGuard(ROOT, Path(tempfile.mkdtemp(
+                prefix=step + '-project-settings-', dir=output)))
             # Never accept a stale XML from an earlier run.
             xml_path = output / (step + '.xml')
             if step != 'build':
                 xml_path.unlink(missing_ok=True)
-            with (output / (step + '-host.log')).open('w') as log:
-                row['exit_code'] = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT).returncode
+            try:
+                with (output / (step + '-host.log')).open('w') as log:
+                    row['exit_code'] = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT).returncode
+            finally:
+                row['project_settings'] = settings.finish()
+                (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
             if step != 'build' and xml_path.exists():
                 result = ET.parse(xml_path).getroot()
                 row['tests'] = {k: result.get(k) for k in ['result', 'total', 'passed', 'failed', 'skipped']}
@@ -72,6 +80,8 @@ def main():
                     row['passed'] = False
             else:
                 row['passed'] = step == 'build' and row['exit_code'] == 0 and 'PLAYABLE_BUILD_PASS' in (output / 'build.log').read_text(errors='replace')
+            row['tests_passed'] = row['passed']
+            row['passed'] &= row['project_settings']['unchanged']
             failed |= not row['passed']
         (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
         print(json.dumps(row), flush=True)

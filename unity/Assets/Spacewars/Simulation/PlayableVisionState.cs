@@ -15,6 +15,7 @@ namespace Spacewars.Simulation
         public PlayableBuildingKind Kind;
         public double X, Z, Heading;
         public bool RefineryUpgraded;
+        public bool ScientificCenterUpgraded;
     }
     // A subsystem checkpoint, not a complete world/archive. The enclosing world state
     // must bind profile/map/generation/tick and coordinate the authoritative sources.
@@ -32,7 +33,7 @@ namespace Spacewars.Simulation
     public sealed partial class PlayableVision
     {
         // Technical format identity, never a balance setting. Unsupported formats fail closed.
-        public const int StateVersion = 1;
+        public const int StateVersion = 2;
 
         public PlayableVisionState CaptureState() => new PlayableVisionState
         {
@@ -44,7 +45,7 @@ namespace Spacewars.Simulation
             KnownBuildings = known.Values.OrderBy(b => b.Id).Select(b => new KnownBuildingState
             {
                 Id = b.Id, Team = b.Team, Owner = b.Owner, Kind = b.Kind,
-                X = b.Position.X, Z = b.Position.Z, Heading = b.Heading, RefineryUpgraded = b.RefineryUpgraded
+                X = b.Position.X, Z = b.Position.Z, Heading = b.Heading, RefineryUpgraded = b.RefineryUpgraded, ScientificCenterUpgraded = b.ScientificCenterUpgraded
             }).ToArray()
         };
 
@@ -81,12 +82,13 @@ namespace Spacewars.Simulation
                     !Enum.IsDefined(typeof(PlayableBuildingKind), row.Kind) || !VisionSource.Finite(row.X) ||
                     !VisionSource.Finite(row.Z) || !VisionSource.Finite(row.Heading) || nextKnown.ContainsKey(row.Id))
                     throw new ArgumentException("Invalid known building.", nameof(state));
-                nextKnown.Add(row.Id, new KnownBuilding(row.Id, row.Team, row.Owner, row.Kind, new NavPoint(row.X, row.Z), row.Heading, row.RefineryUpgraded));
+                nextKnown.Add(row.Id, new KnownBuilding(row.Id, row.Team, row.Owner, row.Kind, new NavPoint(row.X, row.Z), row.Heading, row.RefineryUpgraded, row.ScientificCenterUpgraded));
             }
             var orderedSources = nextSources.OrderBy(s => s.Position.X).ThenBy(s => s.Position.Z).ThenBy(s => s.Radius).ToArray();
             var nextCoverage = (byte[])state.Coverage.Clone();
 
             sources = orderedSources;
+            queryBounds = VisionQueryBounds.Create(sources);
             foreach (long key in nextDiscovered) discovered.Add(key);
             foreach (var pair in nextKnown) known.Add(pair.Key, pair.Value);
             Array.Copy(nextCoverage, coverage, coverage.Length);

@@ -44,7 +44,7 @@ namespace Spacewars.Runtime
         private const int Tag=0x47525031;
         internal static void WriteExtension(BinaryWriter w,NavigationSessionState state)
         {
-            w.Write(Tag);bool v2=System.Linq.Enumerable.Any(state.Groups??System.Array.Empty<GroupOrderState>(),g=>g.MarchVersion==2)||System.Linq.Enumerable.Any(state.InstalledExecutions??System.Array.Empty<NavigationInstalledExecutionState>(),e=>e.ExecutionGeometryIndex>=0);w.Write(v2?10:state.HostAuthority==null?8:9);w.Write(state.GroupSequence);
+            w.Write(Tag);bool v2=state.RecastCoordinationVersion==2||System.Linq.Enumerable.Any(state.Groups??System.Array.Empty<GroupOrderState>(),g=>g.MarchVersion==2)||System.Linq.Enumerable.Any(state.InstalledExecutions??System.Array.Empty<NavigationInstalledExecutionState>(),e=>e.ExecutionGeometryIndex>=0);w.Write(state.RecastCoordinationVersion==2?13:v2?10:state.HostAuthority==null?8:9);w.Write(state.GroupSequence);if(state.RecastCoordinationVersion==2)w.Write(2);
             Array(w,state.Groups??System.Array.Empty<GroupOrderState>(),g=>{
                 w.Write(g.WorldGeneration);w.Write(g.GroupId);w.Write(g.OrderRevision);w.Write(g.CommandSequence);w.Write(g.IssuedTick);w.Write(g.MembershipRevision);
                 String(w,g.OwnerId);w.Write(g.TeamId);w.Write((int)g.Origin);w.Write((int)g.Kind);String(w,g.Source);w.Write(g.JobId);w.Write(g.ActionId);WorldWire.Write(w,g.OriginalGoal);w.Write(g.TargetId);
@@ -74,7 +74,7 @@ namespace Spacewars.Runtime
                 String(w,e.HeldIdentity);w.Write(e.GeometryIndex);w.Write(e.BaseGeometryIndex);if(v2)w.Write(e.ExecutionGeometryIndex);});
             Array(w,state.Groups,g=>{w.Write(g.GroupId);w.Write(g.MarchVersion);w.Write(g.MarchProfileRevision);
                 Number(w,g.MarchStretch);Number(w,g.MarchAnchor);w.Write(g.MarchInitialized);
-                Array(w,g.Members,m=>{w.Write(m.Entity);w.Write(m.ProgressRequest);if(v2){w.Write(m.ProgressVersion);Number(w,m.ProgressOffset);}});});
+                Array(w,g.Members,m=>{w.Write(m.Entity);w.Write(m.ProgressRequest);if(v2){w.Write(m.ProgressVersion);Number(w,m.ProgressOffset);}if(state.RecastCoordinationVersion==2)m.Recast.Write(w);});});
             Array(w,state.AllocationRequestIndices??System.Array.Empty<int>(),i=>w.Write(i));
             w.Write(state.ArrivalAuthority!=null);
             if(state.ArrivalAuthority!=null){w.Write(state.ArrivalAuthority.Length);w.Write(state.ArrivalAuthority);}
@@ -84,10 +84,10 @@ namespace Spacewars.Runtime
         {
             if(r.BaseStream.Position==r.BaseStream.Length){LegacyAnswerStatuses(state);return;}
             if(r.ReadInt32()!=Tag)throw new ArgumentException("Unsupported navigation group extension.");
-            int version=r.ReadInt32();if(version<1||version>10)throw new ArgumentException("Unsupported navigation surface extension.");
+            int version=r.ReadInt32();if(version<1||version>13)throw new ArgumentException("Unsupported navigation surface extension.");
             if(version==8&&legacyFormat==NavigationV8Format.Unspecified)throw new ArgumentException("Navigation v8 requires explicit A5Arrival or MainInstalledLayout import format.");
             if(legacyFormat<NavigationV8Format.Unspecified||legacyFormat>NavigationV8Format.MainInstalledLayout)throw new ArgumentException("Unknown navigation v8 import format.");
-            state.GroupSequence=r.ReadInt64();state.Groups=Array(r,()=>Record(r,()=>new GroupOrderState{
+            state.GroupSequence=r.ReadInt64();if(version>=11){state.RecastCoordinationVersion=r.ReadInt32();if(state.RecastCoordinationVersion!=(version==11?1:2))throw new ArgumentException("Unsupported Recast coordination sidecar.");}state.Groups=Array(r,()=>Record(r,()=>new GroupOrderState{
                 WorldGeneration=r.ReadInt64(),GroupId=r.ReadInt64(),OrderRevision=r.ReadInt64(),CommandSequence=r.ReadInt64(),IssuedTick=r.ReadInt64(),MembershipRevision=r.ReadInt64(),
                 OwnerId=String(r),TeamId=r.ReadInt32(),Origin=EnumValue<PlayableOrderOrigin>(r),Kind=EnumValue<PlayableCommandKind>(r),Source=String(r),JobId=r.ReadInt64(),ActionId=r.ReadInt64(),OriginalGoal=ReadPoint(r),TargetId=r.ReadInt32(),
                 Members=Array(r,()=>Record(r,()=>new GroupMemberState{Entity=r.ReadInt32(),Incarnation=r.ReadInt64(),OrderRevision=r.ReadInt64(),MobilityRevision=r.ReadInt64(),Slot=r.ReadInt32(),Phase=EnumValue<GroupMemberPhase>(r),
@@ -111,13 +111,13 @@ namespace Spacewars.Runtime
                 ReadStatuses(state.AnswerMailbox);
                 ReadStatuses(state.BarrierAnswers??System.Array.Empty<NavigationAnswerState>());
                 state.TechnicalFailures=Array(r,()=>Record(r,()=>new NavigationTechnicalFailureState{
-                    Entity=r.ReadInt32(),Request=r.ReadInt64(),Status=EnumValue<NavSolveStatus>(r)}));
+                    Entity=r.ReadInt32(),Request=r.ReadInt64(),Status=ReadStatus()}));
                 var seen=new System.Collections.Generic.HashSet<int>();
                 foreach(var failure in state.TechnicalFailures){
                     var actor=System.Array.Find(state.Crowd.Units,u=>u.Id==failure.Entity);
                     if(!seen.Add(failure.Entity)||actor==null||actor.FailedRequest!=failure.Request||
                         actor.LastFailure!=NavigationOutcome.Rejected||
-                        (failure.Status!=NavSolveStatus.InvalidEndpoint&&failure.Status!=NavSolveStatus.BlockedConnector&&failure.Status!=NavSolveStatus.CapacityExceeded))
+                        (failure.Status!=NavSolveStatus.InvalidEndpoint&&failure.Status!=NavSolveStatus.BlockedConnector&&failure.Status!=NavSolveStatus.CapacityExceeded&&failure.Status!=NavSolveStatus.Partial))
                         throw new ArgumentException("Invalid technical route failure extension.");
                 }
             }else LegacyAnswerStatuses(state);
@@ -142,7 +142,7 @@ namespace Spacewars.Runtime
                     group.MarchVersion=r.ReadInt32();group.MarchProfileRevision=r.ReadInt32();
                     group.MarchStretch=Number(r);group.MarchAnchor=Number(r);group.MarchInitialized=Boolean(r);
                     int members=r.ReadInt32();if(members!=group.Members.Length)throw new ArgumentException("March member count mismatch.");
-                    foreach(var member in group.Members){if(r.ReadInt32()!=member.Entity)throw new ArgumentException("March member identity mismatch.");member.ProgressRequest=r.ReadInt64();if(version>=10){member.ProgressVersion=r.ReadInt32();member.ProgressOffset=Number(r);}}
+                    foreach(var member in group.Members){if(r.ReadInt32()!=member.Entity)throw new ArgumentException("March member identity mismatch.");member.ProgressRequest=r.ReadInt64();if(version>=10){member.ProgressVersion=r.ReadInt32();member.ProgressOffset=Number(r);}if(version>=11)member.Recast=RecastMemberProgress.Read(r);}
                 }
             }
 
@@ -158,10 +158,17 @@ namespace Spacewars.Runtime
                     if(answer.Corridor!=null&&answer.Status!=NavSolveStatus.Ready)throw new ArgumentException("Corridor on failed answer.");}
             }
 
+            NavSolveStatus ReadStatus()
+            {
+                var status=EnumValue<NavSolveStatus>(r);
+                if(status==NavSolveStatus.Partial&&version<13)throw new ArgumentException("Partial requires navigation extension thirteen.");
+                return status;
+            }
+
             void ReadStatuses(NavigationAnswerState[] answers)
             {
                 int count=r.ReadInt32();if(count!=answers.Length)throw new ArgumentException("Route status count mismatch.");
-                foreach(var answer in answers){answer.Status=EnumValue<NavSolveStatus>(r);
+                foreach(var answer in answers){answer.Status=ReadStatus();
                     if(answer.Status==NavSolveStatus.Pending||(answer.Status==NavSolveStatus.Ready)!=(answer.Route.Length>0))throw new ArgumentException("Invalid route status.");}
             }
             if(version>=9||version==8&&legacyFormat==NavigationV8Format.A5Arrival){state.AllocationRequestIndices=Array(r,()=>r.ReadInt32());

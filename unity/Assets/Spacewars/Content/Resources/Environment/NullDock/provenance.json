@@ -1,0 +1,23 @@
+{
+  "tool": "built-in imagegen",
+  "purpose": "Approved Null Dock high detail art rework; three sibling worn painted-steel albedos",
+  "prompt": "Seamless square orthographic PBR albedo, dark desaturated blue-grey painted industrial steel, fine grain, hairline scratches, rubbed paint, tiny ochre primer flecks, restrained grey grime. No seams/borders/screws/objects/text, no baked light or shadow. Covering 2m square, graphite bluegrey average sRGB110, sharp subtle wear. Variants: sparse multidirectional scratches; directional brushing; scuffed painted patches.",
+  "import": "Retain original PNG source; Unity NPOT ToLarger, max2048, mipmaps, trilinear, aniso8, Repeat, high quality compression. Measure actual imported result.",
+  "assets": [
+    {
+      "asset": "Steel.png",
+      "source": "/Users/eaafonasev/.codex/generated_images/01a17816-8a18-7162-9278-3efad0c73d1c/exec-8becfe72-488e-4ca7-9027-9093d99ccdc9.png",
+      "sha256": "4df3d15183dc62027d020253a5bf93a3d5bc69e7be464511852cef3cac392bf3"
+    },
+    {
+      "asset": "Steel-b.png",
+      "source": "/Users/eaafonasev/.codex/generated_images/01a17816-8a18-7162-9278-3efad0c73d1c/exec-51d7138a-38d9-4f2a-afe2-f81d60e112b4.png",
+      "sha256": "4ea5434c973c986299b894ecd2a9b3f6a181167e310aafa0598c9cfeb35b0046"
+    },
+    {
+      "asset": "Steel-c.png",
+      "source": "/Users/eaafonasev/.codex/generated_images/01a17816-8a18-7162-9278-3efad0c73d1c/exec-7fab671d-27f3-420f-ae83-90ffba730c09.png",
+      "sha256": "7573a7c97150690639d91fb1f9aa1e544f2fd1eb93528c62407867fc8b210a28"
+    }
+  ]
+}

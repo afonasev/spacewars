@@ -1,0 +1,37 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: df6c6128918cc41599b46973b17cdf54, type: 3}
+  m_Name: tank-1
+  m_EditorClassIdentifier: Spacewars.Presentation::Spacewars.Presentation.ModelDetailCatalog
+  exemptions: []
+  entries:
+  - hash: 77ab4b0dd302e741e02245f345fd8c41ee1fdf4eae721522d8335180470b981d
+    vertices: 40236
+    indices: 72237
+    submeshes: 1
+    normal: {fileID: 4300000, guid: a1da4e104a82949799e8ee220a8d691d, type: 2}
+    far: {fileID: 4300000, guid: 90d1d619842434701bcb96a348ec4824, type: 2}
+    compactBounds: []
+  - hash: 110522b33b8b908d8e09abdcd3f3066b02668108533bd9e13493eadd222bca61
+    vertices: 24629
+    indices: 54069
+    submeshes: 1
+    normal: {fileID: 4300000, guid: bc860bee2b61f4d97b9e55e1409c33a9, type: 2}
+    far: {fileID: 4300000, guid: 0d9c71bc95c214e138b06f3b79addc48, type: 2}
+    compactBounds: []
+  - hash: e72b97047273af8c6cb604655fe058d71e6e6226c61561a34d27e623bd0a76f1
+    vertices: 4510
+    indices: 8208
+    submeshes: 1
+    normal: {fileID: 4300000, guid: 519151941701846b5aa4e0a4e1b50c12, type: 2}
+    far: {fileID: 4300000, guid: 4d8d96b81899d4d3393b1090515a3969, type: 2}
+    compactBounds: []

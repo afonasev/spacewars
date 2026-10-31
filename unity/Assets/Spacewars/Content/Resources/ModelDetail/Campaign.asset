@@ -1,0 +1,91 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: df6c6128918cc41599b46973b17cdf54, type: 3}
+  m_Name: Campaign
+  m_EditorClassIdentifier: Spacewars.Presentation::Spacewars.Presentation.ModelDetailCatalog
+  exemptions:
+  - hash: a870397ededcc59b7f3113718a82696a46380fb4f4127496109c5dbc0857c30c
+    reason: already-small-protected-solids
+    vertices: 100
+    indices: 168
+    submeshes: 1
+  - hash: 7777b25c4ca38498ae8fab688eaf536c2969623708222459f2ca6b0f71942be4
+    reason: already-small-protected-solids
+    vertices: 86
+    indices: 144
+    submeshes: 1
+  - hash: 0732c4a87d09e733934ebb664af84fae20ad4aedf9af32a078f6fd7ad2b7877e
+    reason: already-small-protected-solids
+    vertices: 84
+    indices: 144
+    submeshes: 1
+  - hash: 4e620e772bf3a5e8b113b3f183bc4dd076f8429926583d648f043e87055e192b
+    reason: already-small-protected-solids
+    vertices: 100
+    indices: 180
+    submeshes: 1
+  - hash: ff7b964f9524c572cec4e69952f4ce676db46329550b59eb65b8d339a5558b50
+    reason: already-small-protected-solids
+    vertices: 24
+    indices: 36
+    submeshes: 1
+  - hash: c1def700a32ad7d2de50625f4d709d8faf26c0926954de998abfbafadb166e5d
+    reason: already-small-protected-solids
+    vertices: 24
+    indices: 36
+    submeshes: 1
+  entries:
+  - hash: ddd95062169820e503d27858f232670b96db03b803063562a71f182859744875
+    vertices: 654
+    indices: 1188
+    submeshes: 1
+    normal: {fileID: 4300000, guid: 707b748471c654fed80790e9e91d9ab1, type: 2}
+    far: {fileID: 4300000, guid: f25b90cb813f141258e7f200674f7eb4, type: 2}
+    compactBounds:
+    - m_Center: {x: 0, y: 0.87, z: -120}
+      m_Extent: {x: 240, y: 0.87, z: 120}
+  - hash: ad307bd9130151bb1292f4096029752dcc122ace12ef8844571f1235f49b1146
+    vertices: 200
+    indices: 348
+    submeshes: 1
+    normal: {fileID: 4300000, guid: df401ef719d3b40c0b5d372035a11668, type: 2}
+    far: {fileID: 4300000, guid: 8dd08408539464b9a8316e739c564c7d, type: 2}
+    compactBounds:
+    - m_Center: {x: -159.63037, y: 0.87, z: 56}
+      m_Extent: {x: 80.36963, y: 0.87, z: 56}
+  - hash: 1b26bb674b3fad908c88d0f2e32c1368a54e0f91848f2916aca97b8d20e260b4
+    vertices: 342
+    indices: 612
+    submeshes: 1
+    normal: {fileID: 4300000, guid: c5fadf6b09c794546b90283aaefc2d2d, type: 2}
+    far: {fileID: 4300000, guid: 21c1e63f4a529496582ad574a594cebd, type: 2}
+    compactBounds:
+    - m_Center: {x: 25.419662, y: 0.87, z: 136}
+      m_Extent: {x: 214.58034, y: 0.87, z: 24}
+  - hash: fd84a1b2060db582052ba9b5971485bfbb94c0b3ae0ce29166942238beb15396
+    vertices: 258
+    indices: 468
+    submeshes: 1
+    normal: {fileID: 4300000, guid: 3d19a6c69605e4ce183ae6785dcc1305, type: 2}
+    far: {fileID: 4300000, guid: 285fa60defcc34071b2c281d059aa1f8, type: 2}
+    compactBounds:
+    - m_Center: {x: 32.238876, y: 0.87, z: -77.62178}
+      m_Extent: {x: 106.498886, y: 0.87, z: 77.62178}
+  - hash: cdb75b6bbdf6ba364f0265b4491c8b61140cb1339bf0dfe96c29756113b712b6
+    vertices: 216
+    indices: 396
+    submeshes: 1
+    normal: {fileID: 4300000, guid: 597f4c75c69114aaeb99fa458219065e, type: 2}
+    far: {fileID: 4300000, guid: 76c347cfa073e41e48395ef47564c6c5, type: 2}
+    compactBounds:
+    - m_Center: {x: 59.195354, y: 0.87, z: 48.94415}
+      m_Extent: {x: 96.06567, y: 0.87, z: 48.94415}

@@ -6,6 +6,7 @@ using Spacewars.Simulation;
 using Spacewars.BalanceLab;
 using UnityEngine;
 using UnityEngine.UIElements;
+using Spacewars.Simulation.Ai;
 
 namespace Spacewars.Presentation
 {
@@ -18,12 +19,15 @@ namespace Spacewars.Presentation
         private readonly Action<PlayableProfile,GameplayAudioProfile> openProvingGround;
         private PlayableProfile selected;
         private PlayableProfileData draft,original;
+        private AiProfileData aiDraft,aiOriginal;
         private GameplayAudioProfile audioDraft,audioOriginal;
+        private ModelDetailProfile detailDraft,detailOriginal;
+        private const string LodGroup="Детализация (LOD)";
         private readonly Dictionary<string,string> invalid=new Dictionary<string,string>();
         private bool dirty;
         private string section="Юниты",entity="Танк",expanded="Юниты";
         private const string Changes="Изменения";
-        private static readonly string[] Categories={Changes,"Юниты","Здания","Экономика","Графика","Правила","Звук"};
+        private static readonly string[] Categories={Changes,"Юниты","Здания","Экономика","Графика","Правила","ИИ","Звук"};
         private readonly Label context,status,help;
         private readonly TextField search;
         private readonly ScrollView fields;
@@ -72,7 +76,7 @@ namespace Spacewars.Presentation
             if(draft==null||invalid.Count>0)throw new ArgumentException("Исправьте ошибки параметров перед запуском полигона.");
             var snapshot=PlayableProfile.Create(NativeBalanceFields.Copy(draft),new ProvingGroundMap(),selected.DisplayName+" · полигон");
             var audio=JsonUtility.FromJson<GameplayAudioProfile>(JsonUtility.ToJson(audioDraft));
-            audio.Validate();openProvingGround(snapshot,audio);
+            audio.Validate();detailDraft.Validate();ModelDetailProfile.UseSession(detailDraft);openProvingGround(snapshot,audio);
         }
         private void Refresh()
         {
@@ -85,19 +89,33 @@ namespace Spacewars.Presentation
         }
         private void Load()
         {
-            try{selected=store.Selected;original=selected.CopyData();draft=selected.CopyData();audioOriginal=store.SelectedAudio;audioDraft=JsonUtility.FromJson<GameplayAudioProfile>(JsonUtility.ToJson(audioOriginal));invalid.Clear();dirty=false;Refresh();RenderFields();}
+            try{selected=store.Selected;original=selected.CopyData();draft=selected.CopyData();aiOriginal=store.SelectedAiProfile.CopyData();aiDraft=store.SelectedAiProfile.CopyData();detailOriginal=store.SelectedModelDetail;detailDraft=detailOriginal.Copy();audioOriginal=store.SelectedAudio;audioDraft=JsonUtility.FromJson<GameplayAudioProfile>(JsonUtility.ToJson(audioOriginal));invalid.Clear();dirty=false;Refresh();RenderFields();}
             catch(Exception e){draft=null;original=null;invalid.Clear();dirty=false;Refresh();grid.Clear();status.text="Версия недоступна: "+e.Message+". Продолжает действовать: "+store.ActiveIdentity+". Исходные данные сохранены; выберите другую версию или релизный Default.";}
         }
         private static string Number(double value)=>value.ToString("0.###",CultureInfo.InvariantCulture);
+        private static string AiRangeUnit(AiProfileField field)=>field.Unit switch{"weight"=>"баллов","buildings"=>"зданий","units"=>"юнитов","changes"=>"смен",_=>NativeBalanceLabels.Unit(field.Unit)};
+        private static string AiUnit(AiProfileField field,double value)=>field.Unit switch
+        {
+            "weight"=>CountForm(value,"балл","балла","баллов"),"buildings"=>CountForm(value,"здание","здания","зданий"),
+            "units"=>CountForm(value,"юнит","юнита","юнитов"),"changes"=>CountForm(value,"смена","смены","смен"),
+            _=>NativeBalanceLabels.Unit(field.Unit)
+        };
+        private static string CountForm(double value,string one,string few,string many)
+        {if(value!=Math.Truncate(value))return many;long number=Math.Abs((long)value);long lastTwo=number%100;if(lastTwo>=11&&lastTwo<=14)return many;switch(number%10){case 1:return one;case 2:case 3:case 4:return few;default:return many;}}
         private bool Changed(PlayableProfileField field)=>field.Read(original)!=field.Read(draft)||invalid.ContainsKey(field.Path);
+        private bool Changed(AiProfileField field)=>aiOriginal!=null&&aiDraft!=null&&(aiOriginal.fields.Single(v=>v.path==field.Path).value!=aiDraft.fields.Single(v=>v.path==field.Path).value||invalid.ContainsKey(field.Path));
+        private static IEnumerable<SurfaceParameter> DetailFields(ModelDetailProfile profile)=>profile.Parameters().Select(f=>{float scale=f.Unit=="screen height"?100:1;return new SurfaceParameter(f.Path,f.Group,f.Label,f.Description,scale==100?"%":f.Unit,f.Minimum*scale,f.Maximum*scale,f.Step*scale,()=>f.Read()*scale,v=>f.Write(v/scale));});
+        private bool DetailChanged(SurfaceParameter field)=>field.Read()!=DetailFields(detailOriginal).Single(f=>f.Path==field.Path).Read()||invalid.ContainsKey(field.Path);
         private IEnumerable<string> Differences()
         {
             foreach(var f in PlayableProfileMetadata.Fields.Where(f=>NativeBalanceFields.Editable(f)&&Changed(f)))yield return NativeBalanceLabels.Label(f)+" ["+f.Path+"]: "+Number(f.Read(original))+" → "+(invalid.TryGetValue(f.Path,out var raw)?raw:Number(f.Read(draft)));
+            foreach(var f in NativeBalanceFields.AiOpeningFields.Where(Changed))yield return f.Label+" ["+f.Path+"]: "+Number(aiOriginal.fields.Single(v=>v.path==f.Path).value)+" → "+(invalid.TryGetValue(f.Path,out var raw)?raw:Number(aiDraft.fields.Single(v=>v.path==f.Path).value));
+            foreach(var f in DetailFields(detailDraft).Where(DetailChanged))yield return "Графика / "+f.Group+" / "+f.Label+" ["+f.Path+"]: "+Number(DetailFields(detailOriginal).Single(v=>v.Path==f.Path).Read())+" → "+(invalid.TryGetValue(f.Path,out var raw)?raw:Number(f.Read()))+" "+f.Unit;
             foreach(var f in GameplayAudioMetadata.Fields.Where(f=>f.Read(audioOriginal)!=f.Read(audioDraft)||invalid.ContainsKey(f.Path)))yield return "Звук / "+f.Label+" ["+f.Path+"]: "+Number(f.Read(audioOriginal))+" → "+(invalid.TryGetValue(f.Path,out var raw)?raw:Number(f.Read(audioDraft)));
         }
         private int ChangeCount=>original==null?0:Differences().Count();
         private void SetDirty(){dirty=ChangeCount>0;save.SetEnabled(dirty&&store.CanEdit);RenderTree();if(section==Changes&&string.IsNullOrEmpty(search.value))Page.schedule.Execute(()=>{string key=(Page.focusController?.focusedElement as VisualElement)?.name;var offset=fields.scrollOffset;RenderFields();fields.scrollOffset=offset;if(key!=null)Page.Q(key)?.Focus();});}
-        private void Save()=>Try(()=>{if(invalid.Count>0)throw new ArgumentException("Исправьте ввод: "+string.Join(", ",invalid.Keys));store.Save(draft,audioDraft);Load();status.text="Версия сохранена в "+store.StoragePath+". Следующая игра: "+store.ActiveIdentity+". Git commit/push не выполнялись кнопкой сохранения.";});
+        private void Save()=>Try(()=>{if(invalid.Count>0)throw new ArgumentException("Исправьте ввод: "+string.Join(", ",invalid.Keys));store.Save(draft,audioDraft,aiDraft,detailDraft);Load();status.text="Версия сохранена в "+store.StoragePath+". Следующая игра: "+store.ActiveIdentity+". Git commit/push не выполнялись кнопкой сохранения.";});
         private void Try(Action action){try{action();}catch(StoreConflictException){store.Reload();Refresh();status.text="История изменилась в другом процессе. Черновик сохранён; проверьте новую базу перед повтором.";}catch(Exception e){status.text=e.Message;}}
         private void Back()=>Guard(()=>{Page.RemoveFromHierarchy();closed();});
         private void Guard(Action action)
@@ -131,40 +149,79 @@ namespace Spacewars.Presentation
         private bool TwoColumns=>Page.resolvedStyle.width>=1120&&!(section==Changes&&string.IsNullOrWhiteSpace(search.value));
         private void RenderTree()
         {
-            var available=PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable).ToArray();groups.Clear();
+            var available=PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable).ToArray();var aiAvailable=NativeBalanceFields.AiOpeningFields;groups.Clear();
             foreach(var category in Categories)
             {
                 string choice=category;bool branch=choice!=Changes&&choice!="Звук";
                 var header=OrbitalTheme.Action((branch?(expanded==choice?"▾  ":"▸  "):"")+choice+(choice==Changes?" · "+ChangeCount:""),()=>{
 
                     expanded=branch&&expanded!=choice?choice:null;section=choice;
-                    if(branch){var objects=available.Where(f=>NativeBalanceLabels.Section(f)==choice).Select(NativeBalanceLabels.Entity).Distinct().ToArray();if(!objects.Contains(entity))entity=objects.FirstOrDefault();}
+                    if(branch){var objects=choice=="ИИ"?aiAvailable.Select(f=>f.Group).Distinct().ToArray():(choice=="Графика"?DetailFields(detailDraft).Select(f=>f.Group).Distinct():Array.Empty<string>()).Concat(available.Where(f=>NativeBalanceLabels.Section(f)==choice).Select(NativeBalanceLabels.Entity).Distinct()).ToArray();if(!objects.Contains(entity))entity=objects.FirstOrDefault();}
                     RenderFields();navigation.SetScope(Page,Back,Page.Q<Button>("lab-section-"+choice));
                 },"lab-section-"+choice,choice==section);
-                header.AddToClassList("lab-tree-section");header.EnableInClassList("lab-dirty",choice==Changes?ChangeCount>0:choice=="Звук"?GameplayAudioMetadata.Fields.Any(f=>f.Read(audioOriginal)!=f.Read(audioDraft)||invalid.ContainsKey(f.Path)):available.Any(f=>NativeBalanceLabels.Section(f)==choice&&Changed(f)));if(choice==Changes)header.style.fontSize=13;header.tooltip=choice==Changes?"Все отличия черновика от выбранной сохранённой версии, включая название.":"Открыть раздел. Остальные ветви дерева свернутся.";groups.Add(header);
+                header.AddToClassList("lab-tree-section");header.EnableInClassList("lab-dirty",choice==Changes?ChangeCount>0:choice=="Звук"?GameplayAudioMetadata.Fields.Any(f=>f.Read(audioOriginal)!=f.Read(audioDraft)||invalid.ContainsKey(f.Path)):choice=="ИИ"?aiAvailable.Any(Changed):(choice=="Графика"&&DetailFields(detailDraft).Any(DetailChanged)||available.Any(f=>NativeBalanceLabels.Section(f)==choice&&Changed(f))));if(choice==Changes)header.style.fontSize=13;header.tooltip=choice==Changes?"Все отличия черновика от выбранной сохранённой версии, включая название.":"Открыть раздел. Остальные ветви дерева свернутся.";groups.Add(header);
                 if(!branch||expanded!=choice)continue;
                 var children=new VisualElement(){name="lab-children-"+choice};children.AddToClassList("lab-tree-children");groups.Add(children);
-                foreach(var item in available.Where(f=>NativeBalanceLabels.Section(f)==choice).Select(NativeBalanceLabels.Entity).Distinct())
+                var items=choice=="ИИ"?aiAvailable.Select(f=>f.Group).Distinct():(choice=="Графика"?DetailFields(detailDraft).Select(f=>f.Group).Distinct():Array.Empty<string>()).Concat(available.Where(f=>NativeBalanceLabels.Section(f)==choice).Select(NativeBalanceLabels.Entity).Distinct());
+                foreach(var item in items)
                 {
-                    string obj=item;
-                    var action=OrbitalTheme.Action("",()=>{section=choice;entity=obj;RenderFields();navigation.SetScope(Page,Back,fields.Query<TextField>().First());},"lab-object-"+obj,obj==entity&&choice==section);
-                    var icon=new OrbitalGlyph(NativeBalanceLabels.Glyph(obj)){pickingMode=PickingMode.Ignore};icon.style.width=24;icon.style.height=24;icon.style.marginRight=6;action.Add(icon);
-                    action.Add(new Label(obj){pickingMode=PickingMode.Ignore});action.EnableInClassList("lab-dirty",available.Any(f=>NativeBalanceLabels.Section(f)==choice&&NativeBalanceLabels.Entity(f)==obj&&Changed(f)));children.Add(action);
+                    string obj=item;string visibleName=choice=="ИИ"?"Дебюты и мидгейм":obj;
+                    var action=OrbitalTheme.Action("",()=>{section=choice;entity=obj;RenderFields();navigation.SetScope(Page,Back,fields.Query<TextField>().First());},"lab-object-"+obj.Replace('/','-').Replace(' ','-'),obj==entity&&choice==section);
+                    var icon=new OrbitalGlyph(NativeBalanceLabels.Glyph(visibleName)){pickingMode=PickingMode.Ignore};icon.style.width=24;icon.style.height=24;icon.style.marginRight=6;action.Add(icon);
+                    action.Add(new Label(visibleName){pickingMode=PickingMode.Ignore});action.EnableInClassList("lab-dirty",choice=="ИИ"?aiAvailable.Any(f=>f.Group==obj&&Changed(f)):(DetailFields(detailDraft).Any(f=>f.Group==obj)?DetailFields(detailDraft).Where(f=>f.Group==obj).Any(DetailChanged):available.Any(f=>NativeBalanceLabels.Section(f)==choice&&NativeBalanceLabels.Entity(f)==obj&&Changed(f))));children.Add(action);
                 }
             }
         }
         private void RenderFields()
         {
             if(draft==null){grid.Clear();return;}
-            var available=PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable).ToArray();RenderTree();
+            var available=PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable).ToArray();var aiAvailable=NativeBalanceFields.AiOpeningFields;RenderTree();
             grid.Clear();fields.scrollOffset=Vector2.zero;string query=search.value?.Trim()??"";
             var visible=available.Where(f=>query.Length==0?(section==Changes?Changed(f):NativeBalanceLabels.Section(f)==section&&NativeBalanceLabels.Entity(f)==entity):(NativeBalanceLabels.Section(f)+" "+f.Path+" "+NativeBalanceLabels.Label(f)+" "+NativeBalanceLabels.Help(f)+" "+NativeBalanceLabels.Entity(f)).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
             context.style.display=section==Changes&&query.Length==0?DisplayStyle.None:DisplayStyle.Flex;
             context.text=query.Length>0?"Поиск по всем разделам · "+visible.Length+" параметров":section==Changes?Changes+" · "+ChangeCount:section+" / "+entity+" · "+visible.Length+" параметров";
+            var aiVisible=aiAvailable.Where(f=>query.Length==0?(section=="ИИ"&&f.Group==entity||section==Changes&&Changed(f)):("ИИ "+f.Group+" "+f.Path+" "+f.Label+" "+f.Description).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
             var audioVisible=GameplayAudioMetadata.Fields.Where(f=>query.Length==0?(section=="Звук"||section==Changes&&(f.Read(audioOriginal)!=f.Read(audioDraft)||invalid.ContainsKey(f.Path))):("Звук "+f.Label+" "+f.Path+" "+f.Description).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
-            context.text=query.Length>0?"Поиск по всем разделам · "+(visible.Length+audioVisible.Length)+" параметров":section==Changes?Changes+" · "+ChangeCount:section=="Звук"?"Звук / Игровой микс · "+audioVisible.Length+" параметров":section+" / "+entity+" · "+visible.Length+" параметров";
+            var detailVisible=DetailFields(detailDraft).Where(f=>query.Length==0?(section=="Графика"&&entity==f.Group||section==Changes&&DetailChanged(f)):("Графика LOD детализация "+f.Group+" "+f.Path+" "+f.Label+" "+f.Description).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
+            context.text=query.Length>0?"Поиск по всем разделам · "+(visible.Length+aiVisible.Length+audioVisible.Length+detailVisible.Length)+" параметров":section==Changes?Changes+" · "+ChangeCount:section=="Звук"?"Звук / Игровой микс · "+audioVisible.Length+" параметров":section=="ИИ"?"ИИ / Дебюты и мидгейм · "+aiVisible.Length+" параметров":section+" / "+entity+" · "+(visible.Length+detailVisible.Length)+" параметров";
             help.style.display=DisplayStyle.None;
-            if(visible.Length==0&&audioVisible.Length==0)grid.Add(OrbitalTheme.Text(query.Length==0&&section==Changes?"Нет несохранённых изменений.":"Параметры не найдены. Попробуйте другое название.","orbital-muted"));
+            if(visible.Length==0&&aiVisible.Length==0&&audioVisible.Length==0&&detailVisible.Length==0)grid.Add(OrbitalTheme.Text(query.Length==0&&section==Changes?"Нет несохранённых изменений.":"Параметры не найдены. Попробуйте другое название.","orbital-muted"));
+            if(detailVisible.Length>0){
+                var hint=OrbitalTheme.Text("LOD: размер модели относительно высоты кадра. Следы: часть машин оставляет сплошной след, остальные — нет. Изменения применяются в следующей игре или в полигоне.","orbital-muted");hint.name="lab-lod-help";hint.style.whiteSpace=WhiteSpace.Normal;hint.style.width=Length.Percent(100);grid.Add(hint);
+                foreach(var field in detailVisible){
+                    var row=new VisualElement();row.AddToClassList("lab-parameter-row");row.style.width=Length.Percent(TwoColumns?50:100);grid.Add(row);
+                    string tip=field.Description+" Диапазон: "+Number(field.Minimum)+"–"+Number(field.Maximum)+" "+field.Unit+", шаг "+Number(field.Step)+" "+field.Unit+". "+field.Path;
+                    var editor=new TextField(field.Label){name=field.Path,isDelayed=true,tooltip=tip,isReadOnly=!store.CanEdit};editor.AddToClassList("lab-parameter");row.Add(editor);
+                    void Show()=>editor.SetValueWithoutNotify(invalid.TryGetValue(field.Path,out var raw)?raw:Number(field.Read()));Show();
+                    editor.RegisterCallback<FocusInEvent>(_=>ShowHelp(row,tip));editor.RegisterCallback<FocusOutEvent>(_=>help.style.display=DisplayStyle.None);
+                    editor.RegisterValueChangedCallback(e=>{try{
+                        if(!float.TryParse(e.newValue.Replace(',','.'),NumberStyles.Float,CultureInfo.InvariantCulture,out var value)||float.IsNaN(value)||float.IsInfinity(value)||value<field.Minimum||value>field.Maximum)throw new ArgumentException("Введите число в диапазоне "+Number(field.Minimum)+"–"+Number(field.Maximum)+" "+field.Unit+".");
+                        NativeBalanceStore.CheckStep(value,DetailFields(detailOriginal).Single(f=>f.Path==field.Path).Read(),field.Step,field.Path);field.Write(value);invalid.Remove(field.Path);SetDirty();
+                    }catch(Exception error){invalid[field.Path]=e.newValue;SetDirty();status.text=error.Message;}});
+                    if(section==Changes&&query.Length==0){var before=new Label("было: "+Number(DetailFields(detailOriginal).Single(f=>f.Path==field.Path).Read())+" "+field.Unit);before.AddToClassList("lab-before");row.Add(before);}
+                    var unit=new Label(field.Unit);unit.AddToClassList("lab-unit");row.Add(unit);
+                    foreach(int direction in new[]{-1,1}){int delta=direction;var button=OrbitalTheme.Action(delta<0?"−":"+",()=>{editor.value=Number(Math.Max(field.Minimum,Math.Min(field.Maximum,field.Read()+delta*field.Step)));});button.AddToClassList("lab-adjust");button.focusable=false;button.SetEnabled(store.CanEdit);row.Add(button);}
+                }
+            }
+            if(aiVisible.Length>0)
+            {
+                if(section=="ИИ")grid.Add(OrbitalTheme.Text("После сохранения настройки применятся к новым матчам; текущий матч не меняется.","orbital-muted"));
+                if(section=="ИИ")grid.Add(OrbitalTheme.Action("Сбросить ИИ по умолчанию",()=>Try(()=>{aiDraft=NativeBalanceFields.InitialAiOpeningProfile().CopyData();invalid.Keys.Where(k=>k.StartsWith("openingsMidgame.",StringComparison.Ordinal)).ToList().ForEach(k=>invalid.Remove(k));SetDirty();RenderFields();}),"lab-ai-reset"));
+                grid.Add(OrbitalTheme.Text("ИИ / Дебюты и мидгейм","lab-subheading"));
+                foreach(var field in aiVisible)
+                {
+                    string tip=field.Description+"\nДиапазон: "+Number(field.Minimum)+"–"+Number(field.Maximum)+" "+AiRangeUnit(field)+" · шаг "+Number(field.Step);
+                    var row=new VisualElement(){tooltip=tip};row.AddToClassList("lab-parameter-row");row.style.flexShrink=0;row.style.width=Length.Percent(TwoColumns?50:100);row.style.paddingRight=8;grid.Add(row);
+                    var editor=new TextField(field.Label){name="lab-ai-"+field.Path.Replace('.','-'),isDelayed=true,tooltip=tip};editor.AddToClassList("lab-parameter");row.Add(editor);editor.isReadOnly=!store.CanEdit;
+                    if(section==Changes&&query.Length==0)row.Add(new Label("было: "+Number(aiOriginal.fields.Single(v=>v.path==field.Path).value)){name="lab-before-ai-"+field.Path.Replace('.','-')});
+                    void Show(){editor.SetValueWithoutNotify(invalid.TryGetValue(field.Path,out var raw)?raw:Number(aiDraft.fields.Single(v=>v.path==field.Path).value));}
+                    var unit=new Label(AiUnit(field,field.Initial)){tooltip=tip};unit.AddToClassList("lab-unit");row.Add(unit);
+                    void UpdateUnit()=>unit.text=AiUnit(field,aiDraft.fields.Single(v=>v.path==field.Path).value);
+                    editor.RegisterCallback<FocusInEvent>(_=>ShowHelp(row,tip+" · "+field.Path+" · Применение: следующий новый матч."));editor.RegisterCallback<FocusOutEvent>(_=>help.style.display=DisplayStyle.None);
+                    editor.RegisterValueChangedCallback(e=>{try{if(!double.TryParse(e.newValue,NumberStyles.Float,CultureInfo.InvariantCulture,out var value))throw new ArgumentException("Введите число: "+field.Path);NativeBalanceStore.CheckStep(value,aiOriginal.fields.Single(v=>v.path==field.Path).value,field.Step,field.Path);NativeBalanceFields.Write(field,aiDraft,value);invalid.Remove(field.Path);UpdateUnit();SetDirty();}catch(Exception error){invalid[field.Path]=e.newValue;SetDirty();status.text=field.Path+": "+error.Message;}});Show();
+                    foreach(int direction in new[]{-1,1}){int delta=direction;var adjust=OrbitalTheme.Action(delta<0?"−":"+",()=>Try(()=>{var current=aiDraft.fields.Single(v=>v.path==field.Path).value;NativeBalanceFields.Write(field,aiDraft,Math.Round(Math.Max(field.Minimum,Math.Min(field.Maximum,current+delta*field.Step)),6));invalid.Remove(field.Path);UpdateUnit();SetDirty();Show();}));adjust.AddToClassList("lab-adjust");adjust.focusable=false;adjust.SetEnabled(store.CanEdit);adjust.tooltip=tip;row.Add(adjust);}
+                }
+            }
             foreach(var bucket in visible.GroupBy(f=>query.Length==0&&section!=Changes?NativeBalanceLabels.Bucket(f):NativeBalanceLabels.Section(f)+" / "+NativeBalanceLabels.Entity(f)+" / "+NativeBalanceLabels.Bucket(f)))
             {
                 var heading=OrbitalTheme.Text(bucket.Key,"lab-subheading");heading.style.width=Length.Percent(100);heading.style.flexShrink=0;grid.Add(heading);

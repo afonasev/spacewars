@@ -25,19 +25,19 @@ namespace Spacewars.Simulation
                 if(!RemovalOraclePageZero()){DropHistorical();return false;}
                 int member=s.PreparationMember;
                 if(s.RemovalStage==0){
-                    if(allocationRemaining==0)return false;SpendCandidate();
+                    if(allocationRemaining==0)return false;SpendCandidate(NavCandidateCharge.Page0Control);
                     if(RemovalRegion(historicalOracle,member)==null){DropHistorical();return false;}s.RemovalStage=1;
                 }
                 if(s.RemovalStage==1){
                     // Normal preparation scans the entire current ordered source, including later pages.
                     if(!PrepareRegionsFor(member))return false;
-                    if(allocationRemaining==0)return false;SpendCandidate();
+                    if(allocationRemaining==0)return false;SpendCandidate(NavCandidateCharge.Page0Control);
                     var old=RemovalRegion(historicalOracle,member);var current=RemovalRegion(this,member);
                     if(current==null||old.Candidates.Count!=current.Candidates.Count||!old.Requested.Equals(current.Requested)||!RemovalOldRecipe(member,old)){DropHistorical();return false;}s.RemovalStage=2;
                 }
                 var previous=RemovalRegion(historicalOracle,member);var now=RemovalRegion(this,member);
                 while(s.RegionCursor<now.Candidates.Count){
-                    if(allocationRemaining==0)return false;SpendCandidate();int n=s.RegionCursor;
+                    if(allocationRemaining==0)return false;SpendCandidate(NavCandidateCharge.Page0RegionCompare);int n=s.RegionCursor;
                     if(!now.Candidates[n].Equals(previous.Candidates[n])){DropHistorical();return false;}s.RegionCursor++;
                 }
                 s.RegionCursor=0;s.RemovalStage=0;s.PreparationMember++;
@@ -61,7 +61,7 @@ namespace Spacewars.Simulation
                     }s.OccupancyStage=3;
                 }
                 // Even empty row sets require one paid comparison/advance pair.
-                if(allocationRemaining==0)return false;SpendCandidate();
+                if(allocationRemaining==0)return false;SpendCandidate(NavCandidateCharge.Page0PredicateCompare);
                 if(s.OccupancyOldBlocked!=s.OccupancyCurrentBlocked){DropHistorical();return false;}
                 s.OccupancyOldRow=s.OccupancyCurrentRow=0;s.OccupancyOldBlocked=s.OccupancyCurrentBlocked=false;
                 s.OccupancyCandidate++;

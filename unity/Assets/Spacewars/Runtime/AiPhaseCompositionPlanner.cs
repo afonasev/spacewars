@@ -27,6 +27,7 @@ namespace Spacewars.Runtime
     // Observe owns phase progress; Assess proposes ordinary commands without reservations/RNG.
     public sealed class AiPhaseCompositionPlanner
     {
+        internal AiDoctrinePolicy Doctrine{get;set;}
         private readonly string owner;private readonly long generation;private readonly AiRosterCatalog roster;
         private AiGamePhase phase;private bool captured;private double startingIncome;private long entered,observed;
         public AiPhaseCompositionPlanner(string owner,long generation,AiRosterCatalog roster=null)
@@ -57,6 +58,7 @@ namespace Spacewars.Runtime
         public AiCompositionAssessment Assess(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiBudgetState ledger=null,int reconCap=1,IEnumerable<int> startupProducers=null,bool usefulScoutDemand=false)
         {
             Bind(o);if(o.Tick<observed)throw new ArgumentException("Composition assessment clock regressed");if(ledger!=null&&(ledger.OwnerId!=owner||ledger.Generation!=generation))throw new ArgumentException("Composition ledger binding");
+            if(Doctrine?.Ready==true)return Doctrine.Assess(o,p,ai,ledger,reconCap,usefulScoutDemand);
             var descriptors=roster.CopyData().Where(d=>string.IsNullOrWhiteSpace(d.exclusionReason)).ToArray();
             var value=new double[3];int support=0,recon=0;
             void Count(PlayableEntityKind kind,double credits,bool countMinimum=true)

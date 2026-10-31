@@ -1,0 +1,37 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: df6c6128918cc41599b46973b17cdf54, type: 3}
+  m_Name: shkval-1
+  m_EditorClassIdentifier: Spacewars.Presentation::Spacewars.Presentation.ModelDetailCatalog
+  exemptions: []
+  entries:
+  - hash: dd1c62b0b94e5357dc2fd949767d7b5206d5e2b3d7d546dce5164cbafbd5101f
+    vertices: 46089
+    indices: 46764
+    submeshes: 1
+    normal: {fileID: 4300000, guid: 889d815a19c1e4b8981c3c766063122d, type: 2}
+    far: {fileID: 4300000, guid: 7a022a627d1744bdfaa73c48f58507e1, type: 2}
+    compactBounds: []
+  - hash: f8db09b11fd8c711b8dc0ecbddd113bc39b838875003bd359b72e906a9814c68
+    vertices: 82690
+    indices: 85650
+    submeshes: 1
+    normal: {fileID: 4300000, guid: 7560ccb7365c54b2f97ce930f03839b4, type: 2}
+    far: {fileID: 4300000, guid: 3c597a166f1df4f2586252cf3eccf672, type: 2}
+    compactBounds: []
+  - hash: 7d5f64711e4e565b1178e9724cd62cbf81846b266c18d990f2454cdcc0e8db84
+    vertices: 5868
+    indices: 8688
+    submeshes: 1
+    normal: {fileID: 4300000, guid: 2b275047bdfca411e8e84d7606aed518, type: 2}
+    far: {fileID: 4300000, guid: 2b275047bdfca411e8e84d7606aed518, type: 2}
+    compactBounds: []

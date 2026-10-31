@@ -21,7 +21,7 @@ namespace Spacewars.Simulation
 
         // Admission and host construction must agree on the same immutable map set.
         public static bool SupportsTerrain(IPlayableTerrain terrain)
-            =>terrain is ThreeCrossingsMap||terrain is FoundryMap||terrain is BasaltCrownMap||terrain is MossHighlandMap||terrain is CampaignOpeningMap||terrain is WhiteMeridianMap||terrain is AiTestMap||terrain is ProvingGroundMap||terrain is CrimsonGroveMap;
+            =>terrain is ThreeCrossingsMap||terrain is FoundryMap||terrain is BasaltCrownMap||terrain is MossHighlandMap||terrain is CampaignOpeningMap||terrain is WhiteMeridianMap||terrain is AiTestMap||terrain is ProvingGroundMap||terrain is CrimsonGroveMap||terrain is NullDockMap;
 
         public PartitionNavigationProvider(IPlayableTerrain terrain, NavGeometry movementGeometry, string holdBinding)
         {

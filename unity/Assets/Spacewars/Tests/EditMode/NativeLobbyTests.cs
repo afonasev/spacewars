@@ -13,7 +13,7 @@ namespace Spacewars.Tests.EditMode
         [Test] public void ActualAuthoredCapacityAndDefaultAreValid()
         {
             var setup=new NativeLobbyConfiguration();
-            Assert.AreEqual(2,setup.Capacity(PlayableProfile.ThreeCrossingsDefault));
+            Assert.AreEqual(4,setup.Capacity(PlayableProfile.ThreeCrossingsDefault));
             Assert.IsNull(setup.Validate(PlayableProfile.ThreeCrossingsDefault,true,true));
             Assert.AreEqual("ИИ",setup.MatchAiName);
         }

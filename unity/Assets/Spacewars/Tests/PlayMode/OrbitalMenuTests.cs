@@ -164,7 +164,7 @@ public sealed class OrbitalMenuTests : InputTestFixture
     }
     [UnityTest] public IEnumerator TextEntryCanBeCompletedWithControllerActions()
     {
-        var text=new TextField(){name="test-name",value=""};root.Add(text);yield return null;navigation.SetScope(root,null,text);navigation.Activate();yield return null;
+        var text=new TextField(){name="test-name",value=""};root.Add(text);yield return null;navigation.SetScope(root,null,text);navigation.UseGamepad();navigation.Activate();yield return null;
         navigation.Activate();Assert.AreEqual("",text.value,"Text is committed only on Done.");
         var keyboard=root.Q(className:"orbital-keyboard");var done=keyboard.Query<Button>().ToList().Single(b=>b.text=="Готово");done.Focus();navigation.Activate();
         Assert.IsNull(root.Q(className:"orbital-keyboard"));Assert.AreSame(text,root.focusController.focusedElement);Assert.AreEqual("А",text.value);

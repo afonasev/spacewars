@@ -8,7 +8,7 @@ def inventory(folder):
 def hashfile(path):
  with path.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
 def main():
- p=argparse.ArgumentParser();p.add_argument('--platform',choices=['macos-universal','windows-x64'],required=True);p.add_argument('--version',required=True);p.add_argument('--release-date',default=datetime.datetime.now(datetime.timezone.utc).date().isoformat(),help='Release date yyyy-MM-dd; default: UTC release preparation date');p.add_argument('--allow-dirty',action='store_true');a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--platform',choices=['macos-universal','windows-x64'],required=True);p.add_argument('--version',required=True);p.add_argument('--channel',choices=['test','production'],default='test');p.add_argument('--release-date',default=datetime.datetime.now(datetime.timezone.utc).date().isoformat(),help='Release date yyyy-MM-dd; default: UTC release preparation date');p.add_argument('--allow-dirty',action='store_true');a=p.parse_args()
  if datetime.datetime.strptime(a.release_date,'%Y-%m-%d').date().isoformat()!=a.release_date:raise ValueError('release date must be yyyy-MM-dd')
  revision=git('rev-parse','HEAD').decode().strip();dirty=bool(git('status','--porcelain'));diff=git('diff','HEAD');code_before=git('diff','HEAD','--','unity/Assets/Spacewars/Presentation','unity/Assets/Spacewars/Editor')
  if dirty and not a.allow_dirty:raise ValueError('release build requires clean committed source; --allow-dirty is test-only')
@@ -18,7 +18,7 @@ def main():
  command=[str(ROOT/'tools/unity.sh'),'shared','-batchmode','-quit']
  if a.platform=='windows-x64':command+=['-buildTarget','Win64']
  command+=['-executeMethod','Spacewars.Editor.PlayableProject.'+('ReleaseMac' if a.platform=='macos-universal' else 'ReleaseWindows'),'-logFile',str(log)]
- env=os.environ.copy();env['SPACEWARS_RELEASE_VERSION']=a.version;env['SPACEWARS_RELEASE_DATE']=a.release_date
+ env=os.environ.copy();env['SPACEWARS_RELEASE_VERSION']=a.version;env['SPACEWARS_RELEASE_DATE']=a.release_date;env['SPACEWARS_RELEASE_CHANNEL']=a.channel
  result=subprocess.run(command,cwd=ROOT,env=env)
  if result.returncode or not log.exists() or 'NATIVE_RELEASE_BUILD_PASS' not in log.read_text(errors='replace'):return 1
  if git('rev-parse','HEAD').decode().strip()!=revision:raise ValueError('source revision changed during build')
@@ -26,6 +26,6 @@ def main():
  if git('diff','HEAD','--','unity/Assets/Spacewars/Presentation','unity/Assets/Spacewars/Editor')!=code_before:raise ValueError('code changed during build')
  folder=out/'Player.app' if a.platform=='macos-universal' else out
  files=inventory(folder);files.pop('native-build.json',None)
- record={'schema':1,'commit':revision,'dirty':dirty,'source_diff_sha256':hashlib.sha256(diff).hexdigest(),'version':a.version,'release_date':a.release_date,'platform':a.platform,'files':files,'build_log':str(log)}
+ record={'schema':1,'channel':a.channel,'test_match_logging':a.channel=='test','commit':revision,'dirty':dirty,'source_diff_sha256':hashlib.sha256(diff).hexdigest(),'version':a.version,'release_date':a.release_date,'platform':a.platform,'files':files,'build_log':str(log)}
  identity.write_text(json.dumps(record,indent=2)+'\n');print(json.dumps({k:v for k,v in record.items() if k!='files'}));return 0
 if __name__=='__main__':sys.exit(main())

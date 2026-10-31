@@ -57,7 +57,12 @@ public sealed class PlayableTerritoryPadTests
                 Assert.AreEqual(PlayableCommandStatus.OccupiedPad,Call("BuildAt",1,1,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null),"Demolition still occupies the slot");
                 Call("AdvanceBuildingLifecycle",PlayableProfile.Default.BuildingSaleDemolitionSec);
             }
-            else Call("Damage",building.Id,building.Health);
+            else
+            {
+                Call("Damage",building.Id,building.Health);
+                Assert.AreEqual(PlayableCommandStatus.OccupiedPad,Call("BuildAt",1,1,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null),"Collapse still reserves the freed gameplay slot");
+                for(int frame=0;frame<(int)Math.Ceiling(PlayableProfile.Default.BuildingDestructionSeconds*30);frame++)Call("Step",1d/30d);
+            }
             Assert.IsFalse(View().Buildings.Any(b=>b.Id==building.Id));
             world.RenderSites(View());yield return null;AssertVisible(Pad("1:1"),layer);Assert.AreSame(original,Pad("1:1"));
             Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,1,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null),"Recovered slot must also accept rebuilding");

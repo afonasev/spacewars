@@ -61,7 +61,13 @@ namespace Spacewars.Simulation
         }
         private int NextParticipantTeam(int capacity)
         {
-            if(!Foundry&&!WhiteMeridian)return Enumerable.Range(1,8).First(team=>Participants.All(p=>p.Team!=team));
+            bool crossings=capacity==4&&!MossHighland&&!BasaltCrown&&!WhiteMeridian;
+            if(!Foundry&&!WhiteMeridian&&!crossings)return Enumerable.Range(1,8).First(team=>Participants.All(p=>p.Team!=team));
+            if(crossings){
+                var teams=Participants.Select(p=>p.Team).Distinct().ToList();
+                while(teams.Count<2)teams.Add(Enumerable.Range(1,8).First(t=>!teams.Contains(t)));
+                return teams.Where(t=>Participants.Count(p=>p.Team==t)<2).OrderBy(t=>Participants.Count(p=>p.Team==t)).ThenBy(t=>t).First();
+            }
             int previous=Participants.Count==0?0:Participants[Participants.Count-1].Team;
             // Foundry is authored for two teams. Fill an available opposing team first,
             // without rewriting manual choices or exceeding a team's share of the map.
@@ -74,6 +80,7 @@ namespace Spacewars.Simulation
         public bool BasaltCrown;
         public bool MossHighland;
         public bool WhiteMeridian;
+        public bool NullDock;
         public string HumanName = "Игрок 1";
         public string AiName = "ИИ";
         public int HumanTeam = 1, AiTeam = 2;
@@ -88,11 +95,13 @@ namespace Spacewars.Simulation
         public static readonly string[] DifficultyNames = { "Кадет", "Боец", "Ветеран" };
         public static readonly string[] ColorNames = { "Голубой", "Красный", "Лайм", "Жёлтый", "Фиолетовый", "Оранжевый", "Мятный", "Белый" };
         public static readonly string[] ColorHex = { "#59d8ff", "#ff5a73", "#a8ff53", "#ffd34e", "#c682ff", "#ff9e58", "#54f0c4", "#f1f1f1" };
-        public int Capacity(PlayableProfile profile) => profile.AuthoredMap == null ? 0 : profile.AuthoredMap.Sites(profile).Count(s => s.Kind == PlayableBuildingKind.Headquarters);
+        public int Capacity(PlayableProfile profile) => profile.AuthoredMap is ThreeCrossingsMap ? 4 : profile.AuthoredMap == null ? 0 : profile.AuthoredMap.Sites(profile).Count(s => s.Kind == PlayableBuildingKind.Headquarters);
         public string Validate(PlayableProfile profile, bool keyboardConnected, bool mouseConnected)
         {
             if(Participants!=null)
             {
+                if(Participants.Any(p=>p==null))return "Укажите участников матча.";
+                if(profile.AuthoredMap is ThreeCrossingsMap&&(Participants.Count<2||Participants.Count>4||Participants.GroupBy(p=>p.Team).Count()!=2||Participants.GroupBy(p=>p.Team).Any(g=>g.Count()>2)))return "Для Переправы нужны 1×1, 1×2 или 2×2.";
                 if(WhiteMeridian&&(Participants.Count!=4||Participants.GroupBy(p=>p.Team).Count()!=2||Participants.GroupBy(p=>p.Team).Any(g=>g.Count()!=2)))return "Для Белого меридиана нужны две команды по два участника.";
                 if(Participants.Count<2)return "Добавьте не менее двух участников.";
                 if(Participants.Count>Capacity(profile))return "Состав превышает вместимость карты. Освободите лишние места.";
@@ -107,7 +116,7 @@ namespace Spacewars.Simulation
                 return null;
             }
             if (!Enum.IsDefined(typeof(AiDifficulty),Difficulty)) return "Выберите сложность ИИ.";
-            if (Capacity(profile) != (Foundry?6:2)) return "Карта не соответствует составу матча.";
+            if (Capacity(profile) != (profile.AuthoredMap is ThreeCrossingsMap?4:Foundry?6:2)) return "Карта не соответствует составу матча.";
             if (!HumanPresent || !Foundry&&!AiPresent) return "Заполните оба игровых места.";
             if (string.IsNullOrWhiteSpace(HumanName)) return "Укажите имена обоих участников.";
             if (HumanName.Trim().Length > 24) return "Имя: не более 24 символов.";

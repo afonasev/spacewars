@@ -1,0 +1,15 @@
+{
+  "id": "shkval-monolith-v1",
+  "revision": 2,
+  "launchTravel": 0.045,
+  "settleSeconds": 0.35,
+  "flamePulse": 0.14,
+  "flameFrequency": 14,
+  "sourceTextureRepeats": 4,
+  "exhaustMuzzleFollowSeconds": 0.3,
+  "rocketScale": 0.6,
+  "loadingTravel": 0.12,
+  "hullRecoilTravel": 0.025,
+  "hullRecoilAttackSeconds": 0.045,
+  "hullRecoilReturnSeconds": 0.22
+}

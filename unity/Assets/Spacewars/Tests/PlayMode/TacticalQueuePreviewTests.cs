@@ -22,6 +22,34 @@ public sealed class TacticalQueuePreviewTests
         Assert.Less(art.orderMarkerRadius,12);Assert.Less(art.orderMarkerWidth,2);
         foreach(var f in fields){float original=f.Read();Assert.IsNotEmpty(f.Description);Assert.IsNotEmpty(f.Unit);Assert.Greater(f.Step,0);foreach(float bad in new[]{float.NaN,float.PositiveInfinity,f.Minimum-f.Step,f.Maximum+f.Step}){f.Write(bad);Assert.Throws<ArgumentException>(()=>art.Validate());}f.Write(original);}art.Validate();
     }
+    [Test] public void VectorControlsHaveBoundsAndMetadata()
+    {
+        var art=EnvironmentArtProfile.Load();var fields=art.Parameters().Where(f=>f.Path.Contains(".orderConfirmation")).ToArray();Assert.AreEqual(9,fields.Length);
+        foreach(var f in fields){float original=f.Read();Assert.IsNotEmpty(f.Description);Assert.IsNotEmpty(f.Unit);Assert.Greater(f.Step,0);f.Write(f.Maximum+f.Step);Assert.Throws<ArgumentException>(()=>art.Validate());f.Write(original);}art.Validate();
+    }
+    [UnityTest] public IEnumerator VectorFramesRenderDistinctSilhouettesConvergeAndFade()
+    {
+        var host=new GameObject("Vector accepted-order animation proof");var panel=ScriptableObject.CreateInstance<PanelSettings>();panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");panel.scaleMode=PanelScaleMode.ConstantPixelSize;
+        var target=new RenderTexture(800,360,24);target.Create();panel.targetTexture=target;var doc=host.AddComponent<UIDocument>();doc.panelSettings=panel;
+        var root=doc.rootVisualElement;root.style.width=800;root.style.height=360;root.style.backgroundColor=new Color(.07f,.09f,.11f);root.style.unityFont=Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        var art=EnvironmentArtProfile.Load();var layer=new PlayableOrderMarkerLayer(location=>new Vector2((float)location.Position.X,(float)location.Position.Z),art:art);root.Add(layer);
+        var times=new[]{0f,.12f,.28f,.65f};var list=new List<PlayableQueueMarker>();
+        for(int row=0;row<2;row++)for(int i=0;i<times.Length;i++)list.Add(new PlayableQueueMarker(row*4+i+1,row*4+i+1,1,row==0?PlayableCommandKind.Move:PlayableCommandKind.AttackMove,new NavLocation(new NavPoint(100+i*200,110+row*140),NavLocation.FlatSurface),QueueMarkerPhase.Pending,times[i]));
+        layer.Set(list);
+        foreach(var text in new[]{"VECTOR / ACCEPTED MOVE","VECTOR / ACCEPTED ATTACK"}){int row=text.EndsWith("MOVE")?0:1;var label=new Label(text);label.style.position=Position.Absolute;label.style.left=20;label.style.top=20+row*140;label.style.color=Color.white;label.style.fontSize=16;root.Add(label);}
+        for(int i=0;i<times.Length;i++){var label=new Label((times[i]*1000).ToString("0")+" ms");label.style.position=Position.Absolute;label.style.left=75+i*200;label.style.top=310;label.style.color=Color.white;root.Add(label);}
+        Texture2D pixels=null;
+        try
+        {
+            yield return null;yield return null;yield return null;
+            var old=RenderTexture.active;RenderTexture.active=target;pixels=new Texture2D(800,360,TextureFormat.RGB24,false);pixels.ReadPixels(new Rect(0,0,800,360),0,0);pixels.Apply();RenderTexture.active=old;
+            int Count(int cx,int cy,int range=45){int count=0;for(int y=cy-range;y<=cy+range;y++)for(int x=cx-range;x<=cx+range;x++){var c=pixels.GetPixel(x,359-y);if(c.g>.5f&&c.g>c.r*2||c.r>.5f&&c.r>c.g*2)count++;}return count;}
+            for(int row=0;row<2;row++){for(int i=0;i<3;i++)Assert.Greater(Count(100+i*200,110+row*140),30,"visible animation frame");Assert.Zero(Count(700,110+row*140),"confirmation must fully disappear at configured duration");}
+            Assert.Greater(Count(100,110,15),20,"the exact destination must be readable from the first frame, before arrows converge");
+            var folder=Path.GetFullPath(Path.Combine(Application.dataPath,"../../.local/order-marker-captures"));Directory.CreateDirectory(folder);File.WriteAllBytes(Path.Combine(folder,"vector-animation.png"),pixels.EncodeToPNG());
+        }
+        finally{if(pixels)UnityEngine.Object.DestroyImmediate(pixels);panel.targetTexture=null;UnityEngine.Object.DestroyImmediate(host);UnityEngine.Object.DestroyImmediate(panel);target.Release();UnityEngine.Object.DestroyImmediate(target);}
+    }
     [UnityTest] public IEnumerator ActiveAndPendingMarkersRenderAsSmallHollowRings()
     {
         var host=new GameObject("Order marker style proof");var panel=ScriptableObject.CreateInstance<PanelSettings>();panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");panel.scaleMode=PanelScaleMode.ConstantPixelSize;

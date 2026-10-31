@@ -150,12 +150,13 @@ namespace Spacewars.Runtime
                 else
                 {
                     if(site.Owner!=o.Owner)return "site not owned";
-                    if(a.BuildingKind!=PlayableBuildingKind.Factory&&a.BuildingKind!=PlayableBuildingKind.Refinery&&a.BuildingKind!=PlayableBuildingKind.ScientificCenter)return "unsupported slot building";
+                    if(a.BuildingKind!=PlayableBuildingKind.Factory&&a.BuildingKind!=PlayableBuildingKind.Refinery&&a.BuildingKind!=PlayableBuildingKind.ScientificCenter&&a.BuildingKind!=PlayableBuildingKind.Hangar)return "unsupported slot building";
                     if(!site.Site.Slots.Any(s=>s.Id==a.SlotId))return "slot unavailable";
                     if(o.Buildings.Any(b=>b.SiteId==a.SiteId&&b.SlotId==a.SlotId))return "slot occupied";
                     var parent=o.Buildings.FirstOrDefault(b=>b.Id==site.CenterId&&b.Id==a.ParentId&&b.Owner==o.Owner);
                     if(parent==null||parent.Health<=0||parent.Phase!=ConstructionPhase.Ready||parent.PrivateState==null||parent.PrivateState.Lifecycle?.Selling==true)return "ready live parent prerequisite";
                 }
+                if(a.BuildingKind==PlayableBuildingKind.ScientificCenter&&!TerritoryRules.HasScienceProducer(o.Buildings,o.Owner))return "ready factory or hangar prerequisite";
                 if(site.Contested)return "site contested";
                 return o.Credits<TerritoryRules.Cost(profile,a.BuildingKind)?"insufficient credits":null;
             }

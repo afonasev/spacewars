@@ -407,21 +407,31 @@ func host(root, exe string) error {
 			stopDownload(false)
 			paused = false
 			status.State = "available"
-		case "/history":
+		case "/history", "/history-image":
 			if r.Method != "GET" || !menu {
 				http.Error(w, "menu only", 409)
 				return
 			}
 			if historyCancel != nil {
-				http.Error(w, "history busy", 409)
-				return
+				historyCancel()
+				pending := historyDone
+				mu.Unlock()
+				<-pending
+				mu.Lock()
 			}
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(r.Context())
 			historyCancel = cancel
 			historyDone = make(chan struct{})
 			done := historyDone
 			mu.Unlock()
-			history, err := githubHistoryContext(ctx, current.Version)
+			var history ReleaseHistory
+			var media []byte
+			var err error
+			if r.URL.Path == "/history" {
+				history, err = cachedHistory(ctx, root, current.Version)
+			} else {
+				media, err = historyImage(ctx, root, current.Version, r.URL.Query().Get("version"), r.URL.Query().Get("asset"))
+			}
 			mu.Lock()
 			cancel()
 			historyCancel = nil
@@ -430,7 +440,12 @@ func host(root, exe string) error {
 				http.Error(w, err.Error(), 502)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(history)
+			if r.URL.Path == "/history-image" {
+				w.Header().Set("Content-Type", "image/png")
+				_, _ = w.Write(media)
+			} else {
+				_ = json.NewEncoder(w).Encode(history)
+			}
 			return
 		case "/commit":
 			if r.Method != "POST" || !menu || status.State != "prepared" {

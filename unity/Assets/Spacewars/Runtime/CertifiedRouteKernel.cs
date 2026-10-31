@@ -66,6 +66,14 @@ namespace Spacewars.Runtime
         // The token remains recorded after EndHostAllocation; it is not authority
         // to reopen allocation. Used only with a pinned same-quantum completion.
         internal bool CompletedAllocationOnThread(int thread)=>!allocating&&thread!=0&&allocationOwnerThread==thread;
+        // Read-only receipt for the Allocation -> Scan publication gap. The
+        // observed Allocation root still has floor zero; the worker owns the
+        // actual floor returned by BeginHostAllocation, not a command estimate.
+        internal bool OwnsAllocationFrontier(int thread,PumpFrontier frame)
+            =>OwnsAllocationThread(thread)&&frame.AllocationFloor==reservedCorridorBytes&&
+                frame.Stage>=PumpStage.Scan&&frame.Stage<=PumpStage.Solve&&
+                frame.SolveWorkLimit==(frame.Stage==PumpStage.Solve?checked(frame.OriginalBudget*WorkUnitsPerRequestBudget):0);
+
         private long BeginAllocation(NavigationRoutePort port)
         {
             var floor=port.BeginHostAllocation();
@@ -99,7 +107,7 @@ namespace Spacewars.Runtime
             }
         }
         private bool PhysicalHasWork {get{var root=currentPort?.PinCommittedHostRoot();try{return root!=null&&(root.Rows.Count!=0||root.Frontier.Stage!=PumpStage.Idle);}finally{root?.Release();}}}
-        public bool HasWork => PhysicalHasWork || registered.Count!=0 || (currentPort?.QueuedRequestCount??0)!=0 || (currentPort?.AllocationCount??0)!=0 || (currentPort?.ArrivalReconstructing??false);
+        public bool HasWork => (recastPreparation?.HasTransientWork??false) || PhysicalHasWork || registered.Count!=0 || (currentPort?.QueuedRequestCount??0)!=0 || (currentPort?.AllocationCount??0)!=0 || (currentPort?.ArrivalReconstructing??false);
         private const int WorkAllotment = 16384;
         private const int WorkUnitsPerRequestBudget = 1024;
         private static readonly NavEpochQuota Quota = new NavEpochQuota(WorkAllotment, WorkAllotment,
@@ -148,6 +156,7 @@ namespace Spacewars.Runtime
         }
         public void Clear()
         {
+            if(recastPreparation!=null){if(currentPort!=null)currentPort.ReleaseRecastPreparation(recastPreparation);else recastPreparation.Dispose();recastPreparation=null;}
             var oldPort=currentPort;
             if(oldPort==null){ClearOwned();return;}
             if(allocating){var retained=oldPort.PhysicalRetainedBytes??OwnedRetainedBytes;allocating=false;reservedCorridorBytes=0;oldPort.EndHostAllocation(retained);}
@@ -398,14 +407,18 @@ namespace Spacewars.Runtime
                 NavNameKey key;
                 if(!NavStorageScratch.TryReserve(reservation,construction,out var constructionLease))return false;
                 using(constructionLease){
-                    ILayeredNavigationProvider provider=observed.AuthoredTerrain==null?
+                    ILayeredNavigationProvider provider=observed.AuthoredTerrain is StackedRampQualificationMap physical?physical.ForGeometry(ingress.Geometry,ingress.HeldIdentity):observed.AuthoredTerrain==null?
                         NavigationAdmission.CertifiedFlatProvider(ingress.Geometry):
                         new PartitionNavigationProvider(observed.AuthoredTerrain,
                             ingress.Geometry,ingress.HeldIdentity);
                     if(provider.EstimatedRetainedBytes>construction)
                         throw new InvalidOperationException("Physical provider exceeded construction reserve.");
                     var prepared=BuildScheduled(observed,ingress,provider);
-                    key=candidate.RegisterOrdinary(ingress,prepared,observed.SurfaceProviderId,reservation,observed.Geometry);
+                    if(port.UsesRecastGroundRoutes){
+                        recastPreparation??=port.PrepareRecastStartup(binding.Profile,()=>Continue?.Invoke()==false);
+                        if(!recastPreparation.TryGet(observedPin,ingress,provider,reservation,()=>Continue?.Invoke()==false,out var route,out var status))return false;
+                        key=candidate.RegisterRecast(ingress,prepared,route,status,observed.SurfaceProviderId,reservation);
+                    }else key=candidate.RegisterOrdinary(ingress,prepared,observed.SurfaceProviderId,reservation,observed.Geometry);
                 }
                 var registrationFrame=CapturePumpFrontier();
                 candidate.SetFrontier(WithCounters(registrationFrame,transfers:registrationFrame.TransfersUsed+1),epoch,checked(ProgressSequence+1));
@@ -414,9 +427,11 @@ namespace Spacewars.Runtime
                 candidate.SealPrepared();
                 port.PublishRegisteredPhysicalHost(scope,source,candidate,observed,ingress,key);
                 ProgressSequence++;return true;
-            }catch(NavigationSession.PhysicalIngressRefused){return false;}
+            }catch(OperationCanceledException)when(Continue?.Invoke()==false){return false;}
+            catch(NavigationSession.PhysicalIngressRefused){return false;}
             catch(PartitionNavigationProvider.CopyScratchRefused){return false;}
-            catch(OrdinaryPreparationReservation.Refused){return false;}
+            catch(OrdinaryPreparationReservation.Refused){recastPreparation?.RetireUnusedMaps();return false;}
+            catch(RecastNative.CapacityRefused){recastPreparation?.RetireUnusedMaps();return false;}
             finally{
                 candidate?.ReleaseStorage();
                 scope?.Discard();
@@ -588,6 +603,12 @@ namespace Spacewars.Runtime
                                 OnSegment(leg.From.Position,s.From,s.To));
                             valid=leg.From.Position.Equals(leg.To.Position)&&seam!=null;
                             if(valid){leg.RequireCanonicalProviderBinding(row.Provider,reservation);portalName=leg.CanonicalPortalName(row.Provider);}
+                        }else if(valid&&leg.Kind==NavTypedLegKind.Portal&&row.Provider is LayeredNavigationProvider layered){
+                            var portal=layered.Portals.FirstOrDefault(p=>p.Id==leg.PortalId);
+                            bool forward=portal!=null&&leg.From.Equals(portal.Entry)&&leg.To.Equals(portal.Exit);
+                            bool reverse=portal!=null&&portal.Direction==NavPortalDirection.Both&&leg.From.Equals(portal.Exit)&&leg.To.Equals(portal.Entry);
+                            valid=portal!=null&&(forward||reverse)&&leg.From.Position.Equals(leg.To.Position)&&layered.QualificationStatus(portal,row.Scheduled.Clearance)==NavConnectorStatus.Ready;
+                            if(valid){leg.RequireCanonicalProviderBinding(row.Provider,reservation);portalName=leg.CanonicalPortalName(row.Provider);}
                         }else valid=false;
                         if(valid){
                             candidate.StageProjectionTransition(key,NavigationHostRow.ProjectionTransition.Leg,
@@ -756,7 +777,8 @@ namespace Spacewars.Runtime
             var key=ProviderKey(request);
             if(providers.TryGetValue(key,out var existing))return existing.Provider;
             ILayeredNavigationProvider provider;
-            if(terrain!=null)provider=new PartitionNavigationProvider(terrain,request.Geometry,request.HeldIdentity);
+            if(terrain is StackedRampQualificationMap physical)provider=physical.ForGeometry(request.Geometry,request.HeldIdentity);
+            else if(terrain!=null)provider=new PartitionNavigationProvider(terrain,request.Geometry,request.HeldIdentity);
             else if(admission.SurfaceProviderId==NavLocation.FlatSurface)provider=NavigationAdmission.CertifiedFlatProvider(request.Geometry);
             else throw new InvalidOperationException("Unsupported authored route provider.");
             if(provider.EstimatedRetainedBytes>LayeredNavigationScheduler.MaxRetainedBytes-4224){oversized=true;return null;}

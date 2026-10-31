@@ -24,20 +24,26 @@ namespace Spacewars.Runtime
         {
             message="Invalid site or ownership.";
             if(!sites.TryGetValue(siteId,out var site)||!Enum.IsDefined(typeof(PlayableBuildingKind),kind))return PlayableCommandStatus.InvalidTarget;
-            NavPoint position=site.Site.Position;double heading=0;
+            if(BuildingSlotCollapsing(siteId,slotId)){message="Здание разрушается. Дождитесь освобождения площадки.";return PlayableCommandStatus.OccupiedPad;}
+            NavPoint position=site.Site.Position;double heading=TerritoryRules.BuildingHeading;
             if(slotId==0)
             {
                 if(kind!=site.Site.Kind||site.CenterId!=0||site.Progress<1||site.Claimant!=owner||(site.Locked.HasValue&&site.Locked!=owner)||parentId!=0)return PlayableCommandStatus.InvalidTarget;
             }
             else
             {
-                if(kind!=PlayableBuildingKind.Factory&&kind!=PlayableBuildingKind.Refinery&&kind!=PlayableBuildingKind.ScientificCenter&&kind!=PlayableBuildingKind.Hangar)return PlayableCommandStatus.InvalidTarget;
-                if(!buildings.TryGetValue(site.CenterId,out var parent)||parent.Id!=parentId||!parent.Ready||parent.Sale!=null||parent.Owner!=owner||slotId<1||slotId>site.Site.Slots.Count)return PlayableCommandStatus.InvalidTarget;
+                if(!TerritoryRules.Defensive(kind)&&kind!=PlayableBuildingKind.Factory&&kind!=PlayableBuildingKind.Refinery&&kind!=PlayableBuildingKind.ScientificCenter&&kind!=PlayableBuildingKind.Hangar)return PlayableCommandStatus.InvalidTarget;
+                if(!buildings.TryGetValue(site.CenterId,out var parent)||parent.Id!=parentId||!parent.Ready||parent.Sale!=null||parent.Owner!=owner||slotId<1)return PlayableCommandStatus.InvalidTarget;
                 foreach(var b in buildings.Values)if(b.SiteId==siteId&&b.SlotId==slotId){message="Slot occupied.";return PlayableCommandStatus.OccupiedPad;}
-                var slot=site.Site.Slots[slotId-1];position=slot.Position;heading=slot.Heading;
+                bool defense=TerritoryRules.DefenseSlot(slotId);
+                if(defense!=(TerritoryRules.Defensive(kind)))return PlayableCommandStatus.InvalidTarget;
+                var slot=(defense?site.Site.DefenseSlots(profile):site.Site.Slots).FirstOrDefault(x=>x.Id==slotId);
+                if(slot==null)return PlayableCommandStatus.InvalidTarget;position=slot.Position;
             }
+            if(kind==PlayableBuildingKind.ScientificCenter&&!buildings.Values.Any(b=>b.Owner==owner&&TerritoryRules.ScienceProducer(b.Kind)&&b.Ready&&b.Health>0&&b.Sale==null)){message="Нужна фабрика или ангар";return PlayableCommandStatus.Rejected;}
+            if(kind==PlayableBuildingKind.GaussTower&&!buildings.Values.Any(b=>b.Owner==owner&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.Ready&&b.Health>0&&b.Sale==null)){message="Нужен готовый исследовательский центр";return PlayableCommandStatus.Rejected;}
             int cost=TerritoryRules.Cost(profile,kind);
-            if(Balance(owner)<cost){message="Insufficient credits.";return PlayableCommandStatus.InsufficientCredits;}
+            if(!CanAfford(owner,cost)){message="Insufficient credits.";return PlayableCommandStatus.InsufficientCredits;}
             AddCredits(owner,-cost);
             var building=new Building{TermsRevision=profile.Revision,Id=nextId++,Owner=owner,Kind=kind,Position=position,SiteId=siteId,SlotId=slotId,ParentId=parentId,PaidCost=cost,Phase=ConstructionPhase.Pending,Heading=heading};
             buildings.Add(building.Id,building);
@@ -45,8 +51,12 @@ namespace Spacewars.Runtime
             if(slotId==0){site.CenterId=building.Id;site.Locked=owner;}
             message="Construction ordered.";return PlayableCommandStatus.Applied;
         }
+        private bool FreeProvingGround=>offline?.ProvingGround!=null;
+        private bool CanAfford(PlayableOwner owner,double cost)=>FreeProvingGround||Balance(owner)>=cost;
+        private double ActionDuration(double ordinary)=>FreeProvingGround?profile.ProvingGroundActionSeconds:ordinary;
+        private double BuildingDuration(Building b)=>ActionDuration(TerritoryRules.Duration(Terms(b.TermsRevision),b.Kind));
         private double Balance(PlayableOwner owner)=>offline==null?(owner==PlayableOwner.Player?credits:enemyCredits):ownerCredits[owner];
-        private void AddCredits(PlayableOwner owner,double amount){if(offline!=null)ownerCredits[owner]+=amount;else if(owner==PlayableOwner.Player)credits+=amount;else enemyCredits+=amount;}
+        private void AddCredits(PlayableOwner owner,double amount){if(FreeProvingGround)return;if(offline!=null)ownerCredits[owner]+=amount;else if(owner==PlayableOwner.Player)credits+=amount;else enemyCredits+=amount;}
         private PlayableCommandStatus CancelBuilding(int id,PlayableOwner owner,out string message)
         {
             message="Select own unfinished building.";
@@ -60,6 +70,8 @@ namespace Spacewars.Runtime
         private void RemoveBuildingWithAttacker(Building b,bool cancellation,PlayableOwner? attacker)
         {
             if(!buildings.Remove(b.Id))return;
+            if(!cancellation&&b.Sale==null&&b.Phase!=ConstructionPhase.Pending)BeginBuildingDestruction(b);
+            if(!cancellation&&b.Sale==null)Fact(b.Owner,MatchFactKind.BuildingLost,0,(int)b.Kind);
             RecordKill(attacker,b.Owner,b.Id,true,(int)b.Kind,TerritoryRules.Cost(profile,b.Kind));
             if(b.Kind==PlayableBuildingKind.ScientificCenter)InterruptResearchCenter(b.Id);
             var children=new List<Building>();foreach(var child in buildings.Values)if(child.ParentId==b.Id)children.Add(child);
@@ -126,7 +138,16 @@ namespace Spacewars.Runtime
                 if(InFootprint(b,target,unitRadius)||!Geometry.IsFree(target,unitRadius)||!navigation.Crowd.CanPlace(target,unitRadius))continue;
                 var allocated=navigation.AllocateArrivalSlots(target,new[]{u.Id});
                 if(allocated.Length!=1||InFootprint(b,allocated[0],unitRadius))continue;
-                if(navigation.Move(u.Id,allocated[0])){u.Target=0;u.HasAttackMove=false;u.StoppedSeconds=0;return true;}
+                // Evacuation replaces the old command: retaining its common-point
+                // group can mark this unit Arrived while it is still on the pad.
+                if(navigation.MoveGroup(new[]{u.Id},allocated)){
+                    // Native evacuation has replaced the old issuance. Retire its
+                    // domain queue too, rather than save an attack/move whose
+                    // installed navigation now belongs to the evacuation root.
+                    tacticalQueues.Remove(u.Id);InvalidateSpatialCompletion(u.Id);
+                    u.CurrentOrder=null;u.WreckWaiting=false;InterruptBurst(u);u.ExplicitTarget=false;
+                    u.Target=0;u.HasAttackMove=false;u.StoppedSeconds=0;return true;
+                }
             }
             return false;
         }

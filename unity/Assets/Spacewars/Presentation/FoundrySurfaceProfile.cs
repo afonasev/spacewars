@@ -5,7 +5,17 @@ namespace Spacewars.Presentation
 {
     [Serializable] public sealed class FoundrySurfaceProfile
     {
-        public string id="foundry-warm-slag-basalt-v1";public int revision=10;
+        public string id="foundry-warm-slag-basalt-v1";public int revision=14;
+        [SurfaceSetting("Foundry height palette","Low hue","Selected A cold-slag low ground; shared by world and map, no geometry change.","turn",0f,1f,0.01f)] public float lowHue=0.075f;
+        [SurfaceSetting("Foundry height palette","Low saturation","Selected A cold-slag low ground; shared by world and map, no geometry change.","ratio",0f,0.5f,0.01f)] public float lowSaturation=0.32f;
+        [SurfaceSetting("Foundry height palette","Low value","Selected A cold-slag low ground; shared by world and map, no geometry change.","ratio",0.2f,0.7f,0.01f)] public float lowValue=0.36f;
+        [SurfaceSetting("Foundry height palette","Rear hue","Selected A cold-slag rear ground; shared by world and map, no geometry change.","turn",0f,1f,0.01f)] public float rearHue=0.075f;
+        [SurfaceSetting("Foundry height palette","Rear saturation","Selected A cold-slag rear ground; shared by world and map, no geometry change.","ratio",0f,0.5f,0.01f)] public float rearSaturation=0.12f;
+        [SurfaceSetting("Foundry height palette","Rear value","Selected A cold-slag rear ground; shared by world and map, no geometry change.","ratio",0.2f,0.7f,0.01f)] public float rearValue=0.45f;
+        [SurfaceSetting("Foundry height palette","Upper hue","Selected A cold-slag upper ground; shared by world and map, no geometry change.","turn",0f,1f,0.01f)] public float upperHue=0.56f;
+        [SurfaceSetting("Foundry height palette","Upper saturation","Selected A cold-slag upper ground; shared by world and map, no geometry change.","ratio",0f,0.5f,0.01f)] public float upperSaturation=0.1f;
+        [SurfaceSetting("Foundry height palette","Upper value","Selected A cold-slag upper ground; shared by world and map, no geometry change.","ratio",0.2f,0.7f,0.01f)] public float upperValue=0.56f;
+        [SurfaceSetting("Foundry height palette","Height palette strength","Blend from legacy uniform ground to the selected height palette in world and all map views.","ratio",0,1,.05f)] public float heightPaletteStrength=1;
         [SurfaceSetting("Foundry routes","Climb value","Neutral exposed aggregate on existing flank climbs; no light or geometry change.","ratio",.3f,.55f,.01f)] public float climbValue=.46f;
         [SurfaceSetting("Foundry routes","Climb wear spacing","Distance between broad transverse wear bands on flank climbs.","m",2,8,.25f)] public float climbWearSpacing=4;
         [SurfaceSetting("Foundry routes","Climb wear contrast","Restrained transverse wear in the aggregate, without raised bars or emission.","ratio",0,.3f,.01f)] public float climbWearContrast=.16f;
@@ -34,8 +44,15 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Foundry palette","Grain contrast","Fine surface texture contrast.","ratio",0,.3f,.01f)] public float grainContrast=.12f;
         [SurfaceSetting("Foundry palette","Road feather","Irregular soft edge of compacted slag.","m",.25f,4,.25f)] public float roadFeather=1.5f;
         [SurfaceSetting("Foundry palette","Cooled lava rim","Width of the dark cooled edge around molten channels.","m",.25f,3,.25f)] public float lavaCrustWidth=1.5f;
+        [SurfaceSetting("Foundry geology","Block span","Upper size of a few flat fractured basalt slabs, reduced for narrow ridges.","m",8,24,1)] public float blockSpan=18;
+        [SurfaceSetting("Foundry geology","Block coverage","Sparse admission target for broad angular slabs; rejected candidates leave natural gaps.","ratio",.15f,.65f,.05f)] public float blockCoverage=.45f;
+        [SurfaceSetting("Foundry geology","Block rotation","Maximum irregular orientation of large angular slabs; never changes blocked contours.","degrees",0,45,1)] public float blockRotation=28;
+        [SurfaceSetting("Foundry geology","Block height","Relief reserved for angular slabs above the continuous basal mesh, inside the solid height.","m",1,4,.25f)] public float blockHeight=2.5f;
+        [SurfaceSetting("Foundry geology","Block joint","Broad open seams between individual slabs; no change to authoritative blocking.","m",.5f,4,.25f)] public float blockJoint=1.5f;
+        [SurfaceSetting("Foundry geology","Terrace strength","Broad basalt shelves within the authoritative blocked footprint; keeps the complete supported foot.","ratio",0,1,.05f)] public float terraceStrength=.85f;
+        [SurfaceSetting("Foundry geology","Rock sample spacing","World-space cap and edge sampling; clipped to the exact blocked polygon.","m",1,2,.25f)] public float rockSampleSpacing=1.5f;
         [SurfaceSetting("Foundry geology","Crown scale","World extent of major uneven cliff silhouettes.","m",2,18,.5f)] public float crownScale=7;
-        [SurfaceSetting("Foundry geology","Crown relief","Height variation within existing blocked rock volumes.","m",.1f,3,.1f)] public float crownRelief=1.5f;
+        [SurfaceSetting("Foundry geology","Crown relief","Height variation within existing blocked rock volumes.","m",.1f,3,.1f)] public float crownRelief=2.8f;
         [SurfaceSetting("Foundry geology","Edge erosion","Inset irregular crowns; base footprint remains fully blocked.","m",.1f,1.5f,.05f)] public float edgeErosion=1.2f;
         [SurfaceSetting("Foundry geology","Strata spacing","Vertical separation of broad mineral layers.","m",.3f,3,.1f)] public float strataSpacing=1.2f;
         [SurfaceSetting("Foundry geology","Strata contrast","Mineral bands without emissive veins.","ratio",0,.6f,.05f)] public float strataContrast=.3f;
@@ -50,7 +67,7 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Foundry textures","Relief","Material normal variation; no collision change.","ratio",0,1,.05f)] public float relief=.3f;
         [SurfaceSetting("Foundry textures","Rock foot blend","Smooth natural deposit width around basalt.","m",.5f,6,.25f)] public float rockBlend=3;
         [SurfaceSetting("Foundry industry","Volume height","Simple grey box masses in already blocked corners.","m",1,8,.25f)] public float industrialHeight=4;
-        [SurfaceSetting("Foundry geology","Organic shoulder width","Inward sculpting of large crowns; complete blocked foot remains visible.","m",1,10,.25f)] public float shoulderWidth=6;
+        [SurfaceSetting("Foundry geology","Organic shoulder width","Inward sculpting of large crowns; complete blocked foot remains visible.","m",1,10,.25f)] public float shoulderWidth=5;
         [SurfaceSetting("Foundry geology","Basalt foot height","Visible continuous blocked foot above local terrain beneath organic shoulders.","m",.5f,3,.25f)] public float footHeight=1.5f;
         [SurfaceSetting("Foundry palette","Support light smoothing","Reduces long planar lighting seams across continuous shallow ramps; geometry remains unchanged.","ratio",0,1,.05f)] public float supportLightSmoothing=.85f;
         [SurfaceSetting("Foundry roads","Road meander","Smooth visual road displacement, independent of navigation.","m",0,5,.25f)] public float roadMeander=3;
@@ -64,6 +81,29 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Foundry concrete","Central foundation radius","Distinct dark foundation beneath headquarters and outposts.","m",2,5,.25f)] public float padCenterRadius=3.5f;
         [SurfaceSetting("Foundry concrete","Central foundation value","Brightness of the separate dark central concrete texture.","ratio",.15f,.4f,.01f)] public float padCenterValue=.35f;
         [SurfaceSetting("Foundry concrete","Center transition","Soft texture transition at the central foundation edge.","m",.1f,1,.05f)] public float padCenterFeather=.25f;
+        [SurfaceSetting("Quarry ground","Ground detail","Albedo detail on sand and slag only; keeps factories and rock texture unchanged.","ratio",0.0f,2.0f,0.05f)] public float groundDetailStrength=1.4f;
+        [SurfaceSetting("Quarry ground","Ground micro relief","Micro-normal strength on soft ground; physical support normals remain independent.","ratio",0.0f,1.0f,0.05f)] public float groundNormalStrength=0.1f;
+        [SurfaceSetting("Quarry ground","Compacted road blend","Material contrast of compacted lanes across the existing open ground.","ratio",0.0f,1.0f,0.05f)] public float roadBlendStrength=0.3f;
+        [SurfaceSetting("Quarry ground","Climb accent blend","Legacy climb and connection paint; zero uses continuous terrain and actual slope lighting.","ratio",0.0f,1.0f,0.05f)] public float routeBlendStrength=0.0f;
+        [SurfaceSetting("Foundry steel","Steel home foundations","Blend the six home pads from concrete to steel; no footprint or collider changes.","ratio",0.0f,1.0f,0.05f)] public float steelFoundation=1.0f;
+        [SurfaceSetting("Foundry steel","Steel value","Matte plate albedo beneath buildings; retain unit contrast.","ratio",0.25f,0.7f,0.01f)] public float steelValue=0.38f;
+        [SurfaceSetting("Foundry steel","Plate size","World size of large staggered structural plate modules.","m",3.0f,12.0f,0.5f)] public float steelPlateSize=5.5f;
+        [SurfaceSetting("Foundry steel","Recessed joint width","Flush dark seam width; anti-aliased in the shader without raised geometry.","m",0.02f,0.12f,0.01f)] public float steelSeamWidth=0.04f;
+        [SurfaceSetting("Foundry steel","Joint contrast","Restrained dark plate joints.","ratio",0.0f,0.6f,0.05f)] public float steelSeamContrast=0.35f;
+        [SurfaceSetting("Foundry steel","Plate variation","Subtle value changes between large plates.","ratio",0.0f,0.2f,0.01f)] public float steelBayVariation=0.08f;
+        [SurfaceSetting("Foundry steel","Brushed wear","Broad irregular polish and retained steel grain.","ratio",0.0f,2.0f,0.05f)] public float steelWearStrength=.9f;
+        [SurfaceSetting("Foundry steel","Steel sheen","Directional broad steel reflection; no emission.","ratio",0.0f,0.5f,0.02f)] public float steelSheen=0.22f;
+        [SurfaceSetting("Foundry steel","Steel reflection width","Reflection exponent; larger narrows the highlight.","exponent",8.0f,64.0f,2.0f)] public float steelExponent=24.0f;
+        [SurfaceSetting("Foundry steel","Flush fastener radius","Sparse fastener heads near plate corners, no physical protrusions.","m",0.02f,0.12f,0.01f)] public float steelFastenerRadius=0.055f;
+        [SurfaceSetting("Foundry steel","Fastener inset","Distance of flush fasteners from plate seams.","m",0.1f,0.4f,0.02f)] public float steelFastenerInset=0.2f;
+        [SurfaceSetting("Foundry steel","Steel micro relief","Subordinate steel surface normal variation.","ratio",0.0f,0.3f,0.01f)] public float steelNormalStrength=0.04f;
+        [SurfaceSetting("Foundry lava","Additional cooled crust","Additional cooled area for restrained recessed hot lava.","ratio",0.0f,0.8f,0.05f)] public float lavaCrustCoverage=0.5f;
+        [SurfaceSetting("Foundry steel","Steel hue","Cool steel separates hard foundations from warm quarry ground.","turn",0,1,.01f)] public float steelHue=.58f;
+        [SurfaceSetting("Foundry steel","Steel saturation","Restrained cool color in structural plates.","ratio",0,.4f,.01f)] public float steelSaturation=.18f;
+        [SurfaceSetting("Foundry steel","Wear texture scale","Resolved rolling wear from the original crisp steel siblings.","m",4,18,.5f)] public float steelTextureTile=12;
+        [SurfaceSetting("Foundry steel","Joint edge highlight","Narrow worn steel edge alongside recessed welds.","ratio",0,.3f,.01f)] public float steelJointEdge=.12f;
+        [SurfaceSetting("Foundry mine yards","Working margin","Additional hard yard around each mine; clipped to its supported plane, no authority change.","m",1,3,.25f)] public float mineYardMargin=2.5f;
+        [SurfaceSetting("Foundry steel","Irregular patina","Crisp pitting from the existing aggregate siblings replaces dominant directional rolling lines.","ratio",0,1,.05f)] public float steelPatina=.85f;
         public System.Collections.Generic.IEnumerable<SurfaceParameter> Parameters()
         {
             foreach(var field in GetType().GetFields())
@@ -75,9 +115,32 @@ namespace Spacewars.Presentation
             if(id!="foundry-warm-slag-basalt-v1"||revision<1)throw new ArgumentException("Foundry surface identity");
             foreach(var p in Parameters())if(float.IsNaN(p.Read())||float.IsInfinity(p.Read())||p.Read()<p.Minimum||p.Read()>p.Maximum)throw new ArgumentException("Invalid foundry surface: "+p.Path);
         }
+        public Color LowGround=>Color.HSVToRGB(lowHue,lowSaturation,lowValue);
+        public Color RearGround=>Color.HSVToRGB(rearHue,rearSaturation,rearValue);
+        public Color UpperGround=>Color.HSVToRGB(upperHue,upperSaturation,upperValue);
+        public Color GroundAtHeight(double height,Spacewars.Simulation.FoundryMap map)
+        {
+            // The shader interpolates linear material colors; mirror that in derived map pixels.
+            Color tint=height<=map.RearHeight
+                ?Color.Lerp(LowGround.linear,RearGround.linear,Mathf.Clamp01((float)(height/map.RearHeight)))
+                :Color.Lerp(RearGround.linear,UpperGround.linear,Mathf.Clamp01((float)((height-map.RearHeight)/(map.UpperHeight-map.RearHeight))));
+            return Color.Lerp(PlayableWorld.FoundryGround.linear,tint,heightPaletteStrength).gamma;
+        }
         public void Apply(Material material)
         {
             Validate();
+            material.SetVector("_FoundryQuarry",new Vector4(groundDetailStrength,groundNormalStrength,roadBlendStrength,routeBlendStrength));
+            material.SetVector("_FoundrySteel",new Vector4(steelFoundation,steelPlateSize,steelSeamWidth,steelSeamContrast));
+            material.SetColor("_FoundrySteelTint",Color.HSVToRGB(steelHue,steelSaturation,steelValue));
+            material.SetVector("_FoundrySteelFinish",new Vector4(steelBayVariation,steelWearStrength,steelSheen,steelExponent));
+            material.SetVector("_FoundrySteelDetail",new Vector4(steelFastenerRadius,steelFastenerInset,steelNormalStrength,0));
+            material.SetFloat("_FoundryCrustCoverage",lavaCrustCoverage);
+            material.SetVector("_FoundrySteelWear",new Vector4(steelTextureTile,steelJointEdge,steelPatina,0));
+            material.SetColor("_FoundryGroundTint",PlayableWorld.FoundryGround);
+            material.SetColor("_FoundryLowTint",LowGround);
+            material.SetColor("_FoundryRearTint",RearGround);
+            material.SetColor("_FoundryUpperTint",UpperGround);
+            material.SetFloat("_FoundryHeightStrength",heightPaletteStrength);
             EnvironmentArt.Apply(material,EnvironmentArtProfile.Load());
             EnvironmentArt.BindFamily(material,"Rock","FoundryArt/Basalt",new Vector3(.09498128f,.09463170f,.09153116f));
             EnvironmentArt.BindFamily(material,"Earth","FoundryArt/SlagAsh",new Vector3(.07655369f,.06494773f,.06200674f));

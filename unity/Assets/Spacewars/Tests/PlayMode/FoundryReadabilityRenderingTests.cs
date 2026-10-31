@@ -43,8 +43,14 @@ namespace Spacewars.Tests.PlayMode
             var lava=material.GetVector("_FoundryLavaFinish");lava.w=0;material.SetVector("_FoundryLavaFinish",lava); // Identical frozen visual time, not game tuning.
             try
             {
+                var filters=root.GetComponentsInChildren<MeshFilter>();
+                var meshes=filters.Select(f=>f.sharedMesh).Where(m=>m).Distinct().ToArray();
+                var renderers=root.GetComponentsInChildren<Renderer>();
+                File.WriteAllText(Path.Combine(output,"model-cost.json"),"{\"meshInstances\":"+filters.Length+",\"uniqueMeshes\":"+meshes.Length+",\"vertices\":"+meshes.Sum(m=>(long)m.vertexCount)+",\"triangles\":"+meshes.Sum(m=>(long)m.triangles.Length/3)+",\"renderers\":"+renderers.Length+",\"materials\":"+renderers.SelectMany(r=>r.sharedMaterials).Distinct().Count()+",\"meshBytes\":"+meshes.Sum(m=>UnityEngine.Profiling.Profiler.GetRuntimeMemorySizeLong(m))+",\"textureBytes\":"+material.GetTexturePropertyNames().Select(n=>material.GetTexture(n)).Where(t=>t).Distinct().Sum(t=>UnityEngine.Profiling.Profiler.GetRuntimeMemorySizeLong(t))+"}");
+                var rocks=meshes.Where(m=>m.name.StartsWith("Foundry ")&&m.name.Contains("basalt")).ToArray();
+                File.WriteAllText(Path.Combine(output,"basalt-cost.json"),"{\"meshes\":"+rocks.Length+",\"vertices\":"+rocks.Sum(m=>(long)m.vertexCount)+",\"expandedTriangleVertices\":"+rocks.Sum(m=>(long)m.triangles.Length)+",\"triangles\":"+rocks.Sum(m=>(long)m.triangles.Length/3)+",\"bytes\":"+rocks.Sum(m=>UnityEngine.Profiling.Profiler.GetRuntimeMemorySizeLong(m))+"}");
                 Assert.IsEmpty(root.GetComponentsInChildren<Collider>(),"Presentation must not add gameplay blockers");
-                var poses=new[]{
+                var poses=new System.Collections.Generic.List<(string,Vector3,Vector3,float)>{
                     ("overview",new Vector3(0,3,0),new Vector3(100,250,-180),150f),
                     ("home",world.Point(home.Position),new Vector3(12,24,-24),18f),
                     ("home-close",world.Point(home.Position),new Vector3(12,24,-24),10f),
@@ -57,6 +63,12 @@ namespace Spacewars.Tests.PlayMode
                     ("rear-flank",world.Point(new NavPoint(-65,80)),new Vector3(25,32,-28),25f),
                     ("ramp-low",world.Point(new NavPoint(-44,35)),new Vector3(30,14,-25),24f),
                     ("lava",new Vector3(44,13,0),new Vector3(15,12,-19),23f)};
+                int cornerIndex=0;
+                foreach(var corner in map.Solids.Skip(map.Solids.Count-4))
+                {
+                    var center=new Vector3((float)((corner.MinX+corner.MaxX)/2),(float)corner.Top+2,(float)((corner.MinZ+corner.MaxZ)/2));
+                    poses.Add(("factory-"+(++cornerIndex),center,new Vector3(24,30,-28),20f));
+                }
                 foreach(var pose in poses)
                 {
                     camera.orthographic=pose.Item1!="lava";camera.orthographicSize=pose.Item4;

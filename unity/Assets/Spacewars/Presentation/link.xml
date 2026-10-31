@@ -1,0 +1,8 @@
+<linker>
+  <assembly fullname="Spacewars.Presentation">
+    <type fullname="Spacewars.Presentation.Prepared*" preserve="all" />
+    <type fullname="Spacewars.Presentation.PlayableWorld" preserve="fields" />
+  </assembly>
+  <!-- Map input keys deliberately reflect every authored map field/property. -->
+  <assembly fullname="Spacewars.Simulation" preserve="all" />
+</linker>

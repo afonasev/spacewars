@@ -76,6 +76,7 @@ namespace Spacewars.Editor
                 if(model.name=="tank"&&!instance.GetComponentsInChildren<Transform>(true).Any(t=>t.name=="turretYaw"))throw new InvalidOperationException("Missing turretYaw");
                 PrefabUtility.SaveAsPrefabAsset(instance,Output+model.name+".prefab");UnityEngine.Object.DestroyImmediate(instance);
             }
+            UnitModelResources.ReuseExactVariantMeshes();
             AssetDatabase.SaveAssets();Debug.Log("PLAYABLE_STYLE_A_PASS approved original models with URP materials");
         }
         private static Texture2D Texture(string name,bool srgb,bool readable=false,bool normal=false,bool height=false)

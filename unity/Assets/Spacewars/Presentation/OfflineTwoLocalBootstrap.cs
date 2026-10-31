@@ -180,7 +180,7 @@ namespace Spacewars.Presentation
                     if(!gestures.Map){var delta=new Vector2(-Axis(ls.x),Axis(ls.y))*padProfile.cameraSpeed*dt;Pan(1,delta);if(delta.sqrMagnitude>0&&!rightStickActive&&Time.unscaledTimeAsDouble-padRightStickLastActive>=padProfile.cursorRecenterIdleMs/1000.0)v.Cursor=Center(1);
                         v.CameraState.AdjustZoom(((assignedPad.dpad.down.isPressed?1:0)-(assignedPad.dpad.up.isPressed?1:0))*padProfile.zoomSpeed*dt,padProfile);v.CameraState.Apply(v.Camera);
                         if(assignedPad.leftStickButton.wasPressedThisFrame){v.CameraState.Reset();v.CameraState.Apply(v.Camera);v.Cursor=Center(1);}}
-                }else if(gestures.Mode=="baseWheel"){if(assignedPad.dpad.left.wasPressedThisFrame)v.BasePage=Math.Max(0,v.BasePage-1);if(assignedPad.dpad.right.wasPressedThisFrame)v.BasePage++;}
+                }
             }
             var actions=PadMenuActions(v,out int pages);var stick=assignedPad.leftStick.ReadValue();var index=OfflinePadGestures.RingSector(stick.x,-stick.y,actions.Length,padProfile.radialDeadzone);var sector=index.HasValue?actions[index.Value].Sector:null;
             int mask=(assignedPad.buttonSouth.isPressed?1:0)|(assignedPad.buttonEast.isPressed?2:0)|(assignedPad.buttonWest.isPressed?4:0)|(assignedPad.selectButton.isPressed?8:0)|(assignedPad.startButton.isPressed?16:0)|(assignedPad.rightShoulder.isPressed?32:0)|(assignedPad.leftShoulder.isPressed?64:0)|(assignedPad.rightTrigger.isPressed?128:0)|(assignedPad.buttonNorth.isPressed?256:0);
@@ -232,7 +232,7 @@ namespace Spacewars.Presentation
             foreach(var site in v.View.DiscoveredSites){
                 var center=v.View.Buildings.FirstOrDefault(b=>b.SiteId==site.Id&&b.SlotId==0&&b.Phase!=ConstructionPhase.Pending);
                 if(center?.Owner==v.View.Owner&&center.Phase==ConstructionPhase.Ready){
-                    foreach(var slot in site.Slots)if(!v.View.Buildings.Any(b=>b.SiteId==site.Id&&b.SlotId==slot.Id)&&TerritoryRules.Contains(v.Cursor,slot.Position,profile.OrdinaryPadRadius,true,false,slot.Heading)){
+                    foreach(var slot in site.Slots.Concat(site.DefenseSlots(profile)))if(!v.View.Buildings.Any(b=>b.SiteId==site.Id&&b.SlotId==slot.Id)&&TerritoryRules.Contains(v.Cursor,slot.Position,TerritoryRules.DefenseSlot(slot.Id)?profile.TurretFootprintRadius:profile.OrdinaryPadRadius,true,false,slot.Heading)){
                         v.Selection.Clear();v.Anchor=0;v.Site=site.Id;v.Slot=slot.Id;v.Parent=center.Id;gestures.SetMode("buildingWheel");return;
                     }
                 }
@@ -253,7 +253,7 @@ namespace Spacewars.Presentation
             var v=views[index];v.Selection.Clear();v.Site=v.Slot=v.Parent=0;var e=v.View.Entities.Where(e=>e.Owner==v.View.Owner).OrderBy(e=>Distance(e.Position,p)).FirstOrDefault();
             if(e!=null&&Distance(e.Position,p)<=PlayableUnitRules.Radius(profile,e.Kind)*profile.TargetPickRadiusMultiplier){v.Selection.Add(e.Id);return;}
             var b=v.View.Buildings.Where(b=>b.Owner==v.View.Owner).OrderBy(b=>Distance(b.Position,p)).FirstOrDefault();if(b!=null&&Distance(b.Position,p)<=profile.BuildingPickRadius){v.Selection.Add(b.Id);return;}
-            foreach(var site in v.View.Sites.Where(site=>site.Owner==v.View.Owner&&site.Ready))foreach(var slot in site.Site.Slots)if(!v.View.Buildings.Any(building=>building.SiteId==site.Site.Id&&building.SlotId==slot.Id)&&Distance(slot.Position,p)<=profile.OrdinaryPadRadius){v.Site=site.Site.Id;v.Slot=slot.Id;v.Parent=site.CenterId;return;}
+            foreach(var site in v.View.Sites.Where(site=>site.Owner==v.View.Owner&&site.Ready))foreach(var slot in site.Site.Slots.Concat(site.Site.DefenseSlots(profile)))if(!v.View.Buildings.Any(building=>building.SiteId==site.Site.Id&&building.SlotId==slot.Id)&&Distance(slot.Position,p)<=(TerritoryRules.DefenseSlot(slot.Id)?profile.TurretFootprintRadius:profile.OrdinaryPadRadius)){v.Site=site.Site.Id;v.Slot=slot.Id;v.Parent=site.CenterId;return;}
         }
         private void SelectMouse(Vector2 from,Vector2 to,bool add){try{SelectMouseCore(from,to,add);}finally{SelectionMarkerEvent(0);}}
         private void SelectMouseCore(Vector2 from,Vector2 to,bool add)
@@ -316,13 +316,14 @@ namespace Spacewars.Presentation
                 var v=views[i];if(v==null)continue;v.View=frame.Views[i==0?"owner-11":"owner-28"];
                 v.World.Fog.Update(v.View.Vision,Time.unscaledDeltaTime);v.World.RenderMemories(v.View,v.Camera);v.World.RenderSites(v.View,v.Camera);
                 var alive=new HashSet<int>();foreach(var e in v.View.Entities){alive.Add(e.Id);if(!v.World.Actors.TryGetValue(e.Id,out var actor))actor=v.World.Tank(e.Id,e.Owner==v.View.Owner,e.Kind);PlayableWorld.PaintOwner(actor,Paint(e.Owner));actor.Root.position=e.Kind==PlayableEntityKind.Hawk?v.World.AirGroundPoint(e.Position):v.World.Point(e.Position);actor.Hull.localRotation=Quaternion.Euler(0,90-(float)e.HullHeading*Mathf.Rad2Deg,0);actor.Turret.localRotation=Quaternion.Euler(0,(float)(e.HullHeading-e.TurretHeading)*Mathf.Rad2Deg,0);actor.Selection.SetActive(e.Owner==v.View.Owner&&v.Selection.Contains(e.Id));PlayableWorld.UpdateHealth(actor,v.Camera,(float)PlayableUnitRules.HealthRatio(profile,e),v.Selection.Contains(e.Id));v.World.UpdateAircraft(actor,e,v.View,v.Selection.Contains(e.Id));v.World.AimExplorer(actor,e);}
-                foreach(var b in v.View.Buildings){if(b.Phase==ConstructionPhase.Pending)continue;alive.Add(b.Id);if(!v.World.Actors.TryGetValue(b.Id,out var actor))actor=v.World.Building(b.Id,b.Kind.ToString(),b.Owner==v.View.Owner,b.RefineryUpgraded);v.World.UpdateFactoryModel(actor,b,v.View);PlayableWorld.PaintOwner(actor,Paint(b.Owner));actor.Root.position=v.World.Point(b.Position);actor.Root.rotation=Quaternion.Euler(0,-(float)b.Heading*Mathf.Rad2Deg,0);v.World.FaceBuilding(actor,v.Camera);actor.Root.localScale=new Vector3(1,Mathf.Lerp(.2f,1,(float)b.Progress),1);actor.Selection.SetActive(b.Owner==v.View.Owner&&v.Selection.Contains(b.Id));PlayableWorld.UpdateHealth(actor,v.Camera,(float)b.Health/TerritoryRules.Health(profile,b.Kind));}
+                foreach(var b in v.View.Buildings){if(b.Phase==ConstructionPhase.Pending)continue;alive.Add(b.Id);if(!v.World.Actors.TryGetValue(b.Id,out var actor))actor=v.World.Building(b.Id,b.Kind.ToString(),b.Owner==v.View.Owner,b.ModelUpgraded);v.World.UpdateFactoryModel(actor,b,v.View);PlayableWorld.PaintOwner(actor,Paint(b.Owner));actor.Root.position=v.World.Point(b.Position);actor.Root.rotation=Quaternion.Euler(0,-(float)b.Heading*Mathf.Rad2Deg,0);v.World.FaceBuilding(actor,v.Camera);actor.Root.localScale=new Vector3(1,Mathf.Lerp(.2f,1,(float)b.Progress),1);actor.Sentry?.Drive(b,v.View,profile);actor.Gauss?.Drive(b,profile);actor.Selection.SetActive(b.Owner==v.View.Owner&&v.Selection.Contains(b.Id));PlayableWorld.UpdateHealth(actor,v.Camera,(float)(b.Health/TerritoryRules.MaximumHealth(profile,b)));}
+                v.World.RenderBuildingDestructions(v.View);
                 foreach(var id in v.World.Actors.Keys.ToArray())if(!alive.Contains(id)){v.World.Remove(id);v.Selection.Remove(id);}
-                v.World.RenderUnitWrecks(v.View);v.World.RenderGroundTrails(v.View);
+                v.World.RenderUnitWrecks(v.View);v.World.RenderGroundTrails(v.View,v.Camera);
                 // Reserved presentation layers are a technical camera isolation bound.
                 foreach(var t in v.Root.GetComponentsInChildren<Transform>(true))t.gameObject.layer=8+i;
                 v.Terrain.Update(v.World.Fog);var rect=v.Camera.pixelRect;v.Map.Set(v.View,v.Selection,new[]{Ground(i,rect.min),Ground(i,new Vector2(rect.xMax,rect.yMin)),Ground(i,rect.max),Ground(i,new Vector2(rect.xMin,rect.yMax))});
-                v.BuildFactory?.SetEnabled(v.Site>0&&v.Slot>0&&v.View.Sites.Any(s=>s.Site.Id==v.Site&&s.Owner==v.View.Owner&&s.Ready)&&!v.View.Buildings.Any(b=>b.SiteId==v.Site&&b.SlotId==v.Slot));
+                v.BuildFactory?.SetEnabled(v.Site>0&&v.Slot>0&&v.View.Sites.Any(s=>s.Site.Id==v.Site&&s.Owner==v.View.Owner&&s.Ready)&&!v.View.BuildingDestructions.Any(d=>d.SiteId==v.Site&&d.SlotId==v.Slot)&&!v.View.Buildings.Any(b=>b.SiteId==v.Site&&b.SlotId==v.Slot));
                 var orderReceipts=session!=null&&session.OwnerReceipts.TryGetValue(v.View.OwnerId,out var ownReceipts)?ownReceipts:Array.Empty<PlayableCommandReceipt>();v.Orders.Observe(v.View,orderReceipts,Time.unscaledTimeAsDouble);var orderMarks=v.Orders.Visible(v.View,v.Selection,Time.unscaledTimeAsDouble);v.OrderLayer?.Set(orderMarks);v.Map.SetOrderMarkers(orderMarks);
                 v.QueueExplorer?.SetEnabled(v.View.Buildings.Any(b=>v.Selection.Contains(b.Id)&&b.Owner==v.View.Owner&&b.Kind==PlayableBuildingKind.Factory&&b.Phase==ConstructionPhase.Ready));
                 v.Status.text=$"Игрок {i+1} · {v.View.OwnerId} · команда {v.View.Team} · {v.View.Credits} · выбор {v.Selection.Count} · tick {frame.Tick}";

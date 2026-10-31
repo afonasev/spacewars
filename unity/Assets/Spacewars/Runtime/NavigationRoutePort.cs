@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using Spacewars.Simulation;
 
 namespace Spacewars.Runtime
@@ -12,9 +13,99 @@ namespace Spacewars.Runtime
         internal NavigationRoutePort(NavigationSession session)
         { this.session = session ?? throw new ArgumentNullException(nameof(session)); }
 
+        private readonly object captureGate=new object();
+        private bool captureRequested;
+        private bool resultPreparationRequested;
+        private bool commandPreparationRequested;
+        private int hostOperations;
+        private Exception hostFailure;
+        internal bool CaptureRequested {get{lock(captureGate)return captureRequested||resultPreparationRequested||commandPreparationRequested;}}
+        internal bool TryBeginHostOperation(bool cleanup=false)
+        {lock(captureGate){if(captureRequested||(resultPreparationRequested||commandPreparationRequested)&&!cleanup)return false;hostOperations++;return true;}}
+        internal void EndHostOperation()
+        {lock(captureGate){if(hostOperations<=0)throw new InvalidOperationException("Missing host operation.");hostOperations--;Monitor.PulseAll(captureGate);}}
+        internal void ReportHostFailure(Exception error)
+        {lock(captureGate){hostFailure=hostFailure??error;Monitor.PulseAll(captureGate);}SignalHost();}
+        internal void ThrowIfHostFailed()
+        {lock(captureGate){if(hostFailure!=null)throw new InvalidOperationException("Route host failed during capture.",hostFailure);}}
+        internal IDisposable AcquireCapture(Func<bool> cancelled)
+        {
+            lock(captureGate){if(captureRequested)throw new InvalidOperationException("Capture exclusion already requested.");captureRequested=true;}
+            try{
+                SignalHost();
+                while(true){
+                    if(cancelled?.Invoke()==true)throw new OperationCanceledException("Capture stopped while awaiting route host.");
+                    lock(captureGate){
+                        if(hostFailure!=null)throw new InvalidOperationException("Route host failed during capture.",hostFailure);
+                        if(hostOperations==0)return new CaptureExclusion(this);
+                        // Monitor.Wait releases this state mutex; no runtime, transport or lane lock is held.
+                        Monitor.Wait(captureGate,25);
+                    }
+                }
+            }catch{ReleaseCapture();throw;}
+        }
+        // Exact answer batches prepare paid copies off transport. A publishing
+        // host can otherwise keep invalidating that source until the next tick.
+        // Reuse the existing acknowledged host boundary only when results exist;
+        // no host quantum, grant, allocation token or mailbox source is rewritten.
+        internal IDisposable AcquireResultPreparation(Func<bool> cancelled)
+            =>session.HasAnswersForPreparation?AcquireCapture(cancelled):null;
+        // Realtime result processing must never wait for a running Pump. Ask it
+        // to yield at its next safe boundary, then acquire that boundary on a
+        // later tick. Until then the ordinary optimistic transactions retain all
+        // source checks; a failed preparation cannot publish a partial result.
+        internal IDisposable TryAcquireResultPreparation(Func<bool> cancelled)
+        {
+            if(!session.HasAnswersForPreparation){CancelResultPreparation();return null;}
+            if(cancelled?.Invoke()==true){CancelResultPreparation();throw new OperationCanceledException("Result preparation stopped.");}
+            bool signal=false;
+            lock(captureGate){
+                if(hostFailure!=null){resultPreparationRequested=false;throw new InvalidOperationException("Route host failed during result preparation.",hostFailure);}
+                if(captureRequested)return null;
+                if(hostOperations==0){resultPreparationRequested=false;captureRequested=true;return new CaptureExclusion(this);}
+                signal=!resultPreparationRequested;resultPreparationRequested=true;
+            }
+            if(signal)SignalHost();return null;
+        }
+        internal void FinishResultPreparationTurn()
+        {if(!session.HasAnswersForPreparation)CancelResultPreparation();}
+        internal void CancelResultPreparation()
+        {
+            bool changed;lock(captureGate){changed=resultPreparationRequested;resultPreparationRequested=false;}
+            if(changed)SignalHost();
+        }
+        internal IDisposable TryAcquireCommandPreparation(Func<bool> cancelled)
+        {
+            if(cancelled?.Invoke()==true){CancelCommandPreparation();throw new OperationCanceledException("Command preparation stopped.");}
+            bool signal=false;
+            lock(captureGate){
+                if(hostFailure!=null){commandPreparationRequested=false;throw new InvalidOperationException("Route host failed during command preparation.",hostFailure);}
+                if(captureRequested)return null;
+                if(hostOperations==0){commandPreparationRequested=false;captureRequested=true;return new CaptureExclusion(this);}
+                signal=!commandPreparationRequested;commandPreparationRequested=true;
+            }
+            if(signal)SignalHost();return null;
+        }
+        internal void CancelCommandPreparation()
+        {
+            bool changed;lock(captureGate){changed=commandPreparationRequested;commandPreparationRequested=false;}
+            if(changed)SignalHost();
+        }
+        private void ReleaseCapture()
+        {lock(captureGate){captureRequested=false;Monitor.PulseAll(captureGate);}SignalHost();}
+        private sealed class CaptureExclusion:IDisposable
+        {
+            private NavigationRoutePort port;
+            internal CaptureExclusion(NavigationRoutePort port){this.port=port;}
+            public void Dispose(){Interlocked.Exchange(ref port,null)?.ReleaseCapture();}
+        }
+
         internal NavigationHostRoot CreatePhysicalHostRoot(INavStorageReservation reservation)=>session.CreatePhysicalHostRoot(reservation);
         internal void ReleaseHostForWorldCheckpoint(Action releaseHost)=>session.ReleaseHostForWorldCheckpoint(releaseHost);
+        internal bool UsesRecastGroundRoutes=>session.UsesRecastGroundRoutes;
         public NavigationAdmission Admission => session.Admission;
+        internal RecastGroupPreparation PrepareRecastStartup(PlayableProfile profile,Func<bool> cancelled)=>session.PrepareRecastStartup(profile,cancelled);
+        internal void ReleaseRecastPreparation(RecastGroupPreparation expected)=>session.ReleaseRecastPreparation(expected);
         internal NavigationAdmissionPin PinAdmission()=>session.PinAdmission();
         internal bool ContainsCurrent(NavigationRequest request){using(var pin=PinAdmission())return pin.Value!=null&&pin.Value.Contains(request);}
         public long CorridorRetainedBytes=>session.CorridorRetainedBytes;

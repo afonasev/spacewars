@@ -44,7 +44,29 @@ namespace Spacewars.Simulation
                     if(dense==null){sparse[cell]=value;return;}if(dense[index]==0)count++;dense[index]=checked(value+1);}
             }
         }
-        private sealed class Field { public readonly Distances Distance;public readonly Queue<Cell> Frontier=new Queue<Cell>();internal Field(int side,IReadOnlyList<Cell> seeds,bool generic){Distance=new Distances(side,seeds,generic);} }
+        private sealed class Field { public bool FreeRoots;public readonly Distances Distance;public readonly Queue<Cell> Frontier=new Queue<Cell>();internal Field(int side,IReadOnlyList<Cell> seeds,bool generic){Distance=new Distances(side,seeds,generic);} }
+        // Each router owns one immutable geometry/profile. Keys retain only ordered roots.
+        // Lookup views may borrow a caller list; dictionary entries snapshot multi-root lists.
+        private readonly struct FieldKey : IEquatable<FieldKey>
+        {
+            private readonly Cell single;private readonly IReadOnlyList<Cell> roots;private readonly int hash;
+            internal int Count {get;}
+            internal Cell At(int index)=>Count==1?single:roots[index];
+            internal FieldKey(Cell root){single=root;roots=null;Count=1;hash=unchecked(397^root.GetHashCode());}
+            internal FieldKey(IReadOnlyList<Cell> values){Count=values.Count;single=Count==1?values[0]:default;roots=Count>1?values:null;int h=Count;for(int i=0;i<Count;i++)h=unchecked(h*397^values[i].GetHashCode());hash=h;}
+            internal FieldKey Snapshot(){if(Count<=1)return this;var copy=new Cell[Count];for(int i=0;i<Count;i++)copy[i]=roots[i];return new FieldKey(copy);}
+            public bool Equals(FieldKey other){if(Count!=other.Count)return false;for(int i=0;i<Count;i++)if(!At(i).Equals(other.At(i)))return false;return true;}
+            public override bool Equals(object other)=>other is FieldKey key&&Equals(key);
+            public override int GetHashCode()=>hash;
+        }
+        // Constrained generic calls keep this view on the stack; no shared mutable scratch.
+        private readonly struct SingleCellList : IReadOnlyList<Cell>
+        {
+            private readonly Cell value;internal SingleCellList(Cell cell){value=cell;}
+            public int Count=>1;public Cell this[int index]=>index==0?value:throw new IndexOutOfRangeException();
+            public IEnumerator<Cell> GetEnumerator(){yield return value;}
+            System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()=>GetEnumerator();
+        }
         private readonly struct PathKey : IEquatable<PathKey> {
             private readonly long ax,az,bx,bz;
             internal PathKey(NavPoint a,NavPoint b){ax=BitConverter.DoubleToInt64Bits(a.X);az=BitConverter.DoubleToInt64Bits(a.Z);bx=BitConverter.DoubleToInt64Bits(b.X);bz=BitConverter.DoubleToInt64Bits(b.Z);}
@@ -57,10 +79,10 @@ namespace Spacewars.Simulation
         public int CachedPathCount=>pathCache.Count;
         public int CachedPathPoints{get;private set;}
         public long PathCacheHits{get;private set;}
-        private readonly NavGeometry geometry; private readonly NavigationProfile profile; private readonly Dictionary<string, Field> fields = new Dictionary<string, Field>();
+        private readonly NavGeometry geometry; private readonly NavigationProfile profile; private readonly Dictionary<FieldKey, Field> fields = new Dictionary<FieldKey, Field>();
         private readonly int denseWidth;
         private readonly byte[] denseFree,denseEdges;
-        private readonly Queue<string> fieldOrder = new Queue<string>();
+        private readonly Queue<FieldKey> fieldOrder = new Queue<FieldKey>();
         // An exhausted field is a closed set under this exact directed grid graph.
         // Retain at most one such witness even when its distance field is evicted.
         private Distances closedReachability;
@@ -100,11 +122,15 @@ namespace Spacewars.Simulation
         public const int ObserverPreparationPayloadLimit=128*1024;
         private readonly GeometryPreparation preparation;
         public SharedFlowRouter(NavGeometry geometry,NavigationProfile profile,SharedFlowRouter previousObserverRouter)
+            :this(geometry,profile,previousObserverRouter,false){}
+        // Large observed maps memoize the same exact predicates in bounded tiles.
+        // Existing callers retain their original dense eligibility/fallback contract.
+        public SharedFlowRouter(NavGeometry geometry,NavigationProfile profile,SharedFlowRouter previousObserverRouter,bool memoizeLargeGeometry)
         {
             if(geometry==null||profile==null)throw new ArgumentNullException();this.geometry=geometry;this.profile=profile;
             // Borrow only pure preparation; never retain the predecessor or its field dictionaries.
             var prior=previousObserverRouter?.preparation;
-            preparation=prior!=null&&prior.Matches(geometry,profile)?prior:new GeometryPreparation(geometry,profile);
+            preparation=prior!=null&&prior.MemoizeLargeGeometry==memoizeLargeGeometry&&prior.Matches(geometry,profile)?prior:new GeometryPreparation(geometry,profile,memoizeLargeGeometry);
         }
         public int PreparedGeometryBytes=>preparation?.Bytes??0;
         public int PreparedGeometrySide=>preparation?.AllocatedSide??0;
@@ -113,12 +139,19 @@ namespace Spacewars.Simulation
         private sealed class GeometryPreparation
         {
             private readonly NavGeometry geometry;private readonly double radius,gridCell;private readonly int side;
+            private readonly int tiledSide;
+            internal readonly bool MemoizeLargeGeometry;
+            private const int TileSide=32,TileCells=TileSide*TileSide,TileLimit=ObserverPreparationPayloadLimit/TileCells;
+            private Dictionary<Cell,byte[]> tiles;private Queue<Cell> tileOrder;
+            // Reuse only the immediately previous lookup; this does not promote FIFO entries.
+            private Cell lastTileKey;private byte[] lastTile;
             private byte[] values;private bool allocationUnavailable;
             internal long CellComputations,EdgeComputations;
-            internal GeometryPreparation(NavGeometry geometry,NavigationProfile profile)
+            internal GeometryPreparation(NavGeometry geometry,NavigationProfile profile,bool memoizeLargeGeometry)
             {
-                this.geometry=geometry;radius=profile.Radius;gridCell=profile.GridCell;
+                this.geometry=geometry;radius=profile.Radius;gridCell=profile.GridCell;MemoizeLargeGeometry=memoizeLargeGeometry;
                 double dimension=Math.Ceiling(2d*geometry.HalfExtent/gridCell)+2d;
+                if(memoizeLargeGeometry&&!double.IsNaN(dimension)&&!double.IsInfinity(dimension)&&dimension>=2d&&dimension<=int.MaxValue)tiledSide=(int)dimension;
                 // One-cell halo is the existing attachment ring, not a larger search footprint.
                 if(double.IsNaN(dimension)||double.IsInfinity(dimension)||dimension<2d||dimension>Math.Sqrt(ObserverPreparationPayloadLimit))return;
                 int candidate=checked((int)dimension);long payload=checked((long)candidate*candidate);
@@ -137,7 +170,7 @@ namespace Spacewars.Simulation
                 }
             }
             internal bool Matches(NavGeometry next,NavigationProfile nextProfile)=>ReferenceEquals(geometry,next)&&radius==nextProfile.Radius&&gridCell==nextProfile.GridCell;
-            internal int Bytes=>values==null?0:checked(values.Length);
+            internal int Bytes=>values==null?checked((tiles?.Count??0)*TileCells):checked(values.Length);
             internal int AllocatedSide=>values==null?0:side;
             private int Index(Cell cell)=>side==0||cell.X< -1||cell.Z< -1||cell.X>=side-1||cell.Z>=side-1?-1:(cell.Z+1)*side+cell.X+1;
             private bool EnsureValues()
@@ -146,25 +179,51 @@ namespace Spacewars.Simulation
                 try{values=new byte[checked(side*side)];}catch(OutOfMemoryException){allocationUnavailable=true;return false;}
                 return true;
             }
+            private bool TryTile(Cell cell,out byte[] tile,out int index)
+            {
+                tile=null;index=0;
+                // Preserve nonrepresentable/out-of-halo and dense-allocation-failure fallbacks.
+                long x=(long)cell.X+1,z=(long)cell.Z+1;
+                if(side!=0||tiledSide==0||x<0||z<0||x>=tiledSide||z>=tiledSide)return false;
+                var key=new Cell((int)(x/TileSide),(int)(z/TileSide));index=(int)(z%TileSide)*TileSide+(int)(x%TileSide);
+                if(lastTile!=null&&key.Equals(lastTileKey)){tile=lastTile;return true;}
+                if(tiles!=null&&tiles.TryGetValue(key,out tile)){lastTileKey=key;lastTile=tile;return true;}
+                if(allocationUnavailable)return false;
+                // Clear before recycling, including failure after an old array is cleared.
+                lastTile=null;
+                try{
+                    if(tiles==null){tiles=new Dictionary<Cell,byte[]>(TileLimit);tileOrder=new Queue<Cell>(TileLimit);}
+                    if(tiles.Count==TileLimit){var old=tileOrder.Dequeue();tile=tiles[old];tiles.Remove(old);Array.Clear(tile,0,tile.Length);}
+                    else tile=new byte[TileCells];
+                    tiles.Add(key,tile);tileOrder.Enqueue(key);lastTileKey=key;lastTile=tile;return true;
+                }catch(OutOfMemoryException){allocationUnavailable=true;tile=null;return false;}
+            }
             // Five independent base-3 digits: unknown=0, blocked=1, free=2. All243 states fit one byte.
             private static int Trit(byte value,int power)=>value/power%3;
             private static byte WithTrit(byte value,int power,int answer)=>checked((byte)(value+(answer-Trit(value,power))*power));
             internal bool CellFree(Cell cell)
             {
-                int index=Index(cell);if(index<0||!EnsureValues())return OriginalCellIsFree(cell,geometry,gridCell,radius);
-                byte value=values[index];int answer=Trit(value,1);if(answer!=0)return answer==2;
+                int index=Index(cell);byte[] storage;
+                if(index>=0&&EnsureValues())storage=values;
+                else if(!TryTile(cell,out storage,out index))return OriginalCellIsFree(cell,geometry,gridCell,radius);
+                byte value=storage[index];int answer=Trit(value,1);if(answer!=0)return answer==2;
                 bool free=OriginalCellIsFree(cell,geometry,gridCell,radius);CellComputations++;
-                values[index]=WithTrit(value,1,free?2:1);return free;
+                storage[index]=WithTrit(value,1,free?2:1);return free;
             }
-            internal bool EdgeFree(Cell from,Cell to)
+            internal bool EdgeFree(Cell from,Cell to)=>EdgeFreeCore(from,to,false);
+            internal bool EdgeFreeCertified(Cell from,Cell to)=>EdgeFreeCore(from,to,true);
+            private bool EdgeFreeCore(Cell from,Cell to,bool freeEndpoints)
             {
                 int index=Index(from),target=Index(to);long dx=(long)to.X-from.X,dz=(long)to.Z-from.Z;
                 int direction=dx==0&&dz==1?0:dx==1&&dz==0?1:dx==0&&dz== -1?2:dx== -1&&dz==0?3:-1;
-                if(index<0||target<0||direction<0||!EnsureValues())return geometry.SegmentFree(Point(from,geometry.HalfExtent,gridCell),Point(to,geometry.HalfExtent,gridCell),radius);
-                int power=direction==0?3:direction==1?9:direction==2?27:81;byte value=values[index];int answer=Trit(value,power);
+                byte[] storage;
+                if(direction<0)return geometry.SegmentFree(Point(from,geometry.HalfExtent,gridCell),Point(to,geometry.HalfExtent,gridCell),radius);
+                if(index>=0&&target>=0&&EnsureValues())storage=values;
+                else if((long)to.X+1<0||(long)to.Z+1<0||(long)to.X+1>=tiledSide||(long)to.Z+1>=tiledSide||!TryTile(from,out storage,out index))return geometry.SegmentFree(Point(from,geometry.HalfExtent,gridCell),Point(to,geometry.HalfExtent,gridCell),radius);
+                int power=direction==0?3:direction==1?9:direction==2?27:81;byte value=storage[index];int answer=Trit(value,power);
                 if(answer!=0)return answer==2;
-                bool free=geometry.SegmentFree(Point(from,geometry.HalfExtent,gridCell),Point(to,geometry.HalfExtent,gridCell),radius);EdgeComputations++;
-                values[index]=WithTrit(value,power,free?2:1);return free;
+                bool free=freeEndpoints?geometry.SegmentFreeBetweenFreeEndpoints(Point(from,geometry.HalfExtent,gridCell),Point(to,geometry.HalfExtent,gridCell),radius):geometry.SegmentFree(Point(from,geometry.HalfExtent,gridCell),Point(to,geometry.HalfExtent,gridCell),radius);EdgeComputations++;
+                storage[index]=WithTrit(value,power,free?2:1);return free;
             }
             // Dense expansion already proves these array indices and direction.
             // Unknown predicates still use the original exact computation/cache.
@@ -198,7 +257,7 @@ namespace Spacewars.Simulation
             if (Attached(start, from) && Attached(goal, target)&&
                 !(closedReachability!=null&&closedReachability.ContainsKey(target)&&!closedReachability.ContainsKey(from)))
             {
-                var directField = GetField(target); ExpandUntil(directField, new[] { from });
+                var directField = GetCertifiedSingleField(target); ExpandSingle(directField, from);
                 if (directField.Distance.ContainsKey(from)) return Route(start, goal, from, directField);
             }
             var starts = Attachments(start); var goals = Attachments(goal);
@@ -208,7 +267,7 @@ namespace Spacewars.Simulation
             double bestCost = double.PositiveInfinity;
             // A single multi-source field considers every attached goal component. This avoids
             // rebuilding the same arena once per alternative while retaining disconnected roots.
-            Field field = GetField(goals); ExpandUntil(field, starts);
+            Field field = GetCertifiedField(goals); ExpandUntil(field, starts);
             foreach (Cell begin in starts)
             {
                 int distance;
@@ -256,29 +315,43 @@ namespace Spacewars.Simulation
             }
             return route;
         }
-        private Field GetField(Cell target) => GetField(new[] { target });
-        private Field GetField(IReadOnlyList<Cell> targets)
+        // Only callers that have attached every root to this immutable geometry/radius
+        // may certify the field. Discovered cells already passed IsFree before enqueue.
+        // Keep GetField untrusted for synthetic/private callers and fallback behavior.
+        private Field GetCertifiedField(IReadOnlyList<Cell> targets)
+        {var field=GetField(targets);field.FreeRoots=true;return field;}
+        private Field GetCertifiedSingleField(Cell target)
+        {var field=GetField(target);field.FreeRoots=true;return field;}
+        private Field GetField(Cell target)=>GetFieldCore(new FieldKey(target),null);
+        private Field GetField(IReadOnlyList<Cell> targets)=>GetFieldCore(new FieldKey(targets),targets);
+        private Field GetFieldCore(FieldKey key,IReadOnlyList<Cell> targets)
         {
-            string key = geometry.Revision + ":" + profile.Radius;
-            foreach (Cell target in targets) key += ":" + target.X + ":" + target.Z;
             Field field; if (fields.TryGetValue(key, out field)){FieldCacheHits++;return field;}
+            // A single-root seed array is needed only when constructing a new field.
+            if(targets==null)targets=new[]{key.At(0)};
+            var storedKey=key.Snapshot();
             int fieldSide=preparation?.AllocatedSide??denseWidth;
 #if UNITY_INCLUDE_TESTS
             if(testSparseFields)fieldSide=0;
 #endif
             field = new Field(fieldSide,targets,preparation==null);
             foreach (Cell target in targets) { field.Distance[target] = 0; field.Frontier.Enqueue(target); }
-            fields[key] = field; fieldOrder.Enqueue(key); CachedCells += field.Distance.Count; RebuildCount++; return field;
+            fields[storedKey] = field; fieldOrder.Enqueue(storedKey); CachedCells += field.Distance.Count; RebuildCount++; return field;
         }
-        private void ExpandUntil(Field field,IReadOnlyList<Cell> required)
+        private void ExpandSingle(Field field,Cell required)=>ExpandRequired(field,new SingleCellList(required));
+        private void ExpandUntil(Field field,IReadOnlyList<Cell> required)=>ExpandRequired(field,required);
+        private void ExpandRequired<TRequired>(Field field,TRequired required) where TRequired:IReadOnlyList<Cell>
         {
             if(preparation!=null&&field.Distance.Dense!=null){ExpandPreparedDense(field,required);if(field.Frontier.Count==0)closedReachability=field.Distance;return;}
             if(denseWidth>0&&field.Distance.Dense!=null){ExpandDense(field,required);if(field.Frontier.Count==0)closedReachability=field.Distance;return;}
-            bool Ready(){for(int i=0;i<required.Count;i++)if(!field.Distance.ContainsKey(required[i]))return false;return true;}
+            // Distances only grow during this invocation. Count each missing request entry
+            // once (including duplicates), then retire it when that exact cell is discovered.
+            int remaining=0;
+            for(int i=0;i<required.Count;i++)if(!field.Distance.ContainsKey(required[i]))remaining++;
             // BFS discovery fixes shortest distance. When a required cell is discovered,
             // all lower-distance neighbors are already discovered, including exact tie choices.
             // Preserve the queue so another origin can continue this same canonical field.
-            while(field.Frontier.Count>0&&!Ready()) {
+            while(field.Frontier.Count>0&&remaining>0) {
                 Cell cell=field.Frontier.Dequeue();
 #if UNITY_INCLUDE_TESTS
                 testFieldDequeued?.Invoke(cell.X,cell.Z);
@@ -286,13 +359,17 @@ namespace Spacewars.Simulation
                 ExpandedCells++;int d=field.Distance[cell];
                 for(int direction=0;direction<4;direction++) {
                     Cell next=Neighbor(cell,direction);
-                    if(field.Distance.ContainsKey(next)||!IsFree(next)||!GridSegmentFreeDirected(cell,next,direction))continue;
+                    if(field.Distance.ContainsKey(next)||!IsFree(next))continue;
+                    // No cache access may intervene while EdgeFreeCore holds a tile array:
+                    // resolving endpoints there could recycle that array at FIFO eviction.
+                    if(!(field.FreeRoots&&preparation!=null?preparation.EdgeFreeCertified(cell,next):GridSegmentFreeDirected(cell,next,direction)))continue;
                     field.Distance[next]=d+1;CachedCells++;field.Frontier.Enqueue(next);
+                    for(int i=0;i<required.Count;i++)if(next.Equals(required[i]))remaining--;
                 }
             }
             if(field.Frontier.Count==0)closedReachability=field.Distance;
         }
-        private void ExpandPreparedDense(Field field,IReadOnlyList<Cell> required)
+        private void ExpandPreparedDense<TRequired>(Field field,TRequired required) where TRequired:IReadOnlyList<Cell>
         {
             int side=preparation.AllocatedSide,remaining=0;var distances=field.Distance.Dense;var wanted=new int[required.Count];
             for(int i=0;i<required.Count;i++){
@@ -316,7 +393,7 @@ namespace Spacewars.Simulation
                 }
             }
         }
-        private void ExpandDense(Field field,IReadOnlyList<Cell> required)
+        private void ExpandDense<TRequired>(Field field,TRequired required) where TRequired:IReadOnlyList<Cell>
         {
             var distances=field.Distance.Dense;int remaining=0;var wanted=new int[required.Count];
             for(int i=0;i<required.Count;i++){if(!DenseIndex(required[i],out int index))throw new InvalidOperationException("Free attachment outside dense grid.");wanted[i]=index;if(distances[index]==0)remaining++;}
@@ -342,7 +419,7 @@ namespace Spacewars.Simulation
         // outside the exact changed bounds still describe the same geometry.
         public SharedFlowRouter ForGeometry(NavGeometry next)
         {
-            if(preparation!=null)return new SharedFlowRouter(next,profile,null);
+            if(preparation!=null)return new SharedFlowRouter(next,profile,null,preparation.MemoizeLargeGeometry);
             var result=new SharedFlowRouter(next,profile);
             if(denseWidth==0||denseWidth!=result.denseWidth||geometry.HalfExtent!=next.HalfExtent)return result;
             Array.Copy(denseFree,result.denseFree,denseFree.Length);Array.Copy(denseEdges,result.denseEdges,denseEdges.Length);

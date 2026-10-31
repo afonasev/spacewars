@@ -62,11 +62,36 @@ namespace Spacewars.Tests.EditMode
         [Test] public void RocketTurnIsBoundedAndDoesNotChangeTarget()
         {
             var r = new HawkRocketFlight(7, new BallisticPoint(0, 0, 0), new BallisticPoint(0, 0, 1), 10, .3, 5);
-            r.Advance(.2, new BallisticPoint(10, 0, 0));
+            r.Advance(.2, new BallisticPoint(10, 0, 0), new BallisticPoint(1, 0, 0));
             Assert.That(Math.Acos(r.Direction.Z), Is.EqualTo(.06).Within(1e-10));
             Assert.That(HawkRocketFlight.Length(r.Direction), Is.EqualTo(1).Within(1e-12));
             Assert.That(HawkRocketFlight.Length(r.Position), Is.EqualTo(2).Within(1e-12));
             Assert.That(r.Target, Is.EqualTo(7));
+        }
+        [TestCase(0, 0, 0)]
+        [TestCase(-1, 0, 0)]
+        [TestCase(0, 0, 1)]
+        public void NonRecedingTargetKeepsRocketHeading(double x, double y, double z)
+        {
+            var r = new HawkRocketFlight(7, new BallisticPoint(0, 0, 0), new BallisticPoint(0, 0, 1), 10, .3, 5);
+            r.Advance(.2, new BallisticPoint(10, 0, 0), new BallisticPoint(x, y, z));
+            Assert.AreEqual(0, r.Direction.X); Assert.AreEqual(0, r.Direction.Y); Assert.AreEqual(1, r.Direction.Z);
+            Assert.AreEqual(2, r.Position.Z);
+        }
+        [Test] public void RecedingTargetCanStillBeSlowerThanRocket()
+        {
+            var r = new HawkRocketFlight(7, new BallisticPoint(0, 0, 0), new BallisticPoint(1, 0, 1), 10, .3, 5);
+            r.Advance(.2, new BallisticPoint(10, 0, 0), new BallisticPoint(1, 0, 0));
+            Assert.Greater(r.Direction.X, Math.Sqrt(.5));
+            var heading = r.Direction;
+            r.Advance(.2, new BallisticPoint(11, 0, 0), default);
+            Assert.AreEqual(heading, r.Direction, "Steering stops immediately when the target stops");
+        }
+        [Test] public void VerticalRetreatEnablesSteering()
+        {
+            var r = new HawkRocketFlight(7, new BallisticPoint(0, 0, 0), new BallisticPoint(0, 0, 1), 10, .3, 5);
+            r.Advance(.2, new BallisticPoint(0, 10, 0), new BallisticPoint(0, 1, 0));
+            Assert.Greater(r.Direction.Y, 0);
         }
         [Test] public void LostTargetKeepsHeadingAndLifetimeClampsTravel()
         {
@@ -77,7 +102,7 @@ namespace Spacewars.Tests.EditMode
         [Test] public void OppositeTargetHasFiniteBoundedTurn()
         {
             var r = new HawkRocketFlight(7, new BallisticPoint(0, 0, 0), new BallisticPoint(0, 0, 1), 10, .3, 5);
-            r.Advance(.2, new BallisticPoint(0, 0, -10));
+            r.Advance(.2, new BallisticPoint(0, 0, -10), new BallisticPoint(0, 0, -1));
             Assert.That(Math.Acos(r.Direction.Z), Is.EqualTo(.06).Within(1e-10));
         }
         [Test] public void SweptContactCatchesTargetBetweenSamples()

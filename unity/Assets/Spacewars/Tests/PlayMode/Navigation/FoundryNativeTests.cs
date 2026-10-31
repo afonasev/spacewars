@@ -27,6 +27,11 @@ namespace Spacewars.Tests.PlayMode
         [Test] public void AuthorityMovementCrossesRampAndCapturesExistingNeutralMine()
         {
             var p=FoundryGreybox.LoadProfile();var m=(FoundryMap)p.AuthoredMap;var c=m.Configuration(p,19092026);var a=new OfflineParticipantAuthority(c,1);var view=a.View(c.Roster[0].Id);var explorer=view.Entities.Single(e=>e.Owner==PlayableOwner.Player);
+            // OfflineParticipantAuthority's legacy public binding omits the host
+            // port. Attach the same authority's actual authored port in this fixture.
+            var bindingConstructor=typeof(PlayableRouteBinding).GetConstructor(System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic,null,
+                new[]{typeof(NavGeometry),typeof(PlayableProfile),typeof(NavigationAdmission),typeof(NavigationRoutePort)},null);
+            Assert.NotNull(bindingConstructor,"Existing trusted route-binding constructor");
             var center=m.Point(0,0);var target=m.Point(-77,1);double lowest=m.UpperHeight,highest=0;long sequence=0;
             using(var service=new UnityHostRouteService())
             foreach(var waypoint in new[]{center,target})
@@ -34,11 +39,17 @@ namespace Spacewars.Tests.PlayMode
                 Assert.That(a.Apply(new PlayableCommand(1,++sequence,c.Roster[0].Id,PlayableCommandKind.Move,new[]{explorer.Id},waypoint)).Status,Is.EqualTo(PlayableCommandStatus.Applied).Or.EqualTo(PlayableCommandStatus.Accepted));
                 for(int i=0;i<1800;i++)
                 {
-                    service.Service(a.Navigation.Requests,a.Navigation.Answers,1,a.NavigationBinding.Geometry,p,32);a.Step(1d/30);
+                    var currentBinding=a.NavigationBinding;
+                    var binding=(PlayableRouteBinding)bindingConstructor.Invoke(new object[]{currentBinding.Geometry,currentBinding.Profile,currentBinding.Admission,a.Navigation.RoutePort});
+                    service.Service(binding,32);a.Step(1d/30);
                     var point=a.Navigation.Crowd.Units.Single(e=>e.Id==explorer.Id).Position;double height=m.SurfaceHeight(point);lowest=Math.Min(lowest,height);highest=Math.Max(highest,height);
                 }
                 var reached=a.Navigation.Crowd.Units.Single(e=>e.Id==explorer.Id).Position;
-                Assert.Less(Math.Sqrt(Math.Pow(reached.X-waypoint.X,2)+Math.Pow(reached.Z-waypoint.Z,2)),p.Navigation.ArrivalTolerance+1,"Waypoint must be reached through supported routes");
+                var counters=service.CertifiedCounters;
+                Assert.Less(Math.Sqrt(Math.Pow(reached.X-waypoint.X,2)+Math.Pow(reached.Z-waypoint.Z,2)),p.Navigation.ArrivalTolerance+1,
+                    "Waypoint must be reached through supported routes; target="+waypoint.X+","+waypoint.Z+" reached="+reached.X+","+reached.Z+
+                    " pending="+a.Navigation.PendingCount+" outcome="+a.Navigation.Crowd.Units.Single(e=>e.Id==explorer.Id).Outcome+
+                    " epoch="+service.SolverEpoch+" graph="+counters.PhysicalGraphWork+" field="+counters.PhysicalFieldWork+" connectors="+counters.ConnectorWork+" projection="+service.LastProjectionFailure);
             }
             Assert.AreEqual(0,lowest,1e-8);Assert.AreEqual(m.UpperHeight,highest,1e-8);
             var after=a.View(c.Roster[0].Id);var moved=after.Entities.Single(e=>e.Id==explorer.Id);Assert.Less(Math.Sqrt(Math.Pow(moved.Position.X-target.X,2)+Math.Pow(moved.Position.Z-target.Z,2)),p.Navigation.ArrivalTolerance+1);

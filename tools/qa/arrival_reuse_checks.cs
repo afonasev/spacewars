@@ -1,0 +1,6 @@
+using System;using System.Linq;using System.Reflection;using NUnit.Framework;
+internal static class ArrivalReuseChecks {
+ public static int RunSelected(){int passed=0;var t=typeof(Spacewars.Tests.EditMode.NavigationArrivalAllocationTests);foreach(var m in t.GetMethods().Where(m=>m.GetCustomAttributes(typeof(TestAttribute),true).Length>0).OrderBy(m=>m.Name)){try{m.Invoke(Activator.CreateInstance(t),null);passed++;Console.WriteLine("CHECK_PASS "+m.Name);}catch(Exception e){Console.WriteLine("CHECK_FAIL "+m.Name+" "+e);return 1;}}var scheduler=new Spacewars.Tests.EditMode.LayeredNavigationSchedulerTests();
+ foreach(var name in new[]{"PartialFieldBuildCountSurvivesContinuationRestoreAndWarmReuse","NonDirectSubsetCancellationAndCurrentCheckpointKeepOneSharedField","SchedulerCheckpointAfterEveryWorkUnitKeepsEpochAndResult","ChunkedCallsWithinEpochKeepStablePublicationOrderAndWork","ClearSingletonUsesOneQualifiedDirectProbeWithoutCompilingGraph"}){try{scheduler.GetType().GetMethod(name).Invoke(scheduler,null);passed++;Console.WriteLine("CHECK_PASS "+name);}catch(Exception e){Console.WriteLine("CHECK_FAIL "+name+" "+e);return 1;}}
+ Console.WriteLine("CHECK_RESULT passed="+passed+" failed=0");return passed>0?0:1;}
+}

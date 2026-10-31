@@ -18,9 +18,14 @@ namespace Spacewars.Tests.EditMode
         private double Balance(PlayableOwner owner=PlayableOwner.Player)=>(double)Call("Balance",owner);
         private PlayableCommandStatus Send(PlayableCommandKind kind,int id,string owner="player-1")=>(PlayableCommandStatus)Call("Apply",new PlayableCommand(1,++sequence,owner,kind,new[]{id}),null);
         private PlayableCommandStatus Research(PlayableResearchKind kind,int center)=>(PlayableCommandStatus)Call("Apply",new PlayableCommand(1,++sequence,"player-1",PlayableCommandKind.QueueResearch,new[]{center},researchKind:kind),null);
+        private void UpgradeScience(int id,PlayableOwner owner=PlayableOwner.Player)
+        {
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",new PlayableCommand(1,++sequence,owner==PlayableOwner.Player?"player-1":"enemy-1",PlayableCommandKind.QueueResearch,new[]{id},researchKind:PlayableResearchKind.ScientificCenterUpgrade),null));Call("AdvanceResearch",p.ScientificCenterUpgradeSeconds);
+        }
         [SetUp] public void Setup(){p=PlayableProfile.Default;domain=Activator.CreateInstance(Domain,Flags,null,new object[]{p,1L},null);sequence=0;}
         private int Build(PlayableBuildingKind kind,int slot, bool ready=true,PlayableOwner owner=PlayableOwner.Player)
         {
+            if(kind==PlayableBuildingKind.ScientificCenter&&!TerritoryRules.HasScienceProducer(View(owner).Buildings,owner))Build(PlayableBuildingKind.Hangar,5,true,owner);
             Call("AddCredits",owner,10000d);int site=owner==PlayableOwner.Player?1:2;
             Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",site,slot,kind,site,owner,null));
             if(ready){Call("AdvanceFoundations");Call("AdvanceBuildings",TerritoryRules.Duration(p,kind)+1);}
@@ -31,11 +36,12 @@ namespace Spacewars.Tests.EditMode
         {
             int r=Build(PlayableBuildingKind.Refinery,1);
             Assert.AreEqual(PlayableCommandStatus.Rejected,Send(PlayableCommandKind.UpgradeRefinery,r));
-            int enemy=Build(PlayableBuildingKind.ScientificCenter,1,true,PlayableOwner.Enemy);
+            int enemy=Build(PlayableBuildingKind.ScientificCenter,1,true,PlayableOwner.Enemy);UpgradeScience(enemy,PlayableOwner.Enemy);
             Assert.AreEqual(PlayableCommandStatus.Rejected,Send(PlayableCommandKind.UpgradeRefinery,r));
             int s=Build(PlayableBuildingKind.ScientificCenter,2,false);
             Assert.AreEqual(PlayableCommandStatus.Rejected,Send(PlayableCommandKind.UpgradeRefinery,r));
             Call("AdvanceFoundations");Call("AdvanceBuildings",p.ScienceBuildSeconds);
+            double bank=Balance();Assert.AreEqual(PlayableCommandStatus.Rejected,Send(PlayableCommandKind.UpgradeRefinery,r));Assert.AreEqual(bank,Balance());UpgradeScience(s);
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UpgradeRefinery,r));
             Send(PlayableCommandKind.CancelRefineryUpgrade,r);Send(PlayableCommandKind.SellBuilding,s);
             Assert.AreEqual(PlayableCommandStatus.Rejected,Send(PlayableCommandKind.UpgradeRefinery,r));
@@ -86,6 +92,7 @@ namespace Spacewars.Tests.EditMode
         [TestCase(PlayableResearchKind.HawkSalvoSystems,PlayableBuildingKind.Hangar)]
         public void SpecializedResearchRequiresReadyOwnNonSellingProducer(PlayableResearchKind kind,PlayableBuildingKind producer)
         {
+            if(producer==PlayableBuildingKind.Hangar)Build(PlayableBuildingKind.Factory,5);
             int center=Build(PlayableBuildingKind.ScientificCenter,2);
             Assert.AreEqual(PlayableCommandStatus.Rejected,Research(kind,center));
             var blocked=View().ResearchAvailability.Single(a=>a.Kind==kind);Assert.False(blocked.Available);Assert.IsNotEmpty(blocked.BlockedReason);
@@ -97,7 +104,7 @@ namespace Spacewars.Tests.EditMode
             Call("Damage",factory,100000);Call("AdvanceResearch",PlayableResearchRules.Duration(p,kind));
             Assert.True(View().OwnerResearch.Single(o=>o.Kind==kind).Complete,"Producer loss after start does not interrupt research");
             Assert.AreEqual(PlayableCommandStatus.Rejected,Research(kind,center));
-            Setup();center=Build(PlayableBuildingKind.ScientificCenter,2);factory=Build(producer,1);
+            Setup();factory=Build(producer,1);center=Build(PlayableBuildingKind.ScientificCenter,2);
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.SellBuilding,factory));
             Assert.AreEqual(PlayableCommandStatus.Rejected,Research(kind,center));
         }
@@ -108,7 +115,8 @@ namespace Spacewars.Tests.EditMode
             double paid=Balance();Call("Damage",factory,100000);Call("AdvanceResearch",p.TankChassisSeconds);
             var waiting=View().OwnerResearch.Single(o=>o.Kind==PlayableResearchKind.ExplorerAssaultGuns);
             Assert.False(waiting.Active);Assert.Zero(waiting.PaidCost);Assert.AreEqual(paid,Balance());
-            Build(PlayableBuildingKind.Factory,1);double before=Balance();Call("AdvanceResearch",0d);
+            // The demolished producer still owns its collapse footprint; a different free plot is available.
+            Build(PlayableBuildingKind.Factory,3);double before=Balance();Call("AdvanceResearch",0d);
             waiting=View().OwnerResearch.Single(o=>o.Kind==PlayableResearchKind.ExplorerAssaultGuns);
             Assert.True(waiting.Active);Assert.AreEqual(p.ExplorerAssaultCost,waiting.PaidCost);Assert.AreEqual(before-p.ExplorerAssaultCost,Balance());
         }
@@ -127,7 +135,7 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void UpgradePaysOnceCancellationRefundsExactlyOnceAndRejectsOtherOwner()
         {
-            int r=Build(PlayableBuildingKind.Refinery,1);Build(PlayableBuildingKind.ScientificCenter,2);double before=Balance();
+            int r=Build(PlayableBuildingKind.Refinery,1);UpgradeScience(Build(PlayableBuildingKind.ScientificCenter,2));double before=Balance();
             Assert.AreEqual(PlayableCommandStatus.InvalidEntity,Send(PlayableCommandKind.UpgradeRefinery,r,"enemy-1"));
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UpgradeRefinery,r));
             Assert.AreEqual(before-p.RefineryUpgradeCost,Balance());
@@ -138,17 +146,28 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(PlayableCommandStatus.InvalidEntity,Send(PlayableCommandKind.CancelRefineryUpgrade,r));Assert.AreEqual(before,Balance());
             Send(PlayableCommandKind.UpgradeRefinery,r);Assert.Zero(B(r).PrivateState.Upgrade.Elapsed);
         }
+        [Test] public void ActiveUpgradeRestoresAndContinuesAfterImprovedCenterLossButNewStartsAreBlocked()
+        {
+            int r=Build(PlayableBuildingKind.Refinery,1),s=Build(PlayableBuildingKind.ScientificCenter,2);UpgradeScience(s);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UpgradeRefinery,r));Call("AdvanceRefineryUpgrades",7d);
+            var bytes=(byte[])Call("CaptureWorldBytes",19092026,"refinery-improved-center");Call("DestroyOwnedNavigation");
+            domain=Domain.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{bytes,p,19092026,"refinery-improved-center"});
+            CollectionAssert.AreEqual(bytes,(byte[])Call("CaptureWorldBytes",19092026,"refinery-improved-center"));
+            Call("Damage",s,10000);Call("AdvanceRefineryUpgrades",p.RefineryUpgradeSeconds-7);Assert.True(B(r).RefineryUpgraded);
+            int second=Build(PlayableBuildingKind.Refinery,3);double bank=Balance();Assert.AreEqual(PlayableCommandStatus.Rejected,Send(PlayableCommandKind.UpgradeRefinery,second));Assert.AreEqual(bank,Balance());Assert.That(B(second).PrivateState.Upgrade.BlockedReason,Does.Contain("улучшенный"));
+        }
         [Test] public void InsufficientCreditsAndConstructionRejectWithoutWork()
         {
+            Build(PlayableBuildingKind.Hangar,5);
             int r=Build(PlayableBuildingKind.Refinery,1,false);int s=Build(PlayableBuildingKind.ScientificCenter,2,false);
             Assert.AreEqual(PlayableCommandStatus.Rejected,Send(PlayableCommandKind.UpgradeRefinery,r));
-            Call("AdvanceFoundations");Call("AdvanceBuildings",p.ScienceBuildSeconds);
+            Call("AdvanceFoundations");Call("AdvanceBuildings",p.ScienceBuildSeconds);UpgradeScience(s);
             Call("AddCredits",PlayableOwner.Player,-Balance());
             Assert.AreEqual(PlayableCommandStatus.Rejected,Send(PlayableCommandKind.UpgradeRefinery,r));Assert.Zero(Balance());Assert.False(B(r).PrivateState.Upgrade.Active);
         }
         [Test] public void CompletionKeepsDamageAndSurvivesScienceLossWithoutASecondLevel()
         {
-            int r=Build(PlayableBuildingKind.Refinery,1),s=Build(PlayableBuildingKind.ScientificCenter,2);double basic=View().IncomePerSecond;
+            int r=Build(PlayableBuildingKind.Refinery,1),s=Build(PlayableBuildingKind.ScientificCenter,2);UpgradeScience(s);double basic=View().IncomePerSecond;
             Send(PlayableCommandKind.UpgradeRefinery,r);Call("AdvanceRefineryUpgrades",p.RefineryUpgradeSeconds-1);
             Assert.AreEqual(basic,View().IncomePerSecond);Call("Damage",s,(int)p.ScienceHealth+1);Call("Damage",r,20);
             Call("AdvanceRefineryUpgrades",1d);Assert.True(B(r).RefineryUpgraded);Assert.AreEqual(p.RefineryHealth-20,B(r).Health);
@@ -158,7 +177,7 @@ namespace Spacewars.Tests.EditMode
         }
         [TestCase(false)] [TestCase(true)] public void SaleIncludesPaidUpgradeAndDisposesIt(bool completed)
         {
-            int r=Build(PlayableBuildingKind.Refinery,1);Build(PlayableBuildingKind.ScientificCenter,2);Send(PlayableCommandKind.UpgradeRefinery,r);
+            int r=Build(PlayableBuildingKind.Refinery,1);UpgradeScience(Build(PlayableBuildingKind.ScientificCenter,2));Send(PlayableCommandKind.UpgradeRefinery,r);
             if(completed)Call("AdvanceRefineryUpgrades",p.RefineryUpgradeSeconds);
             Call("Damage",r,p.RefineryHealth/2);Domain.GetField("elapsed",Flags).SetValue(domain,10d);
             double expected=Math.Floor((p.RefineryCreditCost+p.RefineryUpgradeCost)*p.BuildingSaleRefundRatio*.5),before=Balance();
@@ -167,20 +186,20 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void CascadeSaleIncludesUpgradeAndDestructionNeverRefunds()
         {
-            int r=Build(PlayableBuildingKind.Refinery,1);Build(PlayableBuildingKind.ScientificCenter,2);Send(PlayableCommandKind.UpgradeRefinery,r);
-            double expected=Math.Floor(p.HeadquartersCreditCost*.75)+Math.Floor((p.RefineryCreditCost+p.RefineryUpgradeCost)*.75)+Math.Floor(p.ScienceCreditCost*.75),before=Balance();
+            int r=Build(PlayableBuildingKind.Refinery,1);UpgradeScience(Build(PlayableBuildingKind.ScientificCenter,2));Send(PlayableCommandKind.UpgradeRefinery,r);
+            double expected=Math.Floor(p.HeadquartersCreditCost*.75)+Math.Floor((p.RefineryCreditCost+p.RefineryUpgradeCost)*.75)+Math.Floor((p.ScienceCreditCost+p.ScientificCenterUpgradeCost)*.75)+Math.Floor(p.HangarCreditCost*.75),before=Balance();
             Assert.AreEqual(expected,B(1).PrivateState.Lifecycle.Refund);Send(PlayableCommandKind.SellBuilding,1);Assert.AreEqual(before+expected,Balance());
-            Setup();r=Build(PlayableBuildingKind.Refinery,1);Build(PlayableBuildingKind.ScientificCenter,2);Send(PlayableCommandKind.UpgradeRefinery,r);before=Balance();Call("Damage",r,p.RefineryHealth+1);Assert.AreEqual(before,Balance());Assert.False(View().Buildings.Any(b=>b.Id==r));
+            Setup();r=Build(PlayableBuildingKind.Refinery,1);UpgradeScience(Build(PlayableBuildingKind.ScientificCenter,2));Send(PlayableCommandKind.UpgradeRefinery,r);before=Balance();Call("Damage",r,p.RefineryHealth+1);Assert.AreEqual(before,Balance());Assert.False(View().Buildings.Any(b=>b.Id==r));
         }
         [Test] public void OtherRefineriesAndOwnersKeepBasicIncome()
         {
-            int a=Build(PlayableBuildingKind.Refinery,1),b=Build(PlayableBuildingKind.Refinery,2);Build(PlayableBuildingKind.ScientificCenter,3);
+            int a=Build(PlayableBuildingKind.Refinery,1),b=Build(PlayableBuildingKind.Refinery,2);UpgradeScience(Build(PlayableBuildingKind.ScientificCenter,3));
             double enemy=View(PlayableOwner.Enemy).IncomePerSecond;Send(PlayableCommandKind.UpgradeRefinery,a);Call("AdvanceRefineryUpgrades",p.RefineryUpgradeSeconds);
             Assert.True(B(a).RefineryUpgraded);Assert.False(B(b).RefineryUpgraded);Assert.AreEqual(enemy,View(PlayableOwner.Enemy).IncomePerSecond);
         }
         [Test] public void EnemySeesCompletedVariantButNeverProgressOrInvestment()
         {
-            int r=Build(PlayableBuildingKind.Refinery,1,true,PlayableOwner.Enemy);Build(PlayableBuildingKind.ScientificCenter,2,true,PlayableOwner.Enemy);
+            int r=Build(PlayableBuildingKind.Refinery,1,true,PlayableOwner.Enemy);UpgradeScience(Build(PlayableBuildingKind.ScientificCenter,2,true,PlayableOwner.Enemy),PlayableOwner.Enemy);
             var point=B(r,PlayableOwner.Enemy).Position;var observer=new NavPoint(point.X+3,point.Z);Call("SpawnPlayer",observer,observer);
             Send(PlayableCommandKind.UpgradeRefinery,r,"enemy-1");Assert.IsNull(B(r).PrivateState);Assert.False(B(r).RefineryUpgraded);
             Call("AdvanceRefineryUpgrades",p.RefineryUpgradeSeconds);Assert.True(B(r).RefineryUpgraded);Assert.IsNull(B(r).PrivateState);

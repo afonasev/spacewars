@@ -48,32 +48,30 @@ namespace Spacewars.Runtime
             var all=units.Values.Where(u=>u.Air!=null&&u.Id!=b.LaunchedId).OrderBy(u=>u.Id).ToArray();
             var blockers=all.Where(u=>Distance(u.Air.Actor.Position,b.Position)<spacing).ToArray();
             if(blockers.Length==0)return true;
-            var planned=new Dictionary<int,NavPoint>();var visiting=new HashSet<int>();int attempts=checked(all.Length*16);
-            bool Displace(Unit u)
+            // Finish existing physical yielding before selecting another plan;
+            // continually extending the destination can otherwise chase free space.
+            if(blockers.Any(u=>u.Air.Yielding))return false;
+            var bodies=all.Select(u=>new NavMotionBody{Id=u.Id,Position=u.Air.Actor.Position,Radius=spacing/2,YieldLabel=u.Air.Yielding?-1:0}).ToArray();
+            var queue=new int[all.Length];var marks=new int[all.Length];
+            for(int root=0;root<all.Length;root++)
             {
-                if(planned.ContainsKey(u.Id))return true;if(!visiting.Add(u.Id))return false;
-                var from=u.Air.Actor.Position;
-                // Search candidate neighbouring positions outward from the hatch; each blocked candidate recurses through the chain.
-                double away=Math.Atan2(from.Z-b.Position.Z,from.X-b.Position.X);
-                for(int i=0;i<16&&attempts>0;i++)
+                if(Distance(bodies[root].Position,b.Position)>=spacing)continue;
+                double away=Math.Atan2(bodies[root].Position.Z-b.Position.Z,bodies[root].Position.X-b.Position.X);
+                for(int sample=0;sample<profile.Navigation.CrowdHeadingIntervals;sample++)
                 {
-                    attempts--;double angle=away+(i%2==0?1:-1)*(i+1)/2*Math.PI/8;
-                    var to=new NavPoint(from.X+spacing*Math.Cos(angle),from.Z+spacing*Math.Sin(angle));
-                    if(!AirInside(to)||Distance(to,b.Position)<spacing||planned.Values.Any(p=>Distance(p,to)<spacing))continue;
-                    var occupants=all.Where(x=>x.Id!=u.Id&&!visiting.Contains(x.Id)&&Distance(planned.TryGetValue(x.Id,out var p)?p:x.Air.Actor.Position,to)<spacing).ToArray();
-                    var prior=planned.Keys.ToArray();
-                    bool failed=occupants.Any(x=>!Displace(x))||all.Any(x=>x.Id!=u.Id&&Distance(planned.TryGetValue(x.Id,out var destination)?destination:x.Air.Actor.Position,to)<spacing);
-                    if(failed){foreach(int id in planned.Keys.Where(id=>!prior.Contains(id)).ToArray())planned.Remove(id);continue;}
-                    planned[u.Id]=to;visiting.Remove(u.Id);return true;
+                    double offset=(sample%2==0?1:-1)*((sample+1)/2)*Math.PI/profile.Navigation.CrowdHeadingIntervals;
+                    double travel=spacing+profile.Navigation.ArrivalTolerance;
+                    var delta=new NavPoint(travel*Math.Cos(away+offset),travel*Math.Sin(away+offset));
+                    bool Clear(int row,NavPoint to)=>AirInside(to)&&Distance(to,b.Position)>=spacing&&AirSweepClear(bodies[row].Position,to,Math.Max(all[row].Air.Height,ClearHeight(to)));
+                    if(!ProducerClearanceRules.TryChain(bodies,root,delta,queue,marks,Clear,out int count))continue;
+                    for(int i=0;i<count;i++)
+                    {
+                        int row=queue[i];var air=all[row].Air;
+                        air.YieldGoal=new NavPoint(bodies[row].Position.X+delta.X,bodies[row].Position.Z+delta.Z);
+                        air.Yielding=true;air.Short=false;air.Escape=false;
+                    }
+                    return false;
                 }
-                visiting.Remove(u.Id);return false;
-            }
-            foreach(var u in blockers)if(!Displace(u))return false;
-            foreach(var pair in planned)
-            {
-                var air=units[pair.Key].Air;
-                // Yield is a temporary local flight intent. Existing order/hold survives.
-                air.YieldGoal=pair.Value;air.Yielding=true;air.Short=false;air.Escape=false;
             }
             return false;
         }

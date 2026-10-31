@@ -21,6 +21,7 @@ namespace Spacewars.Tests.EditMode
             Call("AddCredits",PlayableOwner.Player,10000d);
             Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,1,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));
             Call("AdvanceFoundations");Call("AdvanceBuildings",100d);factory=View.Buildings.Single(b=>b.Kind==PlayableBuildingKind.Factory).Id;
+            Assert.That(View.Buildings.All(b=>b.Heading==TerritoryRules.BuildingHeading),Is.True,"New buildings face world south, independently of radial pad headings");
         }
         [TearDown] public void Cleanup(){domain.Navigation.ReleaseCommittedHostRoot();domain.DestroyOwnedNavigation();}
         void Advance(int ticks=1){for(int i=0;i<ticks;i++){Call("AdvanceProduction",1d/30);Call("AdvanceBuildingLifecycle",1d/30);}}
@@ -52,7 +53,38 @@ namespace Spacewars.Tests.EditMode
             int blocker=(int)Call("SpawnUnit",exit,PlayableOwner.Player,PlayableEntityKind.Tank);int count=View.Entities.Count;
             Send(PlayableCommandKind.QueueTank,factory);int credits=View.Credits;Advance(1500);
             Assert.AreEqual(0,Factory.LaunchPhase);Assert.Zero(Factory.PrivateState.Orders.Single().Remaining);Assert.AreEqual(count,View.Entities.Count);Assert.AreEqual(credits,View.Credits);
-            Call("Damage",blocker,100000);Until(FactoryReleaseRules.Closing);Assert.AreEqual(count,View.Entities.Count);Assert.IsEmpty(Factory.PrivateState.Orders);
+            Call("Damage",blocker,100000);
+            // Current wreck rules keep the destroyed hull solid at the exit.
+            // Clearing the blocker therefore also requires destroying its wreck;
+            // killing only the living unit cannot make this corridor free.
+            Call("Damage",blocker,100000);
+            Until(FactoryReleaseRules.Closing);Assert.AreEqual(count,View.Entities.Count);Assert.IsEmpty(Factory.PrivateState.Orders);
+        }
+        [Test] public void SavedActiveRadialReleaseFinishesBeforeSwitchingSouth()
+        {
+            var all=(System.Collections.IDictionary)typeof(PlayableDomain).GetField("buildings",Hidden).GetValue(domain);
+            var building=all[factory];building.GetType().GetField("Heading").SetValue(building,0d);
+            Send(PlayableCommandKind.QueueTank,factory);Until(FactoryReleaseRules.Driving);Advance(12);
+            var restored=PlayableDomain.RestoreWorldBytes(domain.CaptureWorldBytes(7,"radial-release"),profile,7,"radial-release");var original=domain;
+            try
+            {
+                Assert.AreEqual(0,Factory.Heading);
+                for(int tick=0;tick<300;tick++)
+                {
+                    Advance();domain=restored;Advance();domain=original;
+                    CollectionAssert.AreEqual(original.CaptureWorldBytes(7,"radial-release"),restored.CaptureWorldBytes(7,"radial-release"));
+                }
+                Assert.AreEqual(TerritoryRules.BuildingHeading,Factory.Heading);
+            }
+            finally{domain=original;restored.Navigation.ReleaseCommittedHostRoot();restored.DestroyOwnedNavigation();}
+        }
+        [Test] public void SavedIdleRadialFactoryNormalizesToSouth()
+        {
+            var all=(System.Collections.IDictionary)typeof(PlayableDomain).GetField("buildings",Hidden).GetValue(domain);
+            var building=all[factory];building.GetType().GetField("Heading").SetValue(building,0d);
+            var restored=PlayableDomain.RestoreWorldBytes(domain.CaptureWorldBytes(7,"idle-radial"),profile,7,"idle-radial");var original=domain;
+            try{domain=restored;Assert.AreEqual(TerritoryRules.BuildingHeading,Factory.Heading);}
+            finally{domain=original;restored.Navigation.ReleaseCommittedHostRoot();restored.DestroyOwnedNavigation();}
         }
         [TestCase("cancel")][TestCase("sale")][TestCase("destroy")]
         public void ProducerCancellationDoesNotCreateProtectedVehicle(string action)
