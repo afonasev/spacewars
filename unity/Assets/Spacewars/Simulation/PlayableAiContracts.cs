@@ -23,6 +23,7 @@ namespace Spacewars.Simulation
         private readonly PlayableArtillerySupportSnapshot[] artillerySupport;
         private PlayableAiObservation(PlayableSnapshot snapshot)
         {
+            OrbitalScans=snapshot.OrbitalScans;Orbital=snapshot.Orbital;Mines=Array.AsReadOnly(snapshot.Mines.ToArray());
             Intel=new Spacewars.Simulation.Ai.AiIntelDelta(snapshot.Tick,snapshot.IntelEnvelopes,snapshot.Vision);Vision=snapshot.Vision;SchemaVersion=snapshot.Participants.Count>0?ParticipantSchemaVersion:CurrentSchemaVersion;HomeSiteId=snapshot.HomeSiteId;OwnerId=snapshot.OwnerId;Team=snapshot.Team;Participants=snapshot.Participants;Owner=snapshot.Owner;ProfileId=snapshot.ProfileId; ProfileRevision=snapshot.ProfileRevision; Generation=snapshot.Generation; Seed=snapshot.Seed;
             var owner=Owner;
             SnapshotSequence=snapshot.Sequence; Tick=snapshot.Tick; Credits=snapshot.Credits; SettledIncome=snapshot.SettledIncome; IncomePerSecond=snapshot.IncomePerSecond;
@@ -56,6 +57,9 @@ namespace Spacewars.Simulation
         }
         public Spacewars.Simulation.Ai.AiIntelDelta Intel{get;}
         public TeamVisionSnapshot Vision{get;}
+        public IReadOnlyList<OrbitalScanSnapshot> OrbitalScans{get;}
+        public OrbitalEscalationSnapshot Orbital{get;}
+        public IReadOnlyList<OrbitalMineSnapshot> Mines{get;}
         public int HomeSiteId{get;}
         public bool IsHostile(PlayableOwner other)=>Participants.Count==0?other!=Owner:Participants[(int)other].Team!=Team;
         public PlayableOwner Owner{get;} public string OwnerId{get;} public int Team{get;} public IReadOnlyList<OfflineParticipant> Participants{get;} public string ProfileId{get;} public int ProfileRevision{get;} public long Generation{get;} public int Seed{get;}

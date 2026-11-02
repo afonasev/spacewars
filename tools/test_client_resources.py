@@ -63,6 +63,8 @@ class ClientResourcesTests(unittest.TestCase):
             player.mkdir(parents=True)
             def run(command, **kwargs):
                 (player/'Player.exe').write_bytes(b'game')
+                dll=player/build.WINDOWS_RECAST;dll.parent.mkdir(parents=True)
+                dll.write_bytes((pathlib.Path(__file__).resolve().parents[1]/'unity/Assets/Spacewars/Plugins/x86_64/spacewars_recast.dll').read_bytes())
                 (player/'Player.pdb').write_bytes(b'debug')
                 (root/'.local/bound-build-windows-x64.log').write_text('NATIVE_RELEASE_BUILD_PASS')
                 return type('Exit', (), {'returncode': 0})()
@@ -72,7 +74,7 @@ class ClientResourcesTests(unittest.TestCase):
             with patch.object(build, 'ROOT', root), patch.object(build, 'git', side_effect=git), patch.object(build.subprocess, 'run', side_effect=run), patch.object(sys, 'argv', args), contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(build.main(), 0)
             record = json.loads((player/'native-build.json').read_text())
-            self.assertEqual(set(record['files']), {'Player.exe'})
+            self.assertEqual(set(record['files']), {'Player.exe', str(build.WINDOWS_RECAST)})
             self.assertEqual(record['removed_debug_artifacts'], ['Player.pdb'])
             self.assertEqual(record['channel'], 'test')
             self.assertTrue(record['test_match_logging'])

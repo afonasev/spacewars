@@ -6,6 +6,7 @@ class TestBuildLoggingChannel(unittest.TestCase):
  def run_build(self,channel=None,extra=None):
   with tempfile.TemporaryDirectory() as temp:
    root=pathlib.Path(temp);player=root/'unity/Builds/release/windows/Player.exe';player.parent.mkdir(parents=True);player.write_bytes(b'Player fixture')
+   dll=player.parent/build.WINDOWS_RECAST;dll.parent.mkdir(parents=True);dll.write_bytes((pathlib.Path(__file__).resolve().parents[1]/'unity/Assets/Spacewars/Plugins/x86_64/spacewars_recast.dll').read_bytes())
    calls=[]
    def run(command,**kwargs):
     calls.append(kwargs['env']);(root/'.local/bound-build-windows-x64.log').write_text('NATIVE_RELEASE_BUILD_PASS\n');return type('Exit',(),{'returncode':0})()

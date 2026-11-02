@@ -13,6 +13,11 @@ namespace Spacewars.Simulation
         public static double Duration(int id,PlayableProfileData p)=>id==ControlHack?p.orbitalHackSeconds:Tier(id)==1?p.orbitalBasicSeconds:Tier(id)==2?p.orbitalAdvancedSeconds:p.orbitalUltimateSeconds;
         public static double Threshold(int level,PlayableProfileData p)=>level==0?p.orbitalThreshold1:level==1?p.orbitalThreshold2:level==2?p.orbitalThreshold3:level==3?p.orbitalThreshold4:level==4?p.orbitalThreshold5:level==5?p.orbitalThreshold5*p.orbitalMaxThresholdMultiplier:0;
     }
+    public sealed class OrbitalScanSnapshot
+    {
+        public readonly PlayableOwner Owner;public readonly NavPoint Point;public readonly double Radius;
+        public OrbitalScanSnapshot(PlayableOwner owner,NavPoint point,double radius){Owner=owner;Point=point;Radius=radius;}
+    }
     public sealed class OrbitalAbilitySnapshot
     {
         public readonly int Id;public readonly double Remaining,Duration,Recovery;

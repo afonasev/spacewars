@@ -136,7 +136,7 @@ namespace Spacewars.Simulation
         public PlayablePopulationSnapshot(int living,int reserved,int capacity){Living=living;Reserved=reserved;Capacity=capacity;}
         public int Living{get;} public int Reserved{get;} public int Capacity{get;}
     }
-    public enum PlayablePublicScoutObjectiveRole { PossibleEnemyStart, ExpansionIncome, ExpansionOutpost }
+    public enum PlayablePublicScoutObjectiveRole { PossibleEnemyStart, ExpansionIncome, ExpansionOutpost, Relay }
     // Immutable authored geography for an AI policy; it intentionally carries no live ownership or vision fact.
     public sealed class PlayablePublicScoutObjective
     {
@@ -196,6 +196,8 @@ namespace Spacewars.Simulation
         public IReadOnlyList<OrbitalScanLine> ScanLines{get;private set;}=Array.Empty<OrbitalScanLine>();
         public IReadOnlyList<OrbitalScanTriangle> ScanTriangles{get;private set;}=Array.Empty<OrbitalScanTriangle>();
         public PlayableSnapshot WithScanLines(OrbitalScanLine[] lines,OrbitalScanTriangle[] triangles=null){var copy=(PlayableSnapshot)MemberwiseClone();copy.ScanLines=Array.AsReadOnly(lines);copy.ScanTriangles=Array.AsReadOnly(triangles??Array.Empty<OrbitalScanTriangle>());return copy;}
+        public IReadOnlyList<OrbitalScanSnapshot> OrbitalScans{get;private set;}=Array.Empty<OrbitalScanSnapshot>();
+        public PlayableSnapshot WithOrbitalScans(OrbitalScanSnapshot[] scans){var copy=(PlayableSnapshot)MemberwiseClone();copy.OrbitalScans=Array.AsReadOnly(scans);return copy;}
         public OrbitalEscalationSnapshot Orbital{get;private set;}=OrbitalEscalationSnapshot.Empty;
         public PlayableSnapshot WithOrbital(OrbitalEscalationSnapshot state){var copy=(PlayableSnapshot)MemberwiseClone();copy.Orbital=state;return copy;}
 

@@ -6,7 +6,13 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 QA_TESTS = {'tools.test_native_qa', 'tools.test_check_qa', 'tools.test_qa_project_settings'}
+RELEASE_TESTS = {'tools.test_github_publication', 'tools.test_release_pipeline', 'tools.test_game_release_notes'}
+BUILD_TESTS = {'tools.test_release_pipeline', 'tools.test_client_resources', 'tools.test_test_match_logging_build'}
 DEPENDENCIES = {
+    'tools/native-release/publish.py': RELEASE_TESTS,
+    'tools/native-release/publish_state.py': RELEASE_TESTS,
+    'tools/native-release/build.py': BUILD_TESTS,
+    'tools/native-release/build_state.py': BUILD_TESTS,
     'tools/native_qa.py': QA_TESTS,
     'tools/check_qa.py': QA_TESTS,
     'tools/qa_project_settings.py': QA_TESTS,

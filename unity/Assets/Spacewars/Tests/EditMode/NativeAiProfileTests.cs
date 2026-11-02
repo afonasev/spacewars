@@ -37,7 +37,8 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void MetadataControlsAllNumericRanges()
         {
-            Assert.AreEqual(253,NativeBalanceFields.AiFields.Count);
+            Assert.AreEqual(268,NativeBalanceFields.AiFields.Count);
+            Assert.AreEqual(15,NativeBalanceFields.AiFields.Count(f=>f.Path.StartsWith("orbital.",StringComparison.Ordinal)));
             Assert.AreEqual(16,NativeBalanceFields.AiRosterFields.Count);
             foreach(var f in NativeBalanceFields.AiFields.Concat(NativeBalanceFields.AiRosterFields))
             {

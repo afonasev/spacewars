@@ -38,8 +38,8 @@ namespace Spacewars.Runtime
             return cap;
         }
         internal int ProtectedUnit{get;set;}
-        private bool SafeCapturerObjective(PlayableAiObservation o,PlayableProfile p,PlayableEntitySnapshot u,PlayablePublicScoutObjective t)=>
-            u.Id!=ProtectedUnit||o.Sites.Any(s=>s.Site.Id==t.SiteId&&s.Site.Kind==PlayableBuildingKind.Mine)&&!o.Entities.Any(e=>o.IsHostile(e.Owner)&&e.Health>0&&Distance(e.Position,t.Approach)<=PlayableUnitRules.Vision(p,e.Kind));
+        private bool SafeCapturerObjective(PlayableAiObservation o,PlayableProfile p,PlayableEntitySnapshot u,PlayablePublicScoutObjective t,AiProfile ai,AiKnowledgeState knowledge)=>
+            (!AiRelayObjectives.HasRelays(o)||!u.Held&&u.OrderStamp?.Origin!=PlayableOrderOrigin.Human&&AiRelayObjectives.Viable(o,p,ai,knowledge,new[]{u},t.SiteId,t.Approach))&&(u.Id!=ProtectedUnit||o.Sites.Any(s=>s.Site.Id==t.SiteId&&s.Site.Kind==PlayableBuildingKind.Mine)&&!o.Entities.Any(e=>o.IsHostile(e.Owner)&&e.Health>0&&Distance(e.Position,t.Approach)<=PlayableUnitRules.Vision(p,e.Kind)));
         public bool BaseSearchSuccess(AiKnowledgeState knowledge)=>knowledge.Contacts.Any(c=>c.Building&&
             (c.Kind==(int)PlayableBuildingKind.Headquarters||c.Kind==(int)PlayableBuildingKind.Factory||c.Kind==(int)PlayableBuildingKind.Mine||c.Kind==(int)PlayableBuildingKind.Outpost));
         private static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
@@ -59,13 +59,18 @@ namespace Spacewars.Runtime
             foreach(var a in Claims(registry).Where(a=>IsPreparationObjective(a.Objective,siteId)&&a.LeaderId==actorId&&a.Members.Length==1&&a.Members[0]==actorId).ToArray())registry.Disband(a.Id);
         }
         public static PlayableRouteRequest[] RouteRequests(IEnumerable<PlayableEntitySnapshot> units,IEnumerable<PlayablePublicScoutObjective> objectives,PlayableOwner owner,long generation,long tick,PlayableProfile profile)=>
-            units.Where(u=>u.Owner==owner&&u.Health>0&&u.Kind==PlayableEntityKind.Explorer&&!u.Moving).OrderBy(u=>u.Id)
+            units.Where(u=>u.Owner==owner&&u.Health>0&&u.Kind==PlayableEntityKind.Explorer&&(!u.Moving||objectives.Any(t=>t.Role==PlayablePublicScoutObjectiveRole.Relay))).OrderBy(u=>u.Id)
             .SelectMany(u=>objectives.Where(t=>t.Reachable).OrderBy(t=>t.SiteId).Select(t=>new PlayableRouteRequest(u.Id,PlayableRouteTargetKind.PublicObjective,t.SiteId,generation,tick,u.Position,PlayableUnitRules.Radius(profile,u.Kind),t.Approach))).ToArray();
-        public void Observe(PlayableAiObservation o,AiKnowledgeState knowledge,AiArmyRegistry registry,AiProfile ai,int budget,int preparationSite=0)
+        public void Observe(PlayableAiObservation o,AiKnowledgeState knowledge,AiArmyRegistry registry,AiProfile ai,int budget,int preparationSite=0,PlayableProfile gameplay=null)
         {
             Binding(o,knowledge,registry);
             foreach(var a in Claims(registry).ToArray())
             {
+                if(AiRelayObjectives.IsClaim(a))
+                {
+                    AiRelayObjectives.ObserveScout(o,knowledge,registry,ai,gameplay??PlayableProfile.Default,a);
+                    continue;
+                }
                 // A public start can also be an expansion Outpost. Site identity
                 // owns coverage/claims; the accepted rally disambiguates approaches.
                 var target=o.PublicScoutObjectives.Where(t=>Objective(t.SiteId)==a.Objective||PreparationObjective(t.SiteId)==a.Objective)
@@ -98,6 +103,8 @@ namespace Spacewars.Runtime
         public PlayableAiAction Plan(PlayableAiObservation o,AiKnowledgeState knowledge,AiArmyRegistry registry,PlayableProfile gameplay,AiProfile ai,int budget,int preparationSite=0,int reservedActor=0)
         {
             Binding(o,knowledge,registry);var claims=Claims(registry).ToArray();
+            var relay=AiRelayObjectives.PlanScout(o,knowledge,registry,gameplay,ai,budget,reservedActor);
+            if(relay!=null)return relay;
             var revisit=AiProfile.SecondsToTicks((ai.Value("scouting.revisitSeconds")*RevisitScale),30);
 #if UNITY_INCLUDE_TESTS
             var readback=PlanReadbackForTests;
@@ -109,9 +116,9 @@ namespace Spacewars.Runtime
             T Value<T>(string stage,int unitId,int siteId,T value)
             {Record(stage,unitId,siteId,value);return value;}
             var candidates=from u in o.Entities.Where(u=>Guard("unit.owner",u.Id,0,u.Owner==o.Owner)&&Guard("unit.alive",u.Id,0,u.Health>0)&&
-                    Guard("unit.explorer",u.Id,0,u.Kind==PlayableEntityKind.Explorer)&&Guard("unit.stationary",u.Id,0,!u.Moving)&&Guard("unit.expansion-reserved",u.Id,0,u.Id!=reservedActor))
+                    Guard("unit.explorer",u.Id,0,u.Kind==PlayableEntityKind.Explorer)&&Guard("unit.stationary",u.Id,0,!u.Moving||AiRelayObjectives.HasRelays(o))&&Guard("unit.expansion-reserved",u.Id,0,u.Id!=reservedActor))
                 where Guard("unit.unclaimed",u.Id,0,registry.ArmyFor(u.Id)==0)&&Guard("budget.available",u.Id,0,claims.Length<budget)
-                from target in o.PublicScoutObjectives.Where(t=>Guard("target.reachable",u.Id,t.SiteId,t.Reachable)&&SafeCapturerObjective(o,gameplay,u,t))
+                from target in o.PublicScoutObjectives.Where(t=>Guard("target.reachable",u.Id,t.SiteId,t.Reachable)&&t.Role!=PlayablePublicScoutObjectiveRole.Relay&&SafeCapturerObjective(o,gameplay,u,t,ai,knowledge))
                 where Guard("target.unclaimed",u.Id,target.SiteId,!claims.Any(a=>Guard("claim.matchesObjective",u.Id,target.SiteId,a.Objective==Objective(target.SiteId)||a.Objective==PreparationObjective(target.SiteId))))
                 let area=Value("area",u.Id,target.SiteId,knowledge.Areas.SingleOrDefault(a=>Guard("area.matchesSite",u.Id,target.SiteId,a.AreaId==target.SiteId)))
                 let gain=Value("gain",u.Id,target.SiteId,area==null?1:Math.Min(1,(o.Tick-area.ActuallyCoveredTick)/(double)revisit))
@@ -126,9 +133,9 @@ namespace Spacewars.Runtime
                 orderby (target.SiteId==preparationSite?0:1),score descending,target.SiteId,u.Id
                 select new {u,target,route};
 #else
-            var candidates=from u in o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==PlayableEntityKind.Explorer&&!u.Moving)
+            var candidates=from u in o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==PlayableEntityKind.Explorer&&(!u.Moving||AiRelayObjectives.HasRelays(o)))
                 where u.Id!=reservedActor&&registry.ArmyFor(u.Id)==0&&claims.Length<budget
-                from target in o.PublicScoutObjectives.Where(t=>t.Reachable&&SafeCapturerObjective(o,gameplay,u,t))
+                from target in o.PublicScoutObjectives.Where(t=>t.Reachable&&t.Role!=PlayablePublicScoutObjectiveRole.Relay&&SafeCapturerObjective(o,gameplay,u,t,ai,knowledge))
                 where !claims.Any(a=>a.Objective==Objective(target.SiteId)||a.Objective==PreparationObjective(target.SiteId))
                 let area=knowledge.Areas.SingleOrDefault(a=>a.AreaId==target.SiteId)
                 let gain=area==null?1:Math.Min(1,(o.Tick-area.ActuallyCoveredTick)/(double)revisit)
@@ -156,7 +163,7 @@ namespace Spacewars.Runtime
             long id=registry.ArmyFor(action.EntityIds.Single());
             if(id==0&&!registry.TryCreate(o,AiArmyRole.Scout,Policy,action.EntityIds,out id))throw new InvalidOperationException("Selected scout claim admission failed");
             var u=o.Entities.Single(e=>e.Id==action.EntityIds.Single());
-            string objective=action.SiteId==preparationSite?PreparationObjective(action.SiteId):Objective(action.SiteId);
+            string objective=AiRelayObjectives.IsRelay(o,action.SiteId)?AiRelayObjectives.Claim(action.SiteId):action.SiteId==preparationSite?PreparationObjective(action.SiteId):Objective(action.SiteId);
             if(!registry.UpdateMission(id,Policy,AiArmyPhase.Advancing,o.Tick,objective,u.Position,action.Target))throw new InvalidOperationException("Scout tactical ownership changed");
         }
     }

@@ -20,6 +20,13 @@ class AffectedSelectionTests(unittest.TestCase):
             git.assert_called_once_with(['git', 'diff', '--name-only', '-z', 'base-sha', 'HEAD', '--'], cwd=ROOT)
             self.assertEqual('modules=tools.test_route_performance_qa\ndecision_lab=false\n', output.read_text())
 
+    def test_release_helpers_select_their_actual_regressions(self):
+        for name,expected in [('publish.py',selector.RELEASE_TESTS),('publish_state.py',selector.RELEASE_TESTS),('build.py',selector.BUILD_TESTS),('build_state.py',selector.BUILD_TESTS)]:
+            with self.subTest(name=name):
+                result=select(['tools/native-release/'+name])
+                self.assertEqual(result['modules'],sorted(expected))
+                self.assertFalse(result['decision_lab'])
+
     def test_changed_qa_dependency_selects_both_runners_and_guard(self):
         result = select(['tools/qa_project_settings.py'])
         self.assertEqual(sorted(QA_TESTS), result['modules'])

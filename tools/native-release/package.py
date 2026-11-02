@@ -3,6 +3,8 @@
 import argparse, base64, hashlib, json, os, pathlib, plistlib, shutil, subprocess, sys, tempfile, struct
 import xml.etree.ElementTree as ET
 ROOT=pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(ROOT/'tools'))
+from native_plugins import WINDOWS_RECAST, validate_windows_recast
 UPDATER=ROOT/'tools/native-release/updater'
 def run(args,**kw):
  return subprocess.check_output([str(x) for x in args],text=True,**kw).strip()
@@ -32,6 +34,7 @@ def validate_build_identity(build_dir,platform,version,head,allow_dirty=False,ch
   if identity.get('channel')!=channel or identity.get('test_match_logging') is not (channel=='test'):raise ValueError('native build channel/logging identity differs; rebuild with --channel '+channel)
   marker=player_dir/('Contents/Resources/Data/StreamingAssets/TestBuildIdentity.json' if platform=='macos-universal' else 'Player_Data/StreamingAssets/TestBuildIdentity.json')
   if not marker.exists() or json.loads(marker.read_text()).get('TestBuild') is not (channel=='test'):raise ValueError('embedded test logging marker differs from requested channel')
+ if platform=='windows-x64':validate_windows_recast(player_dir/WINDOWS_RECAST)
  return identity
 
 def windows_manifest(executable):

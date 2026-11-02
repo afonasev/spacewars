@@ -99,6 +99,8 @@ namespace Spacewars.Runtime
                 forceKind=Sample("opening-force-kind")<V(p,"openingExplorerShare")?PlayableEntityKind.Explorer:PlayableEntityKind.Tank;
                 mixedForce=Sample("mixed-opening")<V(p,"openingExplorerShare")||opening.Opening==PlayableAiOpening.ExplorerAllIn&&forceKind==PlayableEntityKind.Tank;
             }
+            // Relay openings use the first unit for useful field work, including contest combat.
+            if(AiRelayObjectives.HasRelays(o))capturerReleased=true;
             if(capturer>0&&!capturerReleased&&ReplacementAvailable(o,PlayableProfileForObservation??PlayableProfile.ThreeCrossingsDefault,SpendableCredits))capturerReleased=true;
             refineries=Income(o);
             int requested=RequiredHomeRefineryCount(p);

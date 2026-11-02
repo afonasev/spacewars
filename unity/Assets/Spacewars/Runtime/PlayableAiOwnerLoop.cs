@@ -182,7 +182,8 @@ namespace Spacewars.Runtime
         public AiTechnologyPlan TechnologyPlan{get;private set;}
         private PlayableAiScoutLivenessPolicy scout;
         private readonly AiScoutPlanner scoutPlanner=new AiScoutPlanner();
-        private int ScoutBudget=>!openingExecutor.Air&&openingExecutor.Capture().Phase==PlayableAiOpeningPhase.Active?0:scoutPlanner.Budget(nativeProfile,nativeConfig.Difficulty,nativeConfig.PersonalitySeed,openingExecutor.ScoutPlan);
+        private bool relayMap; // Derived from public map geography on every review; no additional save state.
+        private int ScoutBudget=>!relayMap&&!openingExecutor.Air&&openingExecutor.Capture().Phase==PlayableAiOpeningPhase.Active?0:scoutPlanner.Budget(nativeProfile,nativeConfig.Difficulty,nativeConfig.PersonalitySeed,openingExecutor.ScoutPlan);
         private PlayableAiMissionDefensePolicy mission;
         private readonly PlayableAiMidgameStrategyPolicy midgame;
         private PlayableAiArtillerySupportPolicy artillery;
@@ -341,6 +342,12 @@ namespace Spacewars.Runtime
                 {Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Effective tactical order already matches at delivery.");return;}
             }
             if(!CombatAttentionAllows(domain,item,itemIndex))return;
+            if(item.PolicyName==AiOrbitalPolicy.Policy&&(action.Kind==PlayableCommandKind.UseOrbital||action.Kind==PlayableCommandKind.ChooseOrbital))
+            {
+                var live=PlayableAiObservation.From(domain.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,opening.MatchSeed,domain.OwnerFor(OwnerId)));
+                if(!AiOrbitalPolicy.CanDeliver(live,profile,nativeProfile,knowledge.Capture(),action,point=>arbiter.LastOrbitalScan(point,AiOrbitalPolicy.ScanRadius(profile))))
+                {Finish(item,0,domain.Tick,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Orbital opportunity changed before delivery.");return;}
+            }
             long sequence=domain.AllocateAiSequence();lastCommandSequence=sequence;
             var command=new PlayableCommand(action.Generation,sequence,action.PlayerId,action.Kind,action.CopyEntityIds(),action.Target,
                 siteId:action.SiteId,slotId:action.SlotId,buildingKind:action.BuildingKind,parentId:action.ParentId,targetId:action.TargetId,
@@ -571,12 +578,14 @@ namespace Spacewars.Runtime
             if(snapshot.OwnerEliminated||snapshot.Generation!=Generation||snapshot.Status==RuntimeStatus.Stopped||snapshot.Status==RuntimeStatus.Failed||snapshot.Outcome!=PlayableMatchOutcome.Playing){while(pending!=null)Cancel(PlayableAiDeliveryStatus.Stopped,"Match ended.");armies.DisbandAll();armyPlanner.Stop();flankPlanner.Stop();defense.Stop();Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);return;}
             if(snapshot.Paused)return;
             var current=PlayableAiObservation.From(snapshot);
+            foreach(var scan in current.OrbitalScans)arbiter.RememberOrbitalScan(scan.Point,current.Tick);
             BindCombatMicro(current);
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
             using var qaRouteAudit=QaAiRouteAudit.Begin(current,profile);
 #endif
             BindUtilityReservations(current);
             openingExecutor.SpendableCredits=budget.Available;
+            relayMap=AiRelayObjectives.HasRelays(current);
             openingExecutor.CombatAvailable=id=>!utilityReserved.Contains(id)&&!expansion.ClaimsActor(id)&&!armies.IsScoutMember(id);
             budget.ObserveBank(current.Credits);
             doctrine.SpendableCredits=budget.Available;
@@ -612,7 +621,7 @@ namespace Spacewars.Runtime
             }
             reviewSection.Dispose();reviewSection=PerformanceProfile.Measure(ProfileStage.AiReviewArmies);
             armies.Observe(current);
-            scoutPlanner.Observe(current,knowledge.Capture(),armies,nativeProfile,ScoutBudget,preparationSite);
+            scoutPlanner.Observe(current,knowledge.Capture(),armies,nativeProfile,ScoutBudget,preparationSite,profile);
             foreach(var item in pendingItems.Where(x=>x.Scout&&x.Action.EntityIds.Any(id=>armies.ArmyFor(id)==0)).ToArray())
             {pendingItems.Remove(item);Finish(item,0,0,PlayableAiDeliveryStatus.Cancelled,PlayableCommandStatus.Cancelled,"Scout assignment released.");}
             BindUtilityReservations(current,preparationSite,current.Tick-lastDecisionTick>=DecisionIntervalTicks);
@@ -712,6 +721,8 @@ namespace Spacewars.Runtime
                 }
                 intent.Commit=commit;intent.Feedback=feedback;proposals.Add(intent);return intent;
             }
+            var orbitalAction=AiOrbitalPolicy.Plan(observation,profile,nativeProfile,knowledge.Capture(),doctrine.Personality,records,opening.SourceIdentity,point=>arbiter.LastOrbitalScan(point,AiOrbitalPolicy.ScanRadius(profile)));
+            Propose(AiOrbitalPolicy.Policy,orbitalAction,()=>{},_=>{},orbitalAction?.Kind==PlayableCommandKind.UseOrbital&&orbitalAction.TargetId==OrbitalAbilities.ControlHack?2:1);
             // TryPlan is a legacy stateful API. Each candidate runs on a transaction fork;
             // only selected forks become live policies. Unselected RNG/pending/mission changes disappear.
             var da=earlyDefense??defense.Propose(observation,profile,nativeProfile,armies);
@@ -964,7 +975,7 @@ namespace Spacewars.Runtime
             // Detached candidates compete through the arbiter's shared recipient
             // claims; an unselected expansion does not own its proposed actor.
             var scoutAction=sc.Admit(observation,scoutPlanner.Plan(observation,knowledge.Capture(),armies,profile,nativeProfile,ScoutBudget,preparationScoutSite));
-            Propose("scout",scoutAction,()=>{scoutPlanner.Commit(observation,scoutAction,armies,preparationScoutSite);scout=sc;},sc.ObserveReceipt);
+            Propose("scout",scoutAction,()=>{scoutPlanner.Commit(observation,scoutAction,armies,preparationScoutSite);scout=sc;},sc.ObserveReceipt,relayMap?1:0);
             // The pure technology plan applies the same productive prerequisite to
             // science infrastructure AND QueueResearch; opening/scout/ledger bands remain.
             var re=research.Fork();Propose("research",re.Admit(observation,TechnologyPlan.Action),()=>research=re,re.ObserveReceipt,0,positionSaving!=null&&!priorityResearch&&!technologyFunding.HasAcceptedScience(budget,arbiter)?(int?)checked(positionProtectedFunds+positionPrice):null);
@@ -1052,11 +1063,11 @@ namespace Spacewars.Runtime
         private static bool SameOrder(PlayableAiAction a,PlayableEntitySnapshot u,string policy,bool missionApplied,string owner,long generation)
         {
             var pending=u.Queue?.Pending;
-            bool sameLiveExpansionMove=policy=="expansion"&&a.PlayerId==owner&&a.Generation==generation&&a.SourceIdentity==PlayableAiOpeningComposition.SourceIdentity&&
+            bool sameLiveExpansionMove=(policy=="expansion"||policy==AiScoutPlanner.Policy)&&a.PlayerId==owner&&a.Generation==generation&&a.SourceIdentity==PlayableAiOpeningComposition.SourceIdentity&&
                 a.Kind==PlayableCommandKind.Move&&a.SiteId>0&&a.EntityIds.Contains(u.Id)&&u.Queue?.PendingAiRouteViable==true&&
                 pending!=null&&pending.AiActionId>0&&pending.Kind==PlayableCommandKind.Move&&pending.PublicObjectiveId==a.SiteId&&
                 pending.Anchor.HasValue&&pending.Anchor.Value.Position.Equals(a.Target);
-            bool sameLiveAttackMove=AiArmyPlanner.IsArmyPolicy(policy)&&missionApplied&&a.PlayerId==owner&&a.Generation==generation&&a.Kind==PlayableCommandKind.AttackMove&&a.SiteId>0&&
+            bool sameLiveAttackMove=(AiArmyPlanner.IsArmyPolicy(policy)&&missionApplied||policy==AiScoutPlanner.Policy)&&a.PlayerId==owner&&a.Generation==generation&&a.Kind==PlayableCommandKind.AttackMove&&a.SiteId>0&&
                 u.Queue?.PendingAiRouteViable==true&&pending!=null&&pending.AiActionId>0&&pending.Kind==PlayableCommandKind.AttackMove&&
                 pending.PublicObjectiveId==a.SiteId&&pending.Anchor.HasValue&&pending.Anchor.Value.Position.Equals(a.Target)&&
                 a.SourceIdentity==PlayableAiOpeningComposition.SourceIdentity;
@@ -1111,7 +1122,8 @@ namespace Spacewars.Runtime
 #endif
                 return null;
             }
-            int cost=0,pop=0;var claims=action.EntityIds.Select(id=>"recipient:"+id).ToList();
+            if(AiOrbitalPolicy.IsHack(action)&&!AiOrbitalPolicy.HackValid(o,profile,action.EntityIds.SingleOrDefault()))return null;
+            int cost=0,pop=0;var claims=action.EntityIds.Select(id=>(AiOrbitalPolicy.IsHack(action)?"orbital-target:":"recipient:")+id).ToList();
             if(AiRepairUsePolicy.IsAction(o,action))claims.Add("repair-tower:"+action.ParentId);
             if(action.Kind==PlayableCommandKind.UpgradeRefinery)cost=(int)Math.Ceiling(profile.RefineryUpgradeCost);
             // Wire v2 has one pending callback per policy. Alternative candidates compete
@@ -1155,7 +1167,7 @@ namespace Spacewars.Runtime
                     return null;
                 }cost=(int)Math.Ceiling(researchCost.Cost);
             }
-            if(action.EntityIds.Any(id=>!o.Entities.Any(u=>u.Id==id&&u.Owner==o.Owner&&u.Health>0)&&!o.Buildings.Any(b=>b.Id==id&&b.Owner==o.Owner&&b.Health>0)))
+            if(!AiOrbitalPolicy.IsHack(action)&&action.EntityIds.Any(id=>!o.Entities.Any(u=>u.Id==id&&u.Owner==o.Owner&&u.Health>0)&&!o.Buildings.Any(b=>b.Id==id&&b.Owner==o.Owner&&b.Health>0)))
             {
 #if UNITY_INCLUDE_TESTS
                 if(policyName=="expansion"&&ProposalAdmissionReadbackForTests!=null&&(ProposalAdmissionOwnerFilterForTests==null||ProposalAdmissionOwnerFilterForTests==OwnerId))
@@ -1216,6 +1228,8 @@ namespace Spacewars.Runtime
             Emit(item,status,sequence,sequence!=0||status==PlayableAiDeliveryStatus.Stale?(long?)authorityTick:null,authorityTick,status==PlayableAiDeliveryStatus.Applied?(long?)applicationTick:null,runtimeStatus,message);
             lastPolicy=item.PolicyName;lastActionKind=item.Action.Kind;
             arbiter.Terminal(item.Intent,authorityTick,status);
+            if(item.PolicyName==AiOrbitalPolicy.Policy&&item.Action.Kind==PlayableCommandKind.UseOrbital&&item.Action.TargetId==1&&status==PlayableAiDeliveryStatus.Applied)
+                arbiter.RememberOrbitalScan(item.Action.Target,applicationTick);
             budget.Reconcile(item.Intent.Id,item.Identity,status,gameplayPaid);
             technologyFunding.Terminal(item.Intent,status,budget,arbiter);
             launches.Terminal(item.Intent,item.Identity,status,gameplayPaid,budget,profile);

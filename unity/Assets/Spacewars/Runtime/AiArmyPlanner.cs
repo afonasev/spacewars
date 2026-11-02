@@ -356,17 +356,18 @@ namespace Spacewars.Runtime
             }
             if(state.TargetKind==PlayableRouteTargetKind.VisibleEnemy)
             {state.TargetVisible=true;state.LastSeenTick=o.Tick;if(state.Phase==AiArmyPhase.Regrouping)SetPhase(registry,AiArmyPhase.Staging,o.Tick);}
-            if(state.TargetKind==PlayableRouteTargetKind.PublicObjective&&!AiPublicEnemyStarts.CanAttack(o,Knowledge,state.TargetId))
+            if(state.TargetKind==PlayableRouteTargetKind.PublicObjective&&!(AiRelayObjectives.IsRelay(o,state.TargetId)?AiRelayObjectives.Needed(o,oProfile,state.TargetId):AiPublicEnemyStarts.CanAttack(o,Knowledge,state.TargetId)))
             {Release(registry,o.Tick,"public target empty or whereabouts unconfirmed");return;}
             state.Target=Point(o,state);
             double now=units.Average(u=>Distance(u.Position,state.Target)),health=Health(o,state);
-            bool progress=now<distance||health>=0&&targetHealth>=0&&health<targetHealth;
+            bool relayHolding=state.TargetKind==PlayableRouteTargetKind.PublicObjective&&AiRelayObjectives.IsRelay(o,state.TargetId)&&AiRelayObjectives.Holding(o,oProfile,state.TargetId,units);
+            bool progress=relayHolding&&!o.Sites.Any(s=>s.Site.Id==state.TargetId&&s.Contested)||now<distance||health>=0&&targetHealth>=0&&health<targetHealth;
             distance=Math.Min(distance,now);targetHealth=health;
             if(progress)state.ProgressTick=o.Tick;
             // A receipt alone is not an effective order and does not advance progress.
             // A newly accepted offensive route retains the preceding effective order until installation.
             // Its exact live pending binding is not a foreign replacement, nor installed progress.
-            if(applied&&units.Any(u=>u.CurrentOrder!=null&&!Same(u,state)&&!SameLivePending(u,state)&&!AssemblyFollow(o,army,u,records)&&CombatMicroOrder?.Invoke(o,army,u)!=true&&
+            if(applied&&units.Any(u=>u.CurrentOrder!=null&&!Same(u,state)&&!(state.TargetKind==PlayableRouteTargetKind.PublicObjective&&AiRelayObjectives.IsRelay(o,state.TargetId)&&AiRelayObjectives.CombatOrder(o,oProfile,state.TargetId,u))&&!SameLivePending(u,state)&&!AssemblyFollow(o,army,u,records)&&CombatMicroOrder?.Invoke(o,army,u)!=true&&
                 !(u.CurrentOrder.Kind!=PlayableTacticalOrderKind.Follow&&AiRepairUsePolicy.OwnedCoreOrder(o,u,policyName,state.StartedTick,records,
                     allowPriorDefense:repairClients.Count>0&&AiRepairUsePolicy.HasLiveRecoveryBudget(o,profile,completed)))))
             {Release(registry,o.Tick,"order replaced");return;}
@@ -376,7 +377,7 @@ namespace Spacewars.Runtime
                 SetPhase(registry,engaging?AiArmyPhase.Engaging:AiArmyPhase.Advancing,o.Tick,progress);
             }
             else if(state.Phase==AiArmyPhase.Forming)SetPhase(registry,AiArmyPhase.Staging,o.Tick,progress);
-            if(applied&&state.TargetKind==PlayableRouteTargetKind.PublicObjective&&units.All(u=>CompletedPublicOrder(o,u)))
+            if(applied&&state.TargetKind==PlayableRouteTargetKind.PublicObjective&&!AiRelayObjectives.IsRelay(o,state.TargetId)&&units.All(u=>CompletedPublicOrder(o,u)))
             {Release(registry,o.Tick,"public objective reached");return;}
             long deadline=AiProfile.SecondsToTicks(profile.Value(state.Phase==AiArmyPhase.Forming||state.Phase==AiArmyPhase.Staging?"armies.assemblyDeadlineSeconds":"armies.stallSeconds"),30);
             if(o.Tick-state.ProgressTick>=deadline)
@@ -524,7 +525,9 @@ namespace Spacewars.Runtime
                 var assessments=AiOpponentSelector.Assess(o,gameplay,profile,knowledge:Knowledge,memory:completed);
                 candidates=candidates.Where(g=>AiActiveStrategyPolicy.ViableApproach(o,gameplay,profile,
                     free.Where(u=>g.Units.Contains(u.Id)).ToArray(),g.Route.TargetId,g.Route.Target,g.Route.Kind,Knowledge,completed)).ToArray();
-                var choice=candidates.OrderByDescending(g=>TeamAssignment!=null&&TeamAssignment.TargetId==g.Route.TargetId&&g.Route.Kind==PlayableRouteTargetKind.VisibleEnemy)
+                var choice=candidates.Where(g=>!AiRelayObjectives.IsRelay(o,g.Route.TargetId)||g.Route.Kind!=PlayableRouteTargetKind.PublicObjective||AiRelayObjectives.Viable(o,gameplay,profile,Knowledge,free.Where(u=>g.Units.Contains(u.Id)),g.Route.TargetId,g.Route.Target))
+                    .OrderByDescending(g=>g.Route.Kind==PlayableRouteTargetKind.PublicObjective&&AiRelayObjectives.IsRelay(o,g.Route.TargetId))
+                    .ThenByDescending(g=>TeamAssignment!=null&&TeamAssignment.TargetId==g.Route.TargetId&&g.Route.Kind==PlayableRouteTargetKind.VisibleEnemy)
                     .ThenByDescending(g=>HarassAllowed&&o.Buildings.Any(b=>b.Id==g.Route.TargetId&&o.IsHostile(b.Owner)&&TerritoryRules.Income(gameplay,b.Kind)>0))
                     .ThenByDescending(g=>assessments.FirstOrDefault(a=>a.TargetId==g.Route.TargetId&&g.Route.Kind==a.Kind)?.Score??double.MinValue)
                     .ThenBy(g=>g.Route.Kind).ThenBy(g=>g.Route.TargetId).FirstOrDefault();if(choice==null)return Guard(o,gameplay,profile,registry,null);
@@ -532,6 +535,12 @@ namespace Spacewars.Runtime
                 ids=choice.Units;plan=new AiArmyMissionState{TargetKind=choice.Route.Kind,TargetId=choice.Route.TargetId,Target=choice.Route.Target};
             }
             var recipients=o.Entities.Where(u=>ids.Contains(u.Id)).ToArray();
+            if(Active&&plan.TargetKind==PlayableRouteTargetKind.PublicObjective&&AiRelayObjectives.IsRelay(o,plan.TargetId))
+            {
+                var contest=AiRelayObjectives.Combat(o,gameplay,recipients,plan.TargetId,nextId);
+                if(contest!=null)return contest;
+                if(AiRelayObjectives.Holding(o,gameplay,plan.TargetId,recipients))return null;
+            }
             if(ids.Length==0||recipients.Length!=ids.Length||recipients.All(u=>Same(u,plan)||SameLivePending(u,plan)))return null;
             if(!o.RouteProofs.Any(r=>ids.Contains(r.UnitId)&&r.Kind==plan.TargetKind&&r.TargetId==plan.TargetId))return null;
             return new PlayableAiAction(nextId,owner,o.ProfileId,o.ProfileRevision,generation,o.SnapshotSequence,
@@ -542,7 +551,7 @@ namespace Spacewars.Runtime
         {
             // Resolve owner knowledge once per public site, not once per unit route.
             var starts=new HashSet<int>(o.PublicScoutObjectives.Where(g=>g.Role==PlayablePublicScoutObjectiveRole.PossibleEnemyStart&&AiPublicEnemyStarts.CanAttack(o,Knowledge,g.SiteId)).Select(g=>g.SiteId));
-            return o.RouteProofs.Where(r=>units.Any(u=>u.Id==r.UnitId)&&(r.Kind==PlayableRouteTargetKind.VisibleEnemy||r.Kind==PlayableRouteTargetKind.PublicObjective&&starts.Contains(r.TargetId)));
+            return o.RouteProofs.Where(r=>units.Any(u=>u.Id==r.UnitId)&&(r.Kind==PlayableRouteTargetKind.VisibleEnemy||r.Kind==PlayableRouteTargetKind.PublicObjective&&(starts.Contains(r.TargetId)||AiRelayObjectives.IsRelay(o,r.TargetId)&&AiRelayObjectives.Needed(o,oProfile,r.TargetId))));
         }
         internal PlayableAiAction ProposePositioning(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiArmyRegistry registry)
         {
@@ -658,7 +667,7 @@ namespace Spacewars.Runtime
             var es=entities.ToArray();var targets=es.Where(e=>hostile(e.Owner)&&e.Health>0).Select(e=>new{Id=e.Id,Point=e.Position,Kind=PlayableRouteTargetKind.VisibleEnemy})
                 .Concat(buildings.Where(b=>hostile(b.Owner)&&b.Health>0).Select(b=>new{Id=b.Id,Point=b.Position,Kind=PlayableRouteTargetKind.VisibleEnemy}))
                 .Concat(buildings.Where(b=>b.Owner==owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&(b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost||b.Kind==PlayableBuildingKind.Mine||b.Kind==PlayableBuildingKind.RepairTower)).Select(b=>new{Id=b.Id,Point=b.Position,Kind=PlayableRouteTargetKind.FriendlyAnchor}))
-                .Concat(objectives.Where(g=>g.Role==PlayablePublicScoutObjectiveRole.PossibleEnemyStart&&g.Reachable).Select(g=>new{Id=g.SiteId,Point=g.Approach,Kind=PlayableRouteTargetKind.PublicObjective})).OrderBy(t=>t.Kind).ThenBy(t=>t.Id).ToArray();
+                .Concat(objectives.Where(g=>(g.Role==PlayablePublicScoutObjectiveRole.PossibleEnemyStart||g.Role==PlayablePublicScoutObjectiveRole.Relay)&&g.Reachable).Select(g=>new{Id=g.SiteId,Point=g.Approach,Kind=PlayableRouteTargetKind.PublicObjective})).OrderBy(t=>t.Kind).ThenBy(t=>t.Id).ToArray();
             return es.Where(e=>e.Owner==owner&&e.Health>0&&AiRosterCatalog.Initial.LineWeight(e.Kind)+AiRosterCatalog.Initial.SupportWeight(e.Kind)>0).OrderBy(e=>e.Id)
                 .SelectMany(e=>targets.Select(t=>new PlayableRouteRequest(e.Id,t.Kind,t.Id,generation,tick,e.Position,PlayableUnitRules.Radius(profile,e.Kind),t.Point))).ToArray();
         }

@@ -6,6 +6,9 @@ class NativeBuildIdentityTests(unittest.TestCase):
  def setUp(self):
   self.temp=tempfile.TemporaryDirectory();self.root=pathlib.Path(self.temp.name);self.player=self.root/'Player.exe';self.player.write_bytes(b'verified native Player')
   self.record={'schema':1,'commit':'abc','version':'0.6.0','platform':'windows-x64','dirty':False,'files':{'Player.exe':{'size':self.player.stat().st_size,'sha256':hashlib.sha256(self.player.read_bytes()).hexdigest()}}};self.write()
+  self.dll=self.root/package.WINDOWS_RECAST;self.dll.parent.mkdir(parents=True)
+  self.dll.write_bytes((SOURCE.parents[2]/'unity/Assets/Spacewars/Plugins/x86_64/spacewars_recast.dll').read_bytes())
+  self.record['files'][str(package.WINDOWS_RECAST)]={'size':self.dll.stat().st_size,'sha256':hashlib.sha256(self.dll.read_bytes()).hexdigest()};self.write()
  def tearDown(self):self.temp.cleanup()
  def write(self):(self.root/'native-build.json').write_text(json.dumps(self.record))
  def validate(self,head='abc',version='0.6.0',channel=None):return package.validate_build_identity(self.root,'windows-x64',version,head,channel=channel)
@@ -34,6 +37,23 @@ class NativeBuildIdentityTests(unittest.TestCase):
   marker=self.root/'Player_Data/StreamingAssets/TestBuildIdentity.json';marker.parent.mkdir(parents=True);marker.write_text('{"TestBuild":false}')
   self.record.update(channel='test',test_match_logging=True);self.record['files'][str(marker.relative_to(self.root))]={'size':marker.stat().st_size,'sha256':hashlib.sha256(marker.read_bytes()).hexdigest()};self.write()
   with self.assertRaisesRegex(ValueError,'embedded'):self.validate(channel='test')
+ def test_matching_inventory_without_recast_is_rejected(self):
+  self.dll.unlink();del self.record['files'][str(package.WINDOWS_RECAST)];self.write()
+  with self.assertRaisesRegex(ValueError,'Recast DLL missing'):self.validate()
+ def test_wrong_architecture_is_rejected_even_with_matching_inventory(self):
+  import struct
+  data=bytearray(self.dll.read_bytes());pe=struct.unpack_from('<I',data,0x3c)[0];struct.pack_into('<H',data,pe+4,0x14c);self.dll.write_bytes(data)
+  self.record['files'][str(package.WINDOWS_RECAST)]={'size':len(data),'sha256':hashlib.sha256(data).hexdigest()};self.write()
+  with self.assertRaisesRegex(ValueError,'x64 DLL'):self.validate()
+ def test_required_exports_and_self_contained_runtime_are_checked(self):
+  from native_plugins import validate_windows_recast
+  original=self.dll.read_bytes()
+  self.dll.write_bytes(original.replace(b'sw_recast_build_layered\0',b'xx_recast_build_layered\0'))
+  with self.assertRaisesRegex(ValueError,'ABI exports missing'):validate_windows_recast(self.dll)
+  self.dll.write_bytes(original.replace(b'KERNEL32.dll\0',b'libgcc_s.dll\0'))
+  with self.assertRaisesRegex(ValueError,'unbundled compiler runtime'):validate_windows_recast(self.dll)
+  self.dll.write_bytes(b'MZ')
+  with self.assertRaisesRegex(ValueError,'Truncated'):validate_windows_recast(self.dll)
 class VolumeIconTests(unittest.TestCase):
  def test_icon_is_copied_and_custom_icon_flag_set_on_volume_root(self):
   with tempfile.TemporaryDirectory() as temp:

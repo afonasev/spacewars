@@ -42,7 +42,7 @@ namespace Spacewars.Runtime
             if(choice==null||HasPendingObligation)return null;
             if(o.OwnerId!=ownerId)throw new ArgumentException("Scout owner");
             pendingActionId=nextActionId++;pendingGeneration=o.Generation;
-            return new PlayableAiAction(pendingActionId,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,choice.Kind,choice.EntityIds.ToArray(),choice.Target,siteId:choice.SiteId,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+            return new PlayableAiAction(pendingActionId,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,choice.Kind,choice.EntityIds.ToArray(),choice.Target,siteId:choice.SiteId,targetId:choice.TargetId,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
         }
 
         public void ObserveReceipt(PlayableAiTraceRecord record)

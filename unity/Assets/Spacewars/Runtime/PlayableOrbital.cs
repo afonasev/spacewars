@@ -16,6 +16,7 @@ namespace Spacewars.Runtime
         {if(owner.HasValue&&HasOwner(owner.Value)&&Hostile(owner.Value,victim)&&amount>0)Orbital(owner.Value).Damage(amount,OrbitalData);}
         private sealed class Scan {internal PlayableOwner Owner;internal NavPoint Point;internal double Radius,Remaining,Duration;}
         private readonly List<Scan> scans=new List<Scan>();
+        private OrbitalScanSnapshot[] TeamOrbitalScans(PlayableOwner owner)=>scans.Where(s=>s.Remaining>0&&TeamOf(s.Owner)==TeamOf(owner)).Select(s=>new OrbitalScanSnapshot(s.Owner,s.Point,s.Radius)).ToArray();
         private void AdvanceOrbital(double dt)
         {foreach(var scan in scans)scan.Remaining=Math.Max(0,scan.Remaining-dt);if(scans.RemoveAll(s=>s.Remaining<=1e-9)>0)visionInputProfile=null;if(orbital.Count==0)return;var data=OrbitalData;foreach(var state in orbital.Values)state.Advance(dt,data);}
         private OrbitalEscalationSnapshot OrbitalView(PlayableOwner owner)=>orbital.TryGetValue(owner,out var state)?state.Snapshot(OrbitalData):new OrbitalEscalationState().Snapshot(OrbitalData);

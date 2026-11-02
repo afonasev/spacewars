@@ -292,6 +292,7 @@ namespace Spacewars.Runtime
             foreach(var p in entries)
             {
                 AiStateWire.Require(!string.IsNullOrWhiteSpace(p.Key)&&p.Value.FirstTick>=0&&p.Value.FirstTick<=tick&&p.Value.NextRetry>=0&&p.Value.Failures>=0&&!history.ContainsKey(p.Key),"arbiter history");
+                if(p.Key.StartsWith(OrbitalScanPrefix,StringComparison.Ordinal))AiStateWire.Require(TryScanPoint(p.Key,out var scanPoint)&&Math.Abs(scanPoint.X)<=profile.ArenaHalfExtent&&Math.Abs(scanPoint.Z)<=profile.ArenaHalfExtent&&p.Value.NextRetry==0&&p.Value.Failures==0&&p.Value.Conditions=="observed","orbital scan memory");
                 if(p.Key==AiExpansionFinancial.MemoKey)AiStateWire.Require(p.Value.FirstTick==0&&p.Value.NextRetry==0&&p.Value.Failures==0&&!string.IsNullOrWhiteSpace(p.Value.Conditions),"site finance memo requires typed payload and no hidden clock or retry counter");
                 if(p.Key.StartsWith(ArmyResearchMemoPrefix,StringComparison.Ordinal))AiStateWire.Require(Enum.TryParse<PlayableResearchKind>(p.Value.Conditions,out var armyKind)&&PlayableResearchRules.Global(armyKind)&&p.Value.Conditions==armyKind.ToString()&&p.Key==ArmyResearchMemoPrefix+armyKind&&p.Value.NextRetry==0&&p.Value.Failures==0,"observed army research fact");
                 if(p.Key==PositionGoalKey)ValidatePositionSaving(p.Value.Conditions,p.Value.FirstTick,p.Value.NextRetry,p.Value.Failures,tick,owner,generation,profile,ai);
@@ -315,7 +316,9 @@ namespace Spacewars.Runtime
             ObservationDelayTicks=AiProfile.SecondsToTicks(next.DifficultyValue(nativeConfig.Difficulty,"reactionSeconds"),30);
             actionLimit=(int)next.DifficultyValue(nativeConfig.Difficulty,"actionsPerDecision");
             repeatTicks=AiProfile.SecondsToTicks(next.Value("decision.repeatOrderSeconds"),30);arbiter.Rebind(next);
-            armies.Rebind(next,nativeConfig.Difficulty);scoutPlanner.ReconcileBudget(armies,ScoutBudget);armyPlanner.ReconcileRegistry(armies,authorityTick);defense.ReconcileRegistry(armies);demand.Rebind(next,authorityTick);expansion.Rebind(authorityTick,next);
+            // Retain valid saved scout missions at a profile barrier. Opening admission is
+            // re-evaluated from public geography by Review, not from an unrestored map cache.
+            armies.Rebind(next,nativeConfig.Difficulty);scoutPlanner.ReconcileBudget(armies,scoutPlanner.Budget(next,nativeConfig.Difficulty,nativeConfig.PersonalitySeed,openingExecutor.ScoutPlan));armyPlanner.ReconcileRegistry(armies,authorityTick);defense.ReconcileRegistry(armies);demand.Rebind(next,authorityTick);expansion.Rebind(authorityTick,next);
             budget.RebindLifetime(AiProfile.SecondsToTicks(next.Value("economy.reservationExpirySeconds"),30));technologyFunding.Rebind(profile,next,budget,arbiter);launches.RebindHorizon(budget);infrastructure.Rebind(profile,budget,authorityTick);launches.ReconcileFunding(budget,profile,authorityTick);expansion.ReconcileFunding(budget,profile,authorityTick,pendingItems.Select(x=>x.Intent));
             expansionFinancial.Rebind(profile,next,authorityTick,budget,arbiter,previousFinancial);
             Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);
@@ -392,6 +395,8 @@ namespace Spacewars.Runtime
         }
         private Action<PlayableAiTraceRecord> Feedback(string name,long id,long generation)
         {
+            // Orbital planning is stateless; its complete obligation is the existing pending intent.
+            if(name==AiOrbitalPolicy.Policy){AiStateWire.Require(id>0,"orbital callback ID");return _=>{};}
             AiStateWire.Require(PolicyPending(name)==id,"terminal callback local ID");
             switch(name){case AiCombatMicroPolicy.Policy:AiStateWire.Require(combatMicro.PendingGeneration==generation,"micro callback generation");return combatMicro.Receipt;case AiArmyPlanner.FlankPolicy:AiStateWire.Require(flankPlanner.PendingGeneration==generation,"callback generation");return flankPlanner.ObserveReceipt;case AiArmyPlanner.Policy:AiStateWire.Require(armyPlanner.PendingGeneration==generation,"callback generation");return armyPlanner.ObserveReceipt;case "infrastructure":AiStateWire.Require(infrastructure.PendingGeneration==generation,"callback generation");return infrastructure.ObserveReceipt;case "expansion":AiStateWire.Require(expansion.PendingGeneration==generation,"callback generation");return expansion.ObserveReceipt;case "economy":AiStateWire.Require(economy.StatePendingGeneration==generation,"callback generation");return economy.ObserveReceipt;
                 case "production":AiStateWire.Require(production.StatePendingGeneration==generation,"callback generation");return production.ObserveReceipt;

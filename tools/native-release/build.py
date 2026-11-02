@@ -2,7 +2,11 @@
 """Build native Player and bind its bytes to source revision before packaging."""
 import argparse,datetime,hashlib,json,os,pathlib,subprocess,sys
 import shutil
+import importlib.util
+_state_spec=importlib.util.spec_from_file_location("release_build_state",pathlib.Path(__file__).with_name("build_state.py"));build_state=importlib.util.module_from_spec(_state_spec);_state_spec.loader.exec_module(build_state)
 ROOT=pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(ROOT/'tools'))
+from native_plugins import WINDOWS_RECAST, validate_windows_recast
 def git(*args):return subprocess.check_output(['git',*args],cwd=ROOT)
 def inventory(folder):
  return {str(p.relative_to(folder)):{'size':p.stat().st_size,'sha256':hashfile(p)} for p in sorted(folder.rglob('*')) if p.is_file()}
@@ -39,7 +43,9 @@ def main():
  if a.platform=='windows-x64':command+=['-buildTarget','Win64']
  command+=['-executeMethod','Spacewars.Editor.PlayableProject.'+('ReleaseMac' if a.platform=='macos-universal' else 'ReleaseWindows'),'-logFile',str(log)]
  env=os.environ.copy();env['SPACEWARS_RELEASE_VERSION']=a.version;env['SPACEWARS_RELEASE_DATE']=a.release_date;env['SPACEWARS_RELEASE_CHANNEL']=a.channel;env['SPACEWARS_RELEASE_DEVELOPMENT']='1' if a.development else '0';env['SPACEWARS_RELEASE_COMPRESSION']=a.compression
+ baseline=build_state.capture(ROOT,git)
  result=subprocess.run(command,cwd=ROOT,env=env)
+ build_state.restore(ROOT,baseline,log.parent/('generated-'+a.platform),git)
  if result.returncode or not log.exists() or 'NATIVE_RELEASE_BUILD_PASS' not in log.read_text(errors='replace'):return 1
  if git('rev-parse','HEAD').decode().strip()!=revision:raise ValueError('source revision changed during build')
  # Release generation changes scene/settings/material data only. Code changes while compiling are rejected.
@@ -51,6 +57,7 @@ def main():
  if a.platform=='macos-universal' and any(name.startswith('Player.app/') for name in removed_debug_artifacts):
   subprocess.check_call(['codesign','--force','--sign','-','--preserve-metadata=identifier,entitlements,flags',str(folder)])
   subprocess.check_call(['codesign','--verify','--strict',str(folder)])
+ if a.platform=='windows-x64':validate_windows_recast(folder/WINDOWS_RECAST)
  files=inventory(folder);files.pop('native-build.json',None)
  record={'schema':1,'development':a.development,'compression':a.compression,'channel':a.channel,'test_match_logging':a.channel=='test','commit':revision,'dirty':dirty,'source_diff_sha256':hashlib.sha256(diff).hexdigest(),'version':a.version,'release_date':a.release_date,'platform':a.platform,'files':files,'build_log':str(log),'removed_debug_artifacts':removed_debug_artifacts}
  identity.write_text(json.dumps(record,indent=2)+'\n');print(json.dumps({k:v for k,v in record.items() if k!='files'}));return 0

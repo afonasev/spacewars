@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "category_ru": "Запуск матча",
+      "category_en": "Match startup",
+      "ru": "В Windows-сборку добавлена отсутствовавшая библиотека навигации Recast, необходимая для подготовки матча.",
+      "en": "The Windows build now includes the missing Recast navigation library required to prepare matches."
+    },
+    {
+      "category_ru": "Компьютерные соперники",
+      "category_en": "Computer opponents",
+      "ru": "Боты выбирают орбитальные способности и применяют их с учётом доступных целей и союзников.",
+      "en": "Bots choose orbital abilities and use them according to available targets and allies."
+    },
+    {
+      "category_ru": "Компьютерные соперники",
+      "category_en": "Computer opponents",
+      "ru": "Разведчики ИИ раньше отправляются к ретрансляторам, а армии получают задачи борьбы за них.",
+      "en": "AI scouts head for relays earlier, and armies receive objectives to contest them."
+    },
+    {
+      "category_ru": "Установка и обновление",
+      "category_en": "Installation and updates",
+      "ru": "Упаковка Windows проверяет наличие, архитектуру и функции библиотеки навигации и отклоняет неполную сборку.",
+      "en": "Windows packaging checks the navigation library presence, architecture and entrypoints and rejects incomplete builds."
+    }
+  ]
+}

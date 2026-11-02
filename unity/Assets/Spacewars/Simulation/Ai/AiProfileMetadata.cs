@@ -18,6 +18,21 @@ namespace Spacewars.Simulation.Ai
     public static class AiProfileMetadata
     {
         public static IReadOnlyList<AiProfileField> Fields {get;}=Array.AsReadOnly(new AiProfileField[] {
+            new AiProfileField("orbital.baseSearchBonus","ИИ / Эскалация","Поиск базы","Дополнительная ценность проверки публичной стартовой зоны, пока база противника неизвестна.","utility",0d,1000d,1d,35d,false),
+            new AiProfileField("orbital.minimumUtility","ИИ / Эскалация","Минимальная польза","Ниже этого значения способность остаётся готовой.","utility",1d,1000d,1d,20d,false),
+            new AiProfileField("orbital.scanUtility","ИИ / Эскалация","Ценность новой информации","Базовая ценность проверки неизвестного направления.","utility",1d,1000d,1d,45d,false),
+            new AiProfileField("orbital.engagementBonus","ИИ / Эскалация","Подготовка боя","Дополнительная ценность скана перед текущим боевым приказом.","utility",0d,1000d,1d,35d,false),
+            new AiProfileField("orbital.mineUtility","ИИ / Эскалация","Контроль подхода","Базовая ценность мины у важных подходов.","utility",1d,1000d,1d,35d,false),
+            new AiProfileField("orbital.mineContactBonus","ИИ / Эскалация","Перехват наземной цели","Дополнительная ценность мины рядом с замеченным наземным противником.","utility",0d,1000d,1d,35d,false),
+            new AiProfileField("orbital.mineSpacing","ИИ / Эскалация","Расстояние между минами","Минимальное расстояние от новой мины до союзной; исключает лишнее дублирование.","m",0.5d,40d,0.5d,5d,false),
+            new AiProfileField("orbital.mineGuardRadius","ИИ / Эскалация","Радиус защиты подхода","Максимальная дистанция от мины до союзного объекта для оценки защиты.","m",1d,100d,1d,24d,false),
+            new AiProfileField("orbital.mineSafetyMargin","ИИ / Эскалация","Запас безопасности мины","Дополнительный отступ от союзников за радиусом взрыва.","m",0d,20d,0.5d,2d,false),
+            new AiProfileField("orbital.replacementGain","ИИ / Эскалация","Выигрыш замены мины","Минимальный прирост полезности при удалении старейшей мины.","utility",0d,1000d,1d,15d,false),
+            new AiProfileField("orbital.hackValueScale","ИИ / Эскалация","Ценность захвата","Множитель цены цели при оценке лишения врага и получения юнита.","weight",0.01d,5d,0.01d,0.3d,false),
+            new AiProfileField("orbital.hackSurvivalFloor","ИИ / Эскалация","Польза нейтрализации","Остаточная ценность захвата даже при малом здоровье.","ratio",0d,1d,0.05d,0.25d,false),
+            new AiProfileField("orbital.hackThreatBonus","ИИ / Эскалация","Срочный захват","Дополнительная ценность захвата непосредственной угрозы своей базе.","utility",0d,1000d,1d,80d,false),
+            new AiProfileField("orbital.personalityBonus","ИИ / Эскалация","Предпочтение характера","Бонус скана для рейдера, мины для защитника и взлома для агрессора.","utility",0d,1000d,1d,20d,false),
+            new AiProfileField("orbital.choiceVariation","ИИ / Эскалация","Разнообразие выбора","Небольшая детерминированная вариация близких по пользе выборов.","utility",0d,100d,1d,5d,false),
             new AiProfileField("safeReinforcements.coreHealthShare","ИИ / Подкрепления","Здоровье боеспособного ядра","Минимальная сумма долей HP ядра относительно обязательного состава армии.","ratio",0.1d,1d,0.05d,0.65d,false),
             new AiProfileField("safeReinforcements.coreRadius","ИИ / Подкрепления","Радиус живого ядра","Максимальное расстояние бойцов от выбранного центра принимающей группы; рассеянные одиночки не образуют ядро.","m",2d,80d,1d,16d,false),
             new AiProfileField("safeReinforcements.maximumThreatRatio","ИИ / Подкрепления","Угроза принимающему ядру","Предельное отношение совместимой известной локальной угрозы к боевой силе ядра.","ratio",0.1d,3d,0.05d,1.2d,false),

@@ -52,7 +52,7 @@ namespace Spacewars.Runtime
             sites.Values.Where(s=>s.Site.Kind==PlayableBuildingKind.Mine||s.Site.Kind==PlayableBuildingKind.Outpost||s.Site.Kind==PlayableBuildingKind.RelayTower)
             .OrderBy(s=>s.Site.Id).Select(s=>new PlayablePublicScoutObjective(s.Site.Id,
                 new NavPoint(s.Site.Position.X+TerritoryRules.CaptureRadius(profile,s.Site.Kind)-PlayableUnitRules.Radius(profile,PlayableEntityKind.Explorer),s.Site.Position.Z),
-                s.Site.Kind!=PlayableBuildingKind.Outpost?PlayablePublicScoutObjectiveRole.ExpansionIncome:PlayablePublicScoutObjectiveRole.ExpansionOutpost,true))).ToArray();
+                s.Site.Kind==PlayableBuildingKind.RelayTower?PlayablePublicScoutObjectiveRole.Relay:s.Site.Kind!=PlayableBuildingKind.Outpost?PlayablePublicScoutObjectiveRole.ExpansionIncome:PlayablePublicScoutObjectiveRole.ExpansionOutpost,true))).ToArray();
         private NavObstacle[] StaticObstacles()=>RelayObstacles().Concat(OrdinaryStaticObstacles()).ToArray();
         private NavObstacle[] OrdinaryStaticObstacles()=>offline==null?PlayableMap.StaticObstacles(profile):offline.CampaignOpening&&!campaignGate?offline.Obstacles.Concat(new[]{CampaignReconOpening.Gate}).ToArray():offline.Obstacles.ToArray();
         private NavObstacle[] SolidObstacles()=>offline==null||profile.AuthoredMap!=null?PlayableMap.SolidObstacles(profile):offline.Obstacles.ToArray();

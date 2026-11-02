@@ -186,7 +186,7 @@ namespace Spacewars.Runtime
                     a.Members.Contains(id)&&!a.Reinforcements.Contains(id)&&intent.Action.EntityIds.All(unit=>membership.TryGetValue(unit,out var assigned)&&assigned==a.Id&&!a.Reinforcements.Contains(unit));
                 if(a.TacticalOwner!=intent.Policy&&!micro&&!preparationHandoff&&!defenseAssembly&&!defenseCoreAttack&&!defenseHandoff)return "unit tactical owner conflict";
                 if(!a.Major&&intent.Action.Kind!=PlayableCommandKind.Move&&intent.Action.Kind!=PlayableCommandKind.Hold&&intent.Action.Kind!=PlayableCommandKind.Stop&&
-                    !defenseHandoff&&!(preparationHandoff&&intent.Action.Kind==PlayableCommandKind.BuildAt)&&!(a.Role==AiArmyRole.Transport&&intent.Action.Kind==PlayableCommandKind.BuildAt))return "scout/transport combat requires major army";
+                    !defenseHandoff&&!(a.TacticalOwner==AiScoutPlanner.Policy&&AiRelayObjectives.IsClaim(a)&&intent.Policy==AiScoutPlanner.Policy&&(intent.Action.Kind==PlayableCommandKind.AttackMove||intent.Action.Kind==PlayableCommandKind.Attack)&&a.Objective==AiRelayObjectives.Claim(intent.Action.SiteId))&&!(preparationHandoff&&intent.Action.Kind==PlayableCommandKind.BuildAt)&&!(a.Role==AiArmyRole.Transport&&intent.Action.Kind==PlayableCommandKind.BuildAt))return "scout/transport combat requires major army";
             }
             return null;
         }

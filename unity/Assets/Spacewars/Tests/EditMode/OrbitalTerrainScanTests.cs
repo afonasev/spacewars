@@ -30,9 +30,10 @@ namespace Spacewars.Tests.EditMode
             var own=View(PlayableOwner.Player);var ally=View(PlayableOwner.Enemy);var enemy=View((PlayableOwner)2);
             foreach(var v in new[]{own,ally}){Assert.True(v.Vision.IsVisible(target));Assert.True(v.Vision.IsVisible(new NavPoint(9.9,0)));Assert.Greater(v.ScanLines.Count,0);}
             Assert.False(enemy.Vision.IsVisible(target));Assert.Zero(enemy.ScanLines.Count,"hidden scan centre/geometry must not leak");
+            Assert.AreEqual(1,PlayableAiObservation.From(ally).OrbitalScans.Count);Assert.AreEqual(target,ally.OrbitalScans[0].Point);Assert.Zero(enemy.OrbitalScans.Count);
             CollectionAssert.AreEqual(before.Entities.Select(e=>e.Position),own.Entities.Select(e=>e.Position));
             Advance(2.99);Assert.True(View(PlayableOwner.Player).Vision.IsVisible(target));Advance(.01);
-            var after=View(PlayableOwner.Player);Assert.False(after.Vision.IsVisible(target));Assert.Zero(after.ScanLines.Count);Assert.Greater(after.Vision.DiscoveredCells.Count,before.Vision.DiscoveredCells.Count);
+            var after=View(PlayableOwner.Player);Assert.False(after.Vision.IsVisible(target));Assert.Zero(after.ScanLines.Count);Assert.Zero(after.OrbitalScans.Count);Assert.Greater(after.Vision.DiscoveredCells.Count,before.Vision.DiscoveredCells.Count);
         }
         [Test] public void InvalidTargetSpendsNothingAndActiveScanRestoresExactly()
         {
