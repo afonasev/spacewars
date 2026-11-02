@@ -11,7 +11,7 @@ namespace Spacewars.Runtime
     public enum LegacyAiProfileFormat { Current, BeforeExpansionSelection }
     public sealed partial class PlayableAuthorityTick
     {
-        private const int PendingBarrierAuthorityVersion=14;
+        private const int PendingBarrierAuthorityVersion=15;
         private OfflineMatchConfiguration savedConfiguration;
         private string SourceIdentity=>savedConfiguration?.SourceIdentity??PlayableAiOpeningComposition.SourceIdentity;
         internal PlayableDomain Domain=>domain;
@@ -24,6 +24,7 @@ namespace Spacewars.Runtime
         {using(var state=CaptureWorldState(publication,human))return state.Encode();}
         internal PlayableWorldState CaptureWorldState(long publication,Func<string,long> human)
         {
+            domain.CaptureCombatMotionBoundary();
             foreach(var owner in scheduler.Owners)owner.ReconcileBudget(domain);
             domain.Navigation.ValidateTickQuantumBoundary(domain.Tick,asynchronousRoutes);
             var state=domain.CaptureWorldState(seed,SourceIdentity);
@@ -86,7 +87,7 @@ namespace Spacewars.Runtime
             foreach(var owner in scheduler.Owners)owner.ReconcileBudget(domain);
             domain.ApplyBalance(gameplay);scheduler.Rebind(gameplay);if(ai!=null)scheduler.Rebind(ai);return null;
         }
-        public void Stop(){domain.Navigation.RoutePort.CancelResultPreparation();scheduler.Stop(domain.Tick);PerformanceProfile.Flush();}
+        public void Stop(){domain.Navigation.RoutePort.CancelResultPreparation();domain.StopCombatMotionAuthority();scheduler.Stop(domain.Tick);PerformanceProfile.Flush();}
     }
     public sealed partial class PlayableRuntime
     {
@@ -151,10 +152,19 @@ namespace Spacewars.Runtime
         // A synthetic paused envelope would instead legitimately cancel that action.
         internal static PlayableRuntime RestoreBytesForTests(byte[] bytes,OfflineMatchConfiguration config,Action<PlayableDomain> beforeStart)
         {var ai=AiProfile.Initial;return new PlayableRuntime(PlayableAuthorityTick.RestoreBytes(bytes,config,ai),bytes,ai,config,beforeStart);}
+        internal static PlayableRuntime RestoreBytesForTests(byte[] bytes,OfflineMatchConfiguration config,AiProfile ai,Action<PlayableRuntime> beforeRuntimeStart)
+        {if(ai==null)throw new ArgumentNullException(nameof(ai));return new PlayableRuntime(PlayableAuthorityTick.RestoreBytes(bytes,config,ai),bytes,ai,config,beforeRuntimeStart:beforeRuntimeStart);}
+        // Exact restored envelope, including transport, before any authority tick.
+        // Reuse the ordinary serializer; do not manufacture pause/transport state.
+        internal byte[] CaptureBeforeStartForTests()
+        {
+            if((worker.ThreadState&ThreadState.Unstarted)==0)throw new InvalidOperationException("Prestart capture requires an unstarted runtime.");
+            var capture=RequestCaptureBytes();CompleteCapture();return capture.GetAwaiter().GetResult();
+        }
 #endif
         private PlayableRuntime(PlayableAuthorityTick restored,byte[] bytes,AiProfile ai,OfflineMatchConfiguration config
 #if UNITY_INCLUDE_TESTS
-            ,Action<PlayableDomain> beforeStart=null
+            ,Action<PlayableDomain> beforeStart=null,Action<PlayableRuntime> beforeRuntimeStart=null
 #endif
         )
         {
@@ -183,6 +193,7 @@ namespace Spacewars.Runtime
             InitializeJournal(domain.RoutingProfile,true);worker=new Thread(Loop){IsBackground=true,Name="Spacewars.Restored.SharedAuthority"};
 #if UNITY_INCLUDE_TESTS
             beforeStart?.Invoke(domain);
+            beforeRuntimeStart?.Invoke(this);
 #endif
             worker.Start();
         }

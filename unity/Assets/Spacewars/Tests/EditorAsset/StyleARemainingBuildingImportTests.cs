@@ -106,8 +106,8 @@ namespace Spacewars.Tests.EditorAsset
                 Assert.IsNotNull(role.GetTexture("_DetailNormalMap"), role.name + " detail");
                 Assert.IsNotNull(role.GetTexture("_MetallicGlossMap"), role.name + " mask");
                 Assert.AreEqual(Source + building + "-detail.png", AssetDatabase.GetAssetPath(role.GetTexture("_DetailNormalMap")));
-                Assert.AreEqual(Prefabs + building + "-" + role.name + "-mask.png", AssetDatabase.GetAssetPath(role.GetTexture("_MetallicGlossMap")));
-                CheckTexture(Prefabs + building + "-" + role.name + "-mask.png", false, false, false);
+                Assert.AreEqual(Spacewars.Editor.ExactResourceAliases.Resolve(Prefabs + building + "-" + role.name + "-mask.png"), AssetDatabase.GetAssetPath(role.GetTexture("_MetallicGlossMap")));
+                CheckTexture(Spacewars.Editor.ExactResourceAliases.Resolve(Prefabs + building + "-" + role.name + "-mask.png"), false, false, false);
             }
             CheckTexture(Source + "style-a-painted-metal-base-color.png", true, false, false);
             CheckTexture(Source + "style-a-painted-metal-structure-base-color.png", true, false, false);

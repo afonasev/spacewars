@@ -17,7 +17,7 @@ namespace Spacewars.Presentation
         private long padTick=-1;
         private EnvironmentArtProfile ApronArt=>apronArt??(apronArt=EnvironmentArtProfile.Load());
         private static void DestroyPad(PadView p){foreach(var filter in p.Root.GetComponentsInChildren<MeshFilter>())UnityEngine.Object.Destroy(filter.sharedMesh);UnityEngine.Object.Destroy(p.Root);}
-        public void ClearPads(){foreach(var p in territoryPads.Values)DestroyPad(p);territoryPads.Clear();readyPadSites.Clear();apronModelBounds.Clear();padTick=-1;}
+        public void ClearPads(){ClearRelayViews();foreach(var p in territoryPads.Values)DestroyPad(p);territoryPads.Clear();readyPadSites.Clear();apronModelBounds.Clear();padTick=-1;}
         private Material ApronMaterial
         {
             get
@@ -44,6 +44,8 @@ namespace Spacewars.Presentation
         // The lower platform is the support datum; balconies/equipment may overhang it.
         private Vector2 ApronModelHalf(string key)
         {
+            if(key=="factoryUpgraded")return ApronModelHalf("factory");
+            if(key=="hangarUpgraded")return ApronModelHalf("hangar");
             if(apronModelBounds.TryGetValue(key,out var size))return size;
             // Authored technical pad is 1.41 m wide; it is flat decoration, independent of the solid pedestal footprint.
             if(key=="sentry-turret"||key=="repair-tower"||key=="gauss-tower")return Vector2.one*(.705f*(float)profile.TurretModelScale);
@@ -81,6 +83,7 @@ namespace Spacewars.Presentation
         }
         public void RenderSites(PlayableSnapshot view,Camera camera=null)
         {
+            RenderRelayViews(view,camera);
             var facing=Facing(camera);
             // Camera motion can occur while paused at the same tick; keep the support square to the facade.
             foreach(var pad in territoryPads.Values)pad.Root.transform.rotation=pad.Facing;
@@ -88,6 +91,7 @@ namespace Spacewars.Presentation
             var live=new HashSet<string>();
             foreach(var state in view.Sites)
             {
+                if(state.Site.Kind==PlayableBuildingKind.RelayTower)continue;
                 var center=view.Buildings.FirstOrDefault(b=>b.Id==state.CenterId&&b.Phase!=ConstructionPhase.Pending);
                 UpdatePad(state.Site.Id+":0",state.Site.Position,ObservedSupportHalf(state.Site.Id+":0",state.Site.Position,state.Site.Kind,center,view),state.Owner??state.Claimant,center==null?state.Progress:0,state.Contested,view.Tick,Facing(camera,state.Site.Kind==PlayableBuildingKind.Mine),live,profile.AuthoredMap is WhiteMeridianMap&&state.Site.Kind!=PlayableBuildingKind.Mine,profile.AuthoredMap is FoundryMap&&state.Site.Kind==PlayableBuildingKind.Mine);
                 if(state.Ready)readyPadSites.Add(state.Site.Id);else readyPadSites.Remove(state.Site.Id);
@@ -101,7 +105,7 @@ namespace Spacewars.Presentation
             }
             foreach(var site in view.DiscoveredSites)
             {
-                if(view.Sites.Any(s=>s.Site.Id==site.Id))continue;
+                if(site.Kind==PlayableBuildingKind.RelayTower||view.Sites.Any(s=>s.Site.Id==site.Id))continue;
                 // Static discovered ground is safe to remember; never inspect hidden live buildings here.
                 UpdatePad(site.Id+":0",site.Position,ObservedSupportHalf(site.Id+":0",site.Position,site.Kind,null,view),null,0,false,view.Tick,Facing(camera,site.Kind==PlayableBuildingKind.Mine),live,profile.AuthoredMap is WhiteMeridianMap&&site.Kind!=PlayableBuildingKind.Mine,profile.AuthoredMap is FoundryMap&&site.Kind==PlayableBuildingKind.Mine);
                 // Last observed readiness only: discovered ground must not disclose hidden construction.

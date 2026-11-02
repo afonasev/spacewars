@@ -12,7 +12,8 @@ namespace Spacewars.Runtime
             lock(recastStartupGate){
                 if(recastStartup!=null)return recastStartup;
                 using var pin=PinAdmission();
-                var terrain=pin.Value?.AuthoredTerrain??throw new InvalidOperationException("Recast startup needs its authored terrain.");
+                var input=pin.Value??throw new InvalidOperationException("Recast startup needs its admission source.");var terrain=input.AuthoredTerrain;
+                if(terrain==null&&(input.SurfaceProviderId!=NavLocation.FlatSurface||input.SurfaceSemanticsVersion!=1))throw new InvalidOperationException("Recast startup needs a supported authored or flat terrain binding.");
                 if(!TryOpenPhysicalHostScope(NavigationPreparationKind.Admission,Generation,pin.Value.PublicationIdentity,out var scope))throw new RecastNative.CapacityRefused();
                 RecastGroupPreparation candidate=null;
                 try{
@@ -22,9 +23,9 @@ namespace Spacewars.Runtime
                     // not enter the ground backend. Future overlays stay scoped.
                     using(var scratch=NavStorageScratch.Reserve(r,4096)){
                         var profile=playable.Navigation;
-                        candidate.PreparePublic(terrain,profile,r,cancelled);
-                        candidate.PreparePublic(terrain,profile.ForUnit(playable.ExplorerCollisionRadius,profile.TankSpeed,profile.TankTurnSpeed),r,cancelled);
-                        candidate.PreparePublic(terrain,profile.ForUnit(playable.ShkvalCollisionRadius,profile.TankSpeed,profile.TankTurnSpeed),r,cancelled);
+                        candidate.PreparePublic(terrain,input.Geometry,profile,r,cancelled);
+                        candidate.PreparePublic(terrain,input.Geometry,profile.ForUnit(playable.ExplorerCollisionRadius,profile.TankSpeed,profile.TankTurnSpeed),r,cancelled);
+                        candidate.PreparePublic(terrain,input.Geometry,profile.ForUnit(playable.ShkvalCollisionRadius,profile.TankSpeed,profile.TankTurnSpeed),r,cancelled);
                     }
                     if(cancelled?.Invoke()==true)throw new OperationCanceledException();
                     recastStartup=candidate;candidate=null;return recastStartup;

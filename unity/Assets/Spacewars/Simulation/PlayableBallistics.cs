@@ -31,8 +31,8 @@ namespace Spacewars.Simulation
     }
     public readonly struct BallisticContact
     {
-        public readonly double Progress;public readonly BallisticPoint Point;public readonly int BuildingId;
-        public BallisticContact(double progress,BallisticPoint point,int building=0){Progress=progress;Point=point;BuildingId=building;}
+        public readonly double Progress;public readonly BallisticPoint Point;public readonly int BuildingId,BodyId;
+        public BallisticContact(double progress,BallisticPoint point,int building=0,int body=0){Progress=progress;Point=point;BuildingId=building;BodyId=body==0?building:body;}
     }
     // Flat native arena adapter of src/sim/ballistics.ts. Numeric eps/sample spacing
     // are reference solver invariants, not gameplay tuning. Authored sheets remain U7.
@@ -66,12 +66,12 @@ namespace Spacewars.Simulation
         }
         private static bool Overlap(NavObstacle s,BallisticPoint p,double radius)
         {return p.X+radius>=s.MinX&&p.X-radius<=s.MaxX&&p.Z+radius>=s.MinZ&&p.Z-radius<=s.MaxZ&&s.DistanceSquared(p.Ground)<=radius*radius;}
-        private static int Cover(BallisticPoint p,double radius,IReadOnlyList<NavObstacle> solids,double wallHeight,IReadOnlyList<BallisticBody> bodies,int ignored)
+        private static int Cover(BallisticPoint p,double radius,IReadOnlyList<NavObstacle> solids,double wallHeight,IReadOnlyList<BallisticBody> bodies,int ignored,bool includeUnits=false)
         {
             // IReadOnlyList foreach boxes array/list enumerators on this hot per-sample
             // path. Index in the same order; keep every exact contact predicate.
             for(int i=0;i<solids.Count;i++){var s=solids[i];if(p.Y+radius>=s.Bottom&&p.Y-radius<=(double.IsNaN(s.Top)?wallHeight:s.Top)&&Overlap(s,p,radius))return -1;}
-            for(int i=0;i<bodies.Count;i++){var b=bodies[i];if(!b.Building||b.Id==ignored)continue;
+            for(int i=0;i<bodies.Count;i++){var b=bodies[i];if((!includeUnits&&!b.Building)||b.Id==ignored)continue;
                 if(b.Combat.HasValue){if(b.Combat.Value.Overlaps(p,radius))return b.Id;continue;}
                 if(p.Y+radius>=b.BaseHeight&&p.Y-radius<=b.BaseHeight+b.Height){double x=p.X-b.Position.X,z=p.Z-b.Position.Z,r=b.Radius+radius;if(x*x+z*z<=r*r)return b.Id;}}
 
@@ -82,7 +82,7 @@ namespace Spacewars.Simulation
             var middle=new BallisticPoint((f.Start.X+f.End.X)/2,0,(f.Start.Z+f.End.Z)/2);
             double reach=Math.Sqrt((f.End.X-f.Start.X)*(f.End.X-f.Start.X)+(f.End.Z-f.Start.Z)*(f.End.Z-f.Start.Z))/2+radius;
             solids=solids.Where(s=>Overlap(s,middle,reach)).ToArray();
-            bodies=bodies.Where(b=>b.Building&&b.Id!=source&&Math.Sqrt((b.Position.X-middle.X)*(b.Position.X-middle.X)+(b.Position.Z-middle.Z)*(b.Position.Z-middle.Z))<=reach+(b.Combat?.Reach??b.Radius)).ToArray();
+            bodies=bodies.Where(b=>b.Id!=source&&Math.Sqrt((b.Position.X-middle.X)*(b.Position.X-middle.X)+(b.Position.Z-middle.Z)*(b.Position.Z-middle.Z))<=reach+(b.Combat?.Reach??b.Radius)).ToArray();
             if(solids.Count==0&&bodies.Count==0&&terrain==null)
             {
                 BallisticContact? first=null;double a=-4*f.ArcHeight,b=f.End.Y-f.Start.Y+4*f.ArcHeight;
@@ -99,8 +99,8 @@ namespace Spacewars.Simulation
             var prev=f.Point(from);
             for(int i=1;i<=steps;i++)
             {
-                double u=from+(to-from)*i/steps;var p=f.Point(u);int hit=Cover(p,radius,solids,wallHeight,bodies,source);
-                if(hit!=0){var at=p;for(int j=0;j<bodies.Count;j++)if(bodies[j].Id==hit&&bodies[j].Combat.HasValue){at=bodies[j].Combat.Value.Closest(p);break;}return new BallisticContact(u,at,Math.Max(0,hit));}
+                double u=from+(to-from)*i/steps;var p=f.Point(u);int hit=Cover(p,radius,solids,wallHeight,bodies,source,true);
+                if(hit!=0){var at=p;for(int j=0;j<bodies.Count;j++)if(bodies[j].Id==hit&&bodies[j].Combat.HasValue){at=bodies[j].Combat.Value.Closest(p);break;}return new BallisticContact(u,at,hit>0&&bodies.Any(b=>b.Id==hit&&b.Building)?hit:0,Math.Max(0,hit));}
                 double ground=terrain?.Invoke(p.Ground)??0,previousGround=terrain?.Invoke(prev.Ground)??0;
                 if((prev.Y-radius>previousGround+Eps&&p.Y-radius<=ground+Eps)||(prev.Y+radius<previousGround-Eps&&p.Y+radius>=ground-Eps))return new BallisticContact(u,new BallisticPoint(p.X,ground,p.Z));
                 prev=p;
@@ -141,14 +141,14 @@ namespace Spacewars.Simulation
             for(int i=1;i<steps;i++){double u=(double)i/steps;var p=new BallisticPoint(impact.X+x*u,impact.Y+Eps+dy*u,impact.Z+z*u);if(Cover(p,0,solids,wallHeight,bodies,target.Id)!=0||(terrain!=null&&p.Y<terrain(p.Ground)-Eps))return false;}
             return true;
         }
-        public static int BestTarget(NavPoint from,PlayableOwner owner,double range,double launchHeight,double arc,double speed,double radius,double blast,double damage,double penalty,IReadOnlyList<NavObstacle> solids,double wallHeight,IReadOnlyList<BallisticBody> observed,Func<NavPoint,double> terrain=null,bool guided=false,double leadThreshold=0,double leadFalloff=1,double maxLeadTime=0,Func<PlayableOwner,PlayableOwner,bool> hostile=null)
+        public static int BestTarget(NavPoint from,PlayableOwner owner,double range,double launchHeight,double arc,double speed,double radius,double blast,double damage,double penalty,IReadOnlyList<NavObstacle> solids,double wallHeight,IReadOnlyList<BallisticBody> observed,Func<NavPoint,double> terrain=null,bool guided=false,double leadThreshold=0,double leadFalloff=1,double maxLeadTime=0,Func<PlayableOwner,PlayableOwner,bool> hostile=null,int source=0)
         {
             int best=0;double bestScore=0,bestDistance=double.PositiveInfinity;BallisticBody[] predicted=null;
             foreach(var target in observed)
             {
                 if(hostile==null?target.Owner==owner:!hostile(target.Owner,owner))continue;double x=target.Position.X-from.X,z=target.Position.Z-from.Z,d=Math.Sqrt(x*x+z*z);if(d>range)continue;
                 var flight=guided?Aim(from,target.Position,target.Velocity,launchHeight,arc,speed,true,leadThreshold,leadFalloff,maxLeadTime,terrain):new BallisticFlight(new BallisticPoint(from.X,(terrain?.Invoke(from)??0)+launchHeight,from.Z),new BallisticPoint(target.Position.X,target.BaseHeight,target.Position.Z),arc,speed);
-                var impact=FirstContact(flight,radius,solids,wallHeight,observed,0,terrain:terrain).Value;
+                var impact=FirstContact(flight,radius,solids,wallHeight,observed,source,terrain:terrain).Value;
                 if(predicted==null)predicted=new BallisticBody[observed.Count];for(int i=0;i<predicted.Length;i++)predicted[i]=observed[i].Predict(flight.Duration*impact.Progress,terrain);
                 double score=0;foreach(var t in predicted)if(BlastHits(impact.Point,blast,t,solids,wallHeight,predicted,terrain))score+=Math.Min(t.Health,damage)*((hostile==null?t.Owner==owner:!hostile(t.Owner,owner))?-penalty:1);
                 // IDs have stable decimal wire keys; retain reference lexical rather than numeric tie order.

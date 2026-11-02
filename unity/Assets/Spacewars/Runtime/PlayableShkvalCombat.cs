@@ -12,7 +12,60 @@ namespace Spacewars.Runtime
             public BallisticFlight Flight;public BallisticContact Predicted;
             public ShkvalLaunchSnapshot Launch;
             public bool BuildingTarget; // Observation established at launch; retained through target loss/destruction.
+            public double DirectDamage;
+            public bool UsesBlastUpgrade; // Absent on already-launched pre-upgrade-radius snapshots.
             public double Elapsed,Radius,BlastRadius,MarkerStartRadius,MarkerOpacity,BuildingHeight;
+        }
+        private void WriteShkvalBlastTerms(BinaryWriter w)
+        {
+            w.Write(0x53425231);w.Write(termProfiles.Count);
+            foreach(var pair in termProfiles.OrderBy(x=>x.Key)){w.Write(pair.Key);WorldWire.Number(w,pair.Value.ShkvalBaseBlastRadiusMultiplier);}
+            var rockets=projectiles.Where(p=>p.Rocket!=null).ToArray();w.Write(rockets.Length);
+            foreach(var p in rockets){w.Write(p.Id);w.Write(p.Rocket.UsesBlastUpgrade);}
+        }
+        private void ReadShkvalBlastTerms(BinaryReader r)
+        {
+            // Older in-flight rockets retain the full stored radius, never receive the reduction retroactively.
+            if(r.BaseStream.Position==r.BaseStream.Length)return;
+            if(r.ReadInt32()!=0x53425231||r.ReadInt32()!=termProfiles.Count)throw new ArgumentException("Invalid Shkval blast terms.");
+            var seen=new HashSet<int>();
+            for(int i=0;i<termProfiles.Count;i++){
+                int revision=r.ReadInt32();double multiplier=WorldWire.Number(r);
+                if(!seen.Add(revision)||!termProfiles.TryGetValue(revision,out var term))throw new ArgumentException("Invalid Shkval blast revision.");
+                var data=term.CopyData();data.shkvalBaseBlastRadiusMultiplier=multiplier;var bound=PlayableProfile.Create(data,profile.AuthoredMap,term.DisplayName);
+                if(revision==profile.Revision&&multiplier!=profile.ShkvalBaseBlastRadiusMultiplier)throw new ArgumentException("Shkval blast binding mismatch.");
+                termProfiles[revision]=revision==profile.Revision?profile:bound;
+            }
+            int count=r.ReadInt32();if(count!=projectiles.Count(p=>p.Rocket!=null))throw new ArgumentException("Invalid Shkval blast count.");seen.Clear();
+            for(int i=0;i<count;i++){
+                int id=r.ReadInt32();bool enabled=WorldWire.Boolean(r);var p=projectiles.SingleOrDefault(x=>x.Id==id);
+                if(!seen.Add(id)||p?.Rocket==null)throw new ArgumentException("Invalid Shkval blast binding.");p.Rocket.UsesBlastUpgrade=enabled;
+            }
+        }
+        private void WriteShkvalDamage(BinaryWriter w)
+        {
+            w.Write(0x53484431);w.Write(termProfiles.Count);
+            foreach(var pair in termProfiles.OrderBy(x=>x.Key)){w.Write(pair.Key);w.Write(pair.Value.ShkvalDirectHitDamage);}
+            var rockets=projectiles.Where(p=>p.Rocket!=null).ToArray();w.Write(rockets.Length);
+            foreach(var p in rockets){w.Write(p.Id);WorldWire.Number(w,p.Rocket.DirectDamage);}
+        }
+        private void ReadShkvalDamage(BinaryReader r)
+        {
+            if(r.BaseStream.Position==r.BaseStream.Length)return;
+            if(r.ReadInt32()!=0x53484431||r.ReadInt32()!=termProfiles.Count)throw new ArgumentException("Invalid Shkval damage terms.");
+            var seen=new HashSet<int>();
+            for(int i=0;i<termProfiles.Count;i++){
+                int revision=r.ReadInt32(),damage=r.ReadInt32();
+                if(!seen.Add(revision)||!termProfiles.TryGetValue(revision,out var term))throw new ArgumentException("Invalid Shkval damage revision.");
+                var data=term.CopyData();data.shkvalDirectHitDamage=damage;var bound=PlayableProfile.Create(data,profile.AuthoredMap,term.DisplayName);
+                if(revision==profile.Revision&&damage!=profile.ShkvalDirectHitDamage)throw new ArgumentException("Shkval damage binding mismatch.");
+                termProfiles[revision]=revision==profile.Revision?profile:bound;
+            }
+            int count=r.ReadInt32();if(count!=projectiles.Count(p=>p.Rocket!=null))throw new ArgumentException("Invalid Shkval damage count.");seen.Clear();
+            for(int i=0;i<count;i++){
+                int id=r.ReadInt32();double damage=WorldWire.Number(r);var p=projectiles.SingleOrDefault(x=>x.Id==id);
+                if(!seen.Add(id)||p?.Rocket==null||damage<0)throw new ArgumentException("Invalid Shkval direct damage.");p.Rocket.DirectDamage=damage;
+            }
         }
         private void WriteShkvalLaunches(BinaryWriter w)
         {
@@ -67,7 +120,7 @@ namespace Spacewars.Runtime
             var velocity=units.TryGetValue(u.Target,out var victim)?victim.Velocity:default(NavPoint);
             return PlayableBallistics.Aim(from,target,velocity,profile.ShkvalLaunchHeight,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed,true,profile.ShkvalLeadSpeedThreshold,profile.ShkvalLeadFalloff,profile.ShkvalMaxLeadTimeSec,TerrainHeight);
         }
-        private int ArtilleryTarget(Unit u,NavPoint from)=>PlayableBallistics.BestTarget(from,u.Owner,PlayableUnitRules.Range(profile,u.Kind,UnitUpgraded(u)),profile.ShkvalLaunchHeight,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed,profile.ShkvalProjectileRadius,profile.ShkvalBlastRadius,profile.ShkvalDamage*WeaponMultiplier(u.Owner),profile.ShkvalFriendlyFirePenalty,SolidObstacles(),profile.BallisticWallHeight,BallisticBodies(u.Owner).Where(b=>!AirTarget(b.Id)).ToArray(),TerrainHeight,UnitUpgraded(u),profile.ShkvalLeadSpeedThreshold,profile.ShkvalLeadFalloff,profile.ShkvalMaxLeadTimeSec,Hostile);
+        private int ArtilleryTarget(Unit u,NavPoint from)=>PlayableBallistics.BestTarget(from,u.Owner,PlayableUnitRules.Range(profile,u.Kind,UnitUpgraded(u)),profile.ShkvalLaunchHeight,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed,profile.ShkvalProjectileRadius,PlayableUnitRules.ShkvalBlastRadius(profile,UnitUpgraded(u)),WeaponDamage(u.Owner,profile.ShkvalDamage),profile.ShkvalFriendlyFirePenalty,SolidObstacles(),profile.BallisticWallHeight,BallisticBodies(u.Owner).Where(b=>!AirTarget(b.Id)).ToArray(),TerrainHeight,UnitUpgraded(u),profile.ShkvalLeadSpeedThreshold,profile.ShkvalLeadFalloff,profile.ShkvalMaxLeadTimeSec,Hostile,u.Id);
         private void AdvanceShkval(Unit u,NavUnit self,double dt)
         {
             bool defaultCombat=u.DefaultCombat!=null;
@@ -110,8 +163,8 @@ namespace Spacewars.Runtime
             int fired=u.BurstSequence%4;u.ShkvalCells[fired]=2*interval;
             // Also handles explicit rapid-fire fixtures: begin the oldest empty cell immediately.
             for(int offset=1;offset<4;offset++){int cell=(fired+offset)%4;if(u.ShkvalCells[cell]>0){u.ShkvalCells[cell]=Math.Min(u.ShkvalCells[cell],interval);break;}}
-            projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=u.Id,Target=u.Target,Faction=u.Owner,Kind=PlayableEntityKind.Shkval,Position=start.Ground,Damage=profile.ShkvalDamage*WeaponMultiplier(u.Owner),
-                Rocket=new Rocket{Launch=new ShkvalLaunchSnapshot(u.BurstSequence++%4,new BallisticPoint(self.Position.X,GroundHeight(self.Position),self.Position.Z),self.Heading,u.Turret,UnitUpgraded(u),flight.Tangent(0),flight.Duration,flight.Start.Y,u.ShkvalPitch,flight.Start),Flight=flight,Predicted=prediction,BuildingTarget=buildings.ContainsKey(u.Target),Radius=profile.ShkvalProjectileRadius,BlastRadius=profile.ShkvalBlastRadius,MarkerStartRadius=profile.ShkvalMarkerStartRadius,MarkerOpacity=profile.ShkvalMarkerOpacity,BuildingHeight=profile.ShkvalBuildingCollisionHeight}});
+            projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=u.Id,Target=u.Target,Faction=u.Owner,Kind=PlayableEntityKind.Shkval,Position=start.Ground,Damage=WeaponDamage(u.Owner,profile.ShkvalDamage),
+                Rocket=new Rocket{UsesBlastUpgrade=true,DirectDamage=WeaponDamage(u.Owner,profile.ShkvalDirectHitDamage),Launch=new ShkvalLaunchSnapshot(u.BurstSequence++%4,new BallisticPoint(self.Position.X,GroundHeight(self.Position),self.Position.Z),self.Heading,u.Turret,UnitUpgraded(u),flight.Tangent(0),flight.Duration,flight.Start.Y,u.ShkvalPitch,flight.Start),Flight=flight,Predicted=prediction,BuildingTarget=buildings.ContainsKey(u.Target),Radius=profile.ShkvalProjectileRadius,BlastRadius=PlayableUnitRules.ShkvalBlastRadius(profile,UnitUpgraded(u)),MarkerStartRadius=profile.ShkvalMarkerStartRadius,MarkerOpacity=profile.ShkvalMarkerOpacity,BuildingHeight=profile.ShkvalBuildingCollisionHeight}});
             RememberDefaultShot(u);Sound(PlayableSoundKind.Shot,self.Position,u.Kind,u.Owner);
             u.Reload=profile.ShkvalFireIntervalMs/1000;
         }
@@ -123,7 +176,8 @@ namespace Spacewars.Runtime
             p.Position=r.Flight.Point(to).Ground;
             if(hit==null)return false;
             // Snapshot every hit before mutations so a destroyed cover still shields this explosion.
-            var victims=bodies.Where(b=>PlayableBallistics.BlastHits(hit.Value.Point,r.BlastRadius,b,solids,profile.BallisticWallHeight,bodies,TerrainHeight)).Select(b=>b.Id).ToArray();
+            var victims=bodies.Where(b=>b.Id==hit.Value.BodyId||PlayableBallistics.BlastHits(hit.Value.Point,r.BlastRadius,b,solids,profile.BallisticWallHeight,bodies,TerrainHeight)).Select(b=>b.Id).ToArray();
+            double DamageFor(int id)=>id==hit.Value.BodyId?r.DirectDamage:p.Damage;
             int visibleMask=0;foreach(PlayableOwner owner in Owners)if(Vision(owner).IsVisible(hit.Value.Point.Ground))visibleMask|=1<<(int)owner;
             var wreckVictims=wrecks.Values.Where(w=>w.Blocks(Tick)&&PlayableBallistics.BlastHits(hit.Value.Point,r.BlastRadius,new BallisticBody(w.Id,w.Owner,w.Position,default(NavPoint),w.Radius,2*w.Radius,1,false,GroundHeight(w.Position)),solids,profile.BallisticWallHeight,bodies,TerrainHeight)).Select(w=>w.Id).ToArray();
             // One prospective publication covers every lethal hit and removed
@@ -131,18 +185,20 @@ namespace Spacewars.Runtime
             var prospective=new System.Collections.Generic.Dictionary<int,PlayableWreckSnapshot>();
             var removals=new System.Collections.Generic.List<Building>();
             foreach(int id in victims){
-                if(units.TryGetValue(id,out var unit)&&unit.Health-p.Damage<=0&&TryActor(id,out var actor))prospective.Add(id,CreateUnitWreck(unit,actor));
+                if(units.TryGetValue(id,out var unit)&&unit.Health-DamageFor(id)<=0&&TryActor(id,out var actor))prospective.Add(id,CreateUnitWreck(unit,actor));
                 if(buildings.TryGetValue(id,out var building)&&building.Phase!=ConstructionPhase.Pending&&
-                    building.Health-p.Damage*(building.Ready?1:profile.ConstructionDamageMultiplier)<=0)removals.Add(building);
+                    building.Health-DamageFor(id)*(building.Ready?1:profile.ConstructionDamageMultiplier)<=0)removals.Add(building);
             }
+            var removedActors=prospective.Values.Where(w=>w.Kind!=PlayableEntityKind.Hawk).Select(w=>w.Id).ToArray();
             bool geometryChange=wreckVictims.Length>0||removals.Count>0||prospective.Values.Any(w=>w.Blocks(Tick));
-            if(geometryChange&&!TryRebuildGeometry(removedWrecks:wreckVictims,removals:removals,additionalWrecks:prospective.Values)){
+            if(geometryChange&&!TryRebuildGeometry(removedWrecks:wreckVictims,removals:removals,additionalWrecks:prospective.Values,removedActors:removedActors.Length>0?removedActors:null)){
                 r.Elapsed=previousElapsed;p.Position=previousPosition;return false;
             }
             foreach(int id in wreckVictims)wrecks[id]=wrecks[id].Destroy(Tick,PlayableEntityKind.Shkval);
+            MarkMinesForAreaDamage(hit.Value.Point,r.BlastRadius);
             Sound(PlayableSoundKind.Impact,hit.Value.Point.Ground,p.Kind);
             impacts.Add(new PlayableImpactSnapshot(p.Id,p.Faction,hit.Value.Point,r.BlastRadius,Tick,visibleMask));
-            foreach(int id in victims)TryDamagePrepared(id,p.Damage,p.Owner,p.Faction,null,default(NavPoint),null,prospective);
+            foreach(int id in victims)TryDamagePrepared(id,DamageFor(id),p.Owner,p.Faction,null,default(NavPoint),null,prospective);
             if(geometryChange){ReconcileWreckRoutes();RetryWreckWaits();}
             return true;
         }

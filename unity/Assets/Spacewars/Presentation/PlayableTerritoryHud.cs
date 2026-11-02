@@ -9,14 +9,14 @@ namespace Spacewars.Presentation
     {
         private static string BuildingName(PlayableBuildingKind kind)
         {
-            switch(kind){case PlayableBuildingKind.GaussTower:return "ГАУСС-БАШНЯ";case PlayableBuildingKind.RepairTower:return "РЕМОНТНАЯ ВЫШКА";case PlayableBuildingKind.SentryTurret:return "ПУЛЕМЁТНАЯ ТУРЕЛЬ";case PlayableBuildingKind.Hangar:return "АНГАР";case PlayableBuildingKind.ScientificCenter:return "НАУЧНЫЙ ЦЕНТР";case PlayableBuildingKind.Headquarters:return "ШТАБ";case PlayableBuildingKind.Outpost:return "ФОРПОСТ";case PlayableBuildingKind.Mine:return "ШАХТА";case PlayableBuildingKind.Factory:return "ФАБРИКА";default:return "ПЕРЕРАБОТКА";}
+            switch(kind){case PlayableBuildingKind.GaussTower:return "ГАУСС-БАШНЯ";case PlayableBuildingKind.RepairTower:return "РЕМОНТНАЯ ВЫШКА";case PlayableBuildingKind.SentryTurret:return "ПУЛЕМЁТНАЯ ТУРЕЛЬ";case PlayableBuildingKind.Hangar:return "АНГАР";case PlayableBuildingKind.ScientificCenter:return "НАУЧНЫЙ ЦЕНТР";case PlayableBuildingKind.Headquarters:return "ШТАБ";case PlayableBuildingKind.Outpost:return "ФОРПОСТ";case PlayableBuildingKind.RelayTower:return "ВЫШКА СВЯЗИ";case PlayableBuildingKind.Mine:return "ШАХТА";case PlayableBuildingKind.Factory:return "ФАБРИКА";default:return "ПЕРЕРАБОТКА";}
         }
         private bool PickPad(NavPoint point)
         {
             foreach(var state in view.Sites)
             {
                 var center=view.Buildings.FirstOrDefault(x=>x.Id==state.CenterId);
-                if((center==null||center.Phase==ConstructionPhase.Pending)&&TerritoryRules.Contains(point,state.Site.Position,TerritoryRules.Radius(profile,state.Site.Kind),false,state.Site.Kind==PlayableBuildingKind.Mine))
+                if((center==null||center.Phase==ConstructionPhase.Pending)&&TerritoryRules.Contains(point,state.Site.Position,TerritoryRules.Radius(profile,state.Site.Kind),false,(state.Site.Kind==PlayableBuildingKind.Mine||state.Site.Kind==PlayableBuildingKind.RelayTower)))
                 {
                     selection.Clear();selectedSite=state.Site.Id;selectedSlot=0;if(center!=null&&center.Owner==LocalOwner)selection.Add(center.Id);return true;
                 }
@@ -72,7 +72,7 @@ namespace Spacewars.Presentation
             ConfigureBuild(buildFactory,PlayableBuildingKind.Factory,ordinary&&!defense,active&&owned&&request==null);
             ConfigureBuild(buildScience,PlayableBuildingKind.ScientificCenter,ordinary&&!defense,active&&owned&&request==null);
             ConfigureBuild(buildRefinery,PlayableBuildingKind.Refinery,ordinary&&!defense,active&&owned&&request==null);
-            ConfigureBuild(buildCenter,state?.Site.Kind??PlayableBuildingKind.Headquarters,state!=null&&!ordinary,active&&owned&&request==null);
+            ConfigureBuild(buildCenter,state?.Site.Kind??PlayableBuildingKind.Headquarters,state!=null&&!ordinary&&state.Site.Kind!=PlayableBuildingKind.RelayTower,active&&owned&&request==null);
             var chosen=view.Buildings.FirstOrDefault(b=>selection.Contains(b.Id)&&b.Owner==LocalOwner);
             cancelBuilding.style.display=chosen!=null&&chosen.Phase!=ConstructionPhase.Ready&&chosen.PrivateState?.Lifecycle?.Selling!=true?DisplayStyle.Flex:DisplayStyle.None;
             cancelBuilding.SetEnabled(active);

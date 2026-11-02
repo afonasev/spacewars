@@ -23,11 +23,28 @@ namespace Spacewars.Tests.EditMode
             var type=typeof(AiArmyPlanner).Assembly.GetType("Spacewars.Runtime.PlayableAiOwnerLoop");
             var loop=Activator.CreateInstance(type,BindingFlags.Instance|BindingFlags.NonPublic,null,new object[]{P,Opening(),71L,null},null);
             void Review(PlayableSnapshot s)=>type.GetMethod("Review",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(loop,new object[]{s,0L});
-            var o=Observation(60,count:6);var noCenter=new PlayableSnapshot(P.ProfileId,P.Revision,71,o.Seed,60,60,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,o.Entities.ToArray(),o.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:o.Vision,routeProofs:o.RouteProofs.ToArray());
-            Review(noCenter);
+            // This is a preemption control, not an opening-readiness test. The
+            // historical one-refinery/six-tank input never completed the current
+            // double-income opening and already presented a defense threat.
+            // Fulfil current bounded first-wave alternatives without changing
+            // their RNG/weights, and introduce the actual threat at tick61.
+            int wave=(int)AiProfile.Initial.Value("openingsMidgame.reinforcedMax");
+            var o=Observation(60,count:wave,explorers:wave,target:0);
+            PlayableSnapshot Stage(long tick,bool threat)
+            {
+                var point=new NavPoint(threat?8:40,0);
+                var units=o.Entities.Concat(new[]{new PlayableEntitySnapshot(101,PlayableOwner.Enemy,PlayableEntityKind.Tank,point,100,false,0,0,0)}).ToArray();
+                var buildings=o.Buildings.Concat(new[]{new PlayableBuildingSnapshot(52,PlayableOwner.Player,PlayableBuildingKind.Refinery,new NavPoint(-15,-10),P.RefineryHealth,1,0,0,default)})
+                    .Concat(threat?new[]{new PlayableBuildingSnapshot(60,PlayableOwner.Player,PlayableBuildingKind.Headquarters,default,P.HeadquartersHealth,1,0,0,default)}:Array.Empty<PlayableBuildingSnapshot>()).ToArray();
+                var routes=o.Entities.Select(u=>new PlayableRouteProof(u.Id,u.Owner,71,tick,1,u.Position,PlayableUnitRules.Radius(P,u.Kind),PlayableRouteTargetKind.VisibleEnemy,101,point,point,new[]{point})).ToArray();
+                return new PlayableSnapshot(P.ProfileId,P.Revision,71,o.Seed,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:o.Vision,routeProofs:routes,population:new PlayablePopulationSnapshot(o.Entities.Sum(u=>PlayableUnitRules.Population(P,u.Kind)),0,P.ArmyCapacity));
+            }
+            Assert.IsEmpty(AiDefensePlanner.Threats(PlayableAiObservation.From(Stage(60,false)),P),"No existing defense may preempt the initial offense");
+            Review(Stage(60,false));
             var checkpoint=(PlayableAiOwnerCheckpoint)type.GetProperty("Checkpoint",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(loop);
+            Assert.True(checkpoint.OpeningExecution.InitialForceFulfilled,"Current opening commitments must actually be fulfilled");
             Assert.True(checkpoint.Records.Any(r=>r.Policy==AiArmyPlanner.Policy&&r.Status==PlayableAiDeliveryStatus.Scheduled));
-            Review(DefenseView(61,true));
+            Review(Stage(61,true));
             checkpoint=(PlayableAiOwnerCheckpoint)type.GetProperty("Checkpoint",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(loop);
             Assert.True(checkpoint.Records.Any(r=>r.Policy==AiArmyPlanner.Policy&&r.Status==PlayableAiDeliveryStatus.Cancelled),"A3: a new observed center threat must invalidate accepted offensive delivery even while its reaction delay is pending");
             Assert.True(checkpoint.Armies.Armies.Any(a=>a.Role==AiArmyRole.MobileDefense&&a.Phase!=AiArmyPhase.Disbanded),"A3 mobile defense must have a major army slot");
@@ -153,14 +170,14 @@ namespace Spacewars.Tests.EditMode
                 .Concat(new[]{new OfflineScenarioUnit(2,PlayableEntityKind.Tank,new NavPoint(-10,0))}).ToArray();
             return new OfflineMatchConfiguration(P,"a3-defense","a3-03-a3-05-unassisted-native","UnityHostRouteService",basis.Seed,basis.Roster.ToArray(),basis.Starts.ToArray(),basis.Sites.ToArray(),Array.Empty<NavObstacle>(),new double[,]{{0,100},{100,0}},scenario:scenario,scenarioBuildings:basis.ScenarioBuildings.ToArray());
         }
-        private static OfflineMatchConfiguration DefenseDetourConfig()
+        private static OfflineMatchConfiguration DefenseDetourConfig(bool interception=false)
         {
             var basis=Config(7);
             var tankRadius=PlayableUnitRules.Radius(P,PlayableEntityKind.Tank);
             var leftX=-P.ArenaHalfExtent+tankRadius+.25;
             var scenario=Enumerable.Range(0,7).Select(i=>new OfflineScenarioUnit(1,PlayableEntityKind.Tank,
-                    new NavPoint(leftX+(i%3)*2,-20-(i/3)*3)))
-                .Concat(new[]{new OfflineScenarioUnit(2,PlayableEntityKind.Tank,new NavPoint(-10,0))}).ToArray();
+                    interception&&i==6?new NavPoint(-31,31):interception&&i==3?new NavPoint(-20,14):interception&&i==4?new NavPoint(-20,18):new NavPoint(leftX+(i%3)*2,-20-(i/3)*3)))
+                .Concat(new[]{new OfflineScenarioUnit(2,PlayableEntityKind.Tank,interception?new NavPoint(-12,6):new NavPoint(-10,0),interception?Math.PI:0)}).ToArray();
             return new OfflineMatchConfiguration(P,"a3-defense-detour","a3-03-a3-05-unassisted-native-detour","UnityHostRouteService",basis.Seed,basis.Roster.ToArray(),basis.Starts.ToArray(),basis.Sites.ToArray(),
                 new[]{new NavObstacle(-18.5,-31,-17.5,10)},new double[,]{{0,100},{100,0}},scenario:scenario,scenarioBuildings:basis.ScenarioBuildings.ToArray());
         }
@@ -193,6 +210,10 @@ namespace Spacewars.Tests.EditMode
                 }
                 Assert.Greater(armyId,0,"ordinary actual threat observation must activate a Defense army");
                 Assert.Greater(candidates.Length,0,"capture candidate IDs from the actual registry at Defense activation");
+                // This controls an existing Defense assembly obligation. A covered
+                // defense now leaves free spares for pressure, so explicitly admit
+                // one real idle actor through the registry before route execution.
+                Assert.True(((AiArmyRegistry)Get(Owner(a),"armies")).TryReinforce(PlayableAiObservation.From(a.ParticipantView("west-owner")),armyId,AiDefensePlanner.Policy,new[]{candidates[0]}));
                 PlayableAiObservation decisionObservation=null;AiArmyRegistryState decisionArmies=null;PlayableAiAction[] decisionPending=null;long decisionTick=-1;bool ownerGeometryVerified=false;
                 var assemblyCausalSignatures=new HashSet<string>(StringComparer.Ordinal);
                 PlayableAiOwnerLoop.CurrentOwnerDecisionOwnerFilterForTests="west-owner";
@@ -323,7 +344,7 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void DefenseRecovery_ActualDetourUnsafeFollowStopsAndRetainsReinforcement()
         {
-            var c=DefenseDetourConfig();Assert.AreEqual(7,c.ScenarioUnits.Count(u=>u.LogicalPlayer==1));Assert.AreEqual(1,c.ScenarioUnits.Count(u=>u.LogicalPlayer==2));
+            var c=DefenseDetourConfig(interception:true);Assert.AreEqual(7,c.ScenarioUnits.Count(u=>u.LogicalPlayer==1));Assert.AreEqual(1,c.ScenarioUnits.Count(u=>u.LogicalPlayer==2));
             Assert.AreEqual(1,c.Obstacles.Count);Assert.AreEqual(-18.5,c.Obstacles[0].MinX);Assert.AreEqual(-17.5,c.Obstacles[0].MaxX);
             Assert.AreEqual(-31,c.Obstacles[0].MinZ);Assert.AreEqual(10,c.Obstacles[0].MaxZ);
             var tankRadius=PlayableUnitRules.Radius(P,PlayableEntityKind.Tank);
@@ -332,7 +353,8 @@ namespace Spacewars.Tests.EditMode
             foreach(var unit in c.ScenarioUnits)
                 Assert.True(authoredGeometry.IsFree(unit.Position,PlayableUnitRules.Radius(P,unit.Kind)),"Scenario actor must fit the arena and obstacle geometry: "+unit.Position);
             var a=new PlayableAuthorityTick(c,71);var candidates=Array.Empty<int>();var candidate=0;long armyId=0;long appliedTick=-1;long joinedTick=-1;long stopAppliedTick=-1;long safeReadbackTick=-1;bool lifecycleVerified=false;
-            PlayableAiTraceRecord applied=null,stopApplied=null;
+            PlayableAiTraceRecord applied=null,stopApplied=null;bool intrusionIssued=false;NavPoint intrusionOrigin=default;
+            PlayableEntitySnapshot lastIntruder=null;bool intrusionMoved=false;long intrusionMotionTick=-1;
             using(var host=new UnityHostRouteService())
             {
                 for(int i=0;i<120&&armyId==0;i++)
@@ -350,6 +372,16 @@ namespace Spacewars.Tests.EditMode
                 }
                 Assert.Greater(armyId,0,"ordinary actual threat observation must activate a Defense army");
                 Assert.Greater(candidates.Length,0,"capture candidate IDs from the actual registry at Defense activation");
+                // This controls an existing Defense assembly obligation. A covered
+                // defense now leaves free spares for pressure, so explicitly admit
+                // one real idle actor through the registry before route execution.
+                // Keep a real en-route interval: the near spare joined in nine
+                // ticks, before an ordinary intruder could reach the corridor.
+                var available=a.ParticipantView("west-owner").Entities.Where(u=>candidates.Contains(u.Id)).OrderByDescending(u=>u.Position.Z).ToArray();
+                TestContext.WriteLine("DEFENSE_AVAILABLE_SPARES "+Newtonsoft.Json.JsonConvert.SerializeObject(available.Select(u=>new{u.Id,u.Position})));
+                Assert.True(available.Any(u=>u.Position.Z>c.Obstacles[0].MaxZ),"An actual idle far-side spare must remain unclaimed at Defense activation");
+                candidates=new[]{available.First(u=>u.Position.Z>c.Obstacles[0].MaxZ).Id};
+                Assert.True(((AiArmyRegistry)Get(Owner(a),"armies")).TryReinforce(PlayableAiObservation.From(a.ParticipantView("west-owner")),armyId,AiDefensePlanner.Policy,candidates));
                 PlayableAiObservation decisionObservation=null;AiArmyRegistryState decisionArmies=null;PlayableAiAction[] decisionPending=null;long decisionTick=-1;bool ownerGeometryVerified=false;
                 PlayableAiOwnerLoop.CurrentOwnerDecisionOwnerFilterForTests="west-owner";
                 var safetyTraceCaptured=false;
@@ -367,10 +399,10 @@ namespace Spacewars.Tests.EditMode
                             var proofs=observation.RouteProofs.Where(r=>r.UnitId==candidate&&r.Owner==observation.Owner&&r.Generation==observation.Generation&&r.Tick==tick&&r.Kind==PlayableRouteTargetKind.FriendlyAnchor).ToArray();
                             var safeFollow=proofs.Where(r=>traceCore.Any(c=>c.Id==r.TargetId&&r.Target.Equals(PlayableUnitRules.FollowGoal(P,c.Position,c.HullHeading))&&r.Goal.Equals(r.Target))&&AiTacticalExecutor.SafeRoute(observation,r,P)).ToArray();
                             var safeCoreMove=proofs.Where(r=>traceCore.Any(c=>c.Id==r.TargetId&&c.Position.Equals(r.Target))&&AiTacticalExecutor.SafeRoute(observation,r,P)).ToArray();
-                            var safeHome=proofs.Where(r=>observation.Buildings.Any(b=>b.Owner==observation.Owner&&b.Kind==PlayableBuildingKind.Headquarters&&r.Target.Equals(b.Position))&&AiTacticalExecutor.SafeRoute(observation,r,P)).ToArray();
+                            var safeHome=proofs.Where(r=>observation.Buildings.Any(b=>b.Owner==observation.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&r.Target.Equals(b.Position))&&AiTacticalExecutor.SafeRoute(observation,r,P)).ToArray();
                             if(safeFollow.Length==0&&safeCoreMove.Length==0&&safeHome.Length==0)
                             {
-                                TestContext.WriteLine("DEFENSE_UNSAFE_ASSEMBLY_TRACE "+Newtonsoft.Json.JsonConvert.SerializeObject(new{Tick=tick,Candidate=candidate,ArmyId=armyId,Order=observed.CurrentOrder,Stamp=observed.OrderStamp,Core=traceCore.Select(u=>new{u.Id,u.Position,u.HullHeading}),Threats=AiDefensePlanner.Threats(observation,P).Select(t=>new{t.Id,t.Position,t.Kind}).ToArray(),Routes=proofs.Select(r=>new{r.TargetId,r.Target,r.Goal,Path=r.Path.ToArray(),r.GeometryRevision}),SafeFollow=safeFollow.Length,SafeCoreMove=safeCoreMove.Length},Newtonsoft.Json.Formatting.Indented));
+                                TestContext.WriteLine("DEFENSE_UNSAFE_ASSEMBLY_TRACE "+Newtonsoft.Json.JsonConvert.SerializeObject(new{Tick=tick,Candidate=candidate,ArmyId=armyId,Order=observed.CurrentOrder,Stamp=observed.OrderStamp,Core=traceCore.Select(u=>new{u.Id,u.Position,u.HullHeading}),Threats=AiDefensePlanner.Threats(observation,P).Select(t=>new{t.Id,t.Position,t.Kind}).ToArray(),Routes=proofs.Select(r=>new{r.TargetId,r.Target,r.Goal,Path=r.Path.ToArray(),r.GeometryRevision}),SafeFollow=safeFollow.Length,SafeCoreMove=safeCoreMove.Length,SafeHome=safeHome.Length},Newtonsoft.Json.Formatting.Indented));
                                 safetyTraceCaptured=true;
                             }
                         }
@@ -394,6 +426,13 @@ namespace Spacewars.Tests.EditMode
                     for(int i=0;i<690&&joinedTick<0;i++)
                     {
                         Step(a,host);var cp=a.CaptureDiagnosticCheckpoints().Single();var owner=Owner(a);var registry=(AiArmyRegistry)Get(owner,"armies");
+                        var liveIntruder=a.ParticipantView("east-owner").Entities.FirstOrDefault(u=>u.Owner==PlayableOwner.Enemy&&u.Kind==PlayableEntityKind.Tank);
+                        if(liveIntruder!=null)
+                        {
+                            lastIntruder=liveIntruder;
+                            if(intrusionIssued&&liveIntruder.OrderStamp?.Origin==PlayableOrderOrigin.Human&&liveIntruder.OrderStamp.Kind==PlayableCommandKind.Move&&liveIntruder.OrderStamp.Sequence==1&&!intrusionOrigin.Equals(liveIntruder.Position))
+                            {intrusionMoved=true;if(intrusionMotionTick<0)intrusionMotionTick=a.Tick;}
+                        }
                         if(candidate==0&&decisionTick>=0&&decisionObservation!=null&&decisionArmies!=null&&decisionPending!=null&&safeReadbackTick!=decisionTick)
                         {
                             var observation=decisionObservation;var armyState=decisionArmies;
@@ -435,6 +474,15 @@ namespace Spacewars.Tests.EditMode
                                 applied=cp.Records.FirstOrDefault(r=>r.Policy==AiDefensePlanner.Policy&&r.Status==PlayableAiDeliveryStatus.Applied&&r.RuntimeStatus==PlayableCommandStatus.Applied&&
                                     r.ActionId==stamp.ActionId&&r.CommandSequence==stamp.Sequence&&r.ApplicationTick==stamp.Tick&&r.Kind==stamp.Kind&&r.ReceiptIdentity?.OwnerId=="west-owner");
                             if(applied!=null&&appliedTick<0)appliedTick=applied.ApplicationTick;
+                            if(applied?.Kind==PlayableCommandKind.Follow&&!intrusionIssued){
+                                // The old passive threat left a safe alternate core.
+                                // Move this real human Tank after Follow applies so
+                                // the current corridor is actually intercepted.
+                                var intruder=a.ParticipantView("east-owner").Entities.Single(u=>u.Owner==PlayableOwner.Enemy&&u.Kind==PlayableEntityKind.Tank);
+                                intrusionOrigin=intruder.Position;
+                                Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,1,"east-owner",PlayableCommandKind.Move,new[]{intruder.Id},new NavPoint(-25,25),origin:PlayableOrderOrigin.Human)).Status);
+                                intrusionIssued=true;
+                            }
                             var army=registry.Capture().Armies.SingleOrDefault(x=>x.Id==armyId&&x.TacticalOwner==AiDefensePlanner.Policy);
                             if(army!=null&&army.Members.Contains(candidate)&&!army.Reinforcements.Contains(candidate))joinedTick=a.Tick;
                             var stopStamp=unit.OrderStamp;
@@ -442,8 +490,13 @@ namespace Spacewars.Tests.EditMode
                                 stopApplied=cp.Records.FirstOrDefault(r=>r.Policy==AiDefensePlanner.Policy&&r.Kind==PlayableCommandKind.Stop&&r.Status==PlayableAiDeliveryStatus.Applied&&
                                     r.RuntimeStatus==PlayableCommandStatus.Applied&&r.ActionId==stopStamp.ActionId&&r.CommandSequence==stopStamp.Sequence&&r.ApplicationTick==stopStamp.Tick&&
                                     r.ReceiptIdentity?.OwnerId=="west-owner");
-                            if(stopApplied!=null&&stopAppliedTick<0&&army!=null&&army.Reinforcements.Contains(candidate))
-                            {stopAppliedTick=stopApplied.ApplicationTick;break;}
+                            if(stopApplied!=null&&army!=null&&army.Reinforcements.Contains(candidate))
+                            {
+                                if(stopAppliedTick<0)stopAppliedTick=stopApplied.ApplicationTick;
+                                // Stop can apply before the intruder's accepted native Move
+                                // activates. Retain that receipt while servicing real motion.
+                                if(intrusionMoved)break;
+                            }
                         }
                     }
                 }
@@ -452,6 +505,8 @@ namespace Spacewars.Tests.EditMode
                     PlayableAiOwnerLoop.CurrentOwnerDecisionReadbackForTests=null;PlayableAiOwnerLoop.CurrentOwnerDecisionOwnerFilterForTests=null;
                 }
                 Assert.Greater(candidate,0,"actual owner projection must expose a free-at-activation idle candidate with a current safe FriendlyAnchor proof to the same Defense core");
+                Assert.True(intrusionIssued,"The safety control must issue its ordinary opposing human Move");
+                TestContext.WriteLine("DEFENSE_INTRUDER_FINAL "+Newtonsoft.Json.JsonConvert.SerializeObject(new{a.Tick,intrusionOrigin,intrusionIssued,stopAppliedTick,intrusionMoved,intrusionMotionTick,Intruder=lastIntruder}));
                 var finalOwner=Owner(a);var finalRegistry=(AiArmyRegistry)Get(finalOwner,"armies");var finalArmy=finalRegistry.Capture().Armies.SingleOrDefault(x=>x.Id==armyId);
                 var finalUnit=a.ParticipantView("west-owner").Entities.Single(u=>u.Id==candidate);
                 TestContext.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(new{Scenario="actual Defense detour safety-stop state",candidate,armyId,safeReadbackTick,appliedTick,joinedTick,stopAppliedTick,
@@ -459,9 +514,12 @@ namespace Spacewars.Tests.EditMode
                         Order=finalUnit.CurrentOrder==null?null:new{finalUnit.CurrentOrder.Kind,finalUnit.CurrentOrder.Destination,finalUnit.CurrentOrder.TargetId,finalUnit.CurrentOrder.IssuedTick},
                         Stamp=finalUnit.OrderStamp==null?null:new{finalUnit.OrderStamp.Kind,finalUnit.OrderStamp.ActionId,finalUnit.OrderStamp.Sequence,finalUnit.OrderStamp.Tick},Queue=finalUnit.Queue},
                     DefenseRecords=a.CaptureDiagnosticCheckpoints().Single().Records.Where(r=>r.Policy==AiDefensePlanner.Policy).Select(r=>new{r.ActionId,r.Kind,r.Status,r.RuntimeStatus,r.DueTick,r.ApplicationTick,r.Message}).ToArray()}));
+                Assert.True(intrusionMoved,"The intruder must physically move under its exact ordinary human Move before safety is qualified");
                 Assert.NotNull(applied,"The actual scenario must first apply an ordinary Defense Follow");
                 Assert.AreEqual(PlayableCommandKind.Follow,applied.Kind);
+                Assert.True(safetyTraceCaptured,"An actual decision must expose no safe Follow, core Move or ready-home continuation before Stop qualification");
                 Assert.NotNull(stopApplied,"When the visible-threat geometry removes every safe continuation, Defense must apply an ordinary Stop");
+                Assert.LessOrEqual(intrusionMotionTick,stopApplied.ApplicationTick,"Physical intrusion must precede the qualified safety Stop");
                 Assert.GreaterOrEqual(safeReadbackTick,0);Assert.GreaterOrEqual(appliedTick,0);Assert.True(lifecycleVerified,"scheduled Defense assembly must cross restore, pause, and Stop lifecycle");
                 Assert.GreaterOrEqual(stopAppliedTick,0,"Stop must apply while the actor still belongs to the original Defense reinforcement wave");
                 Assert.AreEqual(armyId,finalRegistry.ArmyFor(candidate));Assert.Contains(candidate,finalArmy.Reinforcements);

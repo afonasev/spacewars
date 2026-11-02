@@ -3,7 +3,7 @@ from unittest.mock import Mock,patch
 
 SCRIPT=pathlib.Path(__file__).parent/'native-release/remote_makensis.py'
 class RemoteCompilerTests(unittest.TestCase):
- def invoke(self,remote='/var/tmp/spacewars-native-package-owned',fail=False):
+ def invoke(self,remote='/var/tmp/spacewars-native-package-owned',fail=False,dictionary=None):
   calls=[]
   def ssh(args,**kwargs):
    command=args[-1];calls.append(command)
@@ -15,6 +15,7 @@ class RemoteCompilerTests(unittest.TestCase):
    tar=Mock();tar.wait.return_value=0
    receiver=Mock();receiver.returncode=0;receiver.communicate.return_value=(b'',b'')
    args=[str(SCRIPT),'-DPAYLOAD='+temp,'-DOUTFILE='+temp+'/setup.exe','-DVERSION=0.6.14','-DRELEASE=source',str(source)]
+   if dictionary is not None:args.insert(1,'-DLZMA_DICT_MB='+dictionary)
    with patch.object(sys,'argv',args),patch('subprocess.check_output',side_effect=ssh),patch('subprocess.Popen',side_effect=[tar,receiver]),patch('subprocess.check_call') as scp:
     try:runpy.run_path(str(SCRIPT),run_name='__main__')
     except Exception:return calls,scp.call_count,sys.exc_info()[1]
@@ -32,3 +33,9 @@ class RemoteCompilerTests(unittest.TestCase):
  def test_unexpected_remote_path_is_not_used_or_deleted(self):
   for path in ['/tmp/spacewars-native-package-owned','/var/tmp/unrelated','/var/tmp/spacewars-native-package-;bad']:
    calls,copies,error=self.invoke(remote=path);self.assertIsInstance(error,ValueError);self.assertEqual(len(calls),1);self.assertEqual(copies,0)
+
+ def test_dictionary_choice_is_forwarded_and_bounded(self):
+  for size in ['8','32','64']:
+   calls,copies,error=self.invoke(dictionary=size);self.assertIsNone(error)
+   self.assertIn('-DLZMA_DICT_MB='+size,next(c for c in calls if ' makensis ' in c))
+  calls,copies,error=self.invoke(dictionary='999');self.assertIsInstance(error,ValueError);self.assertEqual(calls,[]);self.assertEqual(copies,0)

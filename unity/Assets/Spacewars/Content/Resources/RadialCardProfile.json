@@ -1,6 +1,9 @@
 {
   "id": "radial-card-a-v1",
-  "revision": 9,
+  "revision": 14,
+  "utilityIconSize": 36,
+  "utilityIconBrightness": 0.76,
+  "buildingUpgradeBadgeSize": 0.22,
   "minimumGroupSlots": 3,
   "spareGroupSlots": 2,
   "width": 380,
@@ -50,5 +53,11 @@
   "selectionTileHeight": 24,
   "selectionColumns": 10,
   "selectionGap": 3,
-  "dockPadding": 10
+  "dockPadding": 10,
+  "upgradePortraitSize": 70,
+  "researchIconBrightness": 0.76,
+  "researchRankSize": 0.28,
+  "unitPortraitBrightness": 1.5,
+  "unitPortraitSaturation": 1.06,
+  "tankPortraitBrightness": 1.2
 }

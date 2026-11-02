@@ -8,7 +8,7 @@ namespace Spacewars.Simulation
     public sealed partial class ThreeCrossingsProfileData
     {
         public string id="three-crossings-greybox-v1";
-        public int revision=5;
+        public int revision=6;
         public double halfExtent=64, riverHalfWidth=8, crossingZ=38, sideBridgeWidth=10, centralBridgeWidth=20, centralBridgeHalfSpan=12;
         public double startAnchorInset=10;
         public double baseCoordinate=46, mineX=22, mineZ=50, pocketX=40;
@@ -135,7 +135,7 @@ namespace Spacewars.Simulation
             new TerritorySite(3,PlayableBuildingKind.Outpost,new NavPoint(-BaseCoordinate,BaseCoordinate),p),
             new TerritorySite(4,PlayableBuildingKind.Outpost,new NavPoint(BaseCoordinate,-BaseCoordinate),p,Math.PI),
             new TerritorySite(5,PlayableBuildingKind.Mine,new NavPoint(-MineX,-MineZ),p),new TerritorySite(6,PlayableBuildingKind.Mine,new NavPoint(MineX,MineZ),p),
-            new TerritorySite(7,PlayableBuildingKind.Mine,new NavPoint(-PocketX,0),p),new TerritorySite(8,PlayableBuildingKind.Mine,new NavPoint(PocketX,0),p),
+            new TerritorySite(7,PlayableBuildingKind.RelayTower,new NavPoint(-PocketX,0),p),new TerritorySite(8,PlayableBuildingKind.RelayTower,new NavPoint(PocketX,0),p),
             new TerritorySite(9,PlayableBuildingKind.Mine,new NavPoint(-MineX,MineZ),p),new TerritorySite(10,PlayableBuildingKind.Mine,new NavPoint(MineX,-MineZ),p)};
     }
 }

@@ -82,7 +82,13 @@ namespace Spacewars.Tests.EditMode
             {
                 Assert.Null(p.Propose(o,A4Opening(),PlayableProfile.Default,AiProfile.Initial,r),"Assembly cannot bypass stock repeat cooldown");
                 var later=PlayableAiObservation.From(new PlayableSnapshot(o.ProfileId,o.ProfileRevision,71,o.Seed,180,180,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,entities,o.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:o.Vision,routeProofs:o.RouteProofs.Select(x=>new PlayableRouteProof(x.UnitId,x.Owner,x.Generation,180,x.GeometryRevision,x.Origin,x.Radius,x.Kind,x.TargetId,x.Target,x.Goal,x.Path.ToArray())).ToArray()));
-                var attack=p.Propose(later,A4Opening(),PlayableProfile.Default,AiProfile.Initial,r);Assert.NotNull(attack);Assert.AreEqual(PlayableCommandKind.Attack,attack.Kind);CollectionAssert.AreEqual(new[]{4},attack.EntityIds);Assert.AreEqual(101,attack.TargetId,"Remaining-live objective gets ordinary line Attack at stock cadence");
+                var fresh=new PlayableEntitySnapshot(5,later.Owner,PlayableEntityKind.Tank,new NavPoint(-16,8),100,false,0,0,0);
+                var freshGoal=PlayableUnitRules.FollowGoal(PlayableProfile.Default,later.Entities.Single(u=>u.Id==1).Position,0);
+                later=PlayableAiObservation.From(new PlayableSnapshot(later.ProfileId,later.ProfileRevision,71,later.Seed,later.Tick,later.SnapshotSequence,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,
+                    later.Entities.Concat(new[]{fresh}).ToArray(),later.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:later.Vision,
+                    routeProofs:later.RouteProofs.Concat(new[]{new PlayableRouteProof(5,later.Owner,71,later.Tick,1,fresh.Position,PlayableUnitRules.Radius(PlayableProfile.Default,fresh.Kind),PlayableRouteTargetKind.FriendlyAnchor,1,freshGoal,freshGoal,new[]{freshGoal})}).ToArray()));
+                Assert.True(r.TryReinforce(later,id,AiArmyPlanner.Policy,new[]{5}),"Continuous output is a real first-leg competitor");
+                var attack=p.ProposeWithRecords(later,A4Opening(),PlayableProfile.Default,AiProfile.Initial,r,new[]{record});Assert.NotNull(attack);Assert.AreEqual(PlayableCommandKind.Attack,attack.Kind);CollectionAssert.AreEqual(new[]{4},attack.EntityIds);Assert.AreEqual(101,attack.TargetId,"Remaining-live objective gets ordinary line Attack at stock cadence");
                 p.Observe(o,r,AiProfile.Initial,Array.Empty<PlayableAiTraceRecord>());Assert.False(p.Active,"Unapplied/absent provenance never exempts a joined replacement order");
             }
             else if(changed!="no-proof"&&changed!="unsafe")
@@ -131,14 +137,14 @@ namespace Spacewars.Tests.EditMode
         public void Reinforcement_RetainsOnlyItsOwnLiveCertifiedFollowLeader(string change)
         {
             var p=PlayableProfile.Default;var entities=new[]{new PlayableEntitySnapshot(1,PlayableOwner.Player,PlayableEntityKind.Tank,default,100,false,0,0,0),new PlayableEntitySnapshot(2,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(-.25,1.5),100,false,0,0,0),new PlayableEntitySnapshot(3,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(0,4),100,false,0,0,0),new PlayableEntitySnapshot(4,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(-3.7354,0),100,false,0,0,0,new PlayableTacticalOrderSnapshot(4,PlayableOwner.Player,71,1,0,PlayableTacticalOrderKind.Follow,default,1),navigationOutcome:NavigationOutcome.Arrived)}
-                .Concat(Enumerable.Range(5,3).Select(i=>new PlayableEntitySnapshot(i,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(20,(i-5)*2),100,false,0,0,0))).ToArray();
+                .Concat(new[]{new PlayableEntitySnapshot(8,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(-.5,3),100,false,0,0,0)}).Concat(Enumerable.Range(5,3).Select(i=>new PlayableEntitySnapshot(i,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(20,(i-5)*2),100,false,0,0,0))).ToArray();
             var vision=new PlayableVision(0,50,50,1,1);vision.Refresh(new[]{new VisionSource(default,50)},Array.Empty<KnownBuilding>());
             PlayableAiObservation Observe(bool valid,bool lost=false)
             {
                 var points=entities.Where(u=>u.Id==2||valid&&u.Id==1).Select(u=>new PlayableRouteProof(4,PlayableOwner.Player,71,100,1,entities.Single(x=>x.Id==4).Position,p.TankCollisionRadius,PlayableRouteTargetKind.FriendlyAnchor,u.Id,PlayableUnitRules.FollowGoal(p,u.Position,u.HullHeading),PlayableUnitRules.FollowGoal(p,u.Position,u.HullHeading),new[]{PlayableUnitRules.FollowGoal(p,u.Position,u.HullHeading)})).ToArray();
                 return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,A4Opening().MatchSeed,100,100,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,entities.Where(u=>!lost||u.Id!=1).ToArray(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:vision.Snapshot(),routeProofs:points,activeProfile:p));
             }
-            var r=Registry();var original=Observe(true);Assert.True(r.TryCreate(original,AiArmyRole.Attack,AiArmyPlanner.Policy,new[]{1,2,3},out var id));Assert.True(r.TryReinforce(original,id,AiArmyPlanner.Policy,new[]{4}));
+            var r=Registry();var original=Observe(true);Assert.True(r.TryCreate(original,AiArmyRole.Attack,AiArmyPlanner.Policy,new[]{1,2,3,8},out var id));Assert.True(r.TryReinforce(original,id,AiArmyPlanner.Policy,new[]{4}));
             if(change=="army-changed"){Assert.True(r.TryCreate(original,AiArmyRole.Escort,"other-owner",new[]{5,6,7},out var other));Assert.True(r.TryTransfer(original,id,other,new[]{1}));}
             var o=Observe(change=="valid",change=="dead");r.Observe(o);var army=r.Capture().Armies.Single(a=>a.Id==id);Assert.IsEmpty(AiTacticalExecutor.Ready(o,army,p),"The tiny correction band must never enlarge strict actual Ready");
             var action=AiTacticalExecutor.Propose(o,army,p,1);
@@ -150,7 +156,13 @@ namespace Spacewars.Tests.EditMode
             var r=Registry();var p=A4Mission(r);var o=A4Observation(100,wave:true,gun:true);var id=p.Capture().ArmyId;
             AiTacticalExecutor.Observe(o,r,id,PlayableProfile.Default);Assert.AreEqual(id,r.ArmyFor(4));
             var move=p.Propose(o,A4Opening(),PlayableProfile.Default,AiProfile.Initial,r);Assert.AreEqual(PlayableCommandKind.Move,move.Kind);Assert.Zero(move.TargetId);Assert.AreEqual(default(NavPoint),move.Target);
-            var near=A4Observation(101,wave:true,gun:true,near:true);AiTacticalExecutor.Observe(near,r,id,PlayableProfile.Default);
+            var basis=A4Observation(101,wave:true,gun:true,near:true);var profile=PlayableProfile.Default;
+            var order=new PlayableTacticalOrderSnapshot(4,basis.Owner,71,7,90,PlayableTacticalOrderKind.Follow,default,1);
+            var stamp=new PlayableOrderStamp(4,basis.Owner,71,1,7,90,PlayableOrderOrigin.Ai,PlayableCommandKind.Follow,PlayableAiOpeningComposition.SourceIdentity,42,42);
+            var units=basis.Entities.Select(u=>u.Id==4?new PlayableEntitySnapshot(u.Id,u.Owner,u.Kind,u.Position,u.Health,false,0,0,0,order,orderStamp:stamp):u).ToArray();
+            var near=PlayableAiObservation.From(new PlayableSnapshot(basis.ProfileId,basis.ProfileRevision,71,basis.Seed,101,101,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,basis.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:basis.Vision,routeProofs:basis.RouteProofs.ToArray(),activeProfile:profile));
+            var applied=new PlayableAiTraceRecord(near.Identity,42,90,7,90,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"actual support joining receipt",near.OwnerId,PlayableAiOpeningComposition.SourceIdentity,new AiReceiptIdentity(71,near.OwnerId,1,1),AiArmyPlanner.Policy,PlayableCommandKind.Follow);
+            AiTacticalExecutor.Observe(near,r,id,PlayableProfile.Default,records:new[]{applied});
             Assert.IsEmpty(r.Capture().Armies.Single().Reinforcements);Assert.Null(p.Propose(near,A4Opening(),PlayableProfile.Default,AiProfile.Initial,r),"A gun never receives the line's attack command");
         }
         [TestCase("tick")][TestCase("generation")][TestCase("unit")]
@@ -189,32 +201,50 @@ namespace Spacewars.Tests.EditMode
             var effective=Project(r.Capture()).Entities.Single(u=>u.Id==gun);Assert.AreEqual(PlayableTacticalOrderKind.Move,effective.CurrentOrder.Kind);Assert.AreEqual(action.Target,effective.CurrentOrder.Destination);
             var doctrine=new PlayableAiArtillerySupportPolicy(p);var production=doctrine.TryPlan(actual,A4Opening(),null,productionOnly:true);Assert.True(production==null||production.Kind==PlayableCommandKind.QueueShkval,"Doctrine cannot start another tactical loop");
         }
-        private static OfflineMatchConfiguration A4NativeConfig(bool intrusion=false,bool artillery=false,bool follow=false)
+        [Test] public void Reinforcement_CurrentUnityOpeningPremise()
         {
-            var p=PlayableProfile.Default;var starts=new[]{new OfflineStart("west",1,new NavPoint(-24,0),new NavPoint(-24,6),pin:1),new OfflineStart("east",2,new NavPoint(24,24),new NavPoint(18,24),pin:2)};
-            var sites=new[]{new TerritorySite(1,PlayableBuildingKind.Headquarters,starts[0].Position,new[]{new TerritorySlot(1,new NavPoint(-24,-9),0),new TerritorySlot(2,new NavPoint(-14,0),0)}),new TerritorySite(2,PlayableBuildingKind.Headquarters,starts[1].Position,Array.Empty<TerritorySlot>()),new TerritorySite(3,PlayableBuildingKind.Outpost,new NavPoint(8,-8),Array.Empty<TerritorySlot>())};
+            var c=A4NativeConfig();var a=new PlayableAuthorityTick(c,71);var owner=Owners(a).Single();
+            using(var routes=new UnityHostRouteService())for(int tick=0;tick<60;tick++)NativeStep(a,routes);
+            var executor=(AiOpeningExecutor)Field(owner,"openingExecutor");
+            int required=(int)typeof(AiOpeningExecutor).GetProperty("RequiredForce",F).GetValue(executor);
+            var desired=typeof(AiOpeningExecutor).GetMethod("DesiredForce",F).Invoke(executor,new object[]{AiProfile.Initial,required});
+            TestContext.WriteLine("UNITY_OPENING_PREMISE "+Newtonsoft.Json.JsonConvert.SerializeObject(new{c.Seed,AiProfile.Initial.Id,AiProfile.Initial.Hash,Fields=AiProfileMetadata.Fields.Count,Opening=A4Opening(),required,desired,executor=executor.Capture(),Mission=((AiArmyPlanner)Field(owner,"armyPlanner")).Capture()}));
+            Assert.AreEqual(PlayableAiOpening.Safe,A4Opening().Opening);Assert.Greater(required,0);a.Stop();
+        }
+        private static OfflineMatchConfiguration A4NativeConfig(bool intrusion=false,bool artillery=false,bool follow=false,bool durableObjective=false)
+        {
+            var p=PlayableProfile.Default;var starts=new[]{new OfflineStart("west",1,new NavPoint(-24,0),new NavPoint(-10,-8),pin:1),new OfflineStart("east",2,durableObjective?new NavPoint(8,-8):new NavPoint(24,24),new NavPoint(18,24),pin:2)};
+            var sites=new[]{new TerritorySite(1,PlayableBuildingKind.Headquarters,starts[0].Position,new[]{new TerritorySlot(1,new NavPoint(-24,-9),0),new TerritorySlot(2,new NavPoint(-14,0),0),new TerritorySlot(3,new NavPoint(-14,12),0)}),new TerritorySite(2,PlayableBuildingKind.Headquarters,starts[1].Position,Array.Empty<TerritorySlot>()),new TerritorySite(3,PlayableBuildingKind.Outpost,durableObjective?new NavPoint(24,24):new NavPoint(8,-8),Array.Empty<TerritorySlot>())};
             var roster=new[]{new OfflineParticipant("player-1",1,1,OfflineControl.Ai),new OfflineParticipant("enemy-1",2,2,OfflineControl.Human)};
-            // A6 fixture rebind: the old follow intruder at (-5,-23.5) cannot reach
-            // the current leg in the unchanged reaction window. Start outside the native
-            // weapon envelope by its existing Follow tolerance; ordinary Move creates intrusion.
-            double followIntruderZ=-8-(PlayableUnitRules.Range(p,PlayableEntityKind.Tank)+2*PlayableUnitRules.Radius(p,PlayableEntityKind.Tank)+p.FollowArrivalTolerance);
-            return new OfflineMatchConfiguration(p,"a4-army-reinforcement","a4-native-front","UnityHostRouteService",A4Opening().MatchSeed,roster,starts,sites,Array.Empty<NavObstacle>(),new double[,]{{0,100},{100,0}},scenario:new[]{new OfflineScenarioUnit(1,PlayableEntityKind.Tank,new NavPoint(-7,-8)),new OfflineScenarioUnit(1,PlayableEntityKind.Tank,new NavPoint(-5,-8)),new OfflineScenarioUnit(1,PlayableEntityKind.Tank,new NavPoint(-3,-8))}.Concat(follow?new[]{new OfflineScenarioUnit(2,PlayableEntityKind.Tank,new NavPoint(-5,followIntruderZ))}:intrusion?new[]{new OfflineScenarioUnit(2,PlayableEntityKind.Tank,new NavPoint(-10.5,-20.5))}:Array.Empty<OfflineScenarioUnit>()).Concat(artillery?new[]{new OfflineScenarioUnit(1,PlayableEntityKind.Shkval,new NavPoint(-7,-6))}:Array.Empty<OfflineScenarioUnit>()).ToArray(),scenarioBuildings:new[]{new OfflineScenarioBuilding(1,PlayableBuildingKind.Factory,1,1,new NavPoint(-24,-9)),new OfflineScenarioBuilding(1,PlayableBuildingKind.Refinery,1,2,new NavPoint(-14,0)),new OfflineScenarioBuilding(2,PlayableBuildingKind.Outpost,3,0,new NavPoint(8,-8))});
+            // Keep the initial intruder outside the native weapon and center
+            // envelopes. Its ordinary human Move crosses the current certified
+            // leg during the unchanged delivery reaction window.
+            double followIntruderZ=-19.5;
+            return new OfflineMatchConfiguration(p,"a4-army-reinforcement","a4-native-front","UnityHostRouteService",A4Opening().MatchSeed,roster,starts,sites,Array.Empty<NavObstacle>(),new double[,]{{0,100},{100,0}},scenario:new[]{new OfflineScenarioUnit(1,PlayableEntityKind.Tank,new NavPoint(-7,-8)),new OfflineScenarioUnit(1,PlayableEntityKind.Tank,new NavPoint(-5,-8)),new OfflineScenarioUnit(1,PlayableEntityKind.Explorer,new NavPoint(-3,-8)),new OfflineScenarioUnit(1,PlayableEntityKind.Explorer,new NavPoint(-1,-8))}.Concat(follow?new[]{new OfflineScenarioUnit(2,PlayableEntityKind.Tank,new NavPoint(2,followIntruderZ))}:intrusion?new[]{new OfflineScenarioUnit(2,PlayableEntityKind.Tank,new NavPoint(-4.5,-20.25))}:Array.Empty<OfflineScenarioUnit>()).Concat(artillery?new[]{new OfflineScenarioUnit(1,PlayableEntityKind.Shkval,new NavPoint(-7,-6))}:Array.Empty<OfflineScenarioUnit>()).ToArray(),scenarioBuildings:new[]{new OfflineScenarioBuilding(1,PlayableBuildingKind.Factory,1,1,new NavPoint(-24,-9)),new OfflineScenarioBuilding(1,PlayableBuildingKind.Refinery,1,2,new NavPoint(-14,0)),new OfflineScenarioBuilding(1,PlayableBuildingKind.Refinery,1,3,new NavPoint(-14,12)),new OfflineScenarioBuilding(2,PlayableBuildingKind.Outpost,3,0,durableObjective?new NavPoint(24,24):new NavPoint(8,-8))});
         }
         [TestCase(1)][TestCase(3)] public void Reinforcement_ActualAuthorityRoutesJoinsAndRestoresPendingWave(int count)
         {
-            var c=A4NativeConfig();var a=new PlayableAuthorityTick(c,71);var owner=Owners(a).Single();var registry=(AiArmyRegistry)Field(owner,"armies");var planner=(AiArmyPlanner)Field(owner,"armyPlanner");var domain=Field(a,"domain");
+            var c=A4NativeConfig(durableObjective:true);var a=new PlayableAuthorityTick(c,71);var owner=Owners(a).Single();var registry=(AiArmyRegistry)Field(owner,"armies");var planner=(AiArmyPlanner)Field(owner,"armyPlanner");var domain=Field(a,"domain");
             using(var routes=new UnityHostRouteService())
             {
-                for(int i=0;i<300&&(!planner.Active||!a.CaptureDiagnosticCheckpoints().Single().Records.Any(x=>x.Policy==AiArmyPlanner.Policy&&x.Status==PlayableAiDeliveryStatus.Applied));i++)NativeStep(a,routes);
-                Assert.True(planner.Active);var id=planner.Capture().ArmyId;
+                for(int i=0;i<300&&(!planner.Active||planner.Capture().TargetKind==PlayableRouteTargetKind.FriendlyAnchor||!planner.HasAppliedOrder);i++)NativeStep(a,routes);
+                Assert.True(planner.Active);Assert.AreNotEqual(PlayableRouteTargetKind.FriendlyAnchor,planner.Capture().TargetKind,"An actual offensive mission must precede wave admission");
+                Assert.True(planner.HasAppliedOrder,"The initial offensive command must actually apply before spawning this wave");
+                var id=planner.Capture().ArmyId;var initialArmy=registry.Capture().Armies.Single(g=>g.Id==id);
+                var beforeWave=PlayableAiObservation.From(a.ParticipantView("player-1"));
+                Assert.GreaterOrEqual(AiReinforcementPolicy.ReceivingCore(beforeWave,initialArmy,c.Profile,AiProfile.Initial).Length,initialArmy.MinimumViableForce);
+                TestContext.WriteLine("NATIVE_WAVE_PREMISE "+Newtonsoft.Json.JsonConvert.SerializeObject(new{c.Seed,AiProfile.Initial.Hash,InitialCore=initialArmy.Members.Except(initialArmy.Reinforcements),ExistingReinforcements=initialArmy.Reinforcements,ProducedWaveCount=count,Mission=planner.Capture()}));
+                // The native objective must remain alive through assembly needs a normal HQ objective
+                // and the stock Attack cooldown. Its native health and all timing contracts are unchanged.
                 var cohort=new System.Collections.Generic.List<int>();
-                for(int n=0;n<count;n++){domain.GetType().GetMethod("SpawnProduced",F).Invoke(domain,new object[]{new NavPoint(-20,-8+n*2),(NavPoint?)new NavPoint(8,-8),PlayableOwner.Player,PlayableEntityKind.Tank});cohort.Add(a.ParticipantView("player-1").Entities.Where(u=>u.Owner==PlayableOwner.Player&&u.Kind==PlayableEntityKind.Tank).Max(u=>u.Id));}
+                for(int n=0;n<count;n++){domain.GetType().GetMethod("SpawnProduced",F).Invoke(domain,new object[]{new NavPoint(-10,-5+n*2),(NavPoint?)new NavPoint(8,-8),PlayableOwner.Player,PlayableEntityKind.Tank});cohort.Add(a.ParticipantView("player-1").Entities.Where(u=>u.Owner==PlayableOwner.Player&&u.Kind==PlayableEntityKind.Tank).Max(u=>u.Id));NativeStep(a,routes);}
                 int wave=cohort[0];Assert.True(cohort.All(u=>a.ParticipantView("player-1").Entities.Single(x=>x.Id==u).CurrentOrder==null));
                 bool assigned=false,move=false,joined=false,roundtrip=false,followRoundtrip=false,attackJoined=false;long began=a.Tick;var effective=new System.Collections.Generic.HashSet<int>();
                 var diagnosticTicks=new System.Collections.Generic.HashSet<long>();
                 void ObserveJoin()
                 {
-                    if(count==3&&new long[]{135,225,315,405,450}.Contains(a.Tick)&&diagnosticTicks.Add(a.Tick))
+                    move|=a.ParticipantView("player-1").Entities.Single(u=>u.Id==wave).CurrentOrder?.Kind==PlayableTacticalOrderKind.Move;
+                    if(count==3&&new long[]{135,225,315,405,450,495,585}.Contains(a.Tick)&&diagnosticTicks.Add(a.Tick))
                     {
                         byte[] OwnerBytes()
                         {using(var stream=new System.IO.MemoryStream())using(var writer=new System.IO.BinaryWriter(stream)){owner.GetType().GetMethod("WriteState",F).Invoke(owner,new object[]{writer});writer.Flush();return stream.ToArray();}}
@@ -223,6 +253,18 @@ namespace Spacewars.Tests.EditMode
                         var proposal=typeof(AiArmyPlanner).GetMethod("ProposeWithRecords",F).Invoke(planner,new object[]{observation,checkpoint.Opening,c.Profile,AiProfile.Initial,registry,checkpoint.Records});
                         CollectionAssert.AreEqual(before,OwnerBytes(),"Diagnostic detached Propose must not mutate live owner/planner/RNG state");
                         var pending=((System.Collections.IEnumerable)Field(owner,"pendingItems")).Cast<object>().Select(x=>new{Action=(PlayableAiAction)Field(x,"Action"),DueTick=(long)Field(x,"DueTick"),Policy=(string)Field(x,"PolicyName")}).ToArray();
+                        var navigation=(NavigationSession)domain.GetType().GetProperty("Navigation",F).GetValue(domain);
+                        foreach(var client in observation.Entities.Where(u=>cohort.Contains(u.Id)&&u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Follow))
+                        {
+                            var anchor=observation.Entities.Single(u=>u.Id==client.CurrentOrder.TargetId);var goal=PlayableUnitRules.FollowGoal(c.Profile,anchor.Position,anchor.HullHeading);
+                            navigation.Crowd.TryGet(client.Id,out var actor);
+                            TestContext.WriteLine("FOLLOW_EXECUTION_READBACK "+Newtonsoft.Json.JsonConvert.SerializeObject(new{a.Tick,client.Id,client.Position,client.NavigationOutcome,
+                                c.Profile.FollowDistance,c.Profile.FollowArrivalTolerance,Anchor=anchor.Id,anchor.HullHeading,Goal=goal,Pending=navigation.IsPending(client.Id),
+                                CanResume=domain.GetType().GetMethod("CanResumeCombat",F).Invoke(domain,new object[]{client.Id}),
+                                CampaignAllowed=domain.GetType().GetMethod("CampaignMoveAllowed",F).Invoke(domain,new object[]{client.Id,goal}),
+                                Free=((NavGeometry)domain.GetType().GetProperty("Geometry",F).GetValue(domain)).IsFree(goal,PlayableUnitRules.Radius(c.Profile,client.Kind)),
+                                Actor=actor}));
+                        }
                         TestContext.WriteLine("A6 cohort diagnostic "+Newtonsoft.Json.JsonConvert.SerializeObject(new{a.Tick,Cohort=cohort,OriginalArmy=id,Registry=registry.Capture(),Mission=planner.Capture(),Proposed=proposal,Pending=pending,Entities=observation.Entities.Where(u=>u.Owner==observation.Owner),Routes=observation.RouteProofs.Where(r=>cohort.Contains(r.UnitId)),SafeFollow10=observation.RouteProofs.Where(r=>cohort.Contains(r.UnitId)&&r.TargetId==10&&r.Goal.Equals(r.Target)).Select(r=>new{r.UnitId,r.TargetId,r.Goal,Safe=AiTacticalExecutor.SafeRoute(observation,r,c.Profile)}),Applied=checkpoint.Records.Where(r=>r.Policy==AiArmyPlanner.Policy&&r.Status==PlayableAiDeliveryStatus.Applied)}));
                     }
                     var g=registry.Capture().Armies.FirstOrDefault(x=>x.Id==id);if(g==null||g.Phase==AiArmyPhase.Disbanded)return;
@@ -294,6 +336,7 @@ namespace Spacewars.Tests.EditMode
                 Assert.True(assigned,"Wave must be assigned to the live original ArmyId");Assert.True(move,"Wave must use an ordinary native gather route");Assert.True(roundtrip,"Pending wave Move must survive actual authority restore");Assert.True(followRoundtrip,"Tiny arrival correction and pending Follow callback must survive actual authority restore");Assert.True(joined,"Every wave unit must physically join the original live army with a certified effective own assembly Follow or line order");
                 while(a.Tick-began<690&&registry.Capture().Armies.Single(g=>g.Id==id).Phase!=AiArmyPhase.Disbanded)
                 {NativeStep(a,routes);if(a.ParticipantView("player-1").Entities.Any(u=>cohort.Contains(u.Id)&&u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Attack&&u.CurrentOrder.TargetId==planner.Capture().TargetId&&registry.ArmyFor(u.Id)==id))attackJoined=true;}
+                TestContext.WriteLine("NATIVE_MISSION_FINAL "+Newtonsoft.Json.JsonConvert.SerializeObject(new{a.Tick,attackJoined,Army=registry.Capture().Armies.Single(g=>g.Id==id),Mission=planner.Capture(),View=a.ParticipantView("player-1"),Applied=a.CaptureDiagnosticCheckpoints().Single().Records.Where(r=>r.Policy==AiArmyPlanner.Policy&&r.Status==PlayableAiDeliveryStatus.Applied)}));
                 Assert.True(attackJoined,"The native original-army control must still prove ordinary line Attack, observed separately after physical assembly");
                 Assert.AreEqual(AiArmyPhase.Disbanded,registry.Capture().Armies.Single(g=>g.Id==id).Phase,"Actual mission completion must release its full wave in the original bounded scenario window");Assert.True(cohort.All(u=>registry.ArmyFor(u)!=id));
             }
@@ -301,13 +344,19 @@ namespace Spacewars.Tests.EditMode
         }
         private static OfflineMatchConfiguration DeliverySafetyConfiguration()
         {
-            var basis=A4NativeConfig();
-            // This witness supplies the CURRENT opening's two income buildings and
-            // possible mixed force; the historical A4 fixture has only one refinery.
-            var sites=new[]{new TerritorySite(1,PlayableBuildingKind.Headquarters,basis.Starts[0].Position,new[]{new TerritorySlot(1,new NavPoint(-24,-9),0),new TerritorySlot(2,new NavPoint(-14,0),0),new TerritorySlot(3,new NavPoint(-14,12),0)})}.Concat(basis.Sites.Where(x=>x.Id!=1)).ToArray();
-            // Seed4 currently requires two explorers and one tank; one explorer is the ordinary start.
-            var units=new[]{new OfflineScenarioUnit(1,PlayableEntityKind.Tank,new NavPoint(-5,-8)),new OfflineScenarioUnit(1,PlayableEntityKind.Explorer,new NavPoint(-3,-8))};
-            return new OfflineMatchConfiguration(basis.Profile,"delivery-safety-current-opening",basis.MapIdentity,basis.RouteProvenance,basis.Seed,basis.Roster.ToArray(),basis.Starts.ToArray(),sites,basis.Obstacles.ToArray(),new double[,]{{0,100},{100,0}},scenario:units,scenarioBuildings:basis.ScenarioBuildings.Concat(new[]{new OfflineScenarioBuilding(1,PlayableBuildingKind.Refinery,1,3,new NavPoint(-14,12))}).ToArray());
+            var basis=A4NativeConfig();var p=basis.Profile;
+            var enemySite=new TerritorySite(3,PlayableBuildingKind.Outpost,basis.Sites.Single(x=>x.Id==3).Position,p);
+            var mineSite=new TerritorySite(4,PlayableBuildingKind.Mine,new NavPoint(0,0),p);
+            var sites=new[]{new TerritorySite(1,PlayableBuildingKind.Headquarters,basis.Starts[0].Position,new[]{new TerritorySlot(1,new NavPoint(-24,-9),0),new TerritorySlot(2,new NavPoint(-14,0),0),new TerritorySlot(3,new NavPoint(-14,12),0)})}
+                .Concat(basis.Sites.Where(x=>x.Id!=1&&x.Id!=3)).Concat(new[]{enemySite,mineSite}).ToArray();
+            // Bind the actual Unity opening: three Explorers, including the starter.
+            var units=basis.ScenarioUnits.ToArray();
+            // Ready, actually visible native income removes the economic-lead guard
+            // premise without overriding personality, RNG or the ordinary strategy.
+            var income=enemySite.Slots.Where(slot=>slot.Id==2||slot.Id==3).Select(slot=>new OfflineScenarioBuilding(2,PlayableBuildingKind.Refinery,3,slot.Id,slot.Position,slot.Heading));
+            var buildings=basis.ScenarioBuildings
+                .Concat(income).Concat(new[]{new OfflineScenarioBuilding(2,PlayableBuildingKind.Mine,4,0,mineSite.Position)}).ToArray();
+            return new OfflineMatchConfiguration(p,"delivery-safety-current-opening",basis.MapIdentity,basis.RouteProvenance,basis.Seed,basis.Roster.ToArray(),basis.Starts.ToArray(),sites,basis.Obstacles.ToArray(),new double[,]{{0,100},{100,0}},scenario:units,scenarioBuildings:buildings);
         }
         [TestCase(0)][TestCase(1)][TestCase(2)] public void Reinforcement_DelayedDeliverySafetyKeepsOrdinaryWorldTickingAndPendingAction(int completion)
         {
@@ -318,16 +367,72 @@ namespace Spacewars.Tests.EditMode
             try{
                 using(var routes=new UnityHostRouteService()){
                     void Advance(){routes.Service(a,64);Assert.True(a.TryAdvance());}
-                    for(int i=0;i<300&&(!planner.Active||!a.CaptureDiagnosticCheckpoints().Single().Records.Any(r=>r.Policy==AiArmyPlanner.Policy&&r.Status==PlayableAiDeliveryStatus.Applied));i++)Advance();
-                    Assert.True(planner.Active);source.GetType().GetMethod("SpawnProduced",F).Invoke(source,new object[]{new NavPoint(-20,-8),(NavPoint?)null,PlayableOwner.Player,PlayableEntityKind.Tank});
+                    Assert.AreEqual(1,c.Seed,"Freeze the current actual opening seed; a changed derived seed needs a new premise review");
+                    Assert.AreEqual("6170fc2251cee9daaa8cf1f100451b36a3343f7c4349ef766255e1b08a03f543",AiProfile.Initial.Hash,"Bind the actual Unity AI profile before the first Advance");
+                    var executor=(AiOpeningExecutor)Field(owner,"openingExecutor");var registry=(AiArmyRegistry)Field(owner,"armies");
+                    var initial=a.ParticipantView("player-1");
+                    foreach(var unit in initial.Entities.Where(u=>u.Kind!=PlayableEntityKind.Hawk))Assert.True(source.Geometry.IsFree(unit.Position,PlayableUnitRules.Radius(c.Profile,unit.Kind)),"Native initial spawns must be free before first Advance");
+                    Assert.AreEqual(2,initial.Entities.Count(u=>u.Owner==initial.Owner&&u.Kind==PlayableEntityKind.Tank));
+                    Assert.AreEqual(3,initial.Entities.Count(u=>u.Owner==initial.Owner&&u.Kind==PlayableEntityKind.Explorer));
+                    PlayableAiTraceRecord offensiveEvent=null;long eventArmy=0;int eventTarget=0;
+                    var micro=(AiCombatMicroPolicy)Field(owner,"combatMicro");
+                    bool CurrentOffenseReady()
+                    {
+                        if(!planner.Active||!executor.AllowsPressure||!executor.Capture().InitialForceFulfilled)return false;
+                        var mission=planner.Capture();var state=registry.Capture();var army=state.Armies.SingleOrDefault(g=>g.Id==mission.ArmyId);
+                        if(state.OwnerId!="player-1"||state.Generation!=71||army==null||army.OwnerId!=state.OwnerId||!army.Major||army.Role!=AiArmyRole.Attack||
+                            army.Phase==AiArmyPhase.Disbanded||army.Phase==AiArmyPhase.Retreating||army.Phase==AiArmyPhase.Recovering||army.Phase==AiArmyPhase.Regrouping||mission.TargetKind!=PlayableRouteTargetKind.VisibleEnemy)return false;
+                        var o=PlayableAiObservation.From(a.ParticipantView("player-1"));
+                        var target=o.Buildings.Where(b=>b.Id==mission.TargetId&&o.IsHostile(b.Owner)&&b.Health>0).Select(b=>b.Position)
+                            .Concat(o.Entities.Where(u=>u.Id==mission.TargetId&&o.IsHostile(u.Owner)&&u.Health>0).Select(u=>u.Position)).ToArray();
+                        if(target.Length!=1||!mission.TargetVisible||o.Vision?.IsVisible(target[0])!=true)return false;
+                        var core=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&army.Members.Contains(u.Id)&&!army.Reinforcements.Contains(u.Id)&&AiRosterCatalog.Initial.LineWeight(u.Kind)>0&&
+                            !u.Held&&u.OrderStamp?.Origin!=PlayableOrderOrigin.Human).ToArray();
+                        if(core.Length<army.MinimumViableForce||!(bool)typeof(AiArmyPlanner).GetMethod("Viable",F).Invoke(planner,new object[]{core,c.Profile,AiProfile.Initial,0}))return false;
+                        var records=a.CaptureDiagnosticCheckpoints().Single().Records;
+                        bool BoundNativeAttack(PlayableEntitySnapshot u)
+                        {
+                            var stamp=u.OrderStamp;var order=u.CurrentOrder;var pendingOrder=u.Queue?.Pending;
+                            if(stamp==null||stamp.UnitId!=u.Id||stamp.Owner!=o.Owner||stamp.Generation!=o.Generation||stamp.Origin!=PlayableOrderOrigin.Ai||stamp.Kind!=PlayableCommandKind.Attack||
+                                stamp.Source!=PlayableAiOpeningComposition.SourceIdentity||stamp.ActionId<=0||stamp.JobId!=stamp.ActionId||stamp.Sequence<=0||stamp.Tick>o.Tick)return false;
+                            return order!=null&&order.Kind==PlayableTacticalOrderKind.Attack&&order.TargetId==mission.TargetId&&order.Owner==o.Owner&&order.Generation==o.Generation&&order.UnitId==u.Id&&order.CommandSequence==stamp.Sequence&&order.IssuedTick==stamp.Tick||
+                                u.Queue?.PendingAiRouteViable==true&&pendingOrder!=null&&pendingOrder.Kind==PlayableCommandKind.Attack&&pendingOrder.VisibleTargetId==mission.TargetId&&pendingOrder.AiActionId==stamp.ActionId&&pendingOrder.CommandSequence==stamp.Sequence;
+                        }
+                        if(offensiveEvent==null)
+                        {
+                            if(core.Any(u=>PlayableUnitRules.HealthRatio(c.Profile,u)<1))return false;
+                            offensiveEvent=records.FirstOrDefault(r=>r.Policy==AiArmyPlanner.Policy&&r.Kind==PlayableCommandKind.Attack&&r.Status==PlayableAiDeliveryStatus.Applied&&r.RuntimeStatus==PlayableCommandStatus.Applied&&
+                                r.OwnerId==o.OwnerId&&r.SourceIdentity==PlayableAiOpeningComposition.SourceIdentity&&r.ReceiptIdentity?.Generation==o.Generation&&r.ReceiptIdentity.OwnerId==o.OwnerId&&
+                                core.Any(u=>BoundNativeAttack(u)&&u.OrderStamp.ActionId==r.ActionId&&u.OrderStamp.Sequence==r.CommandSequence&&u.OrderStamp.Tick==r.ApplicationTick));
+                            if(offensiveEvent==null)return false;eventArmy=army.Id;eventTarget=mission.TargetId;
+                        }
+                        // The exact Applied event is latched once, independent of debug ring
+                        // retention. Current ownership/order certificates remain a separate gate.
+                        return army.Id==eventArmy&&mission.TargetId==eventTarget&&core.All(u=>BoundNativeAttack(u)||micro.CurrentOverride(o,army,u)||AiArmyPlanner.AssemblyFollow(o,army,u,records));
+                    }
+                    var initialObservation=PlayableAiObservation.From(initial);
+                    double SeenIncome(PlayableOwner side)=>initialObservation.Buildings.Where(b=>b.Owner==side&&b.Health>0&&b.Phase==ConstructionPhase.Ready).Sum(b=>TerritoryRules.Income(c.Profile,b.Kind));
+                    Assert.AreEqual(40,SeenIncome(initialObservation.Owner));Assert.AreEqual(40,SeenIncome(PlayableOwner.Enemy));Assert.False(AiOpponentSelector.KnownEconomicLead(initialObservation,c.Profile));
+                    for(int i=0;i<300&&!CurrentOffenseReady();i++)Advance();
+                    Assert.True(CurrentOffenseReady(),"The real current opening must yield an exact Applied offensive event and a current viable bound core before spawning a reinforcement");
+                    Assert.AreEqual(3,executor.RequiredForce);var desired=executor.DesiredForce(AiProfile.Initial,executor.RequiredForce);
+                    Assert.AreEqual(3,desired[PlayableEntityKind.Explorer]);Assert.False(desired.ContainsKey(PlayableEntityKind.Tank));
+                    TestContext.WriteLine($"DELIVERY_PREMISE seed={c.Seed} generation=71 ai={AiProfile.Initial.Id}@{AiProfile.Initial.Revision} hash={AiProfile.Initial.Hash} required={executor.RequiredForce} explorer={desired[PlayableEntityKind.Explorer]} tank=0 army={planner.Capture().ArmyId} target={planner.Capture().TargetId} phase={planner.Capture().Phase}");
+                    long originalArmy=planner.Capture().ArmyId;int originalTarget=planner.Capture().TargetId;
+                    source.GetType().GetMethod("SpawnProduced",F).Invoke(source,new object[]{new NavPoint(-18,-8),(NavPoint?)null,PlayableOwner.Player,PlayableEntityKind.Tank});
                     int wave=a.ParticipantView("player-1").Entities.Where(u=>u.Owner==PlayableOwner.Player&&u.Kind==PlayableEntityKind.Tank).Max(u=>u.Id);object pending=null;
                     for(int i=0;i<150&&pending==null;i++){
-                        Advance();pending=((System.Collections.IEnumerable)Field(owner,"pendingItems")).Cast<object>().FirstOrDefault(x=>(string)Field(x,"PolicyName")==AiArmyPlanner.Policy&&(((PlayableAiAction)Field(x,"Action")).Kind==PlayableCommandKind.Move||((PlayableAiAction)Field(x,"Action")).Kind==PlayableCommandKind.Follow)&&((PlayableAiAction)Field(x,"Action")).EntityIds.Contains(wave));
+                        Advance();var currentArmy=registry.Capture().Armies.SingleOrDefault(g=>g.Id==originalArmy);
+                        if(CurrentOffenseReady()&&planner.Capture().ArmyId==originalArmy&&planner.Capture().TargetId==originalTarget&&currentArmy!=null&&currentArmy.Reinforcements.Contains(wave))
+                            pending=((System.Collections.IEnumerable)Field(owner,"pendingItems")).Cast<object>().FirstOrDefault(x=>(string)Field(x,"PolicyName")==AiArmyPlanner.Policy&&(((PlayableAiAction)Field(x,"Action")).Kind==PlayableCommandKind.Move||((PlayableAiAction)Field(x,"Action")).Kind==PlayableCommandKind.Follow)&&((PlayableAiAction)Field(x,"Action")).EntityIds.Contains(wave));
                     }
                     TestContext.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(new{a.Tick,Wave=a.ParticipantView("player-1").Entities.Single(u=>u.Id==wave),Mission=planner.Capture(),Registry=((AiArmyRegistry)Field(owner,"armies")).Capture(),Pending=((System.Collections.IEnumerable)Field(owner,"pendingItems")).Cast<object>().Select(x=>new{Action=(PlayableAiAction)Field(x,"Action"),Policy=(string)Field(x,"PolicyName")}),Records=a.CaptureDiagnosticCheckpoints().Single().Records}));
                     Assert.NotNull(pending,"Actual policy must schedule a reinforcement Move.");
                     var action=(PlayableAiAction)Field(pending,"Action");long due=(long)Field(pending,"DueTick");
                     while(a.Tick<due-1)Advance();
+                    Assert.True(CurrentOffenseReady(),"Capture must retain the live hostile target, original offensive event and current viable certified core");
+                    Assert.AreEqual(originalArmy,planner.Capture().ArmyId);Assert.AreEqual(originalTarget,planner.Capture().TargetId);
+                    Assert.AreEqual(originalArmy,registry.ArmyFor(wave));Assert.Contains(wave,registry.Capture().Armies.Single(g=>g.Id==originalArmy).Reinforcements);
                     using(var state=a.CaptureWorldState(a.PublicationSequence,_=>0)){
                         // A current supported transport envelope around this exact live authority.
                         state.SetTransportCapture(w=>{w.Write(3);w.Write(false);w.Write(false);w.Write(0L);w.Write(0);w.Write(0L);w.Write(0);w.Write(0);w.Write(0);w.Write(false);});
@@ -370,18 +475,19 @@ namespace Spacewars.Tests.EditMode
             var c=A4NativeConfig(intrusion:intrusion,follow:follow);var a=new PlayableAuthorityTick(c,71);var owner=Owners(a).Single();var domain=Field(a,"domain");var registry=(AiArmyRegistry)Field(owner,"armies");var planner=(AiArmyPlanner)Field(owner,"armyPlanner");
             using(var routes=new UnityHostRouteService())
             {
-                for(int i=0;i<300&&(!planner.Active||!a.CaptureDiagnosticCheckpoints().Single().Records.Any(r=>r.Policy==AiArmyPlanner.Policy&&r.Status==PlayableAiDeliveryStatus.Applied));i++)NativeStep(a,routes);
-                Assert.True(planner.Active);domain.GetType().GetMethod("SpawnProduced",F).Invoke(domain,new object[]{new NavPoint(-20,-8),(NavPoint?)null,PlayableOwner.Player,PlayableEntityKind.Tank});
+                for(int i=0;i<300&&(!planner.Active||planner.Capture().TargetKind==PlayableRouteTargetKind.FriendlyAnchor||!planner.HasAppliedOrder);i++)NativeStep(a,routes);
+                Assert.True(planner.Active);domain.GetType().GetMethod("SpawnProduced",F).Invoke(domain,new object[]{new NavPoint(-12,-8),(NavPoint?)null,PlayableOwner.Player,PlayableEntityKind.Tank});
                 int wave=a.ParticipantView("player-1").Entities.Where(u=>u.Owner==PlayableOwner.Player&&u.Kind==PlayableEntityKind.Tank).Max(u=>u.Id);object pending=null;
                 int bound=follow?(int)AiProfile.SecondsToTicks(AiProfile.Initial.Value("armies.assemblyDeadlineSeconds"),30):150;
                 for(int i=0;i<bound&&pending==null;i++)
                 {NativeStep(a,routes);pending=((System.Collections.IEnumerable)Field(owner,"pendingItems")).Cast<object>().FirstOrDefault(x=>(string)Field(x,"PolicyName")==AiArmyPlanner.Policy&&((PlayableAiAction)Field(x,"Action")).Kind==(follow?PlayableCommandKind.Follow:PlayableCommandKind.Move)&&((PlayableAiAction)Field(x,"Action")).EntityIds.Contains(wave));}
+                if(pending==null)TestContext.WriteLine("Missing native leg "+Newtonsoft.Json.JsonConvert.SerializeObject(new{a.Tick,Wave=a.ParticipantView("player-1").Entities.Single(u=>u.Id==wave),Mission=planner.Capture(),Registry=registry.Capture(),Records=a.CaptureDiagnosticCheckpoints().Single().Records}));
                 Assert.NotNull(pending,"A real safe gather Move must be scheduled before the threat moves");var action=(PlayableAiAction)Field(pending,"Action");long due=(long)Field(pending,"DueTick");
                 Assert.True((bool)domain.GetType().GetMethod("ArmyMoveSafe",F).Invoke(domain,new object[]{action}),"Initial accepted path must actually be safe");
                 if(intrusion)
                 {
                     var enemy=a.ParticipantView("enemy-1").Entities.Single(u=>u.Owner==PlayableOwner.Enemy&&u.Kind==PlayableEntityKind.Tank);
-                    Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,1,"enemy-1",PlayableCommandKind.Move,new[]{enemy.Id},follow?new NavPoint(-5,-10):new NavPoint(-10.5,-8))).Status);
+                    Assert.AreEqual(PlayableCommandStatus.Applied,a.Apply(new PlayableCommand(71,1,"enemy-1",PlayableCommandKind.Move,new[]{enemy.Id},follow?new NavPoint(2,-10):new NavPoint(-4.5,-8))).Status);
                 }
                 var b=PlayableAuthorityTick.RestoreBytes(a.CaptureBytes(),c);ExactByteAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes());
                 while(a.Tick<due){NativeStep(a,routes);NativeStep(b,routes);ExactByteAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes());}

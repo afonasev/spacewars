@@ -589,7 +589,11 @@ namespace Spacewars.Runtime
         internal static readonly NavigationHostBodyExtension Instance=new NavigationHostBodyExtension();
         private NavigationHostBodyExtension(){}
         public NavOwnedStorage Read(NavPhysicalTag tag,NavPhysicalBodyReader reader)
-            =>tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostEnvelopePublication,value:NavPhysicalValueKind.AccruedAuthorityCreditsV1))?NavigationAccruedHostEnvelope.Read(reader):
+            =>tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostEnvelopePublication,value:NavPhysicalValueKind.MotionSourceV1))?NavigationMotionSource.Read(reader):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostEnvelopePublication,value:NavPhysicalValueKind.MotionRecordV1))?NavigationMotionRecord.Read(reader):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostEnvelopePublication,value:NavPhysicalValueKind.MotionSourcesV1))?NavigationMotionSources.Read(reader):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostEnvelopePublication,value:NavPhysicalValueKind.MotionEnvelopeV1))?NavigationMotionEnvelope.Read(reader):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostEnvelopePublication,value:NavPhysicalValueKind.AccruedAuthorityCreditsV1))?NavigationAccruedHostEnvelope.Read(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostRootFairArrivalV1,value:NavPhysicalValueKind.AccruedAuthorityCreditsV1))?NavigationHostRoot.ReadPhysicalBody(reader,false,true,false,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.HostEnvelopeTraffic))?NavigationHostEnvelope.ReadPhysicalBody(reader,traffic:true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.TrafficAuthority))?NavigationTrafficAuthority.ReadPhysicalBody(reader):

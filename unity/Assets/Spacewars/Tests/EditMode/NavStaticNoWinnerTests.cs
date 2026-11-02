@@ -22,7 +22,7 @@ namespace Spacewars.Tests.EditMode
             =>new NavMotionBody{Id=id,Position=position,Target=target,Heading=heading,Radius=.72,Speed=4,TurnSpeed=4.5,Active=active};
 
         [Test]
-        public void StaticNoWinnerRequiresUnchangedHeadingNoOverflowAndNoActiveNeighbor()
+        public void StaticNoWinnerRequiresUnchangedHeadingNoOverflowRegardlessOfActiveNeighbor()
         {
             const double dt=1d/30d;var profile=NavigationProfile.Default;var geometry=new NavGeometry(20,Array.Empty<NavObstacle>(),1);
             var body=Body(1,new NavPoint(0,0),new NavPoint(4,0),0);var bodies=new[]{body};var neighbors=new int[NavCrowdMotion.NeighborCapacity];var clearance=new GeometryClearance(geometry,body.Position,body.Radius);
@@ -37,7 +37,7 @@ namespace Spacewars.Tests.EditMode
 
             body=Body(1,new NavPoint(0,0),new NavPoint(4,0),0);bodies=new[]{body,Body(2,new NavPoint(1.5,0),new NavPoint(2.5,0),0)};
             neighbors[0]=1;proposal=NavCrowdMotion.Select(bodies,0,neighbors,1,profile,dt,new SingleEndpointClearance(new NavPoint(-4*dt,0)));
-            Assert.False(proposal.Blocked);Assert.False(proposal.StaticNoWinner,"an active peer moving away retains the existing no-winner wait lifecycle");Assert.AreEqual(body.Position,proposal.Position);Assert.AreEqual(0,NavCrowdMotion.Length(proposal.Velocity));Assert.AreEqual(body.Heading,proposal.Heading);
+            Assert.False(proposal.Blocked);Assert.True(proposal.StaticNoWinner,"an aligned exhausted choice reaches bounded recovery even when a peer is active");Assert.AreEqual(body.Position,proposal.Position);Assert.AreEqual(0,NavCrowdMotion.Length(proposal.Velocity));Assert.AreEqual(body.Heading,proposal.Heading);
 
             proposal=NavCrowdMotion.Select(bodies,0,neighbors,-1,profile,dt,clearance);
             Assert.True(proposal.Overflow);Assert.False(proposal.StaticNoWinner);

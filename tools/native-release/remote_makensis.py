@@ -2,7 +2,8 @@
 """NSIS compiler fallback on the configured VPS; private temporary packaging only."""
 import os,pathlib,shlex,subprocess,sys
 args=sys.argv[1:];values={a[2:].split('=',1)[0]:a[2:].split('=',1)[1] for a in args if a.startswith('-D') and '=' in a}
-if set(values)-{'APPNAME'}!={'PAYLOAD','OUTFILE','VERSION','RELEASE'} or values.get('APPNAME','Spacewars') not in {'Spacewars','Spacewars Test'}:raise ValueError('expected only approved packaging parameters')
+if set(values)-{'APPNAME','LZMA_DICT_MB'}!={'PAYLOAD','OUTFILE','VERSION','RELEASE'} or values.get('APPNAME','Spacewars') not in {'Spacewars','Spacewars Test'}:raise ValueError('expected only approved packaging parameters')
+if values.get('LZMA_DICT_MB','64') not in {'8','32','64'}:raise ValueError('unsupported LZMA dictionary size')
 source=pathlib.Path(args[-1]).resolve();payload=pathlib.Path(values['PAYLOAD']).resolve();output=pathlib.Path(values['OUTFILE']).resolve();host='gfe'
 def ssh(command,**kw):return subprocess.check_output(['ssh','-o','BatchMode=yes','-o','ConnectTimeout=15',host,command],**kw)
 remote=ssh('mktemp -d /var/tmp/spacewars-native-package-XXXXXXXX',text=True).strip()
@@ -15,7 +16,7 @@ try:
  if receiver.returncode or tar.wait():raise RuntimeError('payload transfer failed: '+stderr.decode())
  ssh('cat > '+shlex.quote(remote+'/installer.nsi'),input=source.read_bytes())
  # NSIS writes a large uncompressed intermediate too; the host /tmp is a small tmpfs.
- command=['env','TMPDIR='+remote,'makensis','-V2','-DPAYLOAD='+remote+'/payload','-DOUTFILE='+remote+'/Spacewars.exe','-DVERSION='+values['VERSION'],'-DRELEASE='+values['RELEASE'],'-DAPPNAME='+values.get('APPNAME','Spacewars'),remote+'/installer.nsi']
+ command=['env','TMPDIR='+remote,'makensis','-V2','-DPAYLOAD='+remote+'/payload','-DOUTFILE='+remote+'/Spacewars.exe','-DLZMA_DICT_MB='+values.get('LZMA_DICT_MB','64'),'-DVERSION='+values['VERSION'],'-DRELEASE='+values['RELEASE'],'-DAPPNAME='+values.get('APPNAME','Spacewars'),remote+'/installer.nsi']
  print(ssh(shlex.join(command),text=True))
  subprocess.check_call(['scp',host+':'+remote+'/Spacewars.exe',str(output)])
 finally:

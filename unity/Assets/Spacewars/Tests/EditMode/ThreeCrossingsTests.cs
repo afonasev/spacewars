@@ -12,7 +12,7 @@ namespace Spacewars.Tests.EditMode
         private static PlayableProfile Profile=>PlayableProfile.ThreeCrossingsDefault;
         [Test] public void SitesAndOddSlotRingsAreRotationallyEquivalent()
         {
-            var p=Profile;var sites=TerritoryRules.Sites(p);Assert.AreEqual(10,sites.Length);Assert.AreEqual(6,sites.Count(s=>s.Kind==PlayableBuildingKind.Mine));
+            var p=Profile;var sites=TerritoryRules.Sites(p);Assert.AreEqual(10,sites.Length);Assert.AreEqual(4,sites.Count(s=>s.Kind==PlayableBuildingKind.Mine));Assert.AreEqual(2,sites.Count(s=>s.Kind==PlayableBuildingKind.RelayTower));Assert.True(sites.Where(s=>s.Kind==PlayableBuildingKind.RelayTower).Select(s=>s.Id).SequenceEqual(new[]{7,8}));
             for(int i=0;i<sites.Length;i+=2){var a=sites[i];var b=sites[i+1];Assert.AreEqual(a.Kind,b.Kind);Assert.AreEqual(-a.Position.X,b.Position.X);Assert.AreEqual(-a.Position.Z,b.Position.Z);for(int j=0;j<a.Slots.Count;j++){Assert.AreEqual(-a.Slots[j].Position.X,b.Slots[j].Position.X,1e-9);Assert.AreEqual(-a.Slots[j].Position.Z,b.Slots[j].Position.Z,1e-9);}}
             TerritoryRules.ValidateArena(p);
         }

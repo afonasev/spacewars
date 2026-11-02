@@ -9,6 +9,9 @@ namespace Spacewars.Presentation
     {
         public string id="split-screen-hud-v1";
         public int revision=1;
+        [SurfaceSetting("Камера бота","Скорость перехода","Скорость перевода камеры к месту последнего применённого приказа.","м/с",1,200,1)] public float botCameraSpeed=45;
+        [SurfaceSetting("Камера бота","Пауза между переводами","Минимальное время показа одного места активности.","с",0,5,.1f)] public float botCameraHold=1;
+
         [SurfaceSetting("Разделители экранов","Толщина","Ширина видимой линии между локальными viewport.","px",1,6,1)] public float thickness=3;
         [SurfaceSetting("Разделители экранов","Зазор у миникарты","Расстояние от конца линии до внешней рамки общей миникарты.","px",2,12,1)] public float minimapGap=4;
         public IEnumerable<SurfaceParameter> Parameters()

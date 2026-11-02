@@ -43,6 +43,7 @@ namespace Spacewars.Tests.EditMode
             int future=Build(d,1002);Assert.AreEqual(reinforced.MaxHealth,Tower(d,future).MaxHealth);Assert.AreEqual(reinforced.MaxHealth,Tower(d,future).Health);
             var at=reinforced.Position;int target=Unit(d,new NavPoint(at.X+3,at.Z),80);double initial=Hp(d,target);
             Heal(d,1);Assert.AreEqual(initial+4,Hp(d,target),1e-9);
+            Research(PlayableResearchKind.ScientificCenterUpgrade);
             foreach(var kind in new[]{PlayableResearchKind.ImprovedWeaponSystems,PlayableResearchKind.AdvancedWeaponSystems})
             {
                 Research(kind);double hp=Hp(d,target);Heal(d,1);Assert.AreEqual(hp+4,Hp(d,target),1e-9,"Weapon research cannot change the repair rate, including overlapping tower coverage.");

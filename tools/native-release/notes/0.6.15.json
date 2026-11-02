@@ -1,0 +1,109 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "category_ru": "Карты",
+      "category_en": "Maps",
+      "ru": "Добавлена городская карта Nova City с кварталами, улицами и проходами между зданиями.",
+      "en": "Added the Nova City urban map with city blocks, streets and passages between buildings."
+    },
+    {
+      "category_ru": "Карты",
+      "category_en": "Maps",
+      "ru": "На карте «Три переправы» появились захватываемые ретрансляторы дохода; при выборе отображается радиус захвата.",
+      "en": "Three Crossings now has capturable income relays, with capture radius shown on selection."
+    },
+    {
+      "category_ru": "Орбитальная поддержка",
+      "category_en": "Orbital support",
+      "ru": "Добавлена персональная эскалация до шестого уровня MAX с пятью слотами выбора поддержки.",
+      "en": "Added per-player escalation up to level six MAX with five support choice slots.",
+      "images": [
+        {
+          "path": "tools/native-release/notes/media/0.6.15-escalation-max.png",
+          "source_commit": "48adce553c99e12c707c0b6ee07e93aff7a7d003",
+          "ru": "Панель MAX для четырёх игроков: реальный Editor-кадр при подготовке версии, ревизия 48adce553.",
+          "en": "Four-player MAX panel: actual Editor capture during release preparation, revision 48adce553."
+        }
+      ]
+    },
+    {
+      "category_ru": "Орбитальная поддержка",
+      "category_en": "Orbital support",
+      "ru": "Сканирование открывает выбранную область игроку и его союзникам и показывает световой луч с расходящимися волнами.",
+      "en": "Scanning reveals the selected area to the player and allies, with a light beam and expanding waves."
+    },
+    {
+      "category_ru": "Орбитальная поддержка",
+      "category_en": "Orbital support",
+      "ru": "Мина-ловушка даёт обзор и взрывается при приближении врага.",
+      "en": "Trap mines provide vision and detonate when an enemy approaches."
+    },
+    {
+      "category_ru": "Орбитальная поддержка",
+      "category_en": "Orbital support",
+      "ru": "«Взлом управления» захватывает видимую вражескую шахту или повреждённого юнита; добавлены уведомления о потере контроля.",
+      "en": "Control Hack captures a visible enemy mine or damaged unit; ownership loss notifications have been added."
+    },
+    {
+      "category_ru": "Интерфейс и управление",
+      "category_en": "Interface and controls",
+      "ru": "Панель эскалации размещается у внешнего края области игрока; карточка одиночного юнита по умолчанию свёрнута.",
+      "en": "The escalation panel sits at the outer edge of each player viewport; single-unit details are collapsed by default."
+    },
+    {
+      "category_ru": "Интерфейс и управление",
+      "category_en": "Interface and controls",
+      "ru": "В лобби можно назначать экранные позиции игроков и автоматически распределять виды ботов.",
+      "en": "The lobby supports player screen positions and automatic bot perspectives."
+    },
+    {
+      "category_ru": "Интерфейс и управление",
+      "category_en": "Interface and controls",
+      "ru": "Обновлены портреты юнитов, значки улучшений, ремонта, продажи, точки сбора и мины-ловушки.",
+      "en": "Updated unit portraits and icons for upgrades, repair, sale, rally points and trap mines."
+    },
+    {
+      "category_ru": "Лаборатория и полигон",
+      "category_en": "Laboratory and proving ground",
+      "ru": "Лаборатория разделена на тематические разделы; для эскалации выделен отдельный раздел с настройками способностей.",
+      "en": "The laboratory is organized by subject, with a dedicated escalation section for ability settings."
+    },
+    {
+      "category_ru": "Лаборатория и полигон",
+      "category_en": "Laboratory and proving ground",
+      "ru": "Уточнены управление на полигоне и отображение прочности шасси; боевые характеристики округляются единообразно.",
+      "en": "Refined proving-ground controls and chassis health display; combat statistics now use consistent rounding."
+    },
+    {
+      "category_ru": "Производство и бой",
+      "category_en": "Production and combat",
+      "ru": "Для производства «Шквала» нужен научный центр; исследование наведения восстанавливает полный радиус взрыва.",
+      "en": "Shkval production requires a scientific center; Guidance research restores its full blast radius."
+    },
+    {
+      "category_ru": "Производство и бой",
+      "category_en": "Production and combat",
+      "ru": "Скорость выезда техники с завода увеличена до 3 м/с.",
+      "en": "Factory rollout speed has increased to 3 m/s."
+    },
+    {
+      "category_ru": "Компьютерные соперники и движение",
+      "category_en": "Computer opponents and movement",
+      "ru": "Обновлены выбор исследований ИИ, финансирование развития и приоритет готового заказа артиллерии перед повторным выпуском разведчиков.",
+      "en": "Updated AI research selection, development funding and priority for ready artillery demand over repeated scout production."
+    },
+    {
+      "category_ru": "Компьютерные соперники и движение",
+      "category_en": "Computer opponents and movement",
+      "ru": "Обновлены присоединение подкреплений, следование за группой, перегруппировка после потери ядра и направление повреждённых юнитов на ремонт.",
+      "en": "Updated reinforcement joining, group following, regrouping after core loss and repair assignments for damaged units."
+    },
+    {
+      "category_ru": "Установка и обновление",
+      "category_en": "Installation and updates",
+      "ru": "Установщики используют улучшенное сжатие без потери качества игровых ресурсов.",
+      "en": "Installers use improved lossless compression without reducing game asset quality."
+    }
+  ]
+}

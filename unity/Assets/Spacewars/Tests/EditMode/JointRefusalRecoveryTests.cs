@@ -7,6 +7,29 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class JointRefusalRecoveryTests
     {
+        [TestCase(false)][TestCase(true)] public void AlignedSelectedStepDoesNotIntersectActualStationaryPeer(bool detour)
+        {
+            // Actual ordinary13 pre-clear pose/headings and peer28 holding pose.
+            // Isolate the full-dt static-footprint invariant from forecast ranking.
+            var position=new NavPoint(11.252490540005116,44.92127384954596);
+            var bodies=new[]{new NavMotionBody{Id=13,Position=position,Target=detour?new NavPoint(11.852490540005116,45.121273849545965):new NavPoint(8,34.98857024149607),Heading=detour?-.07094852730207757:-1.8872450004729222,Radius=.58,Speed=detour?2.189948064565504:1.8583292191710978,TurnSpeed=7.5,Active=true},new NavMotionBody{Id=28,Position=new NavPoint(11.6,43.8),Radius=.58,Active=false,Potential=true,Speed=7}};
+            bodies=bodies.Concat(new[]{new NavMotionBody{Id=19,Position=new NavPoint(12.56227293752776,46.24439643871587),Radius=.58},new NavMotionBody{Id=18,Position=new NavPoint(11.6,42.638256161968116),Radius=.58},new NavMotionBody{Id=31,Position=new NavPoint(12.43077945288659,47.4),Radius=.58},new NavMotionBody{Id=16,Position=new NavPoint(12.523042969250717,48.561099980850436),Radius=.58}}).ToArray();
+            var neighbors=new int[bodies.Length*NavCrowdMotion.NeighborCapacity];for(int k=1;k<bodies.Length;k++)neighbors[k-1]=k;var profile=PlayableProfile.RecastGroupCorridorDefault.Navigation;
+            var map=ThreeCrossingsMap.Default;var clearance=new NavCrowd(new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision),profile,map);
+            var unit=clearance.Add(13,position,.58,7,7.5,new NavLocation(position,"bank/east"));unit.ReplaceRoute(new[]{new NavPoint(8,34.98857024149607)});unit.Moving=true;unit.Goal=new NavPoint(-16,25.8);if(detour)unit.localRoute=new[]{bodies[0].Target};
+            var proposal=NavCrowdMotion.Select(bodies,0,neighbors,bodies.Length-1,profile,1d/30,clearance,new NavPoint(-16,25.8));
+            Assert.GreaterOrEqual(NavCrowdMotion.ClosestSquared(new NavPoint(position.X-bodies[1].Position.X,position.Z-bodies[1].Position.Z),proposal.Velocity,1d/30),Math.Pow(1.16,2)-1e-9,"A terrain-clear aligned candidate must also clear the actual stationary footprint, before Joint retracts it.");
+            Assert.LessOrEqual(NavCrowdMotion.Length(proposal.Velocity),bodies[0].Speed+1e-12);Assert.LessOrEqual(Math.Abs(NavCrowdMotion.Angle(proposal.Heading-bodies[0].Heading)),bodies[0].TurnSpeed/30+1e-12);
+        }
+        sealed class RetreatClearance:INavMotionClearance {public bool ClearMotion(int actor,NavPoint end)=>end.X<=0&&Math.Abs(end.Z)<1e-10;}
+        [TestCase(false)][TestCase(true)] public void ActivePeerDoesNotHideAnAlignedExhaustedLocalChoice(bool activePeer)
+        {
+            var bodies=new[]{new NavMotionBody{Id=13,Position=default,Target=new NavPoint(10,0),Radius=.58,Speed=7,TurnSpeed=7.5,Active=true},new NavMotionBody{Id=28,Position=new NavPoint(-10,10),Target=new NavPoint(-10,12),Radius=.58,Speed=7,Active=activePeer}};
+            var neighbors=new int[2*NavCrowdMotion.NeighborCapacity];neighbors[0]=1;
+            var q=NavCrowdMotion.Select(bodies,0,neighbors,1,PlayableProfile.RecastGroupCorridorDefault.Navigation,1d/30,new RetreatClearance(),bodies[0].Target);
+            Assert.False(q.Blocked,"A terrain-clear retreat direction exists.");Assert.Zero(q.Heading);Assert.AreEqual(default(NavPoint),q.Velocity);
+            Assert.True(q.StaticNoWinner,"A distant active peer cannot turn an aligned no-winner into an indefinite voluntary wait.");
+        }
         [Test] public void ProvenanceRequiresActuallyRejectedTranslationAndIsFreshPerSelection()
         {
             var bodies=new[]{new NavMotionBody{Id=1,Position=new NavPoint(-1,0),Radius=.72,Active=true},new NavMotionBody{Id=2,Position=new NavPoint(1,0),Radius=.72,Active=true}};

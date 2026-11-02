@@ -15,7 +15,7 @@ namespace Spacewars.Presentation
         private VisualElement signalWorldLayer,signalModalPanel,signalHints;
         private TeamSignalWheel signalWheel;
         private readonly HashSet<long> heardTeamSignals=new HashSet<long>();
-        private bool CanSignal=>view!=null&&!view.OwnerEliminated&&!spectatorMode&&matchSetup?.Spectator!=true&&!paused&&!chatOpen&&!MenuOwnsInput&&!ProvingPreparation&&input?.CommandInputEnabled==true&&view.Outcome==PlayableMatchOutcome.Playing&&localInputFocused;
+        private bool CanSignal=>!scanTargeting&&!orbitalOpen&&view!=null&&!view.OwnerEliminated&&!spectatorMode&&matchSetup?.Spectator!=true&&!paused&&!chatOpen&&!MenuOwnsInput&&!ProvingPreparation&&input?.CommandInputEnabled==true&&view.Outcome==PlayableMatchOutcome.Playing&&localInputFocused;
         private void EnsureTeamSignalUi()
         {
             if(signalWorldLayer!=null)return;

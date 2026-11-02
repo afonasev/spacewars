@@ -585,9 +585,11 @@ namespace Spacewars.Simulation
                         saved.Connector));
                 }
                 if(saved.Demand!=null)job.AdoptDemand(NavDemandQueryWork.RestoreWithAliases(first,saved.Demand,corridorRestores));
-                if (saved.Singleton != null)
-                    job.AdoptSingleton(NavIncrementalSingletonRoute.Restore(job.Graph,
-                        job.Subscribers.First.Subscription, saved.Singleton, first.MaxLabels,first.Query?first.Region:null));
+                if (saved.Singleton != null) {
+                    bool flat=saved.Singleton.Version==4;
+                    if(flat&&(job.Phase!=JobPhase.Connectors||job.Graph!=null||job.Compiler!=null||job.CompletedCompiler!=null||job.Field!=null||job.Connector!=null||job.Demand!=null||job.GraphDebt!=0||job.FieldDebt!=0||!NavIncrementalSingletonRoute.FlatEligible(first)))throw new ArgumentException("Flat logical job has legacy graph payload.");
+                    job.AdoptSingleton(flat?NavIncrementalSingletonRoute.RestoreFlat(first,saved.Singleton):NavIncrementalSingletonRoute.Restore(job.Graph,job.Subscribers.First.Subscription,saved.Singleton,first.MaxLabels,first.Query?first.Region:null));
+                }
                 if(job.Phase==JobPhase.PartialFieldProbePaid&&(!ValidPartialProbeJob(job)||scheduler.connectorWork==0||scheduler.lastEpoch<0))throw new ArgumentException("Invalid paid partial-field checkpoint.");
                 job.QueueNode=scheduler.jobs.NextId;job.Seal();scheduler.jobs.AddLast(job); job.Release(); scheduler.jobsByKey.Add(NavNameKey.Artifact(first), job.QueueNode,first.StorageRoot);
             }
@@ -949,6 +951,10 @@ namespace Spacewars.Simulation
                             job.DirectRoute = route; job.Phase = JobPhase.Connectors;
                             if (used == before) break;
                         }
+                    } else if(NavIncrementalSingletonRoute.FlatEligible(request)&&HasRoom(NavIncrementalSingletonRoute.FlatInitialStorageBytes)) {
+                        // Only a fresh failed Direct job selects this explicit mode.
+                        // Saved Graph jobs keep their original solver and paid suffix.
+                        job.AdoptSingleton(rootReservation==null?NavIncrementalSingletonRoute.CreateFlat(request):NavIncrementalSingletonRoute.CreateOwnedFlat(request,OwnedRootReservation));job.Phase=JobPhase.Connectors;
                     } else job.Phase = JobPhase.Graph;
                     }finally{route?.ReleaseOwner();}UpdatePeak(); continue;
                 }
@@ -1098,6 +1104,18 @@ namespace Spacewars.Simulation
                     int before = used;
                     if (!CompleteCurrent(job, NavSolveStatus.Ready, job.DirectRoute, ref used, maxSteps) && used == before) break;
                     continue;
+                }
+                if(job.Singleton?.IsFlat==true){
+                    bool graphLane=job.Singleton.FlatNeedsGraph;
+                    if(graphLane?graphQuota==0:connectorQuota==0)break;
+                    if(!HasRoom(job.Singleton.NextGrowthBytes)){if(TryMaintenanceEviction())continue;RetentionBlocked=true;break;}
+                    if(ReferenceEquals(job.Singleton,sourceJob.Singleton))job.PrepareSingleton(RootAdmission);
+                    if(job.Singleton.Status==NavSolveStatus.Pending){
+                        if(graphLane){graphQuota--;logicalGraph++;physicalGraph++;job.GraphWork++;}else{connectorQuota--;connectorWork++;}used++;
+                        job.Singleton.StepFlat(graphLane);
+                    }else{if(bookkeepingQuota==0)break;SpendBookkeeping();used++;}
+                    if(job.Singleton.Status!=NavSolveStatus.Pending){int before=used;if(!CompleteCurrent(job,job.Singleton.Status,job.Singleton.Route,ref used,maxSteps)&&used==before)break;}
+                    UpdatePeak();continue;
                 }
                 if (UsesSingleton(job)) {
                     if (connectorQuota == 0) break;

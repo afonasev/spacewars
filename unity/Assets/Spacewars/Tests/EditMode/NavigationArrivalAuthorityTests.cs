@@ -35,6 +35,21 @@ namespace Spacewars.Tests.EditMode
                     TestContext.WriteLine("SOLVER "+typeof(NavigationArrivalWork).GetProperty("RetentionBreakdown",F).GetValue(w));
                 }
             }Assert.AreEqual(0,nav.PendingCount);}
+        [Test] public void OwnInstalledNearReplacementKeepsTheLedgerAndColdRestoresBeforePublication()
+        {
+            int actor=Spawn(-18,-14);var oldGoal=new NavPoint(-10,-14);var nextGoal=new NavPoint(-10,-13.5);
+            Move(new[]{actor},oldGoal);Complete();
+            var installed=nav.ArrivalReservations.Single(r=>r.Entity==actor);long oldRequest=installed.Request;
+            Assert.AreEqual(NavArrivalReservationKind.InstalledExecution,installed.State);
+            Move(new[]{actor},nextGoal);
+            Assert.AreEqual(oldRequest,nav.ArrivalReservations.Single(r=>r.Entity==actor).Request,"Replacement must not globally release the old reservation");
+            byte[] bytes=Bytes();RestoreOnlyBytes(bytes);CollectionAssert.AreEqual(bytes,Bytes());
+            Complete();
+            var replacement=nav.ArrivalReservations.Single(r=>r.Entity==actor);
+            Assert.Greater(replacement.Request,oldRequest);Assert.AreEqual(nextGoal,replacement.Endpoint.Position);
+            Assert.AreEqual(NavArrivalReservationKind.InstalledExecution,replacement.State);
+            Assert.AreEqual(nextGoal,nav.Crowd.Units.Single(u=>u.Id==actor).Goal);
+        }
         [Test] public void ActualCommandAllocatesWithoutRequestsAndFreshWorldBytesPreserveIdentity()
         {
             int a=Spawn(-18,-14),b=Spawn(-22,-14);Move(new[]{a,b},new NavPoint(-10,-14));
@@ -354,13 +369,19 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void UnreachableFirstCandidateUsesLaterReachableTypedEndpoint()
         {
+            // This control pumps the certified-flat kernel, not the production
+            // Recast default. Retain its original backend and exact restore.
+            host.Clear();Call("DestroyOwnedNavigation");
+            var terms=PlayableProfile.Default.CopyData();terms.groundRouteBackend=0;var profile=PlayableProfile.Create(terms);
+            domain=Activator.CreateInstance(Domain,F,null,new object[]{profile,1L,false},null);
+            nav=(NavigationSession)Domain.GetProperty("Navigation",F).GetValue(domain);host=new CertifiedRouteKernel();
             int id=Spawn(-18,-14);var requested=new NavPoint(-10,-14);
             var holders=Enumerable.Range(0,12).Select(n=>Spawn(requested.X+4*Math.Cos(n*Math.PI/6),requested.Z+4*Math.Sin(n*Math.PI/6))).ToArray();
             Stop(holders,hold:true);
             Move(new[]{id},requested);nav.PrepareDeliveryBarrier();Complete();Assert.AreEqual(1,nav.AppliedResults);
             var row=nav.ArrivalReservations.Single();Assert.AreNotEqual(requested,row.Endpoint.Position);Assert.Less(row.Endpoint.Position.X,-14);
             Assert.AreEqual(NavLocation.FlatSurface,row.Endpoint.SurfaceId);Assert.IsNotEmpty(row.Proof);Assert.False(Interrupted(id,"Active"));
-            byte[] bytes=Bytes();RestoreOnlyBytes(bytes);CollectionAssert.AreEqual(bytes,Bytes());Assert.AreEqual(row.Proof,nav.ArrivalReservations.Single().Proof);
+            byte[] bytes=Bytes();RestoreOnlyBytes(bytes,profile);CollectionAssert.AreEqual(bytes,Bytes());Assert.AreEqual(row.Proof,nav.ArrivalReservations.Single().Proof);
         }
         [Test] public void ExactCombinedRetentionBoundaryDoesNotRefillOrJournalEmptyRetryAndReleaseResumes()
         {

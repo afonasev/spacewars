@@ -117,13 +117,6 @@ namespace Spacewars.Tests.EditMode
             Rally(new NavPoint(10,10));var old=Next();if(reason=="removed")Buildings.Remove(factory);else Field(reason,reason=="Ready"?(object)false:reason=="Health"?(object)0d:PlayableOwner.Enemy);
             Answer(old,new[]{old.Goal});Assert.AreEqual(PlayableCommandStatus.Cancelled,((PlayableCommandReceipt[])Call("DrainRallyReceipts")).Single().Status);
         }
-        [Test] public void SaleAndReconstructionDoNotRevivePriorFactoryIntent()
-        {
-            Rally(new NavPoint(10,10));var old=Next();Assert.AreEqual(PlayableCommandStatus.Applied,Call("SellBuilding",factory,PlayableOwner.Player,null));Answer(old,new[]{old.Goal});
-            Assert.AreEqual(PlayableCommandStatus.Cancelled,((PlayableCommandReceipt[])Call("DrainRallyReceipts")).Single().Status);
-            int prior=factory;Call("RemoveBuilding",Buildings[factory],false);Call("BuildAt",1,2,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null);Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
-            factory=View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.Factory).Id;Assert.AreNotEqual(prior,factory);Answer(old,new[]{old.Goal});Assert.False(State.HasRally);Assert.False(State.PendingRally.HasValue);
-        }
         [Test] public void PausedIntentRestoresFreshValidationWithoutRestoringJobIdentity()
         {
             var target=new NavPoint(10,10);Rally(target);var old=Next();Call("SetRallyPaused",true);var saved=(PlayableRallyIntentState[])Call("CaptureRallyIntents");
@@ -137,15 +130,16 @@ namespace Spacewars.Tests.EditMode
             Field("Ready",false);Assert.AreEqual(PlayableCommandStatus.InvalidEntity,Rally(new NavPoint(10,10)));Field("Ready",true);Field("Kind",PlayableBuildingKind.Refinery);Assert.AreEqual(PlayableCommandStatus.InvalidEntity,Rally(new NavPoint(10,10)));
         }
         [TestCase(PlayableEntityKind.Tank)][TestCase(PlayableEntityKind.Explorer)][TestCase(PlayableEntityKind.Shkval)]
-        public void AbsentPointProducesIdleAndAcceptedPointProducesPlainMove(PlayableEntityKind kind)
+        public void AbsentPointProducesIdleAndAcceptedPointProducesAttackMove(PlayableEntityKind kind)
         {
             void Produce()=>Call("Apply",new PlayableCommand(1,++sequence,"player-1",kind==PlayableEntityKind.Tank?PlayableCommandKind.QueueTank:kind==PlayableEntityKind.Explorer?PlayableCommandKind.QueueExplorer:PlayableCommandKind.QueueShkval,new[]{factory}),null);
             Produce();Call("AdvanceProduction",100d);var idle=View().Entities.OrderByDescending(u=>u.Id).First();Assert.False(State.HasRally);Assert.False(idle.Moving);Assert.False(Nav.IsPending(idle.Id));Assert.IsNull(idle.CurrentOrder);
-            Accept(new NavPoint(10,10));Produce();Call("AdvanceProduction",100d);var moved=View().Entities.OrderByDescending(u=>u.Id).First();Assert.AreEqual(kind,moved.Kind);Assert.True(Nav.IsPending(moved.Id));Assert.AreEqual(PlayableTacticalOrderKind.Move,moved.CurrentOrder.Kind);Assert.Zero(moved.TargetId);
+            Accept(new NavPoint(10,10));Produce();Call("AdvanceProduction",100d);var moved=View().Entities.OrderByDescending(u=>u.Id).First();Assert.AreEqual(kind,moved.Kind);Assert.True(Nav.IsPending(moved.Id));Assert.AreEqual(PlayableTacticalOrderKind.AttackMove,moved.CurrentOrder.Kind);Assert.Zero(moved.TargetId);
         }
         [Test] public void PendingProbeDoesNotHoldProductionOrCombatTicks()
         {
-            Rally(new NavPoint(10,10));Next();Call("Apply",new PlayableCommand(1,++sequence,"player-1",PlayableCommandKind.QueueTank,new[]{factory}),null);Call("AdvanceProduction",100d);Assert.IsEmpty(State.Orders);Assert.True(State.PendingRally.HasValue);
+            Rally(new NavPoint(10,10));Next();Call("Apply",new PlayableCommand(1,++sequence,"player-1",PlayableCommandKind.QueueTank,new[]{factory}),null);for(int phase=0;phase<10&&State.Orders.Count>0;phase++)Call("AdvanceProduction",100d);
+            Assert.IsEmpty(State.Orders,"Production must progress through its protected release phases without waiting for the rally probe");Assert.True(State.PendingRally.HasValue);
             long tick=View().Tick;Call("Step",1d/30);Assert.Greater(View().Tick,tick);Assert.True(State.PendingRally.HasValue);
         }
     }

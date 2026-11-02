@@ -49,7 +49,7 @@ namespace Spacewars.Presentation
             if(HideEvents)return;
             foreach(var f in events.Where(f=>visible.Contains(f.Owner)).OrderBy(f=>f.Seconds).ThenBy(f=>f.Sequence))
             {
-                var pt=Point(new Vector2((float)f.Seconds,(float)eventValue(f)));var bounds=new Rect(Mathf.Clamp(pt.x-9,0,Math.Max(0,contentRect.width-23)),pt.y+7,23,23);
+                var pt=Point(new Vector2((float)f.Seconds,(float)eventValue(f)));var bounds=new Rect(Mathf.Clamp(pt.x-9,0,Math.Max(0,contentRect.width-43)),pt.y+7,43,23);
                 var overlaps=Stacks.Where(s=>s.Anchor==null&&s.Bounds.Overlaps(bounds)).ToArray();var stack=overlaps.FirstOrDefault();
                 if(stack==null){stack=new EventStack{Bounds=bounds};Stacks.Add(stack);}
                 else{stack.Bounds=Union(stack.Bounds,bounds);foreach(var merge in overlaps.Skip(1)){stack.Facts.AddRange(merge.Facts);stack.Bounds=Union(stack.Bounds,merge.Bounds);Stacks.Remove(merge);}}

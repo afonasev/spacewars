@@ -12,7 +12,8 @@ namespace Spacewars.Simulation
         // AI has an independent revision and numeric DTO; gameplay writers never mutate it.
         public static IReadOnlyList<AiProfileField> AiFields=>AiProfileMetadata.Fields;
         public static IReadOnlyList<AiProfileField> AiOpeningFields=>AiProfileMetadata.Fields
-            .Where(f=>f.Path.StartsWith("openingsMidgame.",StringComparison.Ordinal))
+            .Where(f=>f.Path.StartsWith("openingsMidgame.",StringComparison.Ordinal)||f.Path.StartsWith("positionDevelopment.",StringComparison.Ordinal)||f.Path.StartsWith("activeStrategy.",StringComparison.Ordinal)||f.Path.StartsWith("safeReinforcements.",StringComparison.Ordinal)||
+                f.Path.StartsWith("difficulty.",StringComparison.Ordinal)&&(f.Path.Contains(".control.")||f.Path.Contains(".micro.")||f.Path.EndsWith(".reactionSeconds",StringComparison.Ordinal)))
             .ToArray();
         public static AiProfile InitialAiOpeningProfile()
         {var data=AiProfile.Initial.CopyData();data.id="ai-openings-midgame-v1";return new AiProfile(data);}
@@ -47,6 +48,7 @@ namespace Spacewars.Simulation
         {
             if(ReferenceEquals(field,PlayableProfileMetadata.AccruedCreditField))return true;
             string name=field.FieldName??"";
+            if(name.StartsWith("orbitalMine",StringComparison.Ordinal))return true; // New placements capture independent mine terms.
             // Maneuver capability is bound at genesis/current capture; changes require a new match.
             if(name.StartsWith("tankReverse",StringComparison.Ordinal))return false;
             if(field.Group=="Arena"||field.Group=="Slots"||field.Group=="Minimap"||field.Group=="Fog presentation"||field.Group=="Camera"||field.Group=="Navigation"||field.Group=="Rendering"||field.Group=="Input"||field.Group=="Presentation")return false;

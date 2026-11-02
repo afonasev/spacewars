@@ -11,6 +11,8 @@ namespace Spacewars.Simulation
         public string Name;
         public int Team, Color;
         public bool Human;
+        // Presentation slot: -1 means no bot camera (humans are normalized to a mandatory slot).
+        public int ScreenSlot=-1;
         // Zero is the mixed mouse/keyboard seat; positive values are exact InputSystem device IDs.
         public int DeviceId;
         public AiDifficulty Difficulty = AiDifficulty.Fighter;
@@ -27,6 +29,10 @@ namespace Spacewars.Simulation
         {
             if(Participants != null)return;
             Participants=new List<NativeLobbyParticipant>();
+            if(AntennaCity){
+                for(int i=0;i<6;i++)Participants.Add(new NativeLobbyParticipant{Name=i==0&&HumanPresent?HumanName:"ИИ",Human=i==0&&HumanPresent,Team=i+1,Color=i,Difficulty=Difficulty});
+                return;
+            }
             if(CrimsonGrove){
                 for(int i=0;i<8;i++)Participants.Add(new NativeLobbyParticipant{Name=i==0&&HumanPresent?HumanName:"ИИ",Human=i==0&&HumanPresent,Team=i+1,Color=i,Difficulty=Difficulty});
                 return;
@@ -61,7 +67,7 @@ namespace Spacewars.Simulation
         }
         private int NextParticipantTeam(int capacity)
         {
-            bool crossings=capacity==4&&!MossHighland&&!BasaltCrown&&!WhiteMeridian;
+            bool crossings=capacity==4&&!AntennaCity&&!MossHighland&&!BasaltCrown&&!WhiteMeridian;
             if(!Foundry&&!WhiteMeridian&&!crossings)return Enumerable.Range(1,8).First(team=>Participants.All(p=>p.Team!=team));
             if(crossings){
                 var teams=Participants.Select(p=>p.Team).Distinct().ToList();
@@ -77,6 +83,7 @@ namespace Spacewars.Simulation
         public bool Foundry;
         public bool AiTestMap;
         public bool CrimsonGrove;
+        public bool AntennaCity;
         public bool BasaltCrown;
         public bool MossHighland;
         public bool WhiteMeridian;
@@ -147,6 +154,7 @@ namespace Spacewars.Simulation
         {
             var copy=(NativeLobbyConfiguration)MemberwiseClone();
             copy.Participants=Participants?.Select(p=>p.Copy()).ToList();
+            if(copy.Participants!=null)NativeScreenLayout.Normalize(copy);
             copy.matchNames=(string[])matchNames?.Clone();return copy;
         }
         public string MatchHumanName => HumanName.Trim();

@@ -76,7 +76,7 @@ namespace Spacewars.Presentation
             }
             foreach(var wreck in unitWrecks.Values)if(wreck.State.HasGround&&wreck.Model)foreach(var renderer in wreck.Model.GetComponentsInChildren<MeshRenderer>())finish.ApplyWreck(renderer,WreckKeyColor);
         }
-        public void Rebind(PlayableProfile next){ClearTowerRange();ClearGroundTrails();ClearUnitWrecks();ClearBuildingDestructions();ClearPads();ClearRallyFlags();profile=next;wreckKeyColor=null;WreckProfile.lifetimeSeconds=(float)next.UnitWreckLifetimeSeconds;foreach(var id in new List<int>(actors.Keys))Remove(id);ReleaseWorldObject(selectionMaterial);selectionMaterial=null;ReleaseWorldObject(selectionQuad);selectionQuad=null;}
+        public void Rebind(PlayableProfile next){ClearMines();ClearTowerRange();ClearGroundTrails();ClearUnitWrecks();ClearBuildingDestructions();ClearPads();ClearRallyFlags();profile=next;wreckKeyColor=null;WreckProfile.lifetimeSeconds=(float)next.UnitWreckLifetimeSeconds;foreach(var id in new List<int>(actors.Keys))Remove(id);ReleaseWorldObject(selectionMaterial);selectionMaterial=null;ReleaseWorldObject(selectionQuad);selectionQuad=null;}
         private readonly Transform root;
         private int presentationLayer;
         public void SetPresentationLayer(int layer){presentationLayer=layer;Layer(root.gameObject);}
@@ -99,6 +99,7 @@ namespace Spacewars.Presentation
         private System.Collections.IEnumerator PrepareTerrain(MossHighlandArtProfile mossArt,NullDockArtProfile dockArt)
         {
             double extent=profile.ArenaHalfExtent;
+            if(profile.AuthoredMap is AntennaCityMap city){yield return CreateAntennaCity(city);yield break;}
             if(profile.AuthoredMap is NullDockMap dock){yield return CreateNullDock(dock,dockArt);yield break;}
             if(profile.AuthoredMap is CrimsonGroveMap grove){yield return CreateCrimsonGrove(grove);yield break;}
             if(profile.AuthoredMap is WhiteMeridianMap meridian){yield return CreateWhiteMeridian(meridian);yield break;}
@@ -228,6 +229,7 @@ namespace Spacewars.Presentation
         }
         public void UpdateFactoryModel(Actor actor,PlayableBuildingSnapshot building,PlayableSnapshot snapshot)
         {
+            UpdateRefineryModel(actor,building,snapshot.Tick);
             if(actor.Mine)actor.Mine.Drive(building,snapshot.Tick,building.Id,actor.MaterialFinish);
             if(actor.Factory){actor.FactoryHeading=building.LaunchPhase>FactoryReleaseRules.Closed?building.Heading:TerritoryRules.BuildingHeading;actor.Factory.Drive(building,snapshot.Tick,profile);UpdateFactoryVehicle(actor,building,snapshot);}
         }
@@ -241,23 +243,25 @@ namespace Spacewars.Presentation
             ?BuildingFacing*Quaternion.Euler(0,(mineArt??(mineArt=ArmoredMineProfile.Load())).facingYawDegrees,0):BuildingFacing;
         // Authored fronts are +Z; mines add their approved visual offset to world south, independent of camera orbit.
         private Quaternion BuildingFacing=>Quaternion.LookRotation(Vector3.back,Vector3.up);
-        private static string BuildingKey(string kind,bool upgraded)=>kind=="GaussTower"?"gauss-tower":kind=="RepairTower"?"repair-tower":kind=="SentryTurret"?"sentry-turret":kind=="ScientificCenter"?(upgraded?"research-scanner-upgraded":"research-scanner"):kind=="Refinery"&&upgraded?"refineryUpgraded":kind.ToLowerInvariant();
+        private static string BuildingKey(string kind,bool upgraded)=>kind=="GaussTower"?"gauss-tower":kind=="RepairTower"?"repair-tower":kind=="SentryTurret"?"sentry-turret":kind=="ScientificCenter"?(upgraded?"research-scanner-upgraded":"research-scanner"):kind=="Refinery"&&upgraded?"refineryUpgraded":kind=="Factory"&&upgraded?"factoryUpgraded":kind=="Hangar"&&upgraded?"hangarUpgraded":kind.ToLowerInvariant();
         public void UpdateRefineryModel(Actor actor,PlayableBuildingSnapshot building,long tick)
         {
-            if(building.Kind!=PlayableBuildingKind.Refinery&&building.Kind!=PlayableBuildingKind.ScientificCenter)return;
+            if(building.Kind!=PlayableBuildingKind.Refinery&&building.Kind!=PlayableBuildingKind.ScientificCenter&&building.Kind!=PlayableBuildingKind.Factory&&building.Kind!=PlayableBuildingKind.Hangar)return;
             if(actor.RefineryUpgraded!=building.ModelUpgraded)
             {
-                Object.Destroy(actor.Hull.gameObject);
+                actor.Hull.gameObject.SetActive(false);Object.Destroy(actor.Hull.gameObject);
                 string key=BuildingKey(building.Kind.ToString(),building.ModelUpgraded);
                 actor.Hull=Model(key,actor.Root,building.Owner==PlayableOwner.Player);actor.DetailLod=actor.Hull.GetComponent<ModelDetailLod>();
                 actor.Hull.localScale=Vector3.one*(float)BuildingScale(key);actor.Hull.rotation=BuildingFacing;
                 UpdateBuildingSelection(actor,key);actor.RefineryUpgraded=building.ModelUpgraded;actor.PresentationPaint=null;
                 actor.Turbine=actor.Hull.GetComponentsInChildren<Transform>(true).FirstOrDefault(t=>t.name=="turbineYaw");
+                actor.Factory=actor.Hull.GetComponent<FactoryModelPresentation>();
+                if(actor.Factory){actor.Factory.ExternallyDriven=true;actor.Factory.Initialize();actor.Factory.SetOwnerColor(building.Owner==PlayableOwner.Player?Ally:Enemy);}
             }
             // Animation follows simulation time, so pause also freezes the turbine.
             if(actor.Turbine)actor.Turbine.localRotation=Quaternion.Euler(0,0,-(float)(tick/30d*profile.RefineryTurbineSpeed%360));
         }
-        private double BuildingScale(string key)=>BuildingCombatGeometry.ModelScale(profile,key=="gauss-tower"?PlayableBuildingKind.GaussTower:(key=="research-scanner"||key=="research-scanner-upgraded")?PlayableBuildingKind.ScientificCenter:key=="repair-tower"?PlayableBuildingKind.RepairTower:key=="sentry-turret"?PlayableBuildingKind.SentryTurret:key=="refineryUpgraded"?PlayableBuildingKind.Refinery:(PlayableBuildingKind)System.Enum.Parse(typeof(PlayableBuildingKind),key,true));
+        private double BuildingScale(string key)=>BuildingCombatGeometry.ModelScale(profile,key=="gauss-tower"?PlayableBuildingKind.GaussTower:(key=="research-scanner"||key=="research-scanner-upgraded")?PlayableBuildingKind.ScientificCenter:key=="repair-tower"?PlayableBuildingKind.RepairTower:key=="sentry-turret"?PlayableBuildingKind.SentryTurret:key=="factoryUpgraded"?PlayableBuildingKind.Factory:key=="hangarUpgraded"?PlayableBuildingKind.Hangar:key=="refineryUpgraded"?PlayableBuildingKind.Refinery:(PlayableBuildingKind)System.Enum.Parse(typeof(PlayableBuildingKind),key,true));
         private static IEnumerable<Renderer> ActorModelRenderers(Actor actor)=>actor.Hull.GetComponentsInChildren<Renderer>(true).Concat(actor.FactoryStaged?actor.FactoryStaged.GetComponentsInChildren<Renderer>(true):System.Array.Empty<Renderer>());
         public static void PaintOwner(Actor actor,Color owner)
         {
@@ -271,10 +275,16 @@ namespace Spacewars.Presentation
             }
         }
         public static string ModelAssetKey(string key)=>key=="factory"?"factory-armored":key=="headquarters"?"headquarters-a":key=="mine"?"mine-armored":key=="outpost"?"outpost-b":key;
+        public static GameObject ModelPrefab(string key)
+        {
+            if(key=="factoryUpgraded")return Resources.Load<GameObject>("ProducerEnergy/factory-armored-energy");
+            if(key=="hangarUpgraded")return Resources.Load<GameObject>("ProducerEnergy/hangar-energy");
+            string asset=ModelAssetKey(key);
+            return Resources.Load<GameObject>("StyleA/Lod/"+asset)??Resources.Load<GameObject>("StyleA/"+asset);
+        }
         private Transform Model(string key,Transform parent,bool friendly)
         {
-            string asset=ModelAssetKey(key);
-            var prefab=Resources.Load<GameObject>("StyleA/Lod/"+asset)??Resources.Load<GameObject>("StyleA/"+asset);
+            var prefab=ModelPrefab(key);
             if(!prefab)throw new System.InvalidOperationException("Missing approved Style A model: "+key);
             var model=Object.Instantiate(prefab,parent,false);Layer(model);var owner=friendly?Ally:Enemy;
             foreach(var renderer in model.GetComponentsInChildren<Renderer>(true))
@@ -417,7 +427,7 @@ namespace Spacewars.Presentation
             root.position=camera.ScreenToWorldPoint(screen);
         }
         public void Remove(int id){RemoveRallyFlag(id);if(actors.TryGetValue(id,out var a)){a.HealthDividerBatch?.Dispose();a.HealthDividerBatch=null;if(a.AirProjection)ReleaseWorldObject(a.AirProjection);ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);actors.Remove(id);}}
-        public void Clear(){ClearTowerRange();ResetEnvironmentDetail();ClearGroundTrails();ClearUnitWrecks();ClearBuildingDestructions();ClearRallyFlags();Fog.Reset();ClearMemories();ClearPads();foreach(var a in actors.Values){a.HealthDividerBatch?.Dispose();a.HealthDividerBatch=null;if(a.AirProjection)ReleaseWorldObject(a.AirProjection);ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);}actors.Clear();}
+        public void Clear(){ClearMines();ClearTowerRange();ResetEnvironmentDetail();ClearGroundTrails();ClearUnitWrecks();ClearBuildingDestructions();ClearRallyFlags();Fog.Reset();ClearMemories();ClearPads();foreach(var a in actors.Values){a.HealthDividerBatch?.Dispose();a.HealthDividerBatch=null;if(a.AirProjection)ReleaseWorldObject(a.AirProjection);ReleaseWorldObject(a.Health.parent.gameObject);ReleaseWorldObject(a.Root.gameObject);}actors.Clear();}
         public void Dispose(){foreach(string name in PreparedTextures)PreparedMapCache.ForgetPixels(PreparedField(name).GetValue(this) as Texture2D);Clear();if(preparedScene!=null){preparedScene.Dispose();ForgetPreparedFields();}if(dockMaterial)ReleaseWorldObject(dockMaterial);if(dockSpaceMaterial)ReleaseWorldObject(dockSpaceMaterial);if(groveMaterial)ReleaseWorldObject(groveMaterial);if(groveSurfaceMask)ReleaseWorldObject(groveSurfaceMask);if(meridianMaterial)ReleaseWorldObject(meridianMaterial);if(meridianRoadMask)ReleaseWorldObject(meridianRoadMask);wreckFlashVisuals.Dispose();collapseVisuals.Dispose();Fog.Dispose();if(mossPaintMask)ReleaseWorldObject(mossPaintMask);if(mossAccentMask)ReleaseWorldObject(mossAccentMask);if(mossTransitionMask)ReleaseWorldObject(mossTransitionMask);if(mossTerrainMaterial)ReleaseWorldObject(mossTerrainMaterial);if(basaltPaintMask)ReleaseWorldObject(basaltPaintMask);if(basaltAccentMask)ReleaseWorldObject(basaltAccentMask);if(basaltTerrainMaterial)ReleaseWorldObject(basaltTerrainMaterial);surfaceMaterials?.Dispose();if(foundryRoadMask)ReleaseWorldObject(foundryRoadMask);if(foundryLavaHeat)ReleaseWorldObject(foundryLavaHeat);if(foundryRouteMask)ReleaseWorldObject(foundryRouteMask);foreach(var mesh in terrainMeshes)ReleaseWorldObject(mesh);terrainMeshes.Clear();if(apronMaterial)ReleaseWorldObject(apronMaterial);if(capturePadMaterial)ReleaseWorldObject(capturePadMaterial);ReleaseWorldObject(selectionMaterial);ReleaseWorldObject(selectionQuad);ReleaseWorldObject(material);if(root)ReleaseWorldObject(root.gameObject);}
         public GameObject Part(string name,Transform parent,Vector3 position,Vector3 scale,Color color,PrimitiveType shape=PrimitiveType.Cube)
         {

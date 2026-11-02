@@ -28,8 +28,10 @@ public sealed class NativeCompactLabTests
                 Assert.LessOrEqual(card.worldBound.yMax,size.y);Assert.Greater(card.worldBound.height,size.y-40);
                 foreach(var key in new[]{"lab-save","lab-reset","lab-back","lab-search","lab-tree"})
                 {var e=view.Page.Q(key);Assert.Greater(e.worldBound.width,0,key);Assert.LessOrEqual(e.worldBound.xMax,size.x+.5f,key);Assert.LessOrEqual(e.worldBound.yMax,size.y+.5f,key);}
-                foreach(var key in new[]{"tankHealth","tankChassisCost","tankChassisSeconds","tankChassisSpeed","tankChassisGlowIntensity"})Assert.NotNull(view.Page.Q<TextField>("lab-field-"+key),key);
+                foreach(var key in new[]{"tankHealth","tankSpeed"})Assert.NotNull(view.Page.Q<TextField>("lab-field-"+key),key);
                 Assert.NotNull(view.Page.Q<Button>("lab-object-Танк").Q<OrbitalGlyph>());
+                Assert.IsNull(view.Page.Q("lab-field-tankChassisCost"));Assert.IsNull(view.Page.Q("lab-field-tankChassisGlowIntensity"));
+                Assert.NotNull(view.Page.Q("lab-research-link-Улучшенное-шасси"));
                 Assert.AreEqual("Поиск",view.Page.Q<TextField>("lab-search").label);Assert.IsNull(view.Page.Q("lab-help"));Assert.IsNull(view.Page.Q(className:"orbital-hints"));
                 CollectionAssert.AreEqual(new[]{"lab-profiles","lab-copy","lab-rename","lab-delete"},view.Page.Q("lab-profile-controls").Children().Select(e=>e.name));
                 CollectionAssert.AreEqual(new[]{"lab-revisions","lab-save","lab-reset","lab-release"},view.Page.Q("lab-revision-controls").Children().Select(e=>e.name));
@@ -52,19 +54,69 @@ public sealed class NativeCompactLabTests
                 panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);texture=null;
             }
             texture=new RenderTexture(1280,800,24);texture.Create();panel.targetTexture=texture;root.style.width=1280;root.style.height=800;
-            foreach(var pair in new[]{new[]{"Исследователь","explorerAssaultCost"},new[]{"Шквал","shkvalGuidanceCost"}})
-            {nav.ActivateElement(view.Page.Q<Button>("lab-object-"+pair[0]));Assert.NotNull(view.Page.Q<TextField>("lab-field-"+pair[1]));}
+            foreach(var pair in new[]{new[]{"Исследователь","Штурмовые-орудия","explorerAssaultCost"},new[]{"Шквал","Улучшенное-наведение","shkvalGuidanceCost"},new[]{"Танк","Улучшенное-шасси","tankChassisCost"},new[]{"Ястреб","Залповый-огонь","hawkSalvoResearchCost"}})
+            {
+                if(view.Page.Q("lab-children-Юниты")==null)nav.ActivateElement(view.Page.Q<Button>("lab-section-Юниты"));nav.ActivateElement(view.Page.Q<Button>("lab-object-"+pair[0]));
+                Assert.IsNull(view.Page.Q<TextField>("lab-field-"+pair[2]));nav.ActivateElement(view.Page.Q<Button>("lab-research-link-"+pair[1]));
+                Assert.NotNull(view.Page.Q<TextField>("lab-field-"+pair[2]));Assert.NotNull(view.Page.Q("lab-children-Исследования"));
+                for(int i=0;i<5;i++)yield return null;Capture(texture,"research-"+pair[1]+"-1280x800");
+            }
             nav.ActivateElement(view.Page.Q<Button>("lab-section-Здания"));nav.ActivateElement(view.Page.Q<Button>("lab-object-Переработчик"));
             Assert.NotNull(view.Page.Q<TextField>("lab-field-refineryUpgradeCost"));Assert.NotNull(view.Page.Q<Button>("lab-object-Переработчик").Q<OrbitalGlyph>());
             for(int i=0;i<5;i++)yield return null;Capture(texture,"refinery-1280x800");
-            var seen=new System.Collections.Generic.HashSet<string>();
-            foreach(var section in new[]{"Юниты","Здания","Экономика","Графика","Правила"})
+            nav.ActivateElement(view.Page.Q<Button>("lab-object-Научный-центр"));Assert.NotNull(view.Page.Q("lab-field-scienceHealth"));Assert.IsNull(view.Page.Q("lab-field-scientificCenterUpgradeCost"));
+            nav.ActivateElement(view.Page.Q<Button>("lab-research-link-Улучшение-научного-центра"));Assert.NotNull(view.Page.Q("lab-field-scientificCenterUpgradeCost"));
+            view.Page.Q<TextField>("lab-field-scientificCenterUpgradeCost").value="301";
+            Assert.True(view.Page.Q<Button>("lab-section-Исследования").ClassListContains("lab-dirty"));
+            nav.ActivateElement(view.Page.Q<Button>("lab-section-Здания"));
+            foreach(var pair in new[]{new[]{"Гаусс-башня","gaussDamage"},new[]{"Ремонтная-вышка","repairTowerHealthPerSecond"}})
+            {nav.ActivateElement(view.Page.Q<Button>("lab-object-"+pair[0]));Assert.NotNull(view.Page.Q("lab-field-"+pair[1]));}
+            nav.ActivateElement(view.Page.Q<Button>("lab-object-Научный-центр"));nav.ActivateElement(view.Page.Q<Button>("lab-research-link-Улучшение-научного-центра"));Assert.AreEqual("301",view.Page.Q<TextField>("lab-field-scientificCenterUpgradeCost").value);
+            nav.ActivateElement(view.Page.Q<Button>("lab-section-ИИ"));nav.ActivateElement(view.Page.Q<Button>("lab-object-Исследования"));
+            Assert.NotNull(view.Page.Q("lab-field-armySystemsMinimumUnits"));view.Page.Q<TextField>("lab-field-armySystemsMinimumUnits").value="11";
+            Assert.True(view.Page.Q<Button>("lab-section-ИИ").ClassListContains("lab-dirty"));Assert.True(view.Page.Q<Button>("lab-object-Исследования").ClassListContains("lab-dirty"));
+            for(int i=0;i<5;i++)yield return null;Capture(texture,"ai-research-1280x800");
+            foreach(var size in new[]{new Vector2Int(1280,800),new Vector2Int(800,620)})
+            {
+                panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);texture=new RenderTexture(size.x,size.y,24);texture.Create();panel.targetTexture=texture;root.style.width=size.x;root.style.height=size.y;
+                if(view.Page.Q("lab-children-Исследования")==null)nav.ActivateElement(view.Page.Q<Button>("lab-section-Исследования"));nav.ActivateElement(view.Page.Q<Button>("lab-object-Оружейные-системы"));
+                for(int i=0;i<5;i++)yield return null;
+                CollectionAssert.AreEqual(new[]{"Уровень I","Уровень II","Уровень III"},view.Page.Query<Label>(className:"lab-subheading").ToList().Select(l=>l.text));
+                foreach(int level in new[]{1,2,3})foreach(string term in new[]{"Cost","Seconds","BonusPercent"})Assert.NotNull(view.Page.Q("lab-field-weaponSystemsLevel"+level+term));
+                Assert.LessOrEqual(view.Page.Q("lab-parameters").worldBound.xMax,size.x+.5f);Capture(texture,"research-levels-"+size.x+"x"+size.y);
+            }
+            panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);texture=new RenderTexture(1280,800,24);texture.Create();panel.targetTexture=texture;root.style.width=1280;root.style.height=800;
+            foreach(var size in new[]{new Vector2Int(1280,800),new Vector2Int(800,620)})
+            {
+                panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);texture=new RenderTexture(size.x,size.y,24);texture.Create();panel.targetTexture=texture;root.style.width=size.x;root.style.height=size.y;
+                if(view.Page.Q("lab-children-Эскалация")==null)nav.ActivateElement(view.Page.Q<Button>("lab-section-Эскалация"));
+                CollectionAssert.AreEquivalent(new[]{"lab-object-Пороги-уровней","lab-object-Перезарядка","lab-object-Панель"},view.Page.Q("lab-children-Эскалация").Query<Button>().ToList().Select(b=>b.name));
+                foreach(var group in new[]{"Пороги уровней","Перезарядка","Панель"})
+                {
+                    nav.ActivateElement(view.Page.Q<Button>("lab-object-"+group.Replace(' ','-')));
+                    var expected=OrbitalProfileMetadata.Fields.Where(f=>group=="Пороги уровней"?f.FieldName.StartsWith("orbitalThreshold"):group=="Панель"?f.FieldName.StartsWith("orbitalUi")||f.FieldName=="orbitalPanelWidth"||f.FieldName=="orbitalIconSize"||f.FieldName=="orbitalLevelFontSize":!f.FieldName.StartsWith("orbitalUi")&&!f.FieldName.StartsWith("orbitalThreshold")&&f.FieldName!="orbitalPanelWidth"&&f.FieldName!="orbitalIconSize"&&f.FieldName!="orbitalLevelFontSize").Select(f=>"lab-field-"+f.FieldName);
+                    CollectionAssert.AreEquivalent(expected,view.Page.Query<TextField>().ToList().Where(f=>f.name!=null&&f.name.StartsWith("lab-field-")).Select(f=>f.name));
+                    for(int i=0;i<5;i++)yield return null;
+                    Assert.LessOrEqual(view.Page.Q("lab-parameters").worldBound.xMax,size.x+.5f);
+                    Capture(texture,"escalation-"+(group=="Пороги уровней"?"thresholds":group=="Перезарядка"?"cooldowns":"panel")+"-"+size.x+"x"+size.y);
+                }
+            }
+            nav.ActivateElement(view.Page.Q<Button>("lab-object-Перезарядка"));view.Page.Q<TextField>("lab-field-orbitalCommonSeconds").value="11";
+            Assert.True(view.Page.Q<Button>("lab-section-Эскалация").ClassListContains("lab-dirty"));
+            nav.ActivateElement(view.Page.Q<Button>("lab-object-Пороги-уровней"));nav.ActivateElement(view.Page.Q<Button>("lab-object-Перезарядка"));Assert.AreEqual("11",view.Page.Q<TextField>("lab-field-orbitalCommonSeconds").value);
+            view.Page.Q<TextField>("lab-field-orbitalCommonSeconds").value="10";
+            panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);texture=new RenderTexture(1280,800,24);texture.Create();panel.targetTexture=texture;root.style.width=1280;root.style.height=800;
+            var seen=new System.Collections.Generic.HashSet<string>();var seenAi=new System.Collections.Generic.HashSet<string>();
+            nav.ActivateElement(view.Page.Q<Button>("lab-section-Общие механики"));nav.ActivateElement(view.Page.Q<Button>("lab-object-Армия"));Assert.NotNull(view.Page.Q("lab-field-armyCapacity"));
+            nav.ActivateElement(view.Page.Q<Button>("lab-object-Приказы-и-движение"));Assert.NotNull(view.Page.Q("lab-field-unitOrderQueueLimit"));
+            foreach(var section in new[]{"Юниты","Здания","Исследования","Экономика","Эскалация","Общие механики","ИИ","Графика и эффекты"})
             {
                 nav.ActivateElement(view.Page.Q<Button>("lab-section-"+section));
                 var objects=view.Page.Query<Button>().ToList().Where(b=>b.name!=null&&b.name.StartsWith("lab-object-")).Select(b=>b.name).ToArray();
                 foreach(var obj in objects)
                 {
                     nav.ActivateElement(view.Page.Q<Button>(obj));
+                    foreach(var ai in view.Page.Query<TextField>().ToList().Where(f=>f.name.StartsWith("lab-ai-")))Assert.True(seenAi.Add(ai.name),"Duplicated AI field: "+ai.name);
                     foreach(var field in view.Page.Query<TextField>().ToList().Where(f=>f.name.StartsWith("lab-field-")))
                     {
                         Assert.True(seen.Add(field.name),"Duplicated field: "+field.name);Assert.False(string.IsNullOrWhiteSpace(field.tooltip));StringAssert.Contains("Диапазон",field.tooltip);
@@ -74,10 +126,11 @@ public sealed class NativeCompactLabTests
                     }
                 }
             }
+            CollectionAssert.AreEquivalent(NativeBalanceFields.AiOpeningFields.Select(f=>"lab-ai-"+f.Path.Replace('.','-')),seenAi);
             CollectionAssert.AreEquivalent(PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable).Select(f=>"lab-field-"+f.FieldName),seen);
             view.Page.Q<TextField>("lab-search").value="tankChassis";Assert.NotNull(view.Page.Q<TextField>("lab-field-tankChassisCost"));
             view.Page.Q<TextField>("lab-search").value="missing-parameter";Assert.AreEqual(0,view.Page.Query<TextField>().ToList().Count(f=>f.name.StartsWith("lab-field-")));
-            view.Page.Q<TextField>("lab-search").value="";nav.ActivateElement(view.Page.Q<Button>("lab-section-Графика"));
+            view.Page.Q<TextField>("lab-search").value="";nav.ActivateElement(view.Page.Q<Button>("lab-section-Графика и эффекты"));
             for(int i=0;i<5;i++)yield return null;Capture(texture,"graphics-1280x800");
             nav.ActivateElement(view.Page.Q<Button>("lab-section-Звук"));
             Assert.AreEqual(GameplayAudioMetadata.Fields.Length,view.Page.Query<TextField>().ToList().Count(f=>f.name!=null&&f.name.StartsWith("audio.")));
@@ -105,7 +158,7 @@ public sealed class NativeCompactLabTests
             nav.ActivateElement(view.Page.Q<Button>("lab-section-Юниты"));Assert.AreEqual(0,view.Page.Query(className:"lab-tree-children").ToList().Count,"Clicking the open branch collapses it");
             nav.ActivateElement(view.Page.Q<Button>("lab-section-Здания"));Assert.NotNull(view.Page.Q("lab-children-Здания"));Assert.IsNull(view.Page.Q("lab-children-Юниты"));
             nav.ActivateElement(view.Page.Q<Button>("lab-section-Юниты"));Assert.NotNull(view.Page.Q("lab-children-Юниты"));Assert.IsNull(view.Page.Q("lab-children-Здания"));
-            view.Page.Q<TextField>("lab-field-tankSpeed").value=(baseline.TankSpeed+1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            nav.ActivateElement(view.Page.Q<Button>("lab-object-Танк"));view.Page.Q<TextField>("lab-field-tankSpeed").value=(baseline.TankSpeed+1).ToString(System.Globalization.CultureInfo.InvariantCulture);
             nav.ActivateElement(view.Page.Q<Button>("lab-section-Здания"));nav.ActivateElement(view.Page.Q<Button>("lab-object-Штаб"));
             view.Page.Q<TextField>("lab-field-headquartersHealth").value=(baseline.HeadquartersHealth+10).ToString();
             Assert.True(view.Page.Q<Button>("lab-section-Юниты").ClassListContains("lab-dirty"));Assert.True(view.Page.Q<Button>("lab-section-Здания").ClassListContains("lab-dirty"));Assert.False(view.Page.Q<Button>("lab-section-Экономика").ClassListContains("lab-dirty"));
@@ -114,7 +167,7 @@ public sealed class NativeCompactLabTests
             for(int i=0;i<5;i++)yield return null;
             Assert.True(view.Page.Q<Button>("lab-object-Танк").ClassListContains("lab-dirty"));
             Assert.That(view.Page.Q<Button>("lab-section-Здания").resolvedStyle.color.r,Is.EqualTo(1f).Within(.01));
-            Assert.That(view.Page.Q<Button>("lab-object-Танк").Q<Label>().resolvedStyle.color.g,Is.EqualTo(197f/255).Within(.01));
+            Assert.That(view.Page.Q<Button>("lab-object-Танк").Q<Label>(className:"lab-tree-label").resolvedStyle.color.g,Is.EqualTo(197f/255).Within(.01));
             Capture(texture,"dirty-tree-1280x800");
             nav.ActivateElement(view.Page.Q<Button>("lab-section-Изменения"));
             for(int i=0;i<5;i++)yield return null;
@@ -133,14 +186,57 @@ public sealed class NativeCompactLabTests
             view.Page.Q<TextField>("lab-field-headquartersHealth").value=baseline.HeadquartersHealth.ToString();
             yield return null;yield return null;
             StringAssert.Contains("0",view.Page.Q<Button>("lab-section-Изменения").text);Assert.False(view.Page.Q<Button>("lab-save").enabledSelf);Assert.IsNull(view.Page.Q("lab-test"));Assert.IsNull(view.Page.Q("lab-default"));Assert.IsNull(view.Page.Q("lab-clear-search"));Assert.IsNull(view.Page.Q("lab-name-change"));Assert.False(view.Page.Q<Button>("lab-section-Юниты").ClassListContains("lab-dirty"));Assert.False(view.Page.Q<Button>("lab-section-Здания").ClassListContains("lab-dirty"));
-            nav.ActivateElement(view.Page.Q<Button>("lab-section-Юниты"));view.Page.Q<TextField>("lab-field-tankSpeed").value=(baseline.TankSpeed+1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            nav.ActivateElement(view.Page.Q<Button>("lab-section-Юниты"));nav.ActivateElement(view.Page.Q<Button>("lab-object-Танк"));view.Page.Q<TextField>("lab-field-tankSpeed").value=(baseline.TankSpeed+1).ToString(System.Globalization.CultureInfo.InvariantCulture);
             StringAssert.Contains("1",view.Page.Q<Button>("lab-section-Изменения").text);
             nav.ActivateElement(view.Page.Q<Button>("lab-save"));nav.ActivateElement(view.Page.Q<Button>("lab-section-Изменения"));
             StringAssert.Contains("0",view.Page.Q<Button>("lab-section-Изменения").text);Assert.AreEqual(0,view.Page.Query<TextField>().ToList().Count(f=>f.name.StartsWith("lab-field-")));
-            nav.ActivateElement(view.Page.Q<Button>("lab-section-Юниты"));view.Page.Q<TextField>("lab-field-tankSpeed").value=(baseline.TankSpeed+2).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            nav.ActivateElement(view.Page.Q<Button>("lab-section-Юниты"));nav.ActivateElement(view.Page.Q<Button>("lab-object-Танк"));view.Page.Q<TextField>("lab-field-tankSpeed").value=(baseline.TankSpeed+2).ToString(System.Globalization.CultureInfo.InvariantCulture);
             nav.ActivateElement(view.Page.Q<Button>("lab-reset"));Assert.NotNull(root.Q("lab-confirm"));nav.ActivateElement(root.Q<Button>("lab-confirm-cancel"));Assert.True(view.Page.Q<Button>("lab-save").enabledSelf);nav.ActivateElement(view.Page.Q<Button>("lab-reset"));nav.ActivateElement(root.Q<Button>("lab-confirm-accept"));StringAssert.Contains("0",view.Page.Q<Button>("lab-section-Изменения").text);Assert.False(view.Page.Q<Button>("lab-save").enabledSelf);
         }
         finally{nav.Dispose();panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);UnityEngine.Object.DestroyImmediate(host);UnityEngine.Object.DestroyImmediate(panel);Directory.Delete(directory,true);}
+    }
+    [UnityTest] public IEnumerator QuestionHelpRespondsToHoverMouseClickAndKeyboardWithoutEditing()
+    {
+        var host=new GameObject("question help QA");var panel=ScriptableObject.CreateInstance<PanelSettings>();panel.themeStyleSheet=Resources.Load<ThemeStyleSheet>("FoundationTheme");
+        var doc=host.AddComponent<UIDocument>();doc.panelSettings=panel;var root=doc.rootVisualElement;
+        var nav=new NativeMenuNavigation(root);var directory=Path.Combine(Path.GetTempPath(),"spacewars-lab-question-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
+        RenderTexture texture=null;
+        try
+        {
+            var store=new NativeBalanceStore(PlayableProfile.Default,Path.Combine(directory,"balance.json"));var view=new NativeBalanceView(root,nav,store,()=>{});
+            int revision=store.SelectedVersion;
+            foreach(var size in new[]{new Vector2Int(1280,800),new Vector2Int(800,620)})
+            {
+                texture=new RenderTexture(size.x,size.y,24);texture.Create();panel.targetTexture=texture;root.style.width=size.x;root.style.height=size.y;OrbitalTheme.ConfigurePanel(panel,root);
+                for(int i=0;i<5;i++)yield return null;
+                var editor=view.Page.Q<TextField>("lab-field-tankSpeed");var info=view.Page.Q<Button>("lab-info-tankSpeed");var search=view.Page.Q<TextField>("lab-search");
+                Assert.NotNull(info);Assert.True(info.focusable);string original=editor.value;search.Focus();
+                using(var enter=PointerEnterEvent.GetPooled()){enter.target=info;info.SendEvent(enter);}
+                for(int i=0;i<3;i++)yield return null;
+                var help=view.Page.Q<Label>("lab-focus-help");Assert.NotNull(help);
+                Assert.AreEqual(DisplayStyle.Flex,help.style.display.value);Assert.AreSame(editor.parent,help.parent);
+                StringAssert.Contains(editor.tooltip,help.text);StringAssert.Contains("tank.speed",help.text);StringAssert.Contains("следующая игра",help.text);
+                string expected=help.text;Assert.Greater(help.worldBound.height,0);Assert.LessOrEqual(help.worldBound.xMax,size.x+.5f);
+                Capture(texture,"question-hover-"+size.x+"x"+size.y);
+                using(var leave=PointerLeaveEvent.GetPooled()){leave.target=info;info.SendEvent(leave);}
+                Assert.AreEqual(DisplayStyle.None,help.style.display.value,"Unfocused hover help dismisses on leave");
+                info.Focus();help.style.display=DisplayStyle.None;for(int i=0;i<3;i++)yield return null;
+                var point=info.worldBound.center;var hit=root.panel.Pick(point);Assert.True(hit==info||info.Contains(hit),"The visible question must receive pointer input");
+                using(var down=PointerDownEvent.GetPooled(new Event{type=EventType.MouseDown,button=0,mousePosition=point})){down.target=hit;hit.SendEvent(down);}
+                using(var up=PointerUpEvent.GetPooled(new Event{type=EventType.MouseUp,button=0,mousePosition=point})){up.target=hit;hit.SendEvent(up);}
+                for(int i=0;i<3;i++)yield return null;
+                Assert.AreEqual(DisplayStyle.Flex,help.style.display.value,"Real mouse click explicitly opens help even when already focused");Assert.AreEqual(expected,help.text);
+                using(var leave=PointerLeaveEvent.GetPooled()){leave.target=info;info.SendEvent(leave);}
+                Assert.AreEqual(DisplayStyle.Flex,help.style.display.value,"Clicked help stays visible while its button is focused");
+                Capture(texture,"question-click-"+size.x+"x"+size.y);
+                search.Focus();Assert.AreEqual(DisplayStyle.None,help.style.display.value,"Blur dismisses clicked help");
+                info.Focus();help.style.display=DisplayStyle.None;nav.ActivateElement(info);Assert.AreEqual(DisplayStyle.Flex,help.style.display.value,"Keyboard submit opens the same help");Assert.AreEqual(expected,help.text);
+                search.Focus();editor.Focus();Assert.AreEqual(DisplayStyle.Flex,help.style.display.value,"Existing editor-focus help remains available");Assert.AreEqual(expected,help.text);
+                Assert.AreEqual(original,editor.value);Assert.AreEqual(revision,store.SelectedVersion);Assert.False(view.Page.Q<Button>("lab-save").enabledSelf,"Help never changes the draft");
+                search.Focus();panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);texture=null;
+            }
+        }
+        finally{nav.Dispose();panel.targetTexture=null;if(texture!=null){texture.Release();UnityEngine.Object.DestroyImmediate(texture);}UnityEngine.Object.DestroyImmediate(host);UnityEngine.Object.DestroyImmediate(panel);Directory.Delete(directory,true);}
     }
     private static void Capture(RenderTexture texture,string name)
     {

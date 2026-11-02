@@ -41,6 +41,7 @@ namespace Spacewars.Runtime
                 Fact(owner,MatchFactKind.BuildingSold,0,(int)item.Kind);
                 AddCredits(owner,SaleRefund(item));
                 item.Sale=new SaleState{TermsRevision=profile.Revision,Duration=profile.BuildingSaleDemolitionSec};
+                RecordBuildingCount(owner,item.Kind);
                 item.Repair=null;if(item.Upgrade?.Complete!=true)item.Upgrade=null;item.Orders.Clear();item.RepeatTank=false;
                 Sound(PlayableSoundKind.DemolitionStarted,item.Position,PlayableEntityKind.Tank,owner,true);
             }
@@ -53,7 +54,7 @@ namespace Spacewars.Runtime
             message=RepairBlocked(b);if(message!=null)return PlayableCommandStatus.Rejected;
             // Store missing HP in base-health units, so research can scale the ongoing
             // repair without changing its frozen price, duration or save fields.
-            double missing=TerritoryRules.Health(profile,b.Kind)-b.Health/BuildingHealthMultiplier(b.Owner,profile),ratio=missing/TerritoryRules.Health(profile,b.Kind);
+            double missing=TerritoryRules.Health(profile,b.Kind)-b.Health*TerritoryRules.Health(profile,b.Kind)/BuildingMaximumHealth(b.Owner,b.Kind),ratio=missing/TerritoryRules.Health(profile,b.Kind);
             b.Repair=new RepairState{TermsRevision=profile.Revision,MissingHealth=missing,TotalCost=TerritoryRules.Cost(profile,b.Kind)*profile.BuildingRepairCostRatio*ratio,Duration=profile.BuildingRepairDurationSec*ratio};
             Sound(PlayableSoundKind.RepairStarted,b.Position,PlayableEntityKind.Tank,owner,true);
             message="Ремонт начат";return PlayableCommandStatus.Applied;
@@ -91,7 +92,7 @@ namespace Spacewars.Runtime
                     if(!FreeProvingGround&&Balance(b.Owner)+1e-9<cost){r.Waiting=true;continue;}
                     AddCredits(b.Owner,-cost);
                     double maximum=BuildingMaximumHealth(b.Owner,b.Kind);
-                    b.Health=Math.Min(maximum,b.Health+r.MissingHealth*BuildingHealthMultiplier(b.Owner,profile)*slice/r.Duration);
+                    b.Health=Math.Min(maximum,b.Health+r.MissingHealth*maximum/TerritoryRules.Health(profile,b.Kind)*slice/r.Duration);
                     // Settle sub-nanohitpoint accumulation before the integer HUD ceiling.
                     if(terminal)b.Health=Math.Round(b.Health,9);
                     r.PaidSeconds+=slice;r.Waiting=false;

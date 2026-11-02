@@ -85,11 +85,11 @@ namespace Spacewars.Presentation
         {
             if(index==7)return PlayableResearchKind.ScientificCenterUpgrade;
             if(index==6)return orders.Any(o=>o.Kind==PlayableResearchKind.ReinforcedConcrete&&o.Complete)?PlayableResearchKind.AdvancedReinforcedConcrete:PlayableResearchKind.ReinforcedConcrete;
-            if(index==5)return PlayableResearchKind.HawkSalvoSystems;
+            if(index==3)return PlayableResearchKind.HawkSalvoSystems;
             if(index<3)return (PlayableResearchKind)index;
-            var first=index==3?PlayableResearchKind.ImprovedWeaponSystems:PlayableResearchKind.ImprovedDefensiveSystems;
-            var second=index==3?PlayableResearchKind.AdvancedWeaponSystems:PlayableResearchKind.AdvancedDefensiveSystems;
-            return orders.Any(o=>o.Kind==second&&o.Complete)?index==3?PlayableResearchKind.UltimateWeaponSystems:PlayableResearchKind.UltimateDefensiveSystems:orders.Any(o=>o.Kind==first&&o.Complete)?second:first;
+            var first=index==4?PlayableResearchKind.ImprovedWeaponSystems:PlayableResearchKind.ImprovedDefensiveSystems;
+            var second=index==4?PlayableResearchKind.AdvancedWeaponSystems:PlayableResearchKind.AdvancedDefensiveSystems;
+            return orders.Any(o=>o.Kind==second&&o.Complete)?index==4?PlayableResearchKind.UltimateWeaponSystems:PlayableResearchKind.UltimateDefensiveSystems:orders.Any(o=>o.Kind==first&&o.Complete)?second:first;
         }
         private static string ResearchName(PlayableResearchKind kind)=>PlayableResearchRules.Name(kind);
     }

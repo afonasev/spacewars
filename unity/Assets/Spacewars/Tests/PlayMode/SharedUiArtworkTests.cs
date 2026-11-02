@@ -13,6 +13,17 @@ using UnityEngine.UIElements;
 
 public sealed class SharedUiArtworkTests
 {
+    [TestCase("repair")] [TestCase("sale")] [TestCase("rally")]
+    public void UtilityArtworkUsesDedicatedAssetsAndResetsTint(string key)
+    {
+        var texture=Resources.Load<Texture2D>("OrbitalIcons/"+key);Assert.NotNull(texture);Assert.AreEqual(256,texture.width);
+        Assert.AreSame(texture,OrbitalGlyph.TextureFor(key));Assert.AreNotSame(OrbitalGlyph.TextureFor("credits"),texture);
+        Assert.AreSame(OrbitalGlyph.TextureFor("credits"),OrbitalGlyph.TextureFor("income"));
+        var glyph=new OrbitalGlyph(key);glyph.Set(key,OrbitalTheme.Ink);
+        var image=glyph.Q<Image>("glyph-artwork");Assert.AreSame(texture,image.image);Assert.AreEqual(RadialCardProfile.Load().utilityIconBrightness,image.tintColor.r,.001f);
+        glyph.Set(key,OrbitalTheme.Muted);Assert.Less(image.tintColor.r,RadialCardProfile.Load().utilityIconBrightness);
+        glyph.Set("credits",OrbitalTheme.Ink);Assert.AreSame(OrbitalGlyph.TextureFor("credits"),image.image);Assert.AreEqual(Color.white,image.tintColor);
+    }
     [TestCase("tank","tankHybrid")] [TestCase("explorer","explorer")] [TestCase("shkval","shkval")] [TestCase("hawk","hawk")]
     [TestCase("headquarters","headquarters")] [TestCase("outpost","outpost")] [TestCase("mine","mine")] [TestCase("factory","factory")]
     [TestCase("refinery","refinery")] [TestCase("science","scientificCenter")] [TestCase("hangar","hangar")]
@@ -29,11 +40,16 @@ public sealed class SharedUiArtworkTests
         Assert.AreEqual(DisplayStyle.None,glyph.Q<Image>("glyph-artwork").style.display.value);Assert.AreEqual(.4,glyph.Progress);
         glyph.Set("credits",Color.white);Assert.AreEqual(DisplayStyle.None,glyph.Q("glyph-model").style.display.value);Assert.NotNull(glyph.Q<Image>("glyph-artwork").image);
     }
-    [TestCase("weapon-systems-1")] [TestCase("weapon-systems-2")] [TestCase("defensive-systems-1")] [TestCase("defensive-systems-2")] [TestCase("reinforced-concrete")]
+    [TestCase("weapon-systems-1")] [TestCase("weapon-systems-2")] [TestCase("defensive-systems-1")] [TestCase("defensive-systems-2")] [TestCase("reinforced-concrete")] [TestCase("reinforced-concrete-2")] [TestCase("weapon-systems-3")] [TestCase("defensive-systems-3")]
     public void SharedResearchUsesWheelEmblem(string key)
     {
         var glyph=new OrbitalGlyph(key);Assert.AreEqual(DisplayStyle.Flex,glyph.Q("glyph-emblem").style.display.value);
         Assert.AreEqual(DisplayStyle.None,glyph.Q("glyph-model").style.display.value);Assert.IsNull(glyph.Q<Image>("glyph-artwork").image);
+        var texture=Resources.Load<Texture2D>("OrbitalIcons/"+(key=="reinforced-concrete-2"?"reinforced-concrete":key));
+        Assert.NotNull(texture);Assert.AreSame(texture,glyph.Q<Image>("research-image").image);
+        Assert.AreEqual(key.EndsWith("3")?"III":key.EndsWith("2")?"II":"I",glyph.Q<Label>("research-level").text);
+        Assert.AreEqual(RadialCardProfile.Load().researchIconBrightness,glyph.Q<Image>("research-image").tintColor.r);
+        var wheel=new RadialArtwork();wheel.Set(key);Assert.AreSame(texture,wheel.Q<ResearchIcon>().Q<Image>("research-image").image);
         glyph.Set("tank",OrbitalTheme.Ink);Assert.AreEqual(DisplayStyle.None,glyph.Q("glyph-emblem").style.display.value);Assert.NotNull(glyph.Q<Image>("glyph-portrait").image);
     }
     static MatchResult Result()

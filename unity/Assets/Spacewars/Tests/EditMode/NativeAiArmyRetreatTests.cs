@@ -29,12 +29,229 @@ namespace Spacewars.Tests.EditMode
             return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,old.Seed,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,entities.ToArray(),old.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:vision.Snapshot(),routeProofs:proofs.ToArray()));
         }
         private static PlayableAiTraceRecord A5Receipt(string change="valid")=>new PlayableAiTraceRecord("withdrawal",2,100,2,100,change=="unapplied"?PlayableAiDeliveryStatus.Cancelled:PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"fixture",policy:change=="policy"?"foreign":AiArmyPlanner.Policy,kind:PlayableCommandKind.Move,ownerId:"player-1",sourceIdentity:PlayableAiOpeningComposition.SourceIdentity,receiptIdentity:new AiReceiptIdentity(71,"player-1",1,2));
+        [TestCase("safe",true)][TestCase("inside-fire",false)][TestCase("occupied",false)]
+        public void Retreat_CertifiedFirstLegLeavesThreatAndKeepsPlacementSpacing(string mode,bool prefix)
+        {
+            var p=PlayableProfile.Default;var r=Registry();var planner=A4Mission(r);planner.SetPhase(r,AiArmyPhase.Regrouping,100);((AiArmyMissionState)Field(planner,"state")).Reason="withdrawal";var old=A5Observation();
+            var first=mode=="inside-fire"?new NavPoint(-2,0):new NavPoint(-12,4);var home=new NavPoint(-25,0);
+            var units=old.Entities.Select(u=>u.Id==2&&mode=="occupied"?new PlayableEntitySnapshot(u.Id,u.Owner,u.Kind,first,u.Health,false,0,0,0,u.CurrentOrder):u).ToArray();
+            var routes=old.RouteProofs.Select(route=>route.UnitId==1&&route.Kind==PlayableRouteTargetKind.FriendlyAnchor?
+                new PlayableRouteProof(1,route.Owner,route.Generation,route.Tick,route.GeometryRevision,route.Origin,route.Radius,route.Kind,route.TargetId,route.Target,home,new[]{first,home}):route).ToArray();
+            var o=PlayableAiObservation.From(new PlayableSnapshot(old.ProfileId,old.ProfileRevision,71,old.Seed,100,100,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,old.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:old.Vision,routeProofs:routes,activeProfile:p));
+            var army=r.Capture().Armies.Single();var action=AiTacticalExecutor.Withdrawal(o,army,p,AiProfile.Initial,99);
+            Assert.NotNull(action);CollectionAssert.AreEqual(new[]{1},action.EntityIds);if(mode=="occupied")
+            {
+                Assert.AreNotEqual(first,action.Target);Assert.AreNotEqual(home,action.Target,"A free stand-off on the certified straight segment avoids the occupied corner");
+                Assert.GreaterOrEqual(AiPositionDevelopmentPlanner.Distance(action.Target,first),Math.Max(p.Navigation.ArrivalSlotSpacing,4*p.TankCollisionRadius+2*p.Navigation.ArrivalTolerance+2*p.Navigation.LocalGridCell));
+                Assert.False(AiTacticalExecutor.WithdrawalLeg(o,o.RouteProofs.Single(route=>route.UnitId==1&&route.Kind==PlayableRouteTargetKind.FriendlyAnchor),p,first),"Original occupied endpoint remains inadmissible");
+            }
+            else Assert.AreEqual(prefix?first:home,action.Target);
+            Assert.True(o.RouteProofs.Any(route=>route.UnitId==1&&AiTacticalExecutor.WithdrawalLeg(o,route,p,action.Target)),"Selected leg retains the current full-home certificate and escape safety");
+            if(mode!="inside-fire")
+            {
+                var selected=planner.ProposeWithRecords(o,A4Opening(),p,AiProfile.Initial,r,null);Assert.NotNull(selected);Assert.AreEqual(action.Target,selected.Target);planner.Commit(o,selected,r);
+                Assert.AreEqual(AiArmyPhase.Retreating,planner.Capture().Phase);Assert.AreEqual(action.Target,r.Capture().Armies.Single().Anchor.Value);
+                using var stream=new System.IO.MemoryStream();using(var w=new System.IO.BinaryWriter(stream,System.Text.Encoding.UTF8,true))planner.WriteState(w);var bytes=stream.ToArray();stream.Position=0;var cold=new AiArmyPlanner(o.OwnerId,o.Generation);using(var reader=new System.IO.BinaryReader(stream,System.Text.Encoding.UTF8,true))cold.ReadState(reader,o.Tick,r);
+                using var copy=new System.IO.MemoryStream();using(var w=new System.IO.BinaryWriter(copy,System.Text.Encoding.UTF8,true))cold.WriteState(w);CollectionAssert.AreEqual(bytes,copy.ToArray());
+            }
+        }
+        [Test] public void Retreat_ActualBlockedCornerOperandsChooseAFreeCertifiedStandOff()
+        {
+            var p=PlayableProfile.Default;var old=A5Observation();var from=new NavPoint(15.436446056238761,18.860182047590193);var corner=new NavPoint(-12.4,6.8);var occupied=new NavPoint(-8.970065708490504,6.171564554667022);var home=new NavPoint(-14.687066799654088,6.573003747272123);
+            var units=new[]{new PlayableEntitySnapshot(1,PlayableOwner.Player,PlayableEntityKind.Tank,from,100,false,0,0,0),new PlayableEntitySnapshot(2,PlayableOwner.Player,PlayableEntityKind.Tank,occupied,100,false,0,0,0),new PlayableEntitySnapshot(101,PlayableOwner.Enemy,PlayableEntityKind.Hawk,new NavPoint(18,24),60,false,0,0,0)};
+            var route=new PlayableRouteProof(1,PlayableOwner.Player,71,100,1,from,p.TankCollisionRadius,PlayableRouteTargetKind.FriendlyAnchor,50,old.Buildings.Single(b=>b.Id==50).Position,home,new[]{corner,home});
+            var o=PlayableAiObservation.From(new PlayableSnapshot(old.ProfileId,old.ProfileRevision,71,old.Seed,100,100,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,old.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:old.Vision,routeProofs:new[]{route},activeProfile:p));
+            Assert.False(AiTacticalExecutor.WithdrawalLeg(o,route,p,corner));var goal=AiTacticalExecutor.WithdrawalDestination(o,route,p);
+            Assert.AreNotEqual(home,goal);Assert.AreNotEqual(corner,goal);Assert.True(AiTacticalExecutor.WithdrawalLeg(o,route,p,goal));Assert.True(AiTacticalExecutor.WithdrawalPath(o,from,new[]{goal},p.TankCollisionRadius,p));
+            double spacing=Math.Max(p.Navigation.ArrivalSlotSpacing,4*p.TankCollisionRadius+2*p.Navigation.ArrivalTolerance+2*p.Navigation.LocalGridCell);Assert.GreaterOrEqual(AiPositionDevelopmentPlanner.Distance(goal,occupied),spacing);
+        }
+        [Test] public void Retreat_SafeOriginUsesFinalHomeGoalInsteadOfAnotherIntermediate()
+        {
+            var p=PlayableProfile.Default;var o=A5Observation("remote");var unit=o.Entities.First(u=>u.Id==1);
+            var home=o.Buildings.Single(b=>b.Id==50);var goal=new NavPoint(-25,0);
+            var route=new PlayableRouteProof(unit.Id,o.Owner,o.Generation,o.Tick,1,unit.Position,p.TankCollisionRadius,PlayableRouteTargetKind.FriendlyAnchor,home.Id,home.Position,goal,new[]{new NavPoint(-12,4),goal});
+            Assert.True(AiTacticalExecutor.WithdrawalRoute(o,route,p));
+            Assert.True(AiTacticalExecutor.WithdrawalPath(o,unit.Position,new[]{unit.Position},route.Radius,p));
+            Assert.AreEqual(goal,AiTacticalExecutor.WithdrawalDestination(o,route,p),"A safe origin needs the final certified home goal, not another escape-prefix installation.");
+        }
+        [TestCase("blocking",true)][TestCase("off-corridor",false)][TestCase("human",false)]
+        [TestCase("foreign-policy",false)][TestCase("unapplied",false)][TestCase("pending-mover",false)]
+        [TestCase("stale-proof",false)][TestCase("unsafe-home",false)][TestCase("static-defense",false)][TestCase("missing-core",false)][TestCase("recovering",false)][TestCase("assembly-anchor",false)]
+        [TestCase("in-flight-anchor",false)][TestCase("unapplied-wave",true)][TestCase("human-wave",true)][TestCase("foreign-wave",true)][TestCase("other-leader-wave",true)]
+        [TestCase("moving-peer",true)][TestCase("same-direction",false)][TestCase("occupied-home",false)][TestCase("path-body",false)]
+        public void Retreat_OriginalPeerClearsOnlyAProvenOwnMovingCorridor(string changed,bool expected)
+        {
+            bool anchor=changed=="assembly-anchor"||changed.EndsWith("-wave",StringComparison.Ordinal)||changed=="in-flight-anchor";
+            var p=PlayableProfile.Default;var old=A5Observation("remote");var end=new NavPoint(-25,0);var peerAt=new NavPoint(-12,changed=="off-corridor"?6:0);var alternate=new NavPoint(-25,6);
+            PlayableOrderStamp Stamp(int id)=>new PlayableOrderStamp(id,old.Owner,71,2,2,100,changed=="human"&&id==2?PlayableOrderOrigin.Human:PlayableOrderOrigin.Ai,PlayableCommandKind.Move,PlayableAiOpeningComposition.SourceIdentity,2,2);
+            var move=new PlayableTacticalOrderSnapshot(1,old.Owner,71,2,100,PlayableTacticalOrderKind.Move,end,0);
+            var pending=changed=="pending-mover"?new PlayableUnitQueueSnapshot(null,new PlayableQueuedOrderSnapshot(1,1,2,2,PlayableCommandKind.Move,new NavLocation(end,NavLocation.FlatSurface),0,aiActionId:2),Array.Empty<PlayableQueuedOrderSnapshot>(),null,pendingAiRouteViable:true):null;
+            var mover=new PlayableEntitySnapshot(1,old.Owner,PlayableEntityKind.Tank,default,p.TankHealth,true,0,0,0,move,navigationOutcome:NavigationOutcome.Moving,orderStamp:Stamp(1),queue:pending);
+            bool peerMoving=changed=="moving-peer"||changed=="same-direction";var peerGoal=changed=="same-direction"?end:new NavPoint(5,0);
+            var peer=new PlayableEntitySnapshot(2,old.Owner,PlayableEntityKind.Tank,peerAt,p.TankHealth,peerMoving,0,0,0,peerMoving?new PlayableTacticalOrderSnapshot(2,old.Owner,71,2,100,PlayableTacticalOrderKind.Move,peerGoal,0):null,navigationOutcome:peerMoving?NavigationOutcome.Moving:NavigationOutcome.Arrived,orderStamp:Stamp(2));
+            var third=new PlayableEntitySnapshot(3,old.Owner,PlayableEntityKind.Tank,changed=="occupied-home"?alternate:changed=="path-body"?new NavPoint(-20,3.7):new NavPoint(-2,8),changed=="missing-core"?0:p.TankHealth,false,0,0,0);
+            var home=old.Buildings.Single(b=>b.Id==50);var proofs=new[]{
+                new PlayableRouteProof(1,old.Owner,71,changed=="stale-proof"?99:100,1,mover.Position,p.TankCollisionRadius,PlayableRouteTargetKind.FriendlyAnchor,1,end,end,new[]{new NavPoint(-12,0),end}),
+                new PlayableRouteProof(2,old.Owner,71,100,1,peer.Position,p.TankCollisionRadius,PlayableRouteTargetKind.FriendlyAnchor,50,home.Position,peer.Position,new[]{peer.Position}),
+                new PlayableRouteProof(2,old.Owner,71,100,1,peer.Position,p.TankCollisionRadius,PlayableRouteTargetKind.FriendlyAnchor,50,home.Position,alternate,new[]{alternate})};
+            if(peerMoving)proofs=proofs.Concat(new[]{new PlayableRouteProof(2,old.Owner,71,100,1,peer.Position,p.TankCollisionRadius,PlayableRouteTargetKind.FriendlyAnchor,2,peerGoal,peerGoal,new[]{peerGoal})}).ToArray();
+            var enemy=new PlayableEntitySnapshot(101,PlayableOwner.Enemy,PlayableEntityKind.Tank,alternate,p.TankHealth,false,0,0,0);
+            var followAt=new NavPoint(peerAt.X-(changed=="assembly-anchor"?p.FollowDistance:10),peerAt.Z);
+            var follower=new PlayableEntitySnapshot(4,old.Owner,PlayableEntityKind.Tank,followAt,p.TankHealth,false,0,0,0,new PlayableTacticalOrderSnapshot(4,old.Owner,71,3,100,PlayableTacticalOrderKind.Follow,default,changed=="other-leader-wave"?3:2),orderStamp:new PlayableOrderStamp(4,old.Owner,71,3,3,100,changed=="human-wave"?PlayableOrderOrigin.Human:PlayableOrderOrigin.Ai,PlayableCommandKind.Follow,PlayableAiOpeningComposition.SourceIdentity,3,3));
+            var units=new[]{mover,peer,third}.Concat(changed=="unsafe-home"?new[]{enemy}:anchor?new[]{follower}:Array.Empty<PlayableEntitySnapshot>()).ToArray();
+            if(anchor)proofs=proofs.Concat(new[]{new PlayableRouteProof(4,old.Owner,71,100,1,followAt,p.TankCollisionRadius,PlayableRouteTargetKind.FriendlyAnchor,2,followAt,followAt,new[]{followAt})}).ToArray();
+            var buildings=old.Buildings.Concat(changed=="static-defense"?new[]{new PlayableBuildingSnapshot(500,PlayableOwner.Enemy,PlayableBuildingKind.SentryTurret,alternate,100,1,0,0,default)}:Array.Empty<PlayableBuildingSnapshot>()).ToArray();
+            var o=PlayableAiObservation.From(new PlayableSnapshot(old.ProfileId,old.ProfileRevision,71,old.Seed,100,100,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:old.Vision,routeProofs:proofs,activeProfile:p));
+            var army=new AiArmyState{OwnerId=o.OwnerId,TacticalOwner=AiArmyPlanner.Policy,Phase=changed=="recovering"?AiArmyPhase.Recovering:AiArmyPhase.Retreating,Members=new[]{1,2,3},Reinforcements=Array.Empty<int>(),LeaderId=1,MinimumViableForce=3,CreatedTick=10,ProgressTick=20};
+            var records=new[]{A5Receipt(changed=="foreign-policy"?"policy":changed=="unapplied"?"unapplied":"valid")};
+            if(anchor)
+            {
+                army.Members=new[]{1,2,3,4};army.Reinforcements=new[]{4};army.LeaderId=2;
+                records=records.Concat(new[]{new PlayableAiTraceRecord(o.Identity,3,100,3,100,changed=="unapplied-wave"?PlayableAiDeliveryStatus.Accepted:PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"assembly",o.OwnerId,PlayableAiOpeningComposition.SourceIdentity,new AiReceiptIdentity(71,o.OwnerId,1,3),changed=="foreign-wave"?"foreign":AiArmyPlanner.Policy,PlayableCommandKind.Follow)}).ToArray();
+            }
+            var action=AiTacticalExecutor.ClearWithdrawalCorridor(o,army,p,99,records);Assert.AreEqual(expected,action!=null,changed);
+            Assert.AreEqual(20,army.ProgressTick);Assert.AreEqual(10,army.CreatedTick);Assert.AreEqual(3,army.MinimumViableForce);Assert.AreEqual(anchor?2:1,army.LeaderId);CollectionAssert.AreEqual(anchor?new[]{1,2,3,4}:new[]{1,2,3},army.Members);
+            if(expected)
+            {
+                CollectionAssert.AreEqual(new[]{2},action.EntityIds);Assert.AreEqual(alternate,action.Target);Assert.AreEqual(PlayableCommandKind.Move,action.Kind);
+                var ordinary=AiTacticalExecutor.Withdrawal(o,army,p,AiProfile.Initial,99,records:records);CollectionAssert.AreEqual(action.EntityIds,ordinary.EntityIds);Assert.AreEqual(action.Target,ordinary.Target);
+            }
+        }
+        [TestCase(false,false,2)][TestCase(true,false,1)][TestCase(true,true,2)]
+        public void Retreat_RepairRendezvousLeaderPrecedesSafePeersButNotExposedBodies(bool priority,bool exposed,int expected)
+        {
+            var p=PlayableProfile.Default;var old=A5Observation("remote");
+            var units=old.Entities.Where(u=>u.Owner==old.Owner).Select(u=>new PlayableEntitySnapshot(u.Id,u.Owner,u.Kind,u.Position,u.Id==2?50:p.TankHealth,false,0,0,0)).ToList();
+            if(exposed)
+            {
+                // Put only body2 strictly inside the envelope. The exact boundary
+                // can round outside when the planner subtracts its two radii.
+                double reach=PlayableUnitRules.Range(p,PlayableEntityKind.Tank,false)+2*p.TankCollisionRadius;
+                double x=(reach+Math.Sqrt(reach*reach-4))/2; // Other bodies are two metres off this axis.
+                units.Add(new PlayableEntitySnapshot(101,PlayableOwner.Enemy,PlayableEntityKind.Tank,new NavPoint(x,2),p.TankHealth,false,0,0,0));
+            }
+            var routes=old.RouteProofs.Where(r=>r.Kind==PlayableRouteTargetKind.FriendlyAnchor).ToList();
+            if(exposed)
+            {
+                var u=units.Single(e=>e.Id==2);var e=units.Single(x=>x.Id==101);
+                routes.Add(new PlayableRouteProof(u.Id,u.Owner,71,100,1,u.Position,p.TankCollisionRadius,PlayableRouteTargetKind.VisibleEnemy,e.Id,e.Position,e.Position,new[]{e.Position}));
+            }
+            var o=PlayableAiObservation.From(new PlayableSnapshot(old.ProfileId,old.ProfileRevision,71,old.Seed,100,100,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units.ToArray(),old.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:old.Vision,routeProofs:routes.ToArray(),activeProfile:p));
+            var army=new AiArmyState{OwnerId=o.OwnerId,TacticalOwner=AiArmyPlanner.Policy,Phase=AiArmyPhase.Retreating,Members=new[]{1,2,3},Reinforcements=Array.Empty<int>(),LeaderId=1,MinimumViableForce=3,CreatedTick=10,ProgressTick=20};
+            Assert.AreEqual(exposed?1:0,AiTacticalExecutor.LocalThreats(o,army,p).Length,"The control must project an actually observed local contact");
+            var action=AiTacticalExecutor.Withdrawal(o,army,p,AiProfile.Initial,99,prioritizeLeader:priority);
+            Assert.NotNull(action);Assert.AreEqual(PlayableCommandKind.Move,action.Kind);CollectionAssert.AreEqual(new[]{expected},action.EntityIds);
+            Assert.AreEqual(20,army.ProgressTick);Assert.AreEqual(10,army.CreatedTick);Assert.AreEqual(3,army.MinimumViableForce);
+        }
+        [TestCase("blocked",true)][TestCase("unreachable",true)][TestCase("stopped",true)][TestCase("moving",false)][TestCase("same-goal",false)][TestCase("unowned",false)]
+        public void Retreat_TerminalOwnMoveCanChooseADifferentCurrentSafeHomeGoal(string mode,bool replace)
+        {
+            var p=PlayableProfile.Default;var old=A5Observation("remote",move:true);var army=new AiArmyState{OwnerId=old.OwnerId,TacticalOwner=AiArmyPlanner.Policy,Members=new[]{1,2,3},Reinforcements=Array.Empty<int>(),Phase=AiArmyPhase.Retreating,CreatedTick=10};
+            var units=old.Entities.Select(u=>u.Id==1?new PlayableEntitySnapshot(u.Id,u.Owner,u.Kind,u.Position,u.Health,false,0,0,0,u.CurrentOrder,navigationOutcome:mode=="moving"?NavigationOutcome.Moving:mode=="stopped"?NavigationOutcome.Stopped:mode=="unreachable"?NavigationOutcome.Unreachable:NavigationOutcome.Blocked,orderStamp:u.OrderStamp):u).ToArray();
+            var goal=mode=="same-goal"?units[0].CurrentOrder.Destination:new NavPoint(-25,4);var home=old.Buildings.Single(b=>b.Id==50);
+            var routes=old.RouteProofs.Concat(new[]{new PlayableRouteProof(1,old.Owner,old.Generation,old.Tick,1,units[0].Position,p.TankCollisionRadius,PlayableRouteTargetKind.FriendlyAnchor,home.Id,home.Position,goal,new[]{goal})}).ToArray();
+            var o=PlayableAiObservation.From(new PlayableSnapshot(old.ProfileId,old.ProfileRevision,old.Generation,old.Seed,old.Tick,old.Tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,old.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:old.Vision,routeProofs:routes));
+            var action=AiTacticalExecutor.Withdrawal(o,army,p,AiProfile.Initial,99,records:new[]{A5Receipt(mode=="unowned"?"policy":"valid")});
+            Assert.AreEqual(replace,action!=null);if(replace){CollectionAssert.AreEqual(new[]{1},action.EntityIds);Assert.AreEqual(goal,action.Target);Assert.AreNotEqual(units[0].CurrentOrder.Destination,action.Target);}
+        }
+        [TestCase(AiArmyPhase.Regrouping,false)][TestCase(AiArmyPhase.Retreating,false)][TestCase(AiArmyPhase.Recovering,true)]
+        public void Retreat_GenericFollowWaveJoinsOnlyAfterOriginalCoreRecovery(AiArmyPhase phase,bool join)
+        {
+            var p=PlayableProfile.Default;var r=Registry();var mission=A4Mission(r);var old=A5Observation("remote",move:true);long id=mission.Capture().ArmyId;
+            var wave=new PlayableEntitySnapshot(4,old.Owner,PlayableEntityKind.Tank,new NavPoint(-2,0),100,false,0,0,0,new PlayableTacticalOrderSnapshot(4,old.Owner,71,7,90,PlayableTacticalOrderKind.Follow,default,1),orderStamp:new PlayableOrderStamp(4,old.Owner,71,7,7,90,PlayableOrderOrigin.Ai,PlayableCommandKind.Follow,PlayableAiOpeningComposition.SourceIdentity,42,42));
+            var proof=new PlayableRouteProof(4,old.Owner,71,100,1,wave.Position,p.TankCollisionRadius,PlayableRouteTargetKind.FriendlyAnchor,1,default,default,new[]{default(NavPoint)});
+            var o=PlayableAiObservation.From(new PlayableSnapshot(old.ProfileId,old.ProfileRevision,71,old.Seed,100,100,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,old.Entities.Concat(new[]{wave}).ToArray(),old.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:old.Vision,routeProofs:old.RouteProofs.Concat(new[]{proof}).ToArray()));
+            AiTacticalExecutor.Observe(o,r,id,p);mission.SetPhase(r,phase,100);((AiArmyMissionState)Field(mission,"state")).Reason="withdrawal";
+            var records=new[]{A5Receipt(),new PlayableAiTraceRecord(o.Identity,42,90,7,90,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"current applied Follow",o.OwnerId,PlayableAiOpeningComposition.SourceIdentity,new AiReceiptIdentity(71,o.OwnerId,7,1),AiArmyPlanner.Policy,PlayableCommandKind.Follow)};
+            mission.Observe(o,r,AiProfile.Initial,records,replanQuietGuards:false);Assert.True(mission.Active);Assert.AreEqual(!join,r.Capture().Armies.Single().Reinforcements.Contains(4));
+            Assert.AreEqual(3,r.Capture().Armies.Single().Members.Except(r.Capture().Armies.Single().Reinforcements).Count()-(join?1:0),"The original core body count is preserved; no viability threshold changes.");
+        }
+        [TestCase("valid",true)][TestCase("unapplied",false)][TestCase("foreign-policy",false)][TestCase("human",false)][TestCase("not-viable",false)]
+        public void Retreat_OwnPendingReplacementDoesNotDependOnRepairClientBudget(string mode,bool keep)
+        {
+            var p=PlayableProfile.Default;var r=Registry();var mission=A4Mission(r);var old=A5Observation("remote",1000,move:true);mission.SetPhase(r,AiArmyPhase.Retreating,1000);((AiArmyMissionState)Field(mission,"state")).Reason="withdrawal";
+            var goal=new NavPoint(-25,4);var pending=new PlayableQueuedOrderSnapshot(1,1,7,24,PlayableCommandKind.Move,new NavLocation(goal,NavLocation.FlatSurface),0,aiActionId:314);
+            var queue=new PlayableUnitQueueSnapshot(null,pending,Array.Empty<PlayableQueuedOrderSnapshot>(),null,pendingAiRouteViable:mode!="not-viable");
+            var units=old.Entities.Select(u=>u.Id==1?new PlayableEntitySnapshot(u.Id,u.Owner,u.Kind,u.Position,u.Health,false,0,0,0,u.CurrentOrder,orderStamp:new PlayableOrderStamp(1,u.Owner,71,24,7,900,mode=="human"?PlayableOrderOrigin.Human:PlayableOrderOrigin.Ai,PlayableCommandKind.Move,PlayableAiOpeningComposition.SourceIdentity,314,314),queue:queue):u).ToArray();
+            var o=PlayableAiObservation.From(new PlayableSnapshot(old.ProfileId,old.ProfileRevision,71,old.Seed,1000,1000,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,old.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:old.Vision,routeProofs:old.RouteProofs.ToArray()));
+            var receipt=new PlayableAiTraceRecord(o.Identity,314,900,7,900,mode=="unapplied"?PlayableAiDeliveryStatus.Accepted:PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"current pending core replacement",o.OwnerId,PlayableAiOpeningComposition.SourceIdentity,new AiReceiptIdentity(71,o.OwnerId,7,1),mode=="foreign-policy"?"foreign":AiArmyPlanner.Policy,PlayableCommandKind.Move);
+            mission.Observe(o,r,AiProfile.Initial,new[]{A5Receipt(),receipt},replanQuietGuards:false);Assert.AreEqual(keep,mission.Active,"An owned viable core replacement is independent of a repair client's deadline; exact authority checks still apply.");
+        }
+        [Test] public void Retreat_ArrivedIntermediateLegStillNeedsActualHomeArrival()
+        {
+            var p=PlayableProfile.Default;var old=A5Observation();var at=new NavPoint(-12,4);var goal=new NavPoint(-25,0);
+            var unit=new PlayableEntitySnapshot(1,PlayableOwner.Player,PlayableEntityKind.Tank,at,100,false,0,0,0,navigationOutcome:NavigationOutcome.Arrived,
+                orderStamp:new PlayableOrderStamp(1,PlayableOwner.Player,71,7,7,90,PlayableOrderOrigin.Ai,PlayableCommandKind.Move,PlayableAiOpeningComposition.SourceIdentity,22,22));
+            var route=new PlayableRouteProof(1,PlayableOwner.Player,71,100,1,at,p.TankCollisionRadius,PlayableRouteTargetKind.FriendlyAnchor,50,old.Buildings.Single(b=>b.Id==50).Position,goal,new[]{goal});
+            var o=PlayableAiObservation.From(new PlayableSnapshot(old.ProfileId,old.ProfileRevision,71,old.Seed,100,100,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,new[]{unit},old.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:old.Vision,routeProofs:new[]{route},activeProfile:p));
+            var army=new AiArmyState{OwnerId=o.OwnerId,TacticalOwner=AiArmyPlanner.Policy,Members=new[]{1},Phase=AiArmyPhase.Retreating};
+            var receipts=new[]{new PlayableAiTraceRecord(o.Identity,22,90,7,90,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"accepted intermediate leg",o.OwnerId,PlayableAiOpeningComposition.SourceIdentity,new AiReceiptIdentity(71,o.OwnerId,1,7),AiArmyPlanner.Policy,PlayableCommandKind.Move)};
+            Assert.True(AiTacticalExecutor.EffectiveWithdrawal(o,army,unit,receipts,p,certified:false));
+            Assert.False(AiTacticalExecutor.EffectiveWithdrawal(o,army,unit,receipts,p),"Intermediate progress cannot become home arrival/recovery");
+        }
+        [TestCase(false)][TestCase(true)] public void Repair_HealedSavedClientIsNotStolenByGenericReinforcementGather(bool expired)
+        {
+            var p=PlayableProfile.Default;long tick=expired?10+AiProfile.SecondsToTicks(AiProfile.Initial.Value("positionDevelopment.repairWaitSeconds"),30):400;var r=Registry();var planner=A4Mission(r);var old=A4Observation(tick,wave:true);long id=planner.Capture().ArmyId;AiTacticalExecutor.Observe(old,r,id,p);
+            var at=old.Entities.Single(u=>u.Id==4).Position;var order=new PlayableTacticalOrderSnapshot(4,PlayableOwner.Player,71,7,10,PlayableTacticalOrderKind.Move,at,0);
+            var units=old.Entities.Select(u=>u.Id==4?new PlayableEntitySnapshot(u.Id,u.Owner,u.Kind,u.Position,100,false,0,0,0,order,navigationOutcome:NavigationOutcome.Arrived,
+                orderStamp:new PlayableOrderStamp(4,PlayableOwner.Player,71,7,7,10,PlayableOrderOrigin.Ai,PlayableCommandKind.Move,PlayableAiOpeningComposition.SourceIdentity,314,314)):u).ToArray();
+            var tower=new PlayableBuildingSnapshot(30,PlayableOwner.Player,PlayableBuildingKind.RepairTower,new NavPoint(at.X-2,at.Z),100,1,0,0,default);
+            var o=PlayableAiObservation.From(new PlayableSnapshot(old.ProfileId,old.ProfileRevision,71,old.Seed,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,old.Buildings.Concat(new[]{tower}).ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:old.Vision,routeProofs:old.RouteProofs.ToArray(),activeProfile:p));
+            const BindingFlags flags=BindingFlags.NonPublic|BindingFlags.Instance;typeof(AiArmyPlanner).GetField("nextId",flags).SetValue(planner,43L);typeof(AiArmyPlanner).GetField("completed",flags).SetValue(planner,new System.Collections.Generic.Dictionary<string,long>{{"repair-use:4:30:42:7",10}});
+            var receipts=new[]{new PlayableAiTraceRecord(o.Identity,314,10,7,10,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"actual repaired client",o.OwnerId,PlayableAiOpeningComposition.SourceIdentity,new AiReceiptIdentity(71,o.OwnerId,1,7),AiArmyPlanner.Policy,PlayableCommandKind.Move)};
+            Assert.True(AiRepairUsePolicy.Recovering(o,p,AiProfile.Initial,planner.Capture().RepairClients,AiArmyPlanner.Policy,receipts,includeRecovered:true,includeExpired:true).Contains(4));
+            var before=Newtonsoft.Json.JsonConvert.SerializeObject(r.Capture());var action=planner.ProposeWithRecords(o,A4Opening(),p,AiProfile.Initial,r,receipts);
+            Assert.AreEqual(expired,action!=null&&action.EntityIds.Contains(4),"Live saved client waits for its dedicated Follow; the original elapsed budget cannot be extended");
+            Assert.True(planner.Capture().RepairClients.ContainsKey("repair-use:4:30:42:7"));Assert.AreEqual(before,Newtonsoft.Json.JsonConvert.SerializeObject(r.Capture()));
+        }
+        [TestCase(true,false)][TestCase(true,true)][TestCase(false,false)]
+        public void Mission_PublicApproachDoesNotRetargetToCollidingVisibleWorldId(bool isPublic,bool building)
+        {
+            var p=PlayableProfile.Default;var r=Registry();var planner=A4Mission(r);const BindingFlags flags=BindingFlags.NonPublic|BindingFlags.Instance;
+            var state=(AiArmyMissionState)typeof(AiArmyPlanner).GetField("state",flags).GetValue(planner);var approach=new NavPoint(18,0);var observed=new NavPoint(20,0);
+            state.TargetKind=isPublic?PlayableRouteTargetKind.PublicObjective:PlayableRouteTargetKind.VisibleEnemy;state.TargetId=101;state.Target=approach;state.Phase=AiArmyPhase.Advancing;
+            r.UpdateMission(state.ArmyId,AiArmyPlanner.Policy,AiArmyPhase.Advancing,100,((int)state.TargetKind)+":101",rally:approach);
+            PlayableAiObservation View(long tick)
+            {
+                var old=A4Observation(tick);var command=isPublic?PlayableCommandKind.AttackMove:PlayableCommandKind.Attack;
+                var units=old.Entities.Where(u=>!building||u.Id!=101).Select(u=>u.Owner!=PlayableOwner.Player?u:new PlayableEntitySnapshot(u.Id,u.Owner,u.Kind,u.Position,u.Health,false,0,0,0,
+                    new PlayableTacticalOrderSnapshot(u.Id,u.Owner,71,7,90,isPublic?PlayableTacticalOrderKind.AttackMove:PlayableTacticalOrderKind.Attack,isPublic?approach:default,isPublic?0:101),
+                    orderStamp:new PlayableOrderStamp(u.Id,u.Owner,71,7,7,90,PlayableOrderOrigin.Ai,command,PlayableAiOpeningComposition.SourceIdentity,22,22))).ToArray();
+                var buildings=old.Buildings.Concat(building?new[]{new PlayableBuildingSnapshot(101,PlayableOwner.Enemy,PlayableBuildingKind.Headquarters,observed,300,2,0,0,default)}:Array.Empty<PlayableBuildingSnapshot>()).ToArray();
+                return PlayableAiObservation.From(new PlayableSnapshot(old.ProfileId,old.ProfileRevision,71,old.Seed,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,units,buildings,
+                    Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:old.Vision,activeProfile:p,
+                    publicScoutObjectives:new[]{new PlayablePublicScoutObjective(101,approach,PlayablePublicScoutObjectiveRole.PossibleEnemyStart,true)}));
+            }
+            var o=View(100);var kind=isPublic?PlayableCommandKind.AttackMove:PlayableCommandKind.Attack;
+            var records=new[]{new PlayableAiTraceRecord(o.Identity,22,90,7,90,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"exact current mission leg",o.OwnerId,PlayableAiOpeningComposition.SourceIdentity,new AiReceiptIdentity(71,o.OwnerId,1,7),AiArmyPlanner.Policy,kind)};
+            planner.Observe(o,r,AiProfile.Initial,records,replanQuietGuards:false);Assert.True(planner.Active);Assert.AreEqual(isPublic?approach:observed,planner.Capture().Target);
+            if(isPublic){planner.SetPhase(r,AiArmyPhase.Regrouping,101);state.Reason="withdrawal";planner.Observe(View(101),r,AiProfile.Initial,records,replanQuietGuards:false);Assert.True(planner.Active,"The exact accepted public leg remains ours while withdrawal is prepared");Assert.AreEqual(approach,planner.Capture().Target);}
+            using var stream=new System.IO.MemoryStream();using(var w=new System.IO.BinaryWriter(stream,System.Text.Encoding.UTF8,true))planner.WriteState(w);var bytes=stream.ToArray();stream.Position=0;var cold=new AiArmyPlanner(o.OwnerId,o.Generation);using(var reader=new System.IO.BinaryReader(stream,System.Text.Encoding.UTF8,true))cold.ReadState(reader,101,r);
+            using var output=new System.IO.MemoryStream();using(var w=new System.IO.BinaryWriter(output,System.Text.Encoding.UTF8,true))cold.WriteState(w);CollectionAssert.AreEqual(bytes,output.ToArray(),"Current target binding persists exactly");
+        }
         [TestCase("local",true)][TestCase("remote",false)][TestCase("hidden",false)][TestCase("allied",false)]
         public void Retreat_OnlyLocalVisibleHostileCatalogForce(string change,bool expected)
         {
             var r=Registry();var mission=A4Mission(r);var o=A5Observation(change);var army=r.Capture().Armies.Single();
             Assert.AreEqual(expected,AiTacticalExecutor.Withdraw(o,army,PlayableProfile.Default,AiProfile.Initial));
             Assert.AreEqual(expected,AiTacticalExecutor.Withdrawal(o,army,PlayableProfile.Default,AiProfile.Initial,2)!=null);
+        }
+        [TestCase("local",3)][TestCase("hidden",1)][TestCase("remote",1)][TestCase("allied",1)]
+        public void Retreat_ObservedExposurePrioritizesEndangeredMemberWithoutPrivateTargets(string change,int expected)
+        {
+            var p=PlayableProfile.Default;var r=Registry();var mission=A4Mission(r);mission.SetPhase(r,AiArmyPhase.Retreating,100);var old=A5Observation(change);
+            var units=old.Entities.Select(e=>e.Id>=101?new PlayableEntitySnapshot(e.Id,e.Owner,e.Kind,new NavPoint(e.Position.X,4+(e.Id-101)*.5),e.Health,e.Moving,0,e.HullHeading,e.TurretHeading):e).ToArray();
+            Assert.True(units.Where(e=>e.Id>=101).All(e=>e.TargetId==0),"Enemy target identity is redacted in a lawful owner observation");
+            var proofs=old.RouteProofs.Select(route=>route.Kind!=PlayableRouteTargetKind.VisibleEnemy?route:
+                new PlayableRouteProof(route.UnitId,route.Owner,route.Generation,route.Tick,route.GeometryRevision,route.Origin,route.Radius,route.Kind,route.TargetId,
+                    units.Single(e=>e.Id==route.TargetId).Position,units.Single(e=>e.Id==route.TargetId).Position,new[]{units.Single(e=>e.Id==route.TargetId).Position})).ToArray();
+            var o=PlayableAiObservation.From(new PlayableSnapshot(old.ProfileId,old.ProfileRevision,old.Generation,old.Seed,old.Tick,old.Tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,
+                units,old.Buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:old.Vision,routeProofs:proofs,activeProfile:p));
+            var army=r.Capture().Armies.Single();var before=Newtonsoft.Json.JsonConvert.SerializeObject(r.Capture());
+            var action=AiTacticalExecutor.Withdrawal(o,army,p,AiProfile.Initial,2);
+            Assert.NotNull(action);Assert.AreEqual(PlayableCommandKind.Move,action.Kind);CollectionAssert.AreEqual(new[]{expected},action.EntityIds);
+            Assert.True(o.RouteProofs.Any(route=>route.UnitId==expected&&route.Goal.Equals(action.Target)&&AiTacticalExecutor.WithdrawalRoute(o,route,p)),"Priority still needs the same current safe home route");
+            Assert.AreEqual(before,Newtonsoft.Json.JsonConvert.SerializeObject(r.Capture()),"Selection cannot change core membership or phase");
         }
         [TestCase("local",PlayableCommandKind.Move)][TestCase("unsafe",PlayableCommandKind.Attack)][TestCase("missing",PlayableCommandKind.Attack)][TestCase("stale",PlayableCommandKind.Attack)]
         public void Retreat_UnsafeOrMissingNativeFallbackDefendsInsteadOfIdle(string change,PlayableCommandKind expected)

@@ -90,7 +90,7 @@ namespace Spacewars.Tests.PlayMode
                             Set(hud,"queueLabel",new Label());Set(hud,"selectionLabel",new Label());Set(hud,"progress",new ProgressBar());
                             foreach(var field in new[]{"hawkButton","tankButton","explorerButton","shkvalButton"})Set(hud,field,new Button());
                             Call(hud,"CreateProductionHud",panel);Call(hud,"UpdateProductionHud",b);
-                            var slots=panel.Query<Button>().ToList();Assert.AreEqual(6,slots.Count);Assert.True(b.PrivateState.Orders.Any(o=>o.IsUpgrade));Assert.That(slots.First(x=>x.tooltip.Contains("Улучшение здания")).Q<OrbitalGlyph>().Kind,Is.EqualTo("science"));
+                            var slots=panel.Query<Button>().ToList();Assert.AreEqual(6,slots.Count);Assert.True(b.PrivateState.Orders.Any(o=>o.IsUpgrade));Assert.That(slots.First(x=>x.tooltip.Contains("Улучшение здания")).Q<OrbitalGlyph>().Kind,Is.EqualTo(OrbitalPrecision.BuildingArtwork(b.Kind,true)));
                         }
                         Call(hud,"CreateScienceHud",panel);Call(hud,"UpdateScienceHud",b);
                     }

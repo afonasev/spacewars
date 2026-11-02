@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using Spacewars.Simulation;
 
@@ -86,6 +87,23 @@ namespace Spacewars.Runtime
         private void InstallProbeCommandBackingNoThrow(NavigationGroupCommand c)
         {
             groupCommandBacking=c.Committed;groups=c.Groups;memberGroups=c.MemberGroups;orders=c.Orders;pending=c.Pending;allocating=c.Allocating;reservations=c.Reservations;retainedGoals=c.Goals;movementIdentities=c.Identities;technicalFailures=c.Failures;arrivalLedger=c.Ledger;c.Published=true;
+        }
+        // Restoring current state already owns these empty maps. Binding a fresh
+        // physical motion consumer must establish the same producer capability,
+        // rather than making its next idle frame depend on prior hydration.
+        private void PrepareFreshMotionCommandBacking()
+        {
+            long operation,publication;NavCrowd crowd;
+            bool Empty()=>groupCommandBacking==null&&physicalArrivalEnabled&&commandGroup==null&&admissionBatchDepth==0&&EmptyCommandStateForProbe()&&probes.Count==0&&Requests.Count==0&&Requests.HasInitialPreparedBacking&&Answers.Count==0&&barrierAnswers.Count==0&&installedExecutions.Count==0&&Crowd.Units.All(a=>!a.Moving&&!a.Held&&a.Route.Count==0);
+            using(EnterTransport()){if(!Empty())return;operation=authorityOperationIdentity;publication=admissionPublicationIdentity;crowd=Crowd;}
+            if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,Generation,publication,out var scope))throw new InvalidOperationException("Fresh motion backing admission refused.");
+            using(scope){NavigationGroupCommand prepared=null;try{
+                prepared=PrepareEmptyProbeCommandBacking(scope);scope.Attach(prepared);
+                using(EnterTransport())scope.Publish(prepared,_=>{
+                    if(scope.IsCancelled||operation!=authorityOperationIdentity||publication!=admissionPublicationIdentity||!ReferenceEquals(crowd,Crowd)||!Empty()||!ProbeBootstrapNamesCurrent(prepared.Committed.CrowdNames))throw new InvalidOperationException("Fresh motion backing source changed.");
+                    using(var mailbox=Requests.EnterPreparedWrite()){InstallProbeCommandBackingNoThrow(prepared);mailbox.InstallNoThrow(prepared.Mailbox,0,prepared.Committed.MailboxOwners);}
+                });scope.ResolveCommitted();
+            }finally{prepared?.ReleaseStorage();}}
         }
         private bool? TryOwnedProbe(int producer,long order,NavigationProfile typed,NavPoint start,NavPoint goal,bool cancel,out NavigationRequest result)
         {

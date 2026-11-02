@@ -44,6 +44,7 @@ namespace Spacewars.Presentation
         }
         private void FocusMatchNotification(bool previous)
         {
+            if(BotCameraLocked)return;
             if(view==null||cameraView==null||chatOpen||paused||MenuOwnsInput||ResultsVisible||inLobby||preparing||signalWheelOpen||PadAuxiliaryWheel||battleGestures.Mode=="buildingWheel"||!localInputFocused||input?.HasFocus!=true)return;
             var point=matchNotifications.Focus(previous,Time.unscaledTimeAsDouble,profile);if(!point.HasValue)return;
             var center=Ground(SeatScreenCenter);cameraView.transform.position+=new Vector3((float)(point.Value.X-center.X),0,(float)(point.Value.Z-center.Z));

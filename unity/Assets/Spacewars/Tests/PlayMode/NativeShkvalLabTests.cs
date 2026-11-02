@@ -27,10 +27,20 @@ public sealed class NativeShkvalLabTests
             int revision=(int)store.State["revisions"][store.State["revisions"].Count()-1]["revision"];
             var saved=new NativeBalanceStore(baseline,path).Resolve(revision);Assert.That(saved.ShkvalMarkerStartRadius,Is.EqualTo(2.3));Assert.That(saved.ShkvalMarkerOpacity,Is.EqualTo(.35));
             Assert.AreEqual(revision,store.Active.Revision);
+            view.Page.Q<TextField>("lab-search").value="artillery.directHitDamage";yield return null;
+            var direct=view.Page.Q<TextField>("lab-field-shkvalDirectHitDamage");Assert.NotNull(direct);Assert.Greater(direct.worldBound.width,150);direct.value="35";
+            view.Page.Q<Button>("lab-save").Focus();navigation.Activate();yield return null;
+            revision=(int)store.State["revisions"][store.State["revisions"].Count()-1]["revision"];
+            Assert.AreEqual(35,new NativeBalanceStore(baseline,path).Resolve(revision).ShkvalDirectHitDamage);
+            view.Page.Q<TextField>("lab-search").value="artillery.baseBlastRadiusMultiplier";yield return null;
+            var baseRadius=view.Page.Q<TextField>("lab-field-shkvalBaseBlastRadiusMultiplier");Assert.NotNull(baseRadius);Assert.Greater(baseRadius.worldBound.width,150);baseRadius.value="0.75";
+            view.Page.Q<Button>("lab-save").Focus();navigation.Activate();yield return null;
+            revision=(int)store.State["revisions"][store.State["revisions"].Count()-1]["revision"];
+            Assert.AreEqual(.75,new NativeBalanceStore(baseline,path).Resolve(revision).ShkvalBaseBlastRadiusMultiplier);
             yield return null;yield return null;
             var folder=Path.Combine(Environment.GetEnvironmentVariable("SPACEWARS_LAB_EVIDENCE")??directory,"shkval");Directory.CreateDirectory(folder);
             var previous=RenderTexture.active;var pixels=new Texture2D(texture.width,texture.height,TextureFormat.RGB24,false);
-            try{RenderTexture.active=texture;pixels.ReadPixels(new Rect(0,0,texture.width,texture.height),0,0);pixels.Apply();File.WriteAllBytes(Path.Combine(folder,"marker-controls.png"),pixels.EncodeToPNG());}finally{RenderTexture.active=previous;UnityEngine.Object.DestroyImmediate(pixels);}
+            try{RenderTexture.active=texture;pixels.ReadPixels(new Rect(0,0,texture.width,texture.height),0,0);pixels.Apply();File.WriteAllBytes(Path.Combine(folder,"base-blast-radius-controls.png"),pixels.EncodeToPNG());}finally{RenderTexture.active=previous;UnityEngine.Object.DestroyImmediate(pixels);}
             view.Page.Q<Button>("lab-back").Focus();navigation.Activate();Assert.True(closed);Assert.AreEqual(revision,store.Active.Revision);Assert.IsNull(NativeBalanceFields.ValidateLiveDifference(baseline,store.Active));
         }finally{navigation.Dispose();panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);UnityEngine.Object.DestroyImmediate(host);UnityEngine.Object.DestroyImmediate(panel);Directory.Delete(directory,true);}
     }

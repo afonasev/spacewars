@@ -400,7 +400,7 @@ namespace Spacewars.Simulation
                 var eventual=Velocity(rearAim,-speed);var velocity=aligned?Velocity(rearHeading,-speed):default;
                 var end=new NavPoint(a.Position.X+velocity.X*dt,a.Position.Z+velocity.Z*dt);
                 var future=new NavPoint(a.Position.X+eventual.X*dt,a.Position.Z+eventual.Z*dt);
-                if(SelectClear(row,end,clearance,clearEntries,ref clearUsed,ref clearNext)&&SelectClear(row,future,clearance,clearEntries,ref clearUsed,ref clearNext)&&StaticPeersClear(bodies,row,neighbors,count,eventual,dt)&&
+                if(SelectClear(row,end,clearance,clearEntries,ref clearUsed,ref clearNext)&&SelectClear(row,future,clearance,clearEntries,ref clearUsed,ref clearNext)&&StaticPeersClear(bodies,row,neighbors,count,eventual,dt)&&StaticPeersClear(bodies,row,neighbors,count,velocity,dt)&&
                     Risk(bodies,row,eventual,neighbors,count,profile.CrowdLookaheadSeconds,riskInputs,ref riskPrepared)<=Risk(bodies,row,default,neighbors,count,profile.CrowdLookaheadSeconds,riskInputs,ref riskPrepared)+1e-12)
                     return new NavMotionProposal{Position=end,Velocity=velocity,Heading=rearHeading,IndependentTurn=!aligned&&!rearHeading.Equals(a.Heading)&&ImprovesGoal(a.Position,future,assignedGoal.Value)};
             }
@@ -440,10 +440,14 @@ namespace Spacewars.Simulation
                         if(risk>bestRisk+1e-12||Math.Abs(risk-bestRisk)<=1e-12&&error>=bestError-errorEpsilon)continue;
                     }
                     bool futureAvailable=false;
-                    if(!aligned||!futureStaticMove)futureAvailable=SelectClear(row,futureEnd,clearance,clearEntries,ref clearUsed,ref clearNext)&&StaticPeersClear(bodies,row,neighbors,count,eventual,dt);
+                    if(!aligned||!futureStaticMove)futureAvailable=SelectClear(row,futureEnd,clearance,clearEntries,ref clearUsed,ref clearNext)&&StaticPeersClear(bodies,row,neighbors,count,eventual,dt)&&StaticPeersClear(bodies,row,neighbors,count,velocity,dt);
                     if(futureAvailable)futureStaticMove=true;
                     if(!aligned&&!futureAvailable)continue;
                     if(!SelectClear(row,end,clearance,clearEntries,ref clearUsed,ref clearNext))continue;
+                    // The executed heading may differ from the forecast steering.
+                    // A known stationary footprint must clear the actual dt sweep;
+                    // otherwise the same ranked candidate is retracted by Joint forever.
+                    if(!StaticPeersClear(bodies,row,neighbors,count,velocity,dt))continue;
                     if(!ranked){
                         risk=Risk(bodies,row,eventual,neighbors,count,profile.CrowdLookaheadSeconds,riskInputs,ref riskPrepared);
                         double ex=eventual.X-preferred.X,ez=eventual.Z-preferred.Z;error=ex*ex+ez*ez;
@@ -469,8 +473,10 @@ namespace Spacewars.Simulation
                 else RefineStaticAvoidanceTurn(bodies,row,neighbors,count,profile,dt,clearance,assignedGoal,aim,limit,bestSteering,bestSpeed,bestRisk,bestError,errorEpsilon,ref result);
             }
             result.Blocked=!futureStaticMove;
-            bool activeNeighbor=false;for(int k=0;k<count;k++)if(bodies[neighbors[row*NeighborCapacity+k]].Active){activeNeighbor=true;break;}
-            result.StaticNoWinner=!won&&turning.Equals(a.Heading)&&!result.Blocked&&!activeNeighbor;
+            // An active neighbor is a forecast input, not evidence that this
+            // stationary no-winner will recover. Keep actual turns voluntary;
+            // an aligned exhausted choice must reach the existing bounded detour.
+            result.StaticNoWinner=!won&&turning.Equals(a.Heading)&&!result.Blocked;
             return result;
         }
 #if UNITY_INCLUDE_TESTS
@@ -493,7 +499,7 @@ namespace Spacewars.Simulation
                 var eventual=Velocity(rearAim,-speed);var velocity=aligned?Velocity(rearHeading,-speed):default;
                 var end=new NavPoint(a.Position.X+velocity.X*dt,a.Position.Z+velocity.Z*dt);
                 var future=new NavPoint(a.Position.X+eventual.X*dt,a.Position.Z+eventual.Z*dt);
-                if(clearance.ClearMotion(row,end)&&clearance.ClearMotion(row,future)&&StaticPeersClear(bodies,row,neighbors,count,eventual,dt)&&
+                if(clearance.ClearMotion(row,end)&&clearance.ClearMotion(row,future)&&StaticPeersClear(bodies,row,neighbors,count,eventual,dt)&&StaticPeersClear(bodies,row,neighbors,count,velocity,dt)&&
                     Risk(bodies,row,eventual,neighbors,count,profile.CrowdLookaheadSeconds)<=Risk(bodies,row,default,neighbors,count,profile.CrowdLookaheadSeconds)+1e-12)
                     return new NavMotionProposal{Position=end,Velocity=velocity,Heading=rearHeading,IndependentTurn=!aligned&&!rearHeading.Equals(a.Heading)&&ImprovesGoal(a.Position,future,assignedGoal.Value)};
             }
@@ -522,10 +528,11 @@ namespace Spacewars.Simulation
                     var end=new NavPoint(a.Position.X+velocity.X*dt,a.Position.Z+velocity.Z*dt);
                     var futureEnd=new NavPoint(a.Position.X+eventual.X*dt,a.Position.Z+eventual.Z*dt);
                     bool futureAvailable=false;
-                    if(!aligned||!futureStaticMove)futureAvailable=clearance.ClearMotion(row,futureEnd)&&StaticPeersClear(bodies,row,neighbors,count,eventual,dt);
+                    if(!aligned||!futureStaticMove)futureAvailable=clearance.ClearMotion(row,futureEnd)&&StaticPeersClear(bodies,row,neighbors,count,eventual,dt)&&StaticPeersClear(bodies,row,neighbors,count,velocity,dt);
                     if(futureAvailable)futureStaticMove=true;
                     if(!aligned&&!futureAvailable)continue;
                     if(!clearance.ClearMotion(row,end))continue;
+                    if(!StaticPeersClear(bodies,row,neighbors,count,velocity,dt))continue;
                     double risk=Risk(bodies,row,eventual,neighbors,count,profile.CrowdLookaheadSeconds);
                     double ex=eventual.X-preferred.X,ez=eventual.Z-preferred.Z,error=ex*ex+ez*ez;
                     if(pass==1&&error>=a.Speed*a.Speed-errorEpsilon)continue;
@@ -543,8 +550,10 @@ namespace Spacewars.Simulation
             if(won&&result.IndependentTurn&&OnlyStaticPreferredThreat(bodies,row,neighbors,count,preferred,profile.CrowdLookaheadSeconds))
                 RefineStaticAvoidanceTurn(bodies,row,neighbors,count,profile,dt,clearance,assignedGoal,aim,limit,bestSteering,bestSpeed,bestRisk,bestError,errorEpsilon,ref result);
             result.Blocked=!futureStaticMove;
-            bool activeNeighbor=false;for(int k=0;k<count;k++)if(bodies[neighbors[row*NeighborCapacity+k]].Active){activeNeighbor=true;break;}
-            result.StaticNoWinner=!won&&turning.Equals(a.Heading)&&!result.Blocked&&!activeNeighbor;
+            // An active neighbor is a forecast input, not evidence that this
+            // stationary no-winner will recover. Keep actual turns voluntary;
+            // an aligned exhausted choice must reach the existing bounded detour.
+            result.StaticNoWinner=!won&&turning.Equals(a.Heading)&&!result.Blocked;
             return result;
         }
 #endif
@@ -598,7 +607,7 @@ namespace Spacewars.Simulation
                 var eventual=Velocity(candidate,speed);var velocity=aligned?Velocity(heading,speed):default;
                 var end=new NavPoint(a.Position.X+velocity.X*dt,a.Position.Z+velocity.Z*dt);
                 var future=new NavPoint(a.Position.X+eventual.X*dt,a.Position.Z+eventual.Z*dt);
-                bool available=SelectClear(row,end,clearance,clearEntries,ref clearUsed,ref clearNext)&&SelectClear(row,future,clearance,clearEntries,ref clearUsed,ref clearNext)&&StaticPeersClear(bodies,row,neighbors,count,eventual,dt);
+                bool available=SelectClear(row,end,clearance,clearEntries,ref clearUsed,ref clearNext)&&SelectClear(row,future,clearance,clearEntries,ref clearUsed,ref clearNext)&&StaticPeersClear(bodies,row,neighbors,count,eventual,dt)&&StaticPeersClear(bodies,row,neighbors,count,velocity,dt);
                 if(available){
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                     if(CountRefinementForQa&&riskInputs.Length==count)RefinementRiskReuseCallsForQa++;

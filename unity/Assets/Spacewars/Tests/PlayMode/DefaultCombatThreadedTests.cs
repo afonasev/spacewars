@@ -13,6 +13,35 @@ namespace Spacewars.Tests.PlayMode
     public sealed class DefaultCombatThreadedTests
     {
         const BindingFlags F=BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public;
+        [TestCase(false)] [TestCase(true)] [Timeout(60000)]
+        public void AttackMoveKillsFirstTargetAndContinuesToOriginalDestination(bool recast)
+        {
+            var data=PlayableProfile.Default.CopyData();data.groundRouteBackend=recast?1:0;var map=new AiTestMap();
+            var p=PlayableProfile.Create(data,map);var basis=map.Configuration(p,7,new[]{new OfflineParticipant("player-1",1,1,OfflineControl.Human),new OfflineParticipant("player-2",2,2,OfflineControl.Human)});
+            var costs=new double[basis.Starts.Count,basis.Starts.Count];for(int a=0;a<basis.Starts.Count;a++)for(int b=0;b<basis.Starts.Count;b++)costs[a,b]=basis.RouteCost(a,b);
+            var scenario=new[]{new OfflineScenarioUnit(1,PlayableEntityKind.Tank,new NavPoint(-38,-38)),new OfflineScenarioUnit(2,PlayableEntityKind.Tank,new NavPoint(-30,-35))};
+            var config=new OfflineMatchConfiguration(p,basis.SourceIdentity,basis.MapIdentity,basis.RouteProvenance,7,basis.Roster.ToArray(),basis.Starts.ToArray(),basis.Sites.ToArray(),basis.Obstacles.ToArray(),costs,scenario:scenario,terrain:map.Id);
+            var runtime=new PlayableRuntime(config,819,startPaused:true);var host=new Spacewars.Presentation.UnityHostRouteService();
+            var d=(PlayableDomain)typeof(PlayableRuntime).GetField("domain",F).GetValue(runtime);var clock=Stopwatch.StartNew();bool hold=false,ordered=false;
+            void Service(){host.Service(runtime,p.NavigationRequestsPerFrame);foreach(var receipt in runtime.DrainReceipts()){Assert.AreEqual(PlayableCommandStatus.Applied,receipt.Status);if(receipt.OwnerId=="player-2")hold=true;else ordered=true;}Assert.IsNull(runtime.Latest.Failure);Assert.IsNull(host.CertifiedPublication?.Failure);}
+            try{
+                while(!(runtime.IsPrepared&&runtime.Latest.Paused)&&clock.Elapsed.TotalSeconds<45){Service();Thread.Sleep(1);}Assert.True(runtime.IsPrepared&&runtime.Latest.Paused,"current native startup must be prepared before commands");
+                var view=runtime.Latest;int shooter=view.Entities.Single(e=>e.Owner==PlayableOwner.Player&&e.Kind==PlayableEntityKind.Tank).Id;
+                int enemy=view.Entities.Single(e=>e.Owner==PlayableOwner.Enemy&&e.Kind==PlayableEntityKind.Tank).Id;
+                var units=(IDictionary)typeof(PlayableDomain).GetField("units",F).GetValue(d);units[enemy].GetType().GetField("Health",F).SetValue(units[enemy],1d);units[enemy].GetType().GetField("Reload",F).SetValue(units[enemy],1000d);
+                var goal=new NavPoint(-20,-38);runtime.RequestPause(false);Assert.True(runtime.TrySubmit(new PlayableCommand(819,1,"player-2",PlayableCommandKind.Hold,new[]{enemy})).Accepted);
+                Assert.True(runtime.TrySubmit(new PlayableCommand(819,1,"player-1",PlayableCommandKind.AttackMove,new[]{shooter},goal)).Accepted);runtime.RequestPause(false);
+                bool fired=false,killed=false,resumed=false,arrived=false;NavPoint deathPosition=default;
+                while(runtime.Latest.Tick<900&&clock.Elapsed.TotalSeconds<45){
+                    Service();view=runtime.Latest;var actor=view.Entities.Single(e=>e.Id==shooter);fired|=view.Projectiles.Any(x=>x.OwnerId==shooter);
+                    if(!killed&&!view.Entities.Any(e=>e.Id==enemy)){killed=true;deathPosition=actor.Position;}
+                    if(killed){resumed|=Math.Pow(actor.Position.X-deathPosition.X,2)+Math.Pow(actor.Position.Z-deathPosition.Z,2)>1;arrived=Math.Pow(actor.Position.X-goal.X,2)+Math.Pow(actor.Position.Z-goal.Z,2)<1;if(arrived)break;}Thread.Sleep(1);
+                }
+                TestContext.WriteLine($"ATTACK_MOVE_RESUME recast={recast} seed=7 tick={runtime.Latest.Tick} fired={fired} killed={killed} resumed={resumed} arrived={arrived} pumps={host.CertifiedPublication.Pumps}");
+                Assert.True(hold&&ordered,"Both commands must apply through the ordinary command queue");Assert.True(fired&&killed,"Attack-move must engage and kill the first live target through actual projectiles");
+                Assert.True(resumed,"After target death, the original attack-move must resume without a new command");Assert.True(arrived,"Original destination must still be reached");Assert.Greater(host.CertifiedPublication.Pumps,0);
+            }finally{var worker=(CertifiedRouteWorker)typeof(Spacewars.Presentation.UnityHostRouteService).GetField("worker",F).GetValue(host);runtime.RequestStop();host.Dispose();runtime.Dispose();Assert.True(SpinWait.SpinUntil(()=>runtime.IsStopped&&(worker==null||worker.IsStopped),10000));d.Navigation.ReleaseCommittedHostRoot();d.DestroyOwnedNavigation();Assert.Zero(d.Navigation.PhysicalHostBudget.PhysicalBytes);Assert.Zero(d.Navigation.PhysicalHostBudget.HeldBytes);}
+        }
         [Test,Timeout(60000)]
         public void IdleFireRetreatPursuitAndReturnUseTheOrdinaryThreadedHost()
         {

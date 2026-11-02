@@ -26,7 +26,7 @@ namespace Spacewars.Runtime
         private int TeamOf(PlayableOwner owner)=>offline==null?(int)owner:offline.Roster[(int)owner].Team;
         private bool Hostile(PlayableOwner a,PlayableOwner b)=>TeamOf(a)!=TeamOf(b);
         private int HomeSite(PlayableOwner owner)=>offline==null?(owner==PlayableOwner.Player?1:2):offline.Starts[offline.Assignments[(int)owner]].SiteId;
-        private PlayablePublicScoutObjective[] StartObjectives(PlayableOwner owner)=>offline==null?TerritoryRules.PublicScoutObjectives(profile,owner):offline.Starts.Where(s=>s.SiteId!=HomeSite(owner)&&!Owners.Any(other=>!Hostile(owner,other)&&HomeSite(other)==s.SiteId)).Select(s=>new PlayablePublicScoutObjective(s.SiteId,s.ExplorerAnchor,PlayablePublicScoutObjectiveRole.PossibleEnemyStart,true)).ToArray();
+        private PlayablePublicScoutObjective[] StartObjectives(PlayableOwner owner)=>offline==null?TerritoryRules.PublicScoutObjectives(profile,owner):offline.Starts.Where(s=>s.SiteId!=HomeSite(owner)&&!Owners.Any(other=>!Hostile(owner,other)&&HomeSite(other)==s.SiteId)).Select(s=>new PlayablePublicScoutObjective(s.SiteId,TerritoryRules.PublicStartScoutApproach(profile,s,offline.Starts[offline.Assignments[(int)owner]].Position),PlayablePublicScoutObjectiveRole.PossibleEnemyStart,true)).ToArray();
         // Public geometry carries no live occupancy. Expansion requires a separate visible site record.
         // Derived public geography only. Sites/starts are fixed for a domain; live
         // claimant/vision/research never enter this cache. A replacement profile
@@ -49,11 +49,12 @@ namespace Spacewars.Runtime
             return value;
         }
         private PlayablePublicScoutObjective[] BuildPublicObjectives(PlayableOwner owner)=>StartObjectives(owner).Concat(
-            sites.Values.Where(s=>s.Site.Kind==PlayableBuildingKind.Mine||s.Site.Kind==PlayableBuildingKind.Outpost)
+            sites.Values.Where(s=>s.Site.Kind==PlayableBuildingKind.Mine||s.Site.Kind==PlayableBuildingKind.Outpost||s.Site.Kind==PlayableBuildingKind.RelayTower)
             .OrderBy(s=>s.Site.Id).Select(s=>new PlayablePublicScoutObjective(s.Site.Id,
                 new NavPoint(s.Site.Position.X+TerritoryRules.CaptureRadius(profile,s.Site.Kind)-PlayableUnitRules.Radius(profile,PlayableEntityKind.Explorer),s.Site.Position.Z),
-                s.Site.Kind==PlayableBuildingKind.Mine?PlayablePublicScoutObjectiveRole.ExpansionIncome:PlayablePublicScoutObjectiveRole.ExpansionOutpost,true))).ToArray();
-        private NavObstacle[] StaticObstacles()=>offline==null?PlayableMap.StaticObstacles(profile):offline.CampaignOpening&&!campaignGate?offline.Obstacles.Concat(new[]{CampaignReconOpening.Gate}).ToArray():offline.Obstacles.ToArray();
+                s.Site.Kind!=PlayableBuildingKind.Outpost?PlayablePublicScoutObjectiveRole.ExpansionIncome:PlayablePublicScoutObjectiveRole.ExpansionOutpost,true))).ToArray();
+        private NavObstacle[] StaticObstacles()=>RelayObstacles().Concat(OrdinaryStaticObstacles()).ToArray();
+        private NavObstacle[] OrdinaryStaticObstacles()=>offline==null?PlayableMap.StaticObstacles(profile):offline.CampaignOpening&&!campaignGate?offline.Obstacles.Concat(new[]{CampaignReconOpening.Gate}).ToArray():offline.Obstacles.ToArray();
         private NavObstacle[] SolidObstacles()=>offline==null||profile.AuthoredMap!=null?PlayableMap.SolidObstacles(profile):offline.Obstacles.ToArray();
         internal PlayableDomain(PlayableProfile profile,long generation,OfflineMatchConfiguration configuration):this(profile,generation,false,false,null,configuration){}
         internal IReadOnlyList<string> EliminatedOwners=>eliminated.OrderBy(x=>(int)x).Select(x=>offline==null?(x==PlayableOwner.Player?PlayerId:"enemy-1"):offline.Roster[(int)x].Id).ToArray();
@@ -63,7 +64,7 @@ namespace Spacewars.Runtime
             foreach(var entity in offline.ScenarioBuildings.OrderBy(b=>b.SlotId==0?0:1)){
                 int index=Enumerable.Range(0,offline.Roster.Count).Where(i=>offline.Roster[i].LogicalPlayer==entity.LogicalPlayer).DefaultIfEmpty(-1).First();if(index<0)continue;
                 var owner=(PlayableOwner)index;var state=sites[entity.SiteId];int id=nextId++;int parent=entity.SlotId==0?0:state.CenterId;if(entity.SlotId!=0&&(parent==0||buildings[parent].Owner!=owner))throw new ArgumentException("Scenario parent binding mismatch.");
-                var b=new Building{TermsRevision=profile.Revision,Id=id,Owner=owner,Kind=entity.Kind,SiteId=entity.SiteId,SlotId=entity.SlotId,ParentId=parent,Position=entity.Position,Heading=TerritoryRules.BuildingHeading,PaidCost=TerritoryRules.Cost(profile,entity.Kind),Health=BuildingMaximumHealth(owner,entity.Kind),Build=TerritoryRules.Duration(profile,entity.Kind),Ready=true,Phase=ConstructionPhase.Ready};buildings.Add(id,b);if(entity.SlotId==0){state.CenterId=id;state.Locked=owner;state.Claimant=owner;state.Progress=1;}
+                var b=new Building{TermsRevision=profile.Revision,Id=id,Owner=owner,Kind=entity.Kind,SiteId=entity.SiteId,SlotId=entity.SlotId,ParentId=parent,Position=entity.Position,Heading=TerritoryRules.BuildingHeading,PaidCost=TerritoryRules.Cost(profile,entity.Kind),Health=BuildingMaximumHealth(owner,entity.Kind),Build=TerritoryRules.Duration(profile,entity.Kind),Ready=true,Phase=ConstructionPhase.Ready};buildings.Add(id,b);RecordBuildingCount(owner,entity.Kind);if(entity.SlotId==0){state.CenterId=id;state.Locked=owner;state.Claimant=owner;state.Progress=1;}
             }
             RebuildGeometry();
             foreach(var owner in Owners.Where(_=>!offline.CampaignOpening&&offline.ProvingGround==null)){var start=offline.Starts[offline.Assignments[(int)owner]];int id=SpawnUnit(start.ExplorerAnchor,owner,PlayableEntityKind.Explorer);TryActor(id,out var n);n.Heading=start.Heading+Math.PI;units[id].Turret=n.Heading;}

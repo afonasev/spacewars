@@ -52,6 +52,7 @@ namespace Spacewars.Simulation.Ai
         public AiProfileData CopyData()=>new AiProfileData{id=Id,revision=Revision,fields=values.OrderBy(v=>v.Key,StringComparer.Ordinal).Select(v=>new AiNumericValue{path=v.Key,value=v.Value}).ToArray()};
         private void ValidateGroups()
         {
+            if(Value("positionDevelopment.repairHealth")>=Value("positionDevelopment.repairReturnHealth"))throw new ArgumentException("Repair health hysteresis.");
             string prefix="openingsMidgame.";
             foreach(var group in new[]{new[]{"opening.aggressive","opening.doubleIncome","opening.greedy","opening.allIn","opening.air"},new[]{"ground.balanced","ground.tanks","ground.heavy","ground.explorers"},new[]{"combined.hawksTanks","combined.hawksExplorers","combined.balancedSmallAir","combined.heavySmallAir"},new[]{"personality.defensive","personality.aggressive","personality.harassing"},new[]{"personality.defensive","personality.aggressive"}})
                 if(group.Sum(key=>Value(prefix+key))<=0)throw new ArgumentException("Empty opening/midgame weight group: "+group[0]);
@@ -63,6 +64,13 @@ namespace Spacewars.Simulation.Ai
                 bool descending=name=="decisionSeconds"||name=="reactionSeconds"||name=="estimateNoise";
                 if(descending?(a<b||b<c):(a>b||b>c))throw new ArgumentException("Difficulty ordering: "+name);
                 if(name.EndsWith("Seconds")&&(SecondsToTicks(a,30)<SecondsToTicks(b,30)||SecondsToTicks(b,30)<SecondsToTicks(c,30)))throw new ArgumentException("Rounded difficulty ordering.");
+            }
+            foreach(var difficulty in new[]{AiDifficulty.Recruit,AiDifficulty.Fighter,AiDifficulty.Veteran})
+            {
+                if(DifficultyValue(difficulty,"reactionSeconds")>DifficultyValue(difficulty,"control.reactionMaxSeconds")||
+                    DifficultyValue(difficulty,"micro.shortStep")>DifficultyValue(difficulty,"micro.maxWithdrawal")||
+                    DifficultyValue(difficulty,"micro.combatRepairHealth")>DifficultyValue(difficulty,"micro.repairReturnHealth")||
+                    DifficultyValue(difficulty,"micro.idleRepairHealth")>DifficultyValue(difficulty,"micro.repairReturnHealth"))throw new ArgumentException("Combat control profile range.");
             }
             foreach(var phase in new[]{"early","mid","late"})
                 if(new[]{"recon","line","support"}.Sum(r=>Value("composition."+phase+"."+r+"BudgetShare"))<=0)throw new ArgumentException("Empty composition: "+phase);

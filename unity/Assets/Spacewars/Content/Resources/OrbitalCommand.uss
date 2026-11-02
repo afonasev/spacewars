@@ -101,7 +101,7 @@
 #laboratory-screen .lab-parameter .unity-base-field__input { min-width: 65px; }
 .lab-unit { width: 52px; color: rgb(135,163,179); font-size: 12px; padding-left: 6px; }
 #laboratory-screen .lab-adjust { width: 26px; height: 26px; min-height: 26px; padding: 0; margin: 0 0 0 3px; -unity-text-align: middle-center; }
-.lab-info { width: 22px; color: rgb(69,217,240); -unity-text-align: middle-center; font-size: 12px; }
+.lab-info { width: 22px; min-width: 22px; height: 24px; flex-shrink: 0; padding: 0; margin: 0; border-width: 0; background-color: transparent; color: rgb(69,217,240); -unity-text-align: middle-center; font-size: 12px; }
 .lab-help { min-height: 44px; max-height: 62px; white-space: normal; font-size: 13px; color: rgb(164,190,203); margin-top: 5px; padding: 5px 8px; background-color: rgb(16,29,36); }
 #laboratory-screen .orbital-hints { margin-top: 4px; }
 #laboratory-screen .orbital-copyright { bottom: 7px; }
@@ -137,7 +137,8 @@
 #lab-search .unity-base-field__label { width: 76px; min-width: 76px; margin-right: 6px; }
 #laboratory-screen .orbital-lab-groups .orbital-button.lab-dirty { color: rgb(255,197,104); }
 
-#laboratory-screen .orbital-lab-groups .lab-dirty .unity-label { color: rgb(255,197,104); }
+#laboratory-screen .orbital-lab-groups .lab-dirty .unity-label,
+#laboratory-screen .orbital-lab-groups .lab-dirty .lab-tree-label { color: rgb(255,197,104); }
 
 .high-contrast Label { color: white; }
 .high-contrast Button { color: white; background-color: rgb(8,18,25); border-color: white; }
@@ -148,6 +149,8 @@
 #lab-confirm .orbital-card { width: 740px; }
 #lab-confirm-diff { max-height: 360px; }
 #lab-focus-help { flex-shrink: 0; }
+
+.lab-info:hover, .lab-info:focus { background-color: rgb(20,49,61); }
 
 .lab-inline-help { white-space: normal; font-size: 13px; color: rgb(164,190,203); background-color: rgb(16,29,36); padding: 6px 8px; margin: 4px 0; border-left-width: 2px; border-left-color: rgb(69,217,240); }
 

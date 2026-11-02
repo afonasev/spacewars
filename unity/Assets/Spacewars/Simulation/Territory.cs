@@ -33,10 +33,10 @@ namespace Spacewars.Simulation
     }
     public sealed class TerritorySiteSnapshot
     {
-        public TerritorySiteSnapshot(TerritorySite site,PlayableOwner? claimant,PlayableOwner? owner,double progress,bool contested,int centerId,bool ready)
-        {Site=site;Claimant=claimant;Owner=owner;Progress=progress;Contested=contested;CenterId=centerId;Ready=ready;}
+        public TerritorySiteSnapshot(TerritorySite site,PlayableOwner? claimant,PlayableOwner? owner,double progress,bool contested,int centerId,bool ready,double controlledSeconds=0)
+        {Site=site;Claimant=claimant;Owner=owner;Progress=progress;Contested=contested;CenterId=centerId;Ready=ready;ControlledSeconds=controlledSeconds;}
         public TerritorySite Site{get;} public PlayableOwner? Claimant{get;} public PlayableOwner? Owner{get;}
-        public double Progress{get;} public bool Contested{get;} public int CenterId{get;} public bool Ready{get;}
+        public double Progress{get;} public bool Contested{get;} public int CenterId{get;} public bool Ready{get;} public double ControlledSeconds{get;}
     }
     public static class TerritoryRules
     {
@@ -56,18 +56,34 @@ namespace Spacewars.Simulation
         {
             var own=p.Headquarters(observer);
             return Sites(p).Where(site=>site.Kind==PlayableBuildingKind.Headquarters&&Math.Abs(site.Position.X-own.X)>Double.Epsilon)
-                .Select(site=>
-                {
-                    var dx=own.X-site.Position.X;var dz=own.Z-site.Position.Z;var length=Math.Sqrt(dx*dx+dz*dz);
-                    var clearance=Radius(p,site.Kind)+p.ExplorerCollisionRadius+p.Navigation.ArrivalSlotSpacing;
-                    // Pick the nearest public gap between authored home slots. A direct radial
-                    // approach can coincide with slot 1 and become illegal after a factory is built.
-                    double spacing=2*Math.PI/site.Slots.Count;
-                    double toward=Math.Atan2(dz,dx);
-                    if(toward<0)toward+=2*Math.PI;
-                    double angle=(Math.Floor(toward/spacing)+.5)*spacing;
-                    return new PlayablePublicScoutObjective(site.Id,new NavPoint(site.Position.X+Math.Cos(angle)*clearance,site.Position.Z+Math.Sin(angle)*clearance),PlayablePublicScoutObjectiveRole.PossibleEnemyStart,true);
-                }).OrderBy(x=>x.SiteId).ToArray();
+                .Select(site=>new PlayablePublicScoutObjective(site.Id,PublicScoutApproach(p,site,own),PlayablePublicScoutObjectiveRole.PossibleEnemyStart,true))
+                .OrderBy(x=>x.SiteId).ToArray();
+        }
+        public static NavPoint PublicScoutApproach(PlayableProfile p,TerritorySite site,NavPoint observer)
+        {
+            // Public start geometry only: do not use occupancy or an actor spawn
+            // anchor, which can be too far away to survey the placement envelope.
+            double toward=Math.Atan2(observer.Z-site.Position.Z,observer.X-site.Position.X);
+            if(toward<0)toward+=2*Math.PI;
+            double angle=toward;
+            var angles=site.Slots.Select(slot=>Math.Atan2(slot.Position.Z-site.Position.Z,slot.Position.X-site.Position.X))
+                .Select(value=>value<0?value+2*Math.PI:value).Distinct().OrderBy(value=>value).ToArray();
+            if(angles.Length>0)
+                angle=angles.Select((value,index)=>(value+(index+1<angles.Length?angles[index+1]:angles[0]+2*Math.PI))/2)
+                    .OrderBy(value=>Math.Abs(Math.Atan2(Math.Sin(value-toward),Math.Cos(value-toward)))).ThenBy(value=>value).First();
+            // Every possible start uses HQ clearance, including vacant starts.
+            // Current hidden occupancy must not select a different public point.
+            double clearance=Radius(p,PlayableBuildingKind.Headquarters)+p.ExplorerCollisionRadius+p.Navigation.ArrivalSlotSpacing;
+            return new NavPoint(site.Position.X+Math.Cos(angle)*clearance,site.Position.Z+Math.Sin(angle)*clearance);
+        }
+        public static NavPoint PublicStartScoutApproach(PlayableProfile p,OfflineStart start,NavPoint observer)
+        {
+            // Reserve both public layouts: vacant Outpost and occupied HQ.
+            // Do not consult assignments, pins, ownership or actual building state.
+            var slots=new TerritorySite(start.SiteId,PlayableBuildingKind.Headquarters,start.Position,p,start.Heading).Slots
+                .Concat(new TerritorySite(start.SiteId,PlayableBuildingKind.Outpost,start.Position,p,start.Heading).Slots)
+                .GroupBy(slot=>slot.Position).Select(group=>group.First()).ToArray();
+            return PublicScoutApproach(p,new TerritorySite(start.SiteId,PlayableBuildingKind.Headquarters,start.Position,slots),observer);
         }
         public static void ValidateArena(PlayableProfile p)
         {
@@ -103,14 +119,14 @@ namespace Spacewars.Simulation
         public static bool ScienceProducer(PlayableBuildingKind kind)=>kind==PlayableBuildingKind.Factory||kind==PlayableBuildingKind.Hangar;
         public static bool HasScienceProducer(IEnumerable<PlayableBuildingSnapshot> buildings,PlayableOwner owner)=>buildings.Any(b=>b.Owner==owner&&ScienceProducer(b.Kind)&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true);
         public static bool Center(PlayableBuildingKind k)=>k==PlayableBuildingKind.Headquarters||k==PlayableBuildingKind.Outpost;
-        public static double Radius(PlayableProfile p,PlayableBuildingKind k)=>Defensive(k)?p.TurretFootprintRadius:k==PlayableBuildingKind.Hangar?p.HangarFootprintRadius:k==PlayableBuildingKind.ScientificCenter?p.ScienceFootprintRadius:k==PlayableBuildingKind.Headquarters?p.HeadquartersFootprintRadius:k==PlayableBuildingKind.Factory?p.FactoryFootprintRadius:k==PlayableBuildingKind.Refinery?p.RefineryFootprintRadius:k==PlayableBuildingKind.Outpost?p.OutpostFootprintRadius:p.MineFootprintRadius;
-        public static double MaximumHealth(PlayableProfile p,PlayableBuildingSnapshot building)=>building.MaxHealth>0?building.MaxHealth:Health(p,building.Kind);
+        public static double Radius(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.RelayTower?p.RelayFootprintRadius:Defensive(k)?p.TurretFootprintRadius:k==PlayableBuildingKind.Hangar?p.HangarFootprintRadius:k==PlayableBuildingKind.ScientificCenter?p.ScienceFootprintRadius:k==PlayableBuildingKind.Headquarters?p.HeadquartersFootprintRadius:k==PlayableBuildingKind.Factory?p.FactoryFootprintRadius:k==PlayableBuildingKind.Refinery?p.RefineryFootprintRadius:k==PlayableBuildingKind.Outpost?p.OutpostFootprintRadius:p.MineFootprintRadius;
+        public static double MaximumHealth(PlayableProfile p,PlayableBuildingSnapshot building)=>building.MaxHealth>0?building.MaxHealth:PlayableStatRounding.MaximumHealth(p,Health(p,building.Kind));
         public static int Health(PlayableProfile p,PlayableBuildingKind k)=>(int)(k==PlayableBuildingKind.GaussTower?p.TurretHealth*p.GaussHealthMultiplier:Defensive(k)?p.TurretHealth:k==PlayableBuildingKind.Hangar?p.HangarHealth:k==PlayableBuildingKind.ScientificCenter?p.ScienceHealth:k==PlayableBuildingKind.Headquarters?p.HeadquartersHealth:k==PlayableBuildingKind.Factory?p.FactoryHealth:k==PlayableBuildingKind.Refinery?p.RefineryHealth:k==PlayableBuildingKind.Outpost?p.OutpostHealth:p.MineHealth);
         public static double Duration(PlayableProfile p,PlayableBuildingKind k)=>Defensive(k)?p.TurretBuildSeconds:k==PlayableBuildingKind.Hangar?p.HangarBuildSeconds:k==PlayableBuildingKind.ScientificCenter?p.ScienceBuildSeconds:k==PlayableBuildingKind.Headquarters?p.HeadquartersBuildSeconds:k==PlayableBuildingKind.Factory?p.FactoryBuildSeconds:k==PlayableBuildingKind.Refinery?p.RefineryBuildSeconds:k==PlayableBuildingKind.Outpost?p.OutpostBuildSeconds:p.MineBuildSeconds;
-        public static int Cost(PlayableProfile p,PlayableBuildingKind k)=>(int)(k==PlayableBuildingKind.GaussTower?p.TurretCreditCost*p.GaussCostMultiplier:Defensive(k)?p.TurretCreditCost:k==PlayableBuildingKind.Hangar?p.HangarCreditCost:k==PlayableBuildingKind.ScientificCenter?p.ScienceCreditCost:k==PlayableBuildingKind.Headquarters?p.HeadquartersCreditCost:k==PlayableBuildingKind.Factory?p.FactoryCreditCost:k==PlayableBuildingKind.Refinery?p.RefineryCreditCost:k==PlayableBuildingKind.Outpost?p.OutpostCreditCost:p.MineCreditCost);
-        public static double Income(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.Headquarters?p.HeadquartersIncomePerPeriod:k==PlayableBuildingKind.Refinery?p.RefineryIncomePerPeriod:k==PlayableBuildingKind.Outpost?p.OutpostIncomePerPeriod:k==PlayableBuildingKind.Mine?p.MineIncomePerPeriod:0;
-        public static double CaptureRadius(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.Headquarters?p.HeadquartersCaptureRadius:k==PlayableBuildingKind.Outpost?p.OutpostCaptureRadius:p.MineCaptureRadius;
-        public static double CaptureSeconds(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.Headquarters?p.HeadquartersCaptureSeconds:k==PlayableBuildingKind.Outpost?p.OutpostCaptureSeconds:p.MineCaptureSeconds;
+        public static int Cost(PlayableProfile p,PlayableBuildingKind k)=>(int)(k==PlayableBuildingKind.RelayTower?0:k==PlayableBuildingKind.GaussTower?p.TurretCreditCost*p.GaussCostMultiplier:Defensive(k)?p.TurretCreditCost:k==PlayableBuildingKind.Hangar?p.HangarCreditCost:k==PlayableBuildingKind.ScientificCenter?p.ScienceCreditCost:k==PlayableBuildingKind.Headquarters?p.HeadquartersCreditCost:k==PlayableBuildingKind.Factory?p.FactoryCreditCost:k==PlayableBuildingKind.Refinery?p.RefineryCreditCost:k==PlayableBuildingKind.Outpost?p.OutpostCreditCost:p.MineCreditCost);
+        public static double Income(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.RelayTower?p.RelayIncomePerPeriod:k==PlayableBuildingKind.Headquarters?p.HeadquartersIncomePerPeriod:k==PlayableBuildingKind.Refinery?p.RefineryIncomePerPeriod:k==PlayableBuildingKind.Outpost?p.OutpostIncomePerPeriod:k==PlayableBuildingKind.Mine?p.MineIncomePerPeriod:0;
+        public static double CaptureRadius(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.RelayTower?p.RelayCaptureRadius:k==PlayableBuildingKind.Headquarters?p.HeadquartersCaptureRadius:k==PlayableBuildingKind.Outpost?p.OutpostCaptureRadius:p.MineCaptureRadius;
+        public static double CaptureSeconds(PlayableProfile p,PlayableBuildingKind k)=>k==PlayableBuildingKind.RelayTower?p.RelayCaptureSeconds:k==PlayableBuildingKind.Headquarters?p.HeadquartersCaptureSeconds:k==PlayableBuildingKind.Outpost?p.OutpostCaptureSeconds:p.MineCaptureSeconds;
         // Shared visible/pick polygon; six sides are the established typed-pad shape, not a balance parameter.
         public static bool Contains(NavPoint point,NavPoint center,double radius,bool square,bool circle,double heading=0)
         {

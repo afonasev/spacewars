@@ -107,7 +107,7 @@ namespace Spacewars.Simulation
         {
             NavStorageAdmission.RequireOwned(reservation,this);if(!rootFrozen||rootFaulted)throw new InvalidOperationException("Seal arrival work before preparing a fork.");
             using(var allocation=new NavStorageAllocation(reservation.TryReserve)){
-                allocation.Reserve(LayoutBytes);var fork=allocation.Register(new NavigationArrivalWork(true));fork.Retain();fork.rootReservation=reservation.TryReserve;fork.queryMode=queryMode;fork.groupQueryMode=groupQueryMode;fork.demandQueryMode=demandQueryMode;fork.boundedCorridorMode=boundedCorridorMode;fork.paidPagePolicy=paidPagePolicy;fork.preparationMember=preparationMember;
+                allocation.Reserve(LayoutBytes);var fork=allocation.Register(new NavigationArrivalWork(true));fork.Retain();fork.rootReservation=reservation.TryReserve;fork.queryMode=queryMode;fork.groupQueryMode=groupQueryMode;fork.demandQueryMode=demandQueryMode;fork.boundedCorridorMode=boundedCorridorMode;fork.paidPagePolicy=paidPagePolicy;fork.flatIndependentGroupMode=flatIndependentGroupMode;fork.preparationMember=preparationMember;
                 try{
                     ForkHistoricalInto(fork,reservation);ForkSpatial(fork,reservation);
                     fork.input=input;fork.ownedInput=NavPhysicalMacro.Acquire(fork,ownedInput);fork.membersStorage=NavPhysicalMacro.Acquire(fork,membersStorage);fork.members=members;fork.pageStartsStorage=NavPhysicalMacro.Acquire(fork,pageStartsStorage);fork.pageCountsStorage=NavPhysicalMacro.Acquire(fork,pageCountsStorage);fork.pageStarts=pageStarts;fork.pageCounts=pageCounts;

@@ -40,6 +40,35 @@ namespace Spacewars.Tests.EditMode
             var scheduler=new AiAuthorityScheduler(Array.Empty<PlayableAiOwnerLoop>());
             scheduler.RestoreReviewCursor(0);Assert.Throws<ArgumentException>(()=>scheduler.RestoreReviewCursor(1));Assert.Throws<ArgumentException>(()=>scheduler.RestoreReviewCursor(-1));
         }
+        [TestCase(false)][TestCase(true)]
+        public void BackgroundCompletionAtReviewPhaseYieldsDeliveryBeforeAnotherReview(bool invalidate)
+        {
+            var config=OfflineParticipantAuthorityTests.Config(2,false);
+            var domain=new PlayableDomain(config.Profile,71,config);
+            var owner=new PlayableAiOwnerLoop(config.Profile,PlayableAiOpeningComposition.Initialize(config.Seed,config.Roster[0].Id),71);
+            var scheduler=new AiAuthorityScheduler(new[]{owner});scheduler.EnableBackgroundReviews();
+            using(var entered=new System.Threading.ManualResetEventSlim())using(var release=new System.Threading.ManualResetEventSlim()){
+                domain.BeforeOwnerReviewForTests=()=>{entered.Set();if(!release.Wait(5000))throw new TimeoutException("Review phase control was not released.");};
+                void Review()=>scheduler.Review(domain,0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),config.Seed,_=>0);
+                try{
+                    Review();Assert.True(entered.Wait(5000));
+                    // Work is incomplete at delivery, then settles before this tick's review.
+                    scheduler.Deliver(domain,_=>0,false);if(invalidate)scheduler.Rebind(config.Profile);
+                    release.Set();Assert.True(System.Threading.SpinWait.SpinUntil(()=>scheduler.ReviewWorkerStopped,5000));
+                    Review();
+                    var work=typeof(AiAuthorityScheduler).GetField("reviewWork",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
+                    Assert.IsNull(work.GetValue(scheduler),"Completion at the review phase must leave one authority delivery opportunity before launching another detached review.");
+                    if(invalidate)Assert.AreSame(owner,scheduler.Owners.Single());else Assert.AreNotSame(owner,scheduler.Owners.Single());
+                    scheduler.Deliver(domain,_=>0,false);
+                    Review();Assert.NotNull(work.GetValue(scheduler),"The delivery opportunity does not stop subsequent ordinary reviews.");
+                }finally{
+                    release.Set();Assert.True(System.Threading.SpinWait.SpinUntil(()=>scheduler.ReviewWorkerStopped,5000));
+                    domain.BeforeOwnerReviewForTests=null;scheduler.Stop(domain.Tick);domain.StopObservedPaths();
+                    Assert.True(System.Threading.SpinWait.SpinUntil(()=>domain.ObservedPathWorkerStopped,5000));
+                    domain.Navigation.DestroyNavigationAuthority();
+                }
+            }
+        }
         [Test] public void ReviewKeepsExactLiveRepairSettlementAndNewReservation()
         {
             var invoice=Entry("repair",40,true,0.1);var initial=State(unpaid:new[]{invoice},settled:0.1);

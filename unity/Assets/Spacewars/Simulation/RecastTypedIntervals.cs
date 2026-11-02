@@ -34,6 +34,14 @@ namespace Spacewars.Simulation
         private static bool SameDirection(NavTypedLeg accepted,NavTypedLeg actual,bool forward)=>accepted.PortalId==actual.PortalId&&actual.From.SurfaceId==(forward?accepted.From:accepted.To).SurfaceId&&actual.To.SurfaceId==(forward?accepted.To:accepted.From).SurfaceId;
         private static bool Trace(NavTypedRoute route,NavRecastStepState before,NavLocation from,NavPoint to,INavStorageReservation reservation,out NavLocation reached,out int stage,out NavRecastSweepReceipt receipt,INavRecastSweepAuthority authority=null,int actor=0)
         {
+            bool result=TryTraceOwned(route,before,from,to,reservation,out reached,out stage,out receipt,out var trace,authority,actor);
+            (trace as NavOwnedStorage)?.ReleaseOwner();return result;
+        }
+        // Transfers the actual authority trace to the caller. The same ordered
+        // seam checks serve movement and its retained execution transcript.
+        internal static bool TryTraceOwned(NavTypedRoute route,NavRecastStepState before,NavLocation from,NavPoint to,INavStorageReservation reservation,out NavLocation reached,out int stage,out NavRecastSweepReceipt receipt,out IReadOnlyList<NavTypedLeg> owned,INavRecastSweepAuthority authority=null,int actor=0)
+        {
+            owned=null;
             reached=default;stage=before.Cursor;receipt=new NavRecastSweepReceipt{Before=before,From=from.Position,To=to,FromSurface=from.SurfaceId,FirstPortalLeg=-1,LastPortalLeg=-1};
             if(authority!=null&&!authority.AllowsRecastSweep(actor,from,to,route.RecastPlan.Spine.Radius))return false;
             var provider=Provider(route);if(provider==null||stage<0||stage>=route.Legs.Count||route.Legs[stage].From.SurfaceId!=from.SurfaceId)return false;
@@ -49,7 +57,7 @@ namespace Spacewars.Simulation
                     if(receipt.PortalCount==0){receipt.FirstPortalLeg=matched;receipt.FirstSeam=leg.PortalId;receipt.FirstCrossing=leg.From.Position;}
                     receipt.PortalCount++;receipt.LastPortalLeg=matched;receipt.LastSeam=leg.PortalId;receipt.LastCrossing=leg.From.Position;
                 }
-                receipt.ToSurface=reached.SurfaceId;receipt.Verified=true;return true;
+                receipt.ToSurface=reached.SurfaceId;receipt.Verified=true;owned=trace;trace=null;return true;
             }finally{(trace as NavOwnedStorage)?.ReleaseOwner();}
         }
         private static bool Connected(NavTypedRoute route,NavLocation from,NavLocation target,INavStorageReservation r,INavRecastSweepAuthority authority,int actor)

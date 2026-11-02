@@ -10,8 +10,11 @@ namespace Spacewars.Runtime
     internal static class AiIncomeSiteSelection
     {
         internal static bool Free(TerritorySiteSnapshot s,PlayableAiObservation o,PlayableProfile p)=>
-            (s.Site.Kind==PlayableBuildingKind.Mine||s.Site.Kind==PlayableBuildingKind.Outpost)&&TerritoryRules.Income(p,s.Site.Kind)>0&&
-            s.CenterId==0&&!s.Contested&&(!s.Owner.HasValue||s.Owner==o.Owner)&&(!s.Claimant.HasValue||s.Claimant==o.Owner);
+            (s.Site.Kind==PlayableBuildingKind.Mine||s.Site.Kind==PlayableBuildingKind.Outpost||s.Site.Kind==PlayableBuildingKind.RelayTower)&&TerritoryRules.Income(p,s.Site.Kind)>0&&
+            s.CenterId==0&&!s.Contested&&Available(s,o);
+        internal static bool Available(TerritorySiteSnapshot s,PlayableAiObservation o)=>s.Site.Kind==PlayableBuildingKind.RelayTower?
+            (!s.Owner.HasValue||o.IsHostile(s.Owner.Value))&&(!s.Claimant.HasValue||s.Claimant==o.Owner||o.IsHostile(s.Claimant.Value)):
+            (!s.Owner.HasValue||s.Owner==o.Owner)&&(!s.Claimant.HasValue||s.Claimant==o.Owner);
         internal static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));
         private static NavPoint Position(PlayableAiObservation o,int site,NavPoint fallback)=>
             o.Intel.Areas.FirstOrDefault(a=>a.Envelope.AreaId==site)?.Envelope.Placement.FirstOrDefault().Position??

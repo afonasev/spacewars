@@ -12,7 +12,7 @@ namespace Spacewars.Input.Tests
 {
     public sealed partial class OrdinaryLocalPadTests
     {
-        [UnityTest] public IEnumerator RbAssignXAddRecallAndRtIdleStayLocal()
+        [UnityTest] public IEnumerator RbAssignXAddRecallAndRtOrbitalStayLocal()
         {
             yield return StartOrdinary(2,false,true);
             var seat=Seats[0];var other=Seats[1];var pad=pads[0];var v=Get<PlayableSnapshot>(seat,"view");
@@ -38,7 +38,8 @@ namespace Spacewars.Input.Tests
             ButtonFrame(pad,pad.rightShoulder,false);Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");CollectionAssert.AreEqual(new[]{ids[0]},Selection(seat));
             Selection(seat).Clear();Call(app,"UpdateFrame");ButtonFrame(pad,pad.rightShoulder,true);Set(pad.leftStick,Vector2.up);InputSystem.Update();Call(app,"UpdateFrame");ButtonFrame(pad,pad.rightShoulder,false);Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");CollectionAssert.AreEquivalent(ids,Selection(seat));
             ButtonFrame(pad,pad.rightTrigger,true);yield return new WaitForSecondsRealtime(.35f);Call(app,"UpdateFrame");ButtonFrame(pad,pad.rightTrigger,false);Assert.AreEqual("world",Get<OfflinePadGestures>(seat,"battleGestures").Mode);
-            Assert.AreEqual(sequence,Get<long>(seat,"sequence"),"group buttons/X/RT cannot issue simulation commands");CollectionAssert.AreEquivalent(otherBefore,Selection(other));Assert.IsEmpty(Get<KeyboardControlGroups>(other,"keyboardGroups").Members(1,(KeyboardSelectable[])Call(other,"KeyboardEntities")));
+            Assert.True(Get<bool>(seat,"orbitalOpen"),"RT now opens orbital support without changing group selection");Call(seat,"CloseOrbital");
+            Assert.AreEqual(sequence,Get<long>(seat,"sequence"),"group buttons/X/opening RT cannot issue simulation commands");CollectionAssert.AreEquivalent(otherBefore,Selection(other));Assert.IsEmpty(Get<KeyboardControlGroups>(other,"keyboardGroups").Members(1,(KeyboardSelectable[])Call(other,"KeyboardEntities")));
         }
         [UnityTest] public IEnumerator AHeldTwoSecondsShowsOwnViewportRectangleAndSelectsOnce()
         {

@@ -72,6 +72,77 @@ namespace Spacewars.Tests.PlayMode
                 Assert.Zero(d.Navigation.PhysicalHostBudget.PhysicalBytes);Assert.Zero(d.Navigation.PhysicalHostBudget.HeldBytes);
             }
         }
+        [TestCase(PlayableEntityKind.Tank,false)] [TestCase(PlayableEntityKind.Hawk,false)]
+        [TestCase(PlayableEntityKind.Tank,true)] [TestCase(PlayableEntityKind.Hawk,true)] [Timeout(120000)]
+        public void ProducedRallyAttacksEnemyThenResumesToDestination(PlayableEntityKind kind,bool rebuild)
+        {
+            var data=PlayableProfile.Default.CopyData();data.tankProductionSeconds=1;data.hawkProductionSeconds=1;
+            var p=PlayableProfile.Create(data);var d=new PlayableDomain(p,83,false);CertifiedRouteWorker worker=null;
+            object Call(string name,params object[] args)=>typeof(PlayableDomain).GetMethod(name,F).Invoke(d,args);
+            PlayableSnapshot View()=>d.Snapshot(1,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+            try
+            {
+                bool air=kind==PlayableEntityKind.Hawk;var buildingKind=air?PlayableBuildingKind.Hangar:PlayableBuildingKind.Factory;
+                Call("AddCredits",PlayableOwner.Player,10000d);
+                Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,1,buildingKind,1,PlayableOwner.Player,null));
+                Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
+                var producer=View().Buildings.Single(b=>b.Kind==buildingKind);
+                var start=air?producer.Position:FactoryReleaseRules.Exit(p,producer.Position,producer.Heading,kind);
+                var goal=new NavPoint(start.X+24,start.Z);
+                var original=View().Entities.Select(e=>e.Id).ToArray();
+                var authority=new PlayableAuthorityTick(d,new AiAuthorityScheduler(Array.Empty<PlayableAiOwnerLoop>()),7);
+                worker=new CertifiedRouteWorker(authority.NavigationBinding,p.NavigationRequestsPerFrame);
+                var status=authority.Apply(new PlayableCommand(83,1,"player-1",PlayableCommandKind.SetRally,new[]{producer.Id},goal)).Status;
+                Assert.That(status,Is.EqualTo(PlayableCommandStatus.Accepted).Or.EqualTo(PlayableCommandStatus.Applied));
+                if(rebuild)
+                {
+                    var admission=Stopwatch.StartNew();
+                    while(!View().Buildings.Single(b=>b.Id==producer.Id).PrivateState.HasRally&&admission.Elapsed.TotalSeconds<15){authority.TryAdvance();Thread.Sleep(1);}
+                    Assert.True(View().Buildings.Single(b=>b.Id==producer.Id).PrivateState.HasRally);
+                    Assert.AreEqual(PlayableCommandStatus.Applied,Call("SellBuilding",producer.Id,PlayableOwner.Player,null));Call("AdvanceBuildingLifecycle",100d);
+                    Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,1,buildingKind,1,PlayableOwner.Player,null));Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
+                    producer=View().Buildings.Single(b=>b.Kind==buildingKind);
+                    Assert.True(producer.PrivateState.HasRally);Assert.AreEqual(goal,producer.Rally,"Rebuilt producer must inherit pad rally without another rally command");
+                }
+                Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(83,2,"player-1",air?PlayableCommandKind.QueueHawk:PlayableCommandKind.QueueTank,new[]{producer.Id})).Status);
+                int shooter=0,enemy=0;bool ordered=false,fired=false,killed=false,resumed=false,arrived=false;NavPoint death=default;
+                var clock=Stopwatch.StartNew();
+                while(d.Tick<2400&&clock.Elapsed.TotalSeconds<110)
+                {
+                    if(!authority.TryAdvance()){Thread.Sleep(1);continue;}
+                    Assert.IsNull(worker.Publication.Failure);var view=View();
+                    var actor=view.Entities.FirstOrDefault(e=>e.Owner==PlayableOwner.Player&&e.Kind==kind&&!original.Contains(e.Id));
+                    if(actor==null){Thread.Sleep(1);continue;}shooter=actor.Id;
+                    var liveUnits=(IDictionary)typeof(PlayableDomain).GetField("units",F).GetValue(d);
+                    var liveOrder=(PlayableTacticalOrderSnapshot)liveUnits[actor.Id].GetType().GetField("CurrentOrder").GetValue(liveUnits[actor.Id]);
+                    ordered|=liveOrder?.Kind==PlayableTacticalOrderKind.AttackMove;
+                    // Introduce a real hostile only after release and first movement: idle fire at the exit cannot satisfy this witness.
+                    if(enemy==0&&Distance(actor.Position,start)>3&&!actor.Departing)
+                    {
+                        enemy=(int)Call("SpawnUnit",new NavPoint(actor.Position.X+6,actor.Position.Z+3),PlayableOwner.Enemy,PlayableEntityKind.Tank);
+                        var units=(IDictionary)typeof(PlayableDomain).GetField("units",F).GetValue(d);
+                        units[enemy].GetType().GetField("Health").SetValue(units[enemy],1d);
+                        units[enemy].GetType().GetField("Reload").SetValue(units[enemy],1000d);
+                        Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(83,3,"enemy-1",PlayableCommandKind.Hold,new[]{enemy})).Status);
+                    }
+                    fired|=view.Projectiles.Any(x=>x.OwnerId==shooter&&x.TargetId==enemy);
+                    if(enemy!=0&&!killed&&!view.Entities.Any(e=>e.Id==enemy)){killed=true;death=actor.Position;}
+                    if(killed){resumed|=Distance(actor.Position,death)>1;arrived=Distance(actor.Position,goal)<1;if(arrived)break;}
+                    Thread.Sleep(1);
+                }
+                TestContext.WriteLine($"RALLY_COMBAT kind={kind} rebuild={rebuild} seed=7 tick={d.Tick} ordered={ordered} fired={fired} killed={killed} resumed={resumed} arrived={arrived} pumps={worker.Publication.Pumps}");
+                Assert.True(ordered,"Production must issue AttackMove without a manual unit command");
+                Assert.True(fired&&killed,"Produced unit must kill encountered enemy with actual projectiles");
+                Assert.True(resumed&&arrived,"After the kill, continue to original rally without another order");
+                if(!air)Assert.Greater(worker.Publication.Pumps,0,"Ground route must be served by threaded host; air uses its independent actor");
+            }
+            finally
+            {
+                worker?.Dispose();if(worker!=null)Assert.True(SpinWait.SpinUntil(()=>worker.IsStopped,5000));
+                d.Navigation.ReleaseCommittedHostRoot();d.DestroyOwnedNavigation();
+                Assert.Zero(d.Navigation.PhysicalHostBudget.PhysicalBytes);Assert.Zero(d.Navigation.PhysicalHostBudget.HeldBytes);
+            }
+        }
         static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt(Math.Pow(a.X-b.X,2)+Math.Pow(a.Z-b.Z,2));
         [Test,Timeout(120000)] public void FactoryAndHangarReleasePastHeldBlockersThroughOrdinaryThreadedHost()
         {

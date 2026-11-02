@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Spacewars.Simulation;
 
@@ -20,6 +21,7 @@ namespace Spacewars.Runtime
             public int SpeedRevision;
         }
         private bool UpgradeCenterReady(PlayableOwner owner)=>buildings.Values.Any(b=>b.Owner==owner&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.Ready&&b.Health>0&&b.Sale==null);
+        private bool UnitPrerequisite(PlayableOwner owner,PlayableEntityKind kind)=>kind!=PlayableEntityKind.Shkval||UpgradeCenterReady(owner);
         private string ProducerUpgradeBlocked(Building b)
         {
             if(!b.Ready||b.Health<=0||b.Sale!=null)return "Нужно готовое собственное здание";
@@ -41,7 +43,7 @@ namespace Spacewars.Runtime
         }
         private string ProductionWaitReason(Building b,ProductionOrder o)
         {
-            if(o.Active)return null;
+            if(o.Active){var p=Population(b.Owner);return !o.IsUpgrade&&p.Living+p.Reserved>p.Capacity?"Превышен лимит армии":null;}
             if(b.LaunchPhase!=0)return "Ожидает завершения выпуска";
             if(!o.IsUpgrade)return "Ожидает места в армии или своей очереди";
             if(b.Orders[0]!=o)return "Ожидает своей очереди";
@@ -53,7 +55,7 @@ namespace Spacewars.Runtime
             int cost=profile.ProducerUpgradeCost(b.Kind);
             if(!UpgradeCenterReady(b.Owner)||!CanAfford(b.Owner,cost))return;
             o.TermsRevision=profile.Revision;o.PaidCost=cost;o.Duration=ActionDuration(profile.ProducerUpgradeSeconds(b.Kind));o.Remaining=o.Duration;o.Active=true;
-            AddCredits(b.Owner,-cost);Sound(PlayableSoundKind.UpgradeStarted,b.Position,o.Kind,b.Owner,true);
+            AddCredits(b.Owner,-cost);Fact(b.Owner,MatchFactKind.RefineryUpgradeOrdered,cost,(int)b.Kind);Sound(PlayableSoundKind.UpgradeStarted,b.Position,o.Kind,b.Owner,true);
         }
         private void ActivateUnitOrder(Building b,ProductionOrder o)
         {
@@ -78,6 +80,7 @@ namespace Spacewars.Runtime
         {
             var b=Producer(id,owner);message="Select a ready factory.";
             if(b==null||!PlayableUnitRules.Supported(kind)||(b.Kind==PlayableBuildingKind.Hangar)!=(kind==PlayableEntityKind.Hawk))return PlayableCommandStatus.InvalidEntity;
+            if(!UnitPrerequisite(owner,kind)){message="Нужен готовый собственный Научный центр";return PlayableCommandStatus.Rejected;}
             if(b.Orders.Count>=MaximumProductionOrders){message="Production queue is full.";return PlayableCommandStatus.Overflow;}
             if(!CanAfford(owner,PlayableUnitRules.Cost(profile,kind))){message="Insufficient credits.";return PlayableCommandStatus.InsufficientCredits;}
             var order=NewOrder(kind,false);AddCredits(owner,-order.PaidCost);b.Orders.Add(order);Fact(owner,MatchFactKind.UnitOrdered,order.PaidCost,(int)order.Kind,order.Kind.ToString());
@@ -102,6 +105,7 @@ namespace Spacewars.Runtime
             if(b.RepeatTank&&b.RepeatKind==kind)b.RepeatTank=false;
             else
             {
+                if(!UnitPrerequisite(owner,kind)){message="Нужен готовый собственный Научный центр";return PlayableCommandStatus.Rejected;}
                 // Repeat is an unpaid tail intent; existing paid work keeps its order and progress.
                 b.RepeatTank=true;b.RepeatKind=kind;
             }
@@ -119,9 +123,10 @@ namespace Spacewars.Runtime
         private void AdvanceProduction(double dt)
         {
             var factories=buildings.Values.Where(b=>(b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar)&&b.Ready&&b.Sale==null&&!eliminated.Contains(b.Owner)).OrderBy(b=>b.Id).ToArray();
+            var overflow=new HashSet<PlayableOwner>();
             foreach(PlayableOwner owner in Owners)
             {
-                var population=Population(owner);int usage=population.Living+population.Reserved;
+                var population=Population(owner);int usage=population.Living+population.Reserved;if(usage>profile.ArmyCapacity)overflow.Add(owner);
                 foreach(var b in factories.Where(b=>b.Owner==owner&&b.Orders.Count>0&&!b.Orders[0].Active&&b.LaunchPhase==0).OrderBy(b=>b.Orders[0].Id).ThenBy(b=>b.Id))
                 {
                     var order=b.Orders[0];
@@ -131,7 +136,7 @@ namespace Spacewars.Runtime
                 }
                 foreach(var b in factories)
                 {
-                    if(b.Owner!=owner||!b.RepeatTank||b.Orders.Count!=0||b.LaunchPhase!=0||usage+PlayableUnitRules.Population(profile,b.RepeatKind)>profile.ArmyCapacity||!CanAfford(owner,PlayableUnitRules.Cost(profile,b.RepeatKind)))continue;
+                    if(b.Owner!=owner||!b.RepeatTank||b.Orders.Count!=0||b.LaunchPhase!=0||usage+PlayableUnitRules.Population(profile,b.RepeatKind)>profile.ArmyCapacity||!CanAfford(owner,PlayableUnitRules.Cost(profile,b.RepeatKind))||!UnitPrerequisite(owner,b.RepeatKind))continue;
                     var order=NewOrder(b.RepeatKind,false);ActivateUnitOrder(b,order);AddCredits(owner,-order.PaidCost);b.Orders.Add(order);Fact(owner,MatchFactKind.UnitOrdered,order.PaidCost,(int)order.Kind,order.Kind.ToString());usage+=PlayableUnitRules.Population(profile,order.Kind);
                     Sound(PlayableSoundKind.ProductionQueued,b.Position,order.Kind,owner,true);
                     Sound(PlayableSoundKind.ProductionStarted,b.Position,order.Kind,owner,true);
@@ -140,6 +145,9 @@ namespace Spacewars.Runtime
             foreach(var b in factories)
             {
                 ObserveProductionLimit(b);
+                // Capture can exceed the cap after an order has already paid/reserved space.
+                // Preserve that work, but do not produce another unit until capacity returns.
+                if(overflow.Contains(b.Owner)&&b.Orders.Count>0&&b.Orders[0].Active&&!b.Orders[0].IsUpgrade)continue;
                 if(b.Kind==PlayableBuildingKind.Factory&&b.LaunchPhase!=0){AdvanceFactoryRelease(b,dt);continue;}
                 if(b.Kind==PlayableBuildingKind.Hangar&&b.LaunchPhase!=0){AdvanceHangar(b,dt);continue;}
                 if(b.Orders.Count==0||!b.Orders[0].Active)continue;
@@ -149,7 +157,7 @@ namespace Spacewars.Runtime
                 if(order.IsUpgrade)
                 {
                     b.ProducerUpgrade=new RefineryUpgrade{TermsRevision=order.TermsRevision,PaidCost=order.PaidCost,Duration=order.Duration,Elapsed=order.Duration,Complete=true};
-                    b.Orders.RemoveAt(0);Sound(PlayableSoundKind.UpgradeComplete,b.Position,order.Kind,b.Owner,true);continue;
+                    b.Orders.RemoveAt(0);Fact(b.Owner,MatchFactKind.RefineryUpgradeCompleted,order.PaidCost,(int)b.Kind,"Ускорение производства");Sound(PlayableSoundKind.UpgradeComplete,b.Position,order.Kind,b.Owner,true);continue;
                 }
                 if(b.Kind==PlayableBuildingKind.Hangar){AdvanceHangar(b,dt);continue;}
                 if(b.Kind==PlayableBuildingKind.Factory){AdvanceFactoryRelease(b,dt);continue;}

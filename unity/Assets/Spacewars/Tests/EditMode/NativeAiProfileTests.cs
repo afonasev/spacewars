@@ -37,8 +37,8 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void MetadataControlsAllNumericRanges()
         {
-            Assert.AreEqual(92,NativeBalanceFields.AiFields.Count);
-            Assert.AreEqual(12,NativeBalanceFields.AiRosterFields.Count);
+            Assert.AreEqual(253,NativeBalanceFields.AiFields.Count);
+            Assert.AreEqual(16,NativeBalanceFields.AiRosterFields.Count);
             foreach(var f in NativeBalanceFields.AiFields.Concat(NativeBalanceFields.AiRosterFields))
             {
                 Assert.IsNotEmpty(f.Path);Assert.IsNotEmpty(f.Group);Assert.IsNotEmpty(f.Label);Assert.IsNotEmpty(f.Description);Assert.IsNotEmpty(f.Unit);Assert.Greater(f.Step,0);
@@ -64,14 +64,14 @@ namespace Spacewars.Tests.EditMode
             Assert.Throws<ArgumentOutOfRangeException>(()=>AiProfile.SecondsToTicks(1,0));
             var p=AiProfile.Initial;
             CollectionAssert.AreEqual(new long[]{90,45,15},Enum.GetValues(typeof(AiDifficulty)).Cast<AiDifficulty>().Select(d=>AiProfile.SecondsToTicks(p.DifficultyValue(d,"decisionSeconds"),30)));
-            CollectionAssert.AreEqual(new long[]{60,30,9},Enum.GetValues(typeof(AiDifficulty)).Cast<AiDifficulty>().Select(d=>AiProfile.SecondsToTicks(p.DifficultyValue(d,"reactionSeconds"),30)));
+            CollectionAssert.AreEqual(new long[]{60,30,12},Enum.GetValues(typeof(AiDifficulty)).Cast<AiDifficulty>().Select(d=>AiProfile.SecondsToTicks(p.DifficultyValue(d,"reactionSeconds"),30)));
         }
         [Test] public void CatalogCoversEveryKindAndReadsGameplayPrices()
         {
             var catalog=AiRosterCatalog.Initial;var data=catalog.CopyData();
             CollectionAssert.AreEquivalent(Enum.GetValues(typeof(PlayableEntityKind)),data.Select(d=>d.kind));
             Assert.AreEqual(catalog.Hash,new AiRosterCatalog(data.Reverse()).Hash);
-            foreach(var d in data){Assert.AreEqual(PlayableBuildingKind.Factory,d.producer);Assert.AreEqual(AiRosterCatalog.Command(d.kind),d.productionCommand);}
+            foreach(var d in data){Assert.AreEqual(d.kind==PlayableEntityKind.Hawk?PlayableBuildingKind.Hangar:PlayableBuildingKind.Factory,d.producer);Assert.AreEqual(AiRosterCatalog.Command(d.kind),d.productionCommand);}
             var gameplay=PlayableProfile.Default;Assert.AreEqual(gameplay.TankCreditCost,catalog.CreditCost(PlayableEntityKind.Tank,gameplay));
             var f=NativeBalanceFields.AiRosterFields.Single(x=>x.Path=="roster.Tank.lineWeight");NativeBalanceFields.Write(f,data,.5);
             Assert.AreNotEqual(catalog.Hash,new AiRosterCatalog(data).Hash);Assert.AreEqual(1,catalog.For(PlayableEntityKind.Tank).lineWeight);
@@ -139,7 +139,7 @@ namespace Spacewars.Tests.EditMode
             Assert.AreNotEqual(AiMatchIdentity.GameplayDigest(p),AiMatchIdentity.GameplayDigest(gameplayNext));
             Assert.Throws<ArgumentException>(()=>new AiOwnerConfig("owner-a",(AiDifficulty)99,41,ai));
         }
-        [TestCase(AiDifficulty.Recruit,90,60)] [TestCase(AiDifficulty.Fighter,45,30)] [TestCase(AiDifficulty.Veteran,15,9)]
+        [TestCase(AiDifficulty.Recruit,90,60)] [TestCase(AiDifficulty.Fighter,45,30)] [TestCase(AiDifficulty.Veteran,15,12)]
         public void LobbyDifficultyDrivesRuntimeCadence(AiDifficulty difficulty,int decision,int delay)
         {
             var setup=new NativeLobbyConfiguration{Difficulty=difficulty,HasExplicitSeed=true,ExplicitSeed=41};
@@ -148,10 +148,26 @@ namespace Spacewars.Tests.EditMode
                 setup.Difficulty=AiDifficulty.Recruit;setup.ExplicitSeed=99;
                 Assert.AreEqual(41,runtime.Latest.Seed);Assert.AreEqual(difficulty,runtime.EnemyAiConfig.Difficulty);Assert.AreEqual(difficulty,runtime.LobbyConfiguration.Difficulty);
                 Assert.AreEqual(AiProfile.Initial.Hash,runtime.NativeAiProfile.Hash);
+                var authority=(PlayableAuthorityTick)typeof(PlayableRuntime).GetField("authorityTick",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(runtime);
+                // Background review waits for current native route proofs. Its first
+                // committed decision can therefore occur after its exact due tick.
+                // Assert the actual lobby owner's cadence, then its applied scheduling.
+                var scheduler=typeof(PlayableAuthorityTick).GetField("scheduler",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(authority);
+                var owners=(System.Collections.IEnumerable)scheduler.GetType().GetProperty("Owners",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(scheduler);
+                var owner=owners.Cast<object>().Single();
+                Assert.AreEqual(decision,owner.GetType().GetProperty("StartupReviewTick",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(owner));
                 runtime.RequestPause(false);
-                Func<PlayableAiOwnerCheckpoint> checkpoint=()=> (PlayableAiOwnerCheckpoint)typeof(PlayableRuntime).GetProperty("EnemyAiCheckpoint",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(runtime);
-                Assert.True(SpinWait.SpinUntil(()=>checkpoint().PendingActionId!=0,7000));
-                var pending=checkpoint();Assert.AreEqual(decision,pending.DecisionTick);Assert.AreEqual(delay,pending.PendingDueTick-pending.DecisionTick);
+                using var routes=new Spacewars.Presentation.UnityHostRouteService();
+                Func<PlayableAiOwnerCheckpoint> checkpoint=()=>authority.CaptureDiagnosticCheckpoints().FirstOrDefault();
+                Assert.True(SpinWait.SpinUntil(()=>{routes.Service(runtime,PlayableProfile.ThreeCrossingsDefault.NavigationRequestsPerFrame);return checkpoint()?.PendingActionId>0;},7000));
+                var pending=checkpoint();Assert.GreaterOrEqual(pending.DecisionTick,decision,"Current route admission cannot precede the exact lobby decision interval");Assert.AreEqual(delay,owner.GetType().GetField("ObservationDelayTicks",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(owner));
+                var scheduled=pending.Records.Single(r=>r.ActionId==pending.PendingActionId&&r.Status==PlayableAiDeliveryStatus.Scheduled);
+                long observedTick=long.Parse(scheduled.ObservationIdentity.Split(':').Reverse().Skip(1).First(),System.Globalization.CultureInfo.InvariantCulture);
+                long maximum=Math.Min(AiProfile.SecondsToTicks(runtime.NativeAiProfile.DifficultyValue(difficulty,"control.reactionMaxSeconds"),30),decision+delay);
+                ulong reactionKey=unchecked((ulong)(observedTick*397+pending.PendingActionId*7919+41));
+                long exactDelay=delay+(long)(reactionKey%(ulong)(maximum-delay+1));
+                Assert.AreEqual(observedTick+exactDelay,scheduled.DueTick,"Actual lobby intent uses its exact deterministic current reaction schedule");
+                Assert.AreEqual(scheduled.DueTick,pending.PendingDueTick);
                 Assert.AreEqual(runtime.NativeAiProfile.Id,pending.AiProfileId);Assert.AreEqual(runtime.NativeAiProfile.Hash,pending.AiHash);Assert.AreEqual(runtime.EnemyAiConfig.PersonalitySeed,pending.PersonalitySeed);
             }
         }

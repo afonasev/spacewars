@@ -10,6 +10,7 @@ using Spacewars.Presentation;
 using Spacewars.Simulation;
 using UnityEngine;
 using UnityEngine.TestTools;
+using UnityEngine.UIElements;
 
 public sealed class SelectedTowerRangeTests
 {
@@ -18,6 +19,50 @@ public sealed class SelectedTowerRangeTests
     private static PlayableSnapshot Frame(PlayableProfile profile,params PlayableBuildingSnapshot[] towers)
         =>new PlayableSnapshot(profile.ProfileId,profile.Revision,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,Array.Empty<PlayableEntitySnapshot>(),towers,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,activeProfile:profile);
     private static MaterialPropertyBlock Properties(PlayableWorld world){var b=new MaterialPropertyBlock();world.TowerRangeVisual.GetComponent<MeshRenderer>().GetPropertyBlock(b);return b;}
+
+    [UnityTest] public IEnumerator RelaySelectionUsesActualCaptureRadiusAndOffersNoActions()
+    {
+        var host=new GameObject("Selected relay inspection");var app=host.AddComponent<PlayableBootstrap>();app.enabled=false;
+        const BindingFlags flags=BindingFlags.Instance|BindingFlags.NonPublic;
+        void Set(string name,object value)=>typeof(PlayableBootstrap).GetField(name,flags).SetValue(app,value);
+        T Get<T>(string name)=>(T)typeof(PlayableBootstrap).GetField(name,flags).GetValue(app);
+        object Call(string name,params object[] args)=>typeof(PlayableBootstrap).GetMethods(flags).Single(m=>m.Name==name&&m.GetParameters().Length==args.Length).Invoke(app,args);
+        var profile=PlayableProfile.ThreeCrossingsDefault;var site=TerritoryRules.Sites(profile).Single(v=>v.Id==7);
+        PlayableSnapshot RelayFrame(PlayableOwner? owner,PlayableProfile p=null,bool known=true){p=p??profile;return new PlayableSnapshot(p.ProfileId,p.Revision,1,7112026,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,500,null,Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:known?new[]{new TerritorySiteSnapshot(site,owner,owner,owner.HasValue?1:0,false,0,owner.HasValue)}:Array.Empty<TerritorySiteSnapshot>(),activeProfile:p,discoveredSites:new[]{site});}
+        var oldAmbient=RenderSettings.ambientLight;GameObject lightHost=null;RenderTexture scene=null,target=null;VisualElement backdrop=null;PanelSettings panel=null;
+        IEnumerator Capture(string name){
+            var output=Environment.GetEnvironmentVariable("RELAY_UI_EVIDENCE");if(string.IsNullOrEmpty(output))yield break;
+            var camera=Get<Camera>("cameraView");camera.targetTexture=scene;camera.Render();camera.targetTexture=null;
+            for(int i=0;i<8;i++)yield return null;
+            var previous=RenderTexture.active;RenderTexture.active=target;var png=new Texture2D(target.width,target.height,TextureFormat.RGB24,false);
+            try{png.ReadPixels(new Rect(0,0,target.width,target.height),0,0);png.Apply();Directory.CreateDirectory(output);File.WriteAllBytes(Path.Combine(output,name+".png"),png.EncodeToPNG());}
+            finally{RenderTexture.active=previous;UnityEngine.Object.DestroyImmediate(png);}
+        }
+        try
+        {
+            Set("profile",profile);Call("CreateWorld");Call("CreateHud");Set("input",host.AddComponent<PlayableInput>());Set("view",RelayFrame(null));
+            var world=Get<PlayableWorld>("world");world.Fog.ShowPublic();var camera=Get<Camera>("cameraView");camera.orthographicSize=9;camera.transform.position=new Vector3(-32,13,-15);camera.transform.LookAt(new Vector3(-40,1.5f,0));
+            lightHost=new GameObject("Relay range daylight");var light=lightHost.AddComponent<Light>();light.type=LightType.Directional;light.intensity=1.3f;light.transform.rotation=Quaternion.Euler(50,-30,0);RenderSettings.ambientLight=new Color(.6f,.65f,.7f);
+            scene=new RenderTexture(1280,800,24);target=new RenderTexture(1280,800,24);scene.Create();target.Create();panel=host.GetComponent<UIDocument>().panelSettings;panel.targetTexture=target;
+            backdrop=new VisualElement{pickingMode=PickingMode.Ignore};backdrop.style.position=Position.Absolute;backdrop.style.left=backdrop.style.right=backdrop.style.top=backdrop.style.bottom=0;backdrop.style.backgroundImage=new StyleBackground(Background.FromRenderTexture(scene));Get<VisualElement>("root").Insert(0,backdrop);
+            Call("Render");Call("UpdateSiteHud");Call("UpdateBattleHud",new object[]{null});Assert.IsNull(world.TowerRangeVisual);yield return Capture("relay-unselected");
+            var point=(Vector2)camera.WorldToScreenPoint(world.Point(site.Position));Call("Select",point,point,false);Assert.AreEqual(7,Get<int>("selectedSite"),"actual ground selection hook");
+            foreach(PlayableOwner? owner in new PlayableOwner?[]{null,PlayableOwner.Player,PlayableOwner.Enemy,PlayableOwner.Third})
+            {
+                Set("view",RelayFrame(owner));Call("Render");Call("UpdateSiteHud");Call("UpdateBattleHud",new object[]{null});
+                Assert.AreEqual(7,world.RangeRelaySiteId);Assert.AreEqual(0,world.RangeTowerId);Assert.True(world.TowerRangeVisual.activeSelf);
+                Assert.That(Properties(world).GetVector("_Zone").w,Is.EqualTo(profile.RelayCaptureRadius).Within(.0001));
+                Assert.IsEmpty((OfflinePadAction[])Call("CurrentBattleActions"));
+                foreach(string field in new[]{"repairBuilding","sellBuilding","battleRing","armyRegion"})Assert.AreEqual(DisplayStyle.None,Get<VisualElement>(field).style.display.value,field+" stays absent for a relay");
+                if(!owner.HasValue)yield return Capture("relay-selected-radius");
+            }
+            var changed=profile.CopyData();changed.relayCaptureRadius=4.2;var adjusted=PlayableProfile.Create(changed,profile.AuthoredMap);Set("view",RelayFrame(null,adjusted));Call("Render");Assert.That(Properties(world).GetVector("_Zone").w,Is.EqualTo(adjusted.RelayCaptureRadius).Within(.0001));
+            Set("selectedSite",0);Call("Render");Assert.False(world.TowerRangeVisual.activeSelf);
+            Set("selectedSite",7);Set("view",RelayFrame(null,known:false));Call("Render");Assert.False(world.TowerRangeVisual.activeSelf);Assert.AreEqual(0,world.RangeRelaySiteId);
+            Set("view",RelayFrame(null));Set("inLobby",true);Call("Render");Assert.False(world.TowerRangeVisual.activeSelf);
+        }
+        finally{if(panel)panel.targetTexture=null;backdrop?.RemoveFromHierarchy();if(scene){scene.Release();UnityEngine.Object.DestroyImmediate(scene);}if(target){target.Release();UnityEngine.Object.DestroyImmediate(target);}if(lightHost)UnityEngine.Object.DestroyImmediate(lightHost);UnityEngine.Object.DestroyImmediate(host);RenderSettings.ambientLight=oldAmbient;}
+    }
 
     [Test] public void SelectionLifecycleUsesActualRangesReadyStateAndIndependentLayers()
     {

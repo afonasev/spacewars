@@ -31,7 +31,7 @@ public sealed class DirectProjectilePresentationTests
         foreach(var item in new[]{(1,-1.4f),(2,1.4f)}){var actor=world.Tank(item.Item1,true,PlayableEntityKind.Tank);actor.Root.position=new Vector3(item.Item2,0,0);}
     }
     [TearDown] public void Cleanup(){UnityEngine.Object.DestroyImmediate(host);}
-    [TestCase(PlayableBuildingKind.Headquarters,false,1d)][TestCase(PlayableBuildingKind.Factory,false,1d)][TestCase(PlayableBuildingKind.Mine,false,1d)][TestCase(PlayableBuildingKind.Outpost,false,1d)][TestCase(PlayableBuildingKind.ScientificCenter,false,1d)][TestCase(PlayableBuildingKind.Refinery,false,1d)][TestCase(PlayableBuildingKind.Refinery,true,1d)][TestCase(PlayableBuildingKind.Hangar,false,1d)]
+    [TestCase(PlayableBuildingKind.Headquarters,false,1d)][TestCase(PlayableBuildingKind.Factory,false,1d)][TestCase(PlayableBuildingKind.Mine,false,1d)][TestCase(PlayableBuildingKind.Outpost,false,1d)][TestCase(PlayableBuildingKind.ScientificCenter,false,1d)][TestCase(PlayableBuildingKind.ScientificCenter,true,1d)][TestCase(PlayableBuildingKind.ScientificCenter,true,.35)][TestCase(PlayableBuildingKind.Refinery,false,1d)][TestCase(PlayableBuildingKind.Refinery,true,1d)][TestCase(PlayableBuildingKind.Hangar,false,1d)]
     [TestCase(PlayableBuildingKind.Headquarters,false,.35)][TestCase(PlayableBuildingKind.Factory,false,0)][TestCase(PlayableBuildingKind.Hangar,false,.5)]
     public void SharedCombatContactLiesOnTheActualRenderedBuilding(PlayableBuildingKind kind,bool upgraded,double progress=1)
     {
@@ -182,12 +182,34 @@ public sealed class DirectProjectilePresentationTests
             {
                 Vector3 a=part.transform.TransformPoint(vertices[triangles[i]]),b=part.transform.TransformPoint(vertices[triangles[i+1]]),c=part.transform.TransformPoint(vertices[triangles[i+2]]);
                 var normal=Vector3.Cross(b-a,c-a);float area=normal.magnitude;if(area<1e-9f)continue;
-                if(Mathf.Abs(Vector3.Dot(normal/area,point-a))>.0001f)continue;
-                float areaSum=(Vector3.Cross(a-point,b-point).magnitude+Vector3.Cross(b-point,c-point).magnitude+Vector3.Cross(c-point,a-point).magnitude)/area;
+                float planeDistance=Vector3.Dot(normal/area,point-a);
+                if(Mathf.Abs(planeDistance)>.0001f)continue;
+                // The area test is planar. Do not count an already accepted normal offset
+                // again as relative area error on tiny triangles near a shared vertex.
+                var projected=point-normal/area*planeDistance;
+                float areaSum=(Vector3.Cross(a-projected,b-projected).magnitude+Vector3.Cross(b-projected,c-projected).magnitude+Vector3.Cross(c-projected,a-projected).magnitude)/area;
                 if(Mathf.Abs(areaSum-1)<.0001f)return true;
             }
         }
         return false;
+    }
+    [Test] public void SurfacePredicateProjectsTinyTrianglesButStillRejectsOutsidePlaneAndEdges()
+    {
+        // Actual compressed-scanner triangle and float-rounded authority contact from the regression.
+        var a=new Vector3(7.98306751f,1.0440619f,2.97454f);
+        var b=new Vector3(7.983086f,1.04384708f,2.97694826f);
+        var c=new Vector3(7.98493958f,1.0436641f,2.976605f);
+        var contact=new Vector3(7.98493958f,1.04366422f,2.976605f);
+        var model=new GameObject("Tiny contact triangle");model.transform.SetParent(host.transform,false);
+        var mesh=new Mesh{vertices=new[]{a,b,c},triangles=new[]{0,1,2}};model.AddComponent<MeshFilter>().sharedMesh=mesh;
+        try
+        {
+            Assert.True(OnMeshSurface(model.transform,contact),"An accepted plane offset must not be counted again as relative triangle-area error");
+            var normal=Vector3.Cross(b-a,c-a);normal/=normal.magnitude;
+            Assert.False(OnMeshSurface(model.transform,c+normal*.0002f),"The existing 0.0001 m plane tolerance must remain enforced");
+            Assert.False(OnMeshSurface(model.transform,c+(c-a)),"A coplanar point outside the triangle must still be rejected");
+        }
+        finally{UnityEngine.Object.DestroyImmediate(mesh);}
     }
     [TestCase(PlayableEntityKind.Tank)] [TestCase(PlayableEntityKind.Explorer)] [TestCase(PlayableEntityKind.Hawk)]
     public void HawkImpactIsOnActualTargetMeshAndItsTerminalSegmentEndsThere(PlayableEntityKind kind)
@@ -222,9 +244,45 @@ public sealed class DirectProjectilePresentationTests
         var data=profile.CopyData();data.hawkMissileVisualScale=1;var previous=PlayableProfile.Create(data);
         Assert.AreEqual(previous.HawkMissileRadius,profile.HawkMissileRadius);Assert.AreEqual(previous.HawkMissileSpeed,profile.HawkMissileSpeed);Assert.AreEqual(previous.HawkDamage,profile.HawkDamage);Assert.AreEqual(previous.HawkMissileTurn,profile.HawkMissileTurn);
         var binding=typeof(Spacewars.Runtime.PlayableRuntime).Assembly.GetType("Spacewars.Runtime.WorldWire",true).GetMethod("Binding",BindingFlags.Static|BindingFlags.NonPublic);
-        CollectionAssert.AreEqual((byte[])binding.Invoke(null,new object[]{previous,false}),(byte[])binding.Invoke(null,new object[]{profile,false}),"A visual scale must not alter gameplay/profile checkpoint binding bytes");
+        var before=(byte[])binding.Invoke(null,new object[]{previous,false});var after=(byte[])binding.Invoke(null,new object[]{profile,false});
+        // EPB1 intentionally identifies the complete effective profile, including presentation.
+        // Retain exact gameplay-prefix equality while checking the current full-profile contract.
+        var effective=binding.DeclaringType.GetMethod("WriteEffectiveProfileBindingV1",BindingFlags.Static|BindingFlags.NonPublic);
+        byte[] Extension(PlayableProfile p)
+        {
+            using var bytes=new System.IO.MemoryStream();using var writer=new System.IO.BinaryWriter(bytes);
+            effective.Invoke(null,new object[]{writer,p});writer.Flush();return bytes.ToArray();
+        }
+        var priorExtension=Extension(previous);var currentExtension=Extension(profile);
+        CollectionAssert.AreEqual(priorExtension,before.Skip(before.Length-priorExtension.Length).ToArray());
+        CollectionAssert.AreEqual(currentExtension,after.Skip(after.Length-currentExtension.Length).ToArray());
+        CollectionAssert.AreEqual(before.Take(before.Length-priorExtension.Length).ToArray(),after.Take(after.Length-currentExtension.Length).ToArray(),
+            "A visual scale must not alter the gameplay binding prefix");
+        CollectionAssert.AreNotEqual(before,after,"EPB1 must still distinguish different effective visual profiles");
         foreach(double value in new[]{field.Minimum-.01,field.Maximum+.01,double.NaN,double.PositiveInfinity})
         {data=profile.CopyData();data.hawkMissileVisualScale=value;Assert.Throws<ArgumentException>(()=>PlayableProfile.Create(data));}
+    }
+    [Test] public void HawkExhaustIsIndependentOfShkvalTuningAndKeepsItsOwnValidatedLabControl()
+    {
+        var art=HawkVisualProfile.Load();
+        var control=art.Parameters().Single(p=>p.Path=="visual.hawk.exhaustOpacity");
+        Assert.Greater(control.Step,0);Assert.AreEqual("opacity",control.Unit);
+        foreach(float invalid in new[]{control.Minimum-control.Step,control.Maximum+control.Step,float.NaN,float.PositiveInfinity})
+        {control.Write(invalid);Assert.Throws<ArgumentOutOfRangeException>(()=>art.Validate());}
+        foreach(double opacity in new[]{.1,.9})
+        {
+            var data=profile.CopyData();data.shkvalExhaustOpacity=opacity;profile=PlayableProfile.Create(data);Set("profile",profile);
+            Render(30,shots:new[]{new PlayableProjectileSnapshot(301,3,0,default,PlayableEntityKind.Hawk,height:3)});
+            var shells=(IDictionary)typeof(PlayableBootstrap).GetField("shells",Flags).GetValue(hud);
+            var shell=(GameObject)shells[301];var exhaust=shell.transform.Find("rocket-exhaust");
+            foreach(var renderer in exhaust.GetComponentsInChildren<Renderer>())
+            {
+                var block=new MaterialPropertyBlock();renderer.GetPropertyBlock(block);
+                Assert.AreEqual(HawkVisualProfile.Load().exhaustOpacity,block.GetColor("_BaseColor").a,.0001f,
+                    "Changing artillery flame tuning must not wash out a Hawk missile");
+            }
+            Assert.AreEqual(Vector3.one*(float)profile.HawkMissileVisualScale,shell.transform.localScale);
+        }
     }
     [UnityTest] public IEnumerator HawkLaunchAndContactFrames()
     {
@@ -249,6 +307,11 @@ public sealed class DirectProjectilePresentationTests
             Render(30,shots:shots);
             foreach(GameObject shell in shells.Values)Assert.AreEqual(Vector3.one*(float)profile.HawkMissileVisualScale,shell.transform.localScale);
             yield return null;Capture("01-both-weapon-muzzles");
+            var flying=new[]{new PlayableProjectileSnapshot(301,3,0,new NavPoint(0,0),PlayableEntityKind.Hawk,height:2.3)};
+            Render(30,shots:flying);Focus(new Vector3(-1,2,0),6);
+            yield return null;Capture("04-missile-flight-normal");
+            Focus(new Vector3(0,2.3f,0),1.4f);
+            yield return null;Capture("05-missile-flight-close");
             var enemy=world.Tank(10,false,PlayableEntityKind.Tank);enemy.Root.position=new Vector3(2,0,0);
             var target=new Vector3(2,.45f,0);var from=new Vector3(-1,2,0);
             var contact=new PlayableSoundEvent(310,30,PlayableSoundKind.Impact,new NavPoint(2,0),PlayableEntityKind.Hawk,contact:new PlayableDirectContact(310,10,new BallisticPoint(from.x,from.y,from.z),new BallisticPoint(target.x,target.y,target.z)));
@@ -256,6 +319,17 @@ public sealed class DirectProjectilePresentationTests
             world.Obstacle(new NavObstacle(8,-1,10,1));
             var obstacle=new PlayableSoundEvent(311,31,PlayableSoundKind.Impact,new NavPoint(7.93,0),PlayableEntityKind.Hawk,contact:new PlayableDirectContact(311,0,new BallisticPoint(7,1,0),new BallisticPoint(7.93,1,0)));
             Render(31,new[]{obstacle});Assert.AreEqual(8,((GameObject)Field(Hits[311L],"Root")).transform.position.x,.0001f);Focus(new Vector3(8.3f,1,0),2.2f);yield return null;Capture("03-obstacle-contact");
+            int index=0;
+            foreach(var model in new[]{(PlayableBuildingKind.Mine,false),(PlayableBuildingKind.ScientificCenter,false),(PlayableBuildingKind.ScientificCenter,true)})
+            {
+                int id=40+index;var at=new NavPoint(12+index*8,6);
+                var actor=world.Building(id,model.Item1.ToString(),false,model.Item2);actor.Root.position=world.Point(at);world.FaceBuilding(actor);
+                var buildingPose=BuildingCombatGeometry.Pose(profile,model.Item1,model.Item2,at,0);
+                var above=new BallisticPoint(at.X,30,at.Z);Assert.True(buildingPose.Segment(above,new BallisticPoint(at.X,-2,at.Z),0,out _,out var impact));
+                var surface=new PlayableSoundEvent(400+index,32+index,PlayableSoundKind.Impact,at,PlayableEntityKind.Hawk,true,contact:new PlayableDirectContact(400+index,id,above,impact));
+                Render(32+index,new[]{surface});var effect=(GameObject)Field(Hits[400L+index],"Root");Assert.True(OnMeshSurface(actor.Hull,effect.transform.position));
+                Focus(actor.Root.position+Vector3.up,3.2f);yield return null;Capture("0"+(6+index)+"-"+model.Item1+(model.Item2?"-upgraded":"")+"-contact");index++;
+            }
         }
         finally{camera.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);}
         void Focus(Vector3 target,float size){camera.orthographicSize=size;camera.transform.position=target+new Vector3(-4,3,-6);camera.transform.LookAt(target);}

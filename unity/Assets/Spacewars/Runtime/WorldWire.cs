@@ -349,10 +349,10 @@ namespace Spacewars.Runtime
             Number(w,v.X);
             Number(w,v.Z);
             Number(w,v.Heading);
-            w.Write(v.RefineryUpgraded);w.Write(v.ScientificCenterUpgraded);
+            w.Write(v.RefineryUpgraded);w.Write(v.ScientificCenterUpgraded);w.Write(v.ProducerUpgraded);
             }
         internal static KnownBuildingState ReadKnownBuildingState(BinaryReader r) {if(!Boolean(r))return null;
-            return Record(r,()=>new KnownBuildingState{Id=r.ReadInt32(),Team=r.ReadInt32(),Owner=EnumValue<PlayableOwner>(r),Kind=EnumValue<PlayableBuildingKind>(r),X=Number(r),Z=Number(r),Heading=Number(r),RefineryUpgraded=Boolean(r),ScientificCenterUpgraded=Boolean(r)});
+            return Record(r,()=>new KnownBuildingState{Id=r.ReadInt32(),Team=r.ReadInt32(),Owner=EnumValue<PlayableOwner>(r),Kind=EnumValue<PlayableBuildingKind>(r),X=Number(r),Z=Number(r),Heading=Number(r),RefineryUpgraded=Boolean(r),ScientificCenterUpgraded=Boolean(r),ProducerUpgraded=Boolean(r)});
             }
         internal static void Write(BinaryWriter w,PlayableRallyIntentState v) {w.Write(v!=null);
             if(v==null)return;
@@ -425,6 +425,10 @@ namespace Spacewars.Runtime
         internal static byte[] BindingLegacyMarch(PlayableProfile p)=>BindingCore(p,false,true);
         private static byte[] BindingCore(PlayableProfile p,bool legacyQueue,bool legacyMarch)=>Pack(w=>WriteBinding(w,p,legacyQueue,legacyMarch));
         internal static NavigationCaptureBytes BindingOwned(PlayableProfile p,NavigationRetentionBudget budget)=>PackOwned(w=>WriteBinding(w,p,false,false),budget);
+        // Air preparation uses its existing paid scope, without a nested
+        // capture admission that can race a background host resolution.
+        internal static NavigationCaptureBytes AirMotionBindingOwned(PlayableProfile p,INavStorageReservation reservation)
+            =>NavigationCaptureBytes.Write(reservation,w=>WriteBinding(w,p,false,false));
         private static void WriteBinding(BinaryWriter w,PlayableProfile p,bool legacyQueue,bool legacyMarch){w.Write(legacyQueue?9:PlayableCommand.CurrentSchemaVersion);String(w,p.DisplayName);String(w,BuildingCombatGeometry.Version);Number(w,p.DefaultCombatPursuitSeconds);Number(w,p.RepairTowerHealthPerSecond);foreach(var f in PlayableProfileMetadata.Fields.Where(f=>(f.Path.StartsWith("turret.",StringComparison.Ordinal)||f.Path.StartsWith("gauss.",StringComparison.Ordinal))))Number(w,f.Read(p.CopyData()));foreach(var f in PlayableProfileMetadata.WreckFields)Number(w,f.Read(p.CopyData()));
             Number(w,p.WeaponSystemsLevel3Cost);
             Number(w,p.WeaponSystemsLevel3Seconds);
@@ -518,6 +522,8 @@ namespace Spacewars.Runtime
             Number(w,p.TankChassisCost);
             Number(w,p.TankChassisSeconds);
             Number(w,p.TankChassisSpeed);
+            Number(w,p.TankChassisHealthBonusPercent);
+            Number(w,p.MaximumHealthRoundingStep);Number(w,p.DamageRoundingStep);
             Number(w,p.ExplorerAssaultCost);
             Number(w,p.ExplorerAssaultSeconds);
             w.Write(p.ExplorerAssaultBurstSize);
@@ -618,7 +624,7 @@ namespace Spacewars.Runtime
             Number(w,p.OutpostCaptureRadius);
             Number(w,p.OutpostCaptureSeconds);
             Number(w,p.MineCaptureRadius);
-            Number(w,p.MineCaptureSeconds);
+            Number(w,p.MineCaptureSeconds);Number(w,p.RelayIncomePerPeriod);Number(w,p.RelayCaptureRadius);Number(w,p.RelayCaptureSeconds);Number(w,p.RelayFootprintRadius);
             Number(w,p.HeadquartersSlots);
             Number(w,p.OutpostSlots);
             Number(w,p.SlotRingRadius);
@@ -761,7 +767,7 @@ namespace Spacewars.Runtime
             WriteObstacleView(w,m.MovementBlockers);
             WriteObstacleView(w,m.Solids);
             WriteObstacleView(w,crossings.Water);
-            }else if(m is FoundryMap foundry){Number(w,foundry.Scale);Number(w,foundry.UpperHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is BasaltCrownMap basalt){String(w,basalt.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is MossHighlandMap moss){String(w,moss.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is WhiteMeridianMap meridian){Number(w,meridian.Scale);Number(w,meridian.TerraceHeight);Number(w,meridian.RidgeHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is CrimsonGroveMap grove){Number(w,grove.Scale);Number(w,grove.TerraceHeight);Number(w,grove.RidgeHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is NullDockMap dock){Number(w,dock.TerraceHeight);Number(w,dock.ModuleHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is StackedRampQualificationMap||m is AiTestMap||m is CampaignOpeningMap||m is ProvingGroundMap){Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else throw new ArgumentException("Unsupported native terrain binding.");
+            }else if(m is FoundryMap foundry){Number(w,foundry.Scale);Number(w,foundry.UpperHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is BasaltCrownMap basalt){String(w,basalt.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is MossHighlandMap moss){String(w,moss.SourceSha256);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is WhiteMeridianMap meridian){Number(w,meridian.Scale);Number(w,meridian.TerraceHeight);Number(w,meridian.RidgeHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is CrimsonGroveMap grove){Number(w,grove.Scale);Number(w,grove.TerraceHeight);Number(w,grove.RidgeHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is AntennaCityMap city){Number(w,city.Scale);Number(w,city.PlazaHeight);Number(w,city.BlockHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is NullDockMap dock){Number(w,dock.TerraceHeight);Number(w,dock.ModuleHeight);Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else if(m is StackedRampQualificationMap||m is AiTestMap||m is CampaignOpeningMap||m is ProvingGroundMap){Number(w,m.DirectFireHeight);WriteObstacleView(w,m.MovementBlockers);WriteObstacleView(w,m.Solids);}else throw new ArgumentException("Unsupported native terrain binding.");
             if(m is StackedRampQualificationMap physical)String(w,physical.Provider.Binding);
             w.Write(m.Supports.Count);
             foreach(var s in m.Supports){String(w,s.Id);
@@ -772,7 +778,10 @@ namespace Spacewars.Runtime
             Write(w,s.Origin);
             }}if(!legacyQueue){w.Write(p.UnitOrderQueueLimit);Number(w,p.CameraEdgePanSpeed);Number(w,p.CameraEdgePanZonePixels);}
             if(!legacyQueue&&!legacyMarch){Number(w,p.GroupMarchMaximumStretch);Number(w,p.IncomeMarkerFontPixels);Number(w,p.IncomeMarkerRisePixels);Number(w,p.IncomeMarkerDurationSeconds);Number(w,p.RallyFlagHeight);}
-            if(legacyQueue||legacyMarch){if(!p.Navigation.HasCrowdV1Defaults)throw new ArgumentException("Legacy binding requires v1 crowd defaults.");}else p.Navigation.WriteCrowdBinding(w);if(p.HasAccruedCreditExtension){w.Write(0x41434331);w.Write(p.MaxAccruedCredits);}if(p.UsesRecastGroundRoutes){w.Write(0x52435331);w.Write(1);}if(!legacyQueue&&!legacyMarch)WriteEffectiveProfileBindingV1(w,p);}
+            if(legacyQueue||legacyMarch){if(!p.Navigation.HasCrowdV1Defaults)throw new ArgumentException("Legacy binding requires v1 crowd defaults.");}else p.Navigation.WriteCrowdBinding(w);if(p.HasAccruedCreditExtension){w.Write(0x41434331);w.Write(p.MaxAccruedCredits);}if(p.UsesRecastGroundRoutes){w.Write(0x52435331);w.Write(1);}if(!legacyQueue&&!legacyMarch)WriteEffectiveProfileBindingV1(w,p);foreach(var f in OrbitalProfileMetadata.Fields)Number(w,f.Read(p.CopyData()));
+            // The original default has no binding suffix, preserving older default-profile checkpoints.
+            if(p.ShkvalDirectHitDamage!=20){w.Write(0x53484431);w.Write(p.ShkvalDirectHitDamage);}
+            if(p.ShkvalBaseBlastRadiusMultiplier!=0.8){w.Write(0x53425231);Number(w,p.ShkvalBaseBlastRadiusMultiplier);}}
 
 
         // EPB1 is an append-only current-profile identity extension. Keep the old

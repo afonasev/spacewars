@@ -62,7 +62,7 @@ namespace Spacewars.Runtime
                 if(Hostile(other.Owner,b.Owner))hits.Add((other.Id,t));else stop=Math.Min(stop,t);
             }
             var ordered=hits.Where(h=>h.t<stop).OrderBy(h=>h.t).ThenBy(h=>h.id).ToArray();
-            double damage=profile.GaussDamage*WeaponMultiplier(b.Owner);
+            double damage=WeaponDamage(b.Owner,profile.GaussDamage);
             var amounts=new double[ordered.Length];for(int i=0;i<amounts.Length;i++){amounts[i]=damage;damage*=profile.GaussPierceRetention;}
             b.Gauss=new GaussShotState{Start=from,End=LerpAir(from,to,stop),VisibleSeconds=profile.GaussBeamSeconds,Targets=ordered.Select(h=>h.id).ToArray(),Damage=amounts};
             state.ShotSequence++;state.Reload=profile.GaussReloadSeconds;

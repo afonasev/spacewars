@@ -98,15 +98,13 @@ namespace Spacewars.Runtime
                     active.Elapsed=Math.Min(active.Duration,active.Elapsed+dt);
                     if(active.Duration-active.Elapsed>2.220446049250313e-16*active.Duration*128)continue;
                     active.Elapsed=active.Duration;
-                    double previousMaximum=HealthMultiplier(owner),previousBuildingMultiplier=BuildingHealthMultiplier(owner,profile);
+                    var previousMaximum=units.Values.Where(u=>u.Owner==owner).ToDictionary(u=>u.Id,u=>UnitMaximumHealth(owner,u.Kind));
+                    var previousBuildingMaximum=BuildingMaxima(owner);
                     active.Active=false;active.Complete=true;
                     Fact(owner,MatchFactKind.ResearchCompleted,ResearchCost(active.Kind),(int)active.Kind,PlayableResearchRules.Description(profile,active.Kind));
-                    if(PlayableResearchRules.Concrete(active.Kind))ScaleBuildingHealth(owner,BuildingHealthMultiplier(owner,profile)/previousBuildingMultiplier);
-                    if(PlayableResearchRules.Defense(active.Kind))
-                    {
-                        double ratio=HealthMultiplier(owner)/previousMaximum;
-                        foreach(var unit in units.Values)if(unit.Owner==owner)unit.Health=Math.Min(UnitMaximumHealth(owner,unit.Kind),unit.Health*ratio);
-                    }
+                    if(PlayableResearchRules.Concrete(active.Kind))ScaleBuildingHealth(owner,previousBuildingMaximum);
+                    if(PlayableResearchRules.Defense(active.Kind)||active.Kind==PlayableResearchKind.TankChassis)
+                        foreach(var unit in units.Values)if(unit.Owner==owner)unit.Health=RescaleCurrentHealth(unit.Health,previousMaximum[unit.Id],UnitMaximumHealth(owner,unit.Kind));
                     var center=buildings[active.CenterId];Sound(PlayableSoundKind.ResearchComplete,center.Position,PlayableEntityKind.Tank,owner,true);
                     if(active.Kind==PlayableResearchKind.TankChassis)
                         foreach(var u in units.Values)if(u.Owner==owner&&u.Kind==PlayableEntityKind.Tank&&!u.AuthoredUpgrade.HasValue)navigation.Crowd.SetSpeed(u.Id,profile.TankChassisSpeed);
@@ -179,6 +177,7 @@ namespace Spacewars.Runtime
             return 1+(HasResearch(owner,ultimate)?PlayableResearchRules.Bonus(profile,ultimate):HasResearch(owner,advanced)?PlayableResearchRules.Bonus(profile,advanced):HasResearch(owner,improved)?PlayableResearchRules.Bonus(profile,improved):0)/100;
         }
         private double WeaponMultiplier(PlayableOwner owner)=>SystemsMultiplier(owner,true);
+        private double WeaponDamage(PlayableOwner owner,double baseDamage)=>PlayableStatRounding.Damage(profile,baseDamage*WeaponMultiplier(owner));
         private double HealthMultiplier(PlayableOwner owner)=>SystemsMultiplier(owner,false);
         private int ArmySystemsLevel(PlayableOwner owner,bool weapon)
         {
@@ -189,12 +188,15 @@ namespace Spacewars.Runtime
             return level;
         }
         private double BuildingHealthMultiplier(PlayableOwner owner,PlayableProfile terms)=>1+(HasResearch(owner,PlayableResearchKind.AdvancedReinforcedConcrete)?terms.ReinforcedConcreteLevel2BonusPercent:HasResearch(owner,PlayableResearchKind.ReinforcedConcrete)?terms.ReinforcedConcreteBonusPercent:0)/100;
-        private double BuildingMaximumHealth(PlayableOwner owner,PlayableBuildingKind kind,PlayableProfile terms=null)=>TerritoryRules.Health(terms??profile,kind)*BuildingHealthMultiplier(owner,profile);
-        private void ScaleBuildingHealth(PlayableOwner owner,double ratio)
+        private double BuildingMaximumHealth(PlayableOwner owner,PlayableBuildingKind kind,PlayableProfile terms=null)=>PlayableStatRounding.MaximumHealth(profile,TerritoryRules.Health(terms??profile,kind)*BuildingHealthMultiplier(owner,profile));
+        // Clamp full HP to its maximum so binary noise cannot expose a phantom extra HP.
+        private static double RescaleCurrentHealth(double health,double previous,double maximum)=>Math.Min(maximum,health*(maximum/previous));
+        private Dictionary<int,double> BuildingMaxima(PlayableOwner owner)=>buildings.Values.Where(b=>b.Owner==owner).ToDictionary(b=>b.Id,b=>BuildingMaximumHealth(owner,b.Kind));
+        private void ScaleBuildingHealth(PlayableOwner owner,Dictionary<int,double> previous)
         {
-            foreach(var b in buildings.Values)if(b.Owner==owner)b.Health*=ratio;
+            foreach(var b in buildings.Values)if(b.Owner==owner)b.Health=RescaleCurrentHealth(b.Health,previous[b.Id],BuildingMaximumHealth(owner,b.Kind));
         }
-        private double UnitMaximumHealth(PlayableOwner owner,PlayableEntityKind kind)=>PlayableUnitRules.Health(profile,kind)*HealthMultiplier(owner);
+        private double UnitMaximumHealth(PlayableOwner owner,PlayableEntityKind kind)=>PlayableStatRounding.MaximumHealth(profile,PlayableUnitRules.Health(profile,kind)*HealthMultiplier(owner)*(kind==PlayableEntityKind.Tank&&Chassis(owner)?1+profile.TankChassisHealthBonusPercent/100:1));
         private bool UnitUpgraded(Unit u)=>u.Kind==PlayableEntityKind.Hawk?false:u.AuthoredUpgrade??(u.Kind==PlayableEntityKind.Tank?Chassis(u.Owner):u.Kind==PlayableEntityKind.Explorer?Assault(u.Owner):Guidance(u.Owner));
         private bool HawkSalvo(PlayableOwner owner)=>HasResearch(owner,PlayableResearchKind.HawkSalvoSystems);
         private double HawkPreparation(Unit u)=>HawkSalvo(u.Owner)?profile.HawkUpgradedPreparationSeconds:profile.HawkPreparationSeconds;

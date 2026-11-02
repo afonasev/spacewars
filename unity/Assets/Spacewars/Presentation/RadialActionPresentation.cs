@@ -36,7 +36,7 @@ namespace Spacewars.Presentation
                 string id=a.Sector.Id;
                 if(a.Sector.Hold=="repeat")
                 {
-                    var kind=a.HoldCommand.Unit;string text=PlayableMenuDescriptions.Unit(p,kind,view.OwnerResearch,freeEconomy:free);
+                    var kind=a.HoldCommand?.Unit??(PlayableEntityKind)Enum.Parse(typeof(PlayableEntityKind),id.Split(':').Last(),true);string text=PlayableMenuDescriptions.Unit(p,kind,view.OwnerResearch,freeEconomy:free);
                     Describe(c,text);c.Artwork=UnitArtwork(kind,Upgraded(kind,view.OwnerResearch));c.Upgrade=Upgraded(kind,view.OwnerResearch);
                     c.Note=a.Detail.StartsWith(text)?a.Detail.Substring(text.Length).Trim(' ','·','\n'):null;
                 }
@@ -71,7 +71,7 @@ namespace Spacewars.Presentation
                 else if(id=="rally")c.Description="Новые юниты направятся к указанной точке после выпуска.";
                 else if(id.EndsWith(":producer-upgrade"))
                 {
-                    c.Artwork="science";c.Upgrade=true;c.Description="Улучшение в общей очереди производства.";
+                    c.Artwork=OrbitalPrecision.BuildingArtwork(building.Kind,true);c.Upgrade=true;c.Description="Улучшение в общей очереди производства.";
                     c.Stats=new[]{"Скорость: ×"+N(p.UpgradedProducerSpeedMultiplier),"Время: "+N(free?p.ProvingGroundActionSeconds:p.ProducerUpgradeSeconds(building.Kind))+" с"};c.Note=a.Detail.Split('\n').Last();
                 }
                 else if(id.EndsWith(":upgrade"))
@@ -83,7 +83,7 @@ namespace Spacewars.Presentation
                 else if(building?.Kind==PlayableBuildingKind.ScientificCenter)
                 {
                     var kind=id.EndsWith(":tank-chassis")?PlayableResearchKind.TankChassis:id.EndsWith(":explorer-assault-guns")?PlayableResearchKind.ExplorerAssaultGuns:id.EndsWith(":shkval-guidance")?PlayableResearchKind.ShkvalGuidance:(PlayableResearchKind)Enum.Parse(typeof(PlayableResearchKind),id.Split(':').Last());
-                    c.Description=PlayableResearchRules.Description(p,kind);c.Artwork=OrbitalPrecision.ResearchGlyph(kind);
+                    c.Description=PlayableResearchRules.Description(p,kind);c.Artwork=OrbitalPrecision.ResearchGlyph(kind);c.Upgrade=PlayableResearchRules.Local(kind);
                     var specialized=new[]{PlayableEntityKind.Tank,PlayableEntityKind.Explorer,PlayableEntityKind.Shkval,PlayableEntityKind.Hawk}.Where(k=>Specialization(k)==kind).ToArray();
                     var stats=new List<string>();
                     if(specialized.Length>0)

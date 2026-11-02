@@ -14,6 +14,44 @@ namespace Spacewars.Tests.EditMode
     public sealed class ObservedFriendlyRouteVariantsTests
     {
         private const BindingFlags F=BindingFlags.Instance|BindingFlags.NonPublic;
+        [TestCase("aligned",true)][TestCase("off-axis",true)][TestCase("outside",false)]
+        public void SettledNearFollowPublishesCurrentTinyLegWithoutChangingCachedDetour(string placement,bool compact)
+        {
+            var p=PlayableProfile.Default;var domain=(PlayableDomain)NativeCombatFixture.WithTwoEnemyDefenders(p,71,false);
+            try
+            {
+                var home=p.Headquarters(PlayableOwner.Player);var leaderPoint=new NavPoint(home.X+14,home.Z+6);
+                int leader=(int)typeof(PlayableDomain).GetMethod("SpawnUnit",F).Invoke(domain,new object[]{leaderPoint,PlayableOwner.Player,PlayableEntityKind.Tank});
+                var view=domain.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+                var follower=view.Entities.Single(u=>u.Owner==PlayableOwner.Player&&u.Id!=leader);
+                var followPoint=PlayableUnitRules.FollowGoal(p,leaderPoint,0);var at=placement=="off-axis"?new NavPoint(followPoint.X-.242,followPoint.Z+.185):new NavPoint(followPoint.X+(placement=="outside"?-.3:.1),followPoint.Z);
+                domain.Navigation.Crowd.Remove(follower.Id);domain.Navigation.Crowd.Add(follower.Id,at,PlayableUnitRules.Radius(p,follower.Kind),p.Navigation.TankSpeed,p.Navigation.TankTurnSpeed);
+                var apply=new object[]{new PlayableCommand(71,1,"player-1",PlayableCommandKind.Follow,new[]{follower.Id},targetId:leader).AsHuman(),null};
+                Assert.AreEqual(PlayableCommandStatus.Applied,typeof(PlayableDomain).GetMethod("Apply",F).Invoke(domain,apply));
+                double nativeDistance=Math.Sqrt(Math.Pow(at.X-leaderPoint.X,2)+Math.Pow(at.Z-leaderPoint.Z,2));Assert.AreEqual(compact,nativeDistance<=p.FollowDistance+p.FollowArrivalTolerance);
+                if(placement=="off-axis")Assert.Greater(Math.Sqrt(Math.Pow(at.X-followPoint.X,2)+Math.Pow(at.Z-followPoint.Z,2)),p.FollowArrivalTolerance,"Native Follow stops by leader distance, not by distance to its trailing point.");
+                view=domain.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+                var requests=new[]{new PlayableRouteRequest(follower.Id,PlayableRouteTargetKind.FriendlyAnchor,leader,71,0,at,PlayableUnitRules.Radius(p,follower.Kind),followPoint)};
+                domain.EnableAsyncObservedPaths();var field=typeof(PlayableDomain).GetField("observedPathLane",F);var lane=(ObservedPathLane)field.GetValue(domain);
+                Assert.Throws<ObservedPathPending>(()=>domain.PlayerSnapshotForDelivery(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7,PlayableOwner.Player,requests));
+                Assert.Zero(lane.RetainedCount,"A close target cannot create or bypass cold solver work.");
+                var vision=typeof(PlayableDomain).GetMethod("Vision",F).Invoke(domain,new object[]{PlayableOwner.Player});
+                PlayableRouteProof[] Project(){try{return (PlayableRouteProof[])typeof(PlayableDomain).GetMethod("ProjectRoutes",F).Invoke(domain,new object[]{PlayableOwner.Player,requests,vision,view.Entities,view.Buildings,null,true});}catch(TargetInvocationException e)when(e.InnerException is ObservedPathPending){return null;}}
+                PlayableRouteProof[] ready=null;for(int i=0;i<64&&ready==null;i++){ready=Project();domain.DrainObservedPathsForCapture(()=>false);}Assert.NotNull(ready);Assert.AreEqual(1,ready.Length);
+                // Model the already-completed, geometrically valid detour seen
+                // when the real recovery follower and leader converge. This is
+                // a producer witness, not a new job or a changed semantic target.
+                double radius=requests[0].Radius;var bend=new[]{new NavPoint(followPoint.X+4,followPoint.Z+8),new NavPoint(followPoint.X,followPoint.Z+8)}
+                    .First(q=>domain.Geometry.SegmentFree(at,q,radius)&&domain.Geometry.SegmentFree(q,followPoint,radius));
+                var gate=typeof(ObservedPathLane).GetField("gate",F).GetValue(lane);
+                lock(gate){var job=((System.Collections.IEnumerable)typeof(ObservedPathLane).GetField("jobs",F).GetValue(lane)).Cast<object>().Single();job.GetType().GetField("Path",F).SetValue(job,new[]{bend,followPoint});}
+                byte[] Capture(){using var s=new MemoryStream();using(var w=new BinaryWriter(s,System.Text.Encoding.UTF8,true))lane.WriteState(w);return s.ToArray();}
+                var bytes=Capture();var delivery=domain.PlayerSnapshotForDelivery(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7,PlayableOwner.Player,requests);
+                var proof=delivery.RouteProofs.Single();CollectionAssert.AreEqual(compact?new[]{followPoint}:new[]{bend,followPoint},proof.Path);Assert.AreEqual(followPoint,proof.Target);Assert.AreEqual(followPoint,proof.Goal);
+                Assert.True(domain.Geometry.SegmentFree(proof.Origin,proof.Goal,proof.Radius));CollectionAssert.AreEqual(bytes,Capture(),"Ready-only projection must preserve exact cached witness/transport state.");
+            }
+            finally{domain.StopObservedPaths();Assert.True(SpinWait.SpinUntil(()=>domain.ObservedPathWorkerStopped,5000));domain.Navigation.ReleaseCommittedHostRoot();domain.DestroyOwnedNavigation();}
+        }
         [Test] public void ActualAnchorAndFollowLegSettleTogetherAndRestoreTheirDistinctAnswers()
         {
             var source=JObject.Parse(File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(),"Tests/Fixtures/Oct29AiMatches.json")));

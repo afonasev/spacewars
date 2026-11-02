@@ -74,15 +74,16 @@ namespace Spacewars.Presentation
         }
         private void PanMap(int kind,Vector2 screen)
         {
-            if(view==null||cameraView==null)return;
+            if(BotCameraLocked||view==null||cameraView==null)return;
             var destination=MapGround(kind,screen);var center=Ground(SeatScreenCenter);
             cameraView.transform.position+=new Vector3((float)(destination.X-center.X),0,(float)(destination.Z-center.Z));
         }
         private void MapSelect(int kind,Vector2 a,Vector2 b,bool shift)
         {
-            if(view==null)return;confirmSaleBuilding=0;root.Focus();
+            if(view==null)return;if(scanTargeting){ConfirmScan(MapGround(kind,b),kind==2);return;}confirmSaleBuilding=0;root.Focus();
             if(matchSetup?.Spectator==true)
             {
+                if(BotCameraLocked)return;
                 var destination=MapGround(kind,b);var center=Ground(SeatScreenCenter);
                 cameraView.transform.position+=new Vector3((float)(destination.X-center.X),0,(float)(destination.Z-center.Z));
                 Record("spectator map focus="+destination.X+","+destination.Z);if(kind==2)CloseMap();return;
@@ -102,7 +103,7 @@ namespace Spacewars.Presentation
         }
         private void MapOrder(int kind,Vector2 screen,bool attack,bool append)
         {
-            var point=MapGround(kind,screen);var producer=SelectedRallyProducer();
+            var point=MapGround(kind,screen);if(scanTargeting){ConfirmScan(point,kind==2);return;}var producer=SelectedRallyProducer();
             if(battleRally)CompleteRallyPlacement(point,battleController);
             else if(producer!=null)Submit(PlayableCommandKind.SetRally,new[]{producer.Id},point);
             else Submit(attack?PlayableCommandKind.AttackMove:PlayableCommandKind.Move,null,point,mode:append?PlayableOrderMode.Append:PlayableOrderMode.Replace);

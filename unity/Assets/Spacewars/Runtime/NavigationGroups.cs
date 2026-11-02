@@ -340,6 +340,7 @@ namespace Spacewars.Runtime
         public GroupOrderState GroupFor(int entity)=>memberGroups.TryGetValue(entity,out var id)?groups[id].Copy():null;
         internal void PrepareCommandGroup(PlayableCommand command,long revision,long tick,int team,long groupId=0,long issuanceRevision=0,long issuedTick=-1)
         {
+            AssertMotionOperational();
             commandActivationRevision=revision;
             if(commandGroup!=null)throw new InvalidOperationException("Nested command group.");
             commandGroup=new GroupOrderState{WorldGeneration=Generation,GroupId=groupId==0?checked(groupSequence+1):groupId,OrderRevision=issuanceRevision==0?revision:issuanceRevision,CommandSequence=command.Sequence,IssuedTick=issuedTick<0?tick:issuedTick,

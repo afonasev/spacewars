@@ -74,13 +74,13 @@ namespace Spacewars.Runtime
             if(!Active){emergencyObserved=threats.Length>0;return entered;}
             var a=registry.Capture().Armies.FirstOrDefault(a=>a.Id==armyId&&a.Phase!=AiArmyPhase.Disbanded&&a.TacticalOwner==Policy);
             if(a==null){armyId=0;targetId=0;emergencyObserved=threats.Length>0;return entered;}
-            if(threats.Length==0)
+            if(threats.Length==0||LastHeadquartersAttackers(o).Length==0&&AiPositionDevelopmentPlanner.StaticDefenseCovers(o,p,threats))
             {
                 // The emergency has ended. Releasing registry ownership includes
                 // unjoined members; their physical orders remain authoritative until
                 // a subsequent plan replaces them. A stranded follower must not hold
                 // every defender in a permanent emergency.
-                registry.Disband(armyId);armyId=0;targetId=0;emergencyObserved=false;return entered;
+                registry.Disband(armyId);armyId=0;targetId=0;emergencyObserved=threats.Length>0;return entered;
             }
             emergencyObserved=true;
             var target=threats.FirstOrDefault(e=>e.Id==targetId);
@@ -110,6 +110,7 @@ namespace Spacewars.Runtime
         private bool CoversCurrentThreats(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiArmyRegistry registry,IEnumerable<PlayableAiTraceRecord> records,bool requireRoutes)
         {
             Bind(o);var threats=Threats(o,p);if(threats.Length==0)return true;
+            if(LastHeadquartersAttackers(o).Length==0&&AiPositionDevelopmentPlanner.StaticDefenseCovers(o,p,threats))return true;
 #if UNITY_INCLUDE_TESTS
             if(requireRoutes&&TechnologyCoverageReadbackForTests!=null&&TechnologyCoverageOwnerFilterForTests==o.OwnerId)
                 return CoversTechnologyThreatsReadback(o,p,ai,registry,records,threats);
@@ -219,6 +220,7 @@ namespace Spacewars.Runtime
             var survival=LastHeadquartersAttackers(o);
             if(survival.Length>0)return ProposeSurvival(o,p,registry,survival);
             var threats=Threats(o,p);if(threats.Length==0)return null;
+            if(AiPositionDevelopmentPlanner.StaticDefenseCovers(o,p,threats))return null;
             var own=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&u.Id!=ProtectedUnit&&!u.Held&&!(u.CurrentOrder!=null&&u.OrderStamp?.Origin==PlayableOrderOrigin.Human)).ToArray();
             var groups=registry.Capture().Armies.Where(a=>a.Major&&a.Phase!=AiArmyPhase.Disbanded&&(Active?a.Id==armyId:true)).Select(a=>new
                 {Id=a.Id,Units=own.Where(u=>a.Members.Contains(u.Id)&&(!Active||!a.Reinforcements.Contains(u.Id))).ToArray()}).ToList();
@@ -278,11 +280,11 @@ namespace Spacewars.Runtime
             if(choice==null||choice.Units.All(u=>u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Attack&&u.CurrentOrder.TargetId==choice.Target.Id))return null;
             return new PlayableAiAction(nextId,owner,o.ProfileId,o.ProfileRevision,generation,o.SnapshotSequence,PlayableCommandKind.Attack,choice.Units.Select(u=>u.Id).ToArray(),choice.Target.Position,targetId:choice.Target.Id,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
         }
-        internal PlayableAiAction ProposeAssembly(PlayableAiObservation o,PlayableProfile p,AiArmyRegistry registry,IEnumerable<PlayableAiTraceRecord> records)
+        internal PlayableAiAction ProposeAssembly(PlayableAiObservation o,PlayableProfile p,AiArmyRegistry registry,IEnumerable<PlayableAiTraceRecord> records,AiProfile ai=null,AiKnowledgeState knowledge=null)
         {
             Bind(o);if(!Active||pendingId!=0||registry.OwnerId!=owner||registry.Generation!=generation)return null;
             var army=registry.Capture().Armies.FirstOrDefault(a=>a.Id==armyId&&a.TacticalOwner==Policy&&a.Phase!=AiArmyPhase.Disbanded);
-            return army==null?null:AiTacticalExecutor.Propose(o,army,p,nextId,assemblyOnly:true,records:records);
+            return army==null?null:AiTacticalExecutor.Propose(o,army,p,nextId,assemblyOnly:true,records:records,knowledge:knowledge,ai:ai);
         }
         internal void CommitAssembly(PlayableAiObservation o,PlayableAiAction action,AiArmyRegistry registry,PlayableProfile p,IEnumerable<PlayableAiTraceRecord> records)
         {

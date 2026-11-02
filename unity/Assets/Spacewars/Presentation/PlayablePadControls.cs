@@ -36,7 +36,7 @@ namespace Spacewars.Presentation
             SetSystemCursorHidden(localInputFocused&&!MouseCursorVisible);
         }
         private void OnDisable()=>SetSystemCursorHidden(false);
-        private bool WorldPadOwnsToolkit=>selectionRosterPadFocus||selectionRosterReleaseGate||!signalWheelOpen&&input?.WorldInputEnabled==true&&SeatPad!=null&&(SeatPad.leftStick.ReadValue().magnitude>NativeDevicePreferences.Deadzone||SeatPad.dpad.ReadValue().sqrMagnitude>0||SeatPad.buttonSouth.isPressed||SeatPad.buttonSouth.wasReleasedThisFrame||SeatPad.buttonEast.isPressed||SeatPad.buttonEast.wasReleasedThisFrame||SeatPad.buttonNorth.isPressed||SeatPad.buttonNorth.wasReleasedThisFrame);
+        private bool WorldPadOwnsToolkit=>orbitalOpen||orbitalReleaseGate||selectionRosterPadFocus||selectionRosterReleaseGate||!orbitalOpen&&!signalWheelOpen&&input?.WorldInputEnabled==true&&SeatPad!=null&&(SeatPad.leftStick.ReadValue().magnitude>NativeDevicePreferences.Deadzone||SeatPad.dpad.ReadValue().sqrMagnitude>0||SeatPad.buttonSouth.isPressed||SeatPad.buttonSouth.wasReleasedThisFrame||SeatPad.buttonEast.isPressed||SeatPad.buttonEast.wasReleasedThisFrame||SeatPad.buttonNorth.isPressed||SeatPad.buttonNorth.wasReleasedThisFrame);
         private bool PadAuxiliaryWheel=>battleGestures.Mode=="groupWheel"||battleGestures.Mode=="groupAssign"||battleGestures.Mode=="baseWheel";
         private void EnsureOrdinaryPadUi()
         {
@@ -126,12 +126,13 @@ namespace Spacewars.Presentation
         }
         private void PollOrdinaryPad()
         {
+            if(BotCameraLocked){HideOrdinaryPadUi();return;}
             var pad=SeatPad;
             if(localBinding!=null)battleController=!SeatUsesKeyboard&&pad?.added==true;
             if(SeatUsesKeyboard&&input?.AssignedMouse?.delta.ReadValue().sqrMagnitude>0)battleController=false;
             if(pad!=previousSeatPad){padRightStickLastActive=double.NegativeInfinity;bool lost=previousSeatPad!=null&&!previousSeatPad.added;battleGestures.Cancel();previousSeatPad=pad;if(lost&&!paused){(localCoordinator??this).PauseFrom(this,true);notice="Геймпад отключён. Подключите устройство и продолжите матч.";}}
             if(pad==null||!pad.added||chatOpen||paused||!localInputFocused||input?.WorldInputEnabled!=true){CancelTeamSignal();battleGestures.Cancel();EndSelectionRosterFocus();HideOrdinaryPadUi();return;}
-            EnsureOrdinaryPadUi();if(PollSelectionRosterPad(pad))return;if(PollTeamSignalPad(pad))return;if(!padCursorInitialized){padCursorGround=Ground(SeatScreenCenter);battleCursor=SeatScreenCenter;padCursorInitialized=true;padOriginalHq=view.Buildings.FirstOrDefault(b=>b.Owner==view.Owner&&b.Kind==PlayableBuildingKind.Headquarters)?.Id??0;}
+            EnsureOrdinaryPadUi();if(PollOrbitalPad(pad))return;if(PollSelectionRosterPad(pad))return;if(PollTeamSignalPad(pad))return;if(!padCursorInitialized){padCursorGround=Ground(SeatScreenCenter);battleCursor=SeatScreenCenter;padCursorInitialized=true;padOriginalHq=view.Buildings.FirstOrDefault(b=>b.Owner==view.Owner&&b.Kind==PlayableBuildingKind.Headquarters)?.Id??0;}
             if(padRememberedBuilding!=0&&!view.Buildings.Any(b=>b.Id==padRememberedBuilding&&b.Owner==view.Owner)){padRememberedBuilding=0;battleGestures.Cancel();}
             int mask=(pad.buttonSouth.isPressed?1:0)|(pad.buttonEast.isPressed?2:0)|(pad.buttonWest.isPressed?4:0)|(pad.selectButton.isPressed?8:0)|(pad.startButton.isPressed?16:0)|(pad.rightShoulder.isPressed?32:0)|(pad.leftShoulder.isPressed?64:0)|(pad.buttonNorth.isPressed?256:0);
             var ls=pad.leftStick.ReadValue();var rs=pad.rightStick.ReadValue();
@@ -141,14 +142,14 @@ namespace Spacewars.Presentation
             var mouse=input.AssignedMouse??Mouse.current;
             bool mouseActivity=mouse?.added==true&&(mouse.delta.ReadValue().sqrMagnitude>0||mouse.scroll.ReadValue().sqrMagnitude>0||mouse.leftButton.wasPressedThisFrame||mouse.rightButton.wasPressedThisFrame||mouse.middleButton.wasPressedThisFrame);
             if(activity)battleController=true;else if(SeatUsesKeyboard&&mouseActivity)battleController=false;
-            if(battleGestures.Blocked&&(ls.magnitude>NativeDevicePreferences.Deadzone||rs.magnitude>NativeDevicePreferences.Deadzone)){HideOrdinaryPadUi();return;}
-            if(!PadAuxiliaryWheel)
+            if(!scanTargeting&&battleGestures.Blocked&&(ls.magnitude>NativeDevicePreferences.Deadzone||rs.magnitude>NativeDevicePreferences.Deadzone)){HideOrdinaryPadUi();return;}
+            if(!PadAuxiliaryWheel&&!scanTargeting)
             {
                 string mode=battleRally?(mapOpen?"rallyMap":"rallyTarget"):mapOpen?"tacticalMap":battleRing.style.display.value==DisplayStyle.Flex?"buildingWheel":"world";
                 if(battleGestures.Mode!=mode)battleGestures.SetMode(mode);
             }
             float Axis(float value)=>Mathf.Abs(value)<=NativeDevicePreferences.Deadzone?0:Mathf.Sign(value)*(Mathf.Abs(value)-NativeDevicePreferences.Deadzone)/(1-NativeDevicePreferences.Deadzone);
-            if(!battleGestures.Blocked&&!PadAuxiliaryWheel&&battleGestures.Mode!="buildingWheel"&&!pad.rightShoulder.isPressed)
+            if((scanTargeting||!battleGestures.Blocked)&&!PadAuxiliaryWheel&&battleGestures.Mode!="buildingWheel"&&!pad.rightShoulder.isPressed)
             {
                 float dt=Time.unscaledDeltaTime;var right=Vector3.ProjectOnPlane(cameraView.transform.right,Vector3.up).normalized;var forward=Vector3.ProjectOnPlane(cameraView.transform.forward,Vector3.up).normalized;
                 if(mapOpen){
@@ -165,7 +166,7 @@ namespace Spacewars.Presentation
                     if(pad.leftStickButton.wasPressedThisFrame){ResetKeyboardCamera();battleCursor=SeatScreenCenter;}
                 }
             }
-            if(!mapOpen&&!battleGestures.Blocked&&!PadAuxiliaryWheel&&battleGestures.Mode=="world"&&!pad.leftShoulder.isPressed&&!pad.rightShoulder.isPressed){
+            if(!scanTargeting&&!mapOpen&&!battleGestures.Blocked&&!PadAuxiliaryWheel&&battleGestures.Mode=="world"&&!pad.leftShoulder.isPressed&&!pad.rightShoulder.isPressed){
                 if(pad.dpad.right.wasPressedThisFrame)FocusMatchNotification(false);
                 else if(pad.dpad.left.wasPressedThisFrame)FocusMatchNotification(true);
             }
@@ -174,6 +175,7 @@ namespace Spacewars.Presentation
             // another player's world outside that explicitly shared UI surface.
             if(mapOpen||MapAt(battleCursor)!=1)battleCursor=new Vector2(Mathf.Clamp(battleCursor.x,rect.xMin,rect.xMax),Mathf.Clamp(battleCursor.y,rect.yMin,rect.yMax));
             if(!mapOpen)padCursorGround=MapAt(battleCursor)==1?MapGround(1,battleCursor):Ground(battleCursor);
+            if(PollScanTargetPad(pad))return;
             var actions=OrdinaryPadActions(out int pages);int? sector=OfflinePadGestures.RingSector(ls.x,-ls.y,actions.Length,battleInputProfile.radialDeadzone);battleSector=sector.HasValue?actions[sector.Value].Sector.Id:null;
             foreach(var intent in battleGestures.StepDetailed(Time.unscaledTimeAsDouble*1000,mask,true,true,battleInputProfile,mapOpen||OrdinaryPadHit()==0,sector.HasValue?actions[sector.Value].Sector:null))
             {

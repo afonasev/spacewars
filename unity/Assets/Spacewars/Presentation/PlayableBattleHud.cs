@@ -119,6 +119,7 @@ namespace Spacewars.Presentation
         }
         private void UpdateBattleHud(PlayableBuildingSnapshot building)
         {
+            UpdateOrbitalHud();if(orbitalOpen){battleRing.style.display=DisplayStyle.None;return;}
             if(PadAuxiliaryWheel){battleRing.style.display=DisplayStyle.None;return;}
             if(paused||view.Outcome!=PlayableMatchOutcome.Playing)ShowArmyComposition(false);
             var population=view.Population;hudFocusButton.text=""+(population==null?view.Entities.Count(e=>e.Owner==view.Owner).ToString():population.Living+" / "+population.Capacity);PackResourceRow();
@@ -160,7 +161,7 @@ namespace Spacewars.Presentation
             // Reserve a complete side-by-side pair before positioning the card; no overlap fallback.
             if(w>=diameter+254){float reserve=Mathf.Min(battleRing.PreferredDetailWidth+12,w-diameter-12);bool cardLeft=left>w-left-diameter;left=cardLeft?Mathf.Max(left,reserve):Mathf.Min(left,w-diameter-reserve);battleRing.style.left=left;}
             battleRing.ConfigureInput(battleController,SeatPad);
-            battleRing.Set(battleActions,building==null?"Строительство":BuildingName(building.Kind),battleController?battleSector:null,battleGestures.Progress,building==null?"building":building.RefineryUpgraded?"refineryUpgraded":OrbitalPrecision.BuildingGlyph(building.Kind));battleRing.PositionDetail(left>w-left-diameter,left>w-left-diameter?left:w-left-diameter,deck-6,battleRing.style.top.value.value,minY);
+            battleRing.Set(battleActions,building==null?"Строительство":BuildingName(building.Kind),battleController?battleSector:null,battleGestures.Progress,building==null?"building":OrbitalPrecision.BuildingArtwork(building));battleRing.PositionDetail(left>w-left-diameter,left>w-left-diameter?left:w-left-diameter,deck-6,battleRing.style.top.value.value,minY);
             if(!MouseBuildingMenuVisible(at,new Rect(left,battleRing.style.top.value.value,diameter,diameter)))battleRing.style.display=DisplayStyle.None;
         }
         private int primarySelection;
@@ -177,7 +178,7 @@ namespace Spacewars.Presentation
             if(!controller&&action.Sector.Hold=="sell"&&!hold){if(confirmSaleBuilding!=battleAnchor){confirmSaleBuilding=battleAnchor;notice=provingGround!=null?"Нажмите «Убрать здание» ещё раз для подтверждения":"Нажмите «Продать здание» ещё раз для подтверждения";return;}command=action.HoldCommand;confirmSaleBuilding=0;}
             if(command==null)return;
             if(action.Sector.Hold!="sell")confirmSaleBuilding=0;
-            if(runtime==null)return;
+            if(BotSeat||runtime==null)return;
             var intent=new PlayableCommand(generation,++sequence,LocalOwnerId,command.Kind,command.Entities,command.Point,targetId:command.Target,siteId:command.Site,slotId:command.Slot,parentId:command.Parent,buildingKind:command.Building,unitKind:command.Unit,researchKind:command.Research);
             var result=runtime.TrySubmit(intent);AudioCommand(intent,result.Accepted);
             noticeSequence=sequence;notice=result.Accepted?"":Friendly(result.Status);Record("radial "+id+" kind="+command.Kind+" admission="+result.Status);

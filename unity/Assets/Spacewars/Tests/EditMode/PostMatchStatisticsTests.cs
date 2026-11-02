@@ -76,6 +76,73 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(PlayableResearchRules.RefineryDescription(profile),Result.Facts.Single(f=>f.Kind==MatchFactKind.RefineryUpgradeCompleted).Name);
             Assert.That(Result.Facts.Where(f=>f.Kind==MatchFactKind.ResearchCompleted||f.Kind==MatchFactKind.RefineryUpgradeCompleted).All(f=>f.Seconds==5));
         }
+        [Test]public void LogBuildingCountsIncludePendingConstructionAndRespectCancellationWithinOneTick()
+        {
+            Call("AddCredits",PlayableOwner.Player,10000d);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,1,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));
+            int first=View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.Factory).Id;
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,3,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.CancelBuilding,new[]{first}));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,2,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));Finish();
+            var orders=Result.Facts.Where(f=>f.Kind==MatchFactKind.BuildingOrdered).ToArray();
+            CollectionAssert.AreEqual(new[]{1,2,2},orders.Select(Result.InventoryAtOrder).ToArray());
+            Assert.That(orders.All(f=>f.Tick==0&&f.Seconds==0));
+            Assert.AreEqual(0,Result.BuildingCount(PlayableOwner.Player,PlayableBuildingKind.Factory,0),"Graphs exclude unfinished construction.");
+        }
+        [Test]public void LogUnitCountsIncludeAllQueuesAndLivingUnitsWithoutCancelledLostOrSoldOrders()
+        {
+            int a=Factory(slot:1),b=Factory(slot:3);
+            int tank=(int)Call("SpawnUnit",new NavPoint(profile.ArenaHalfExtent-4,-profile.ArenaHalfExtent+4),PlayableOwner.Player,PlayableEntityKind.Tank);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.QueueTank,new[]{a}));
+            long cancelled=View().Buildings.Single(x=>x.Id==a).PrivateState.Orders.First().Id;
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.QueueTank,new[]{a}));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.CancelProductionOrder,new[]{a},orderId:cancelled));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.QueueTank,new[]{b}));
+            Call("DamageWithOwner",tank,100000,0,(PlayableOwner?)PlayableOwner.Enemy);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.QueueTank,new[]{b}));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.SellBuilding,new[]{a}));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.QueueTank,new[]{b}));
+            var bytes=(byte[])Call("CaptureWorldBytes",7,"order-inventory");
+            domain=Domain.GetMethod("RestoreWorldBytes",BindingFlags.NonPublic|BindingFlags.Static).Invoke(null,new object[]{bytes,profile,7,"order-inventory"});
+            Assert.AreEqual(bytes,Call("CaptureWorldBytes",7,"order-inventory"));Finish();
+            CollectionAssert.AreEqual(new[]{2,3,3,3,3},Result.Facts.Where(f=>f.Kind==MatchFactKind.UnitOrdered).Select(Result.InventoryAtOrder).ToArray());
+            Assert.AreEqual(0,Result.UnitCount(PlayableOwner.Player,PlayableEntityKind.Tank,Result.Duration),"Graphs exclude queued units and subtract losses.");
+        }
+        [Test]public void LivingUnitCountsIncludeStartsSubtractLossesAndRoundTrip()
+        {
+            Call("Step",1d);int tank=(int)Call("SpawnUnit",new NavPoint(profile.ArenaHalfExtent-4,-profile.ArenaHalfExtent+4),PlayableOwner.Player,PlayableEntityKind.Tank);
+            Call("Step",1d);Call("SpawnUnit",new NavPoint(profile.ArenaHalfExtent-8,-profile.ArenaHalfExtent+4),PlayableOwner.Player,PlayableEntityKind.Tank);
+            Call("Step",1d);Call("DamageWithOwner",tank,100000,0,(PlayableOwner?)PlayableOwner.Enemy);
+            var bytes=(byte[])Call("CaptureWorldBytes",7,"unit-counts");
+            domain=Domain.GetMethod("RestoreWorldBytes",BindingFlags.NonPublic|BindingFlags.Static).Invoke(null,new object[]{bytes,profile,7,"unit-counts"});
+            Assert.AreEqual(bytes,Call("CaptureWorldBytes",7,"unit-counts"));Finish();
+            Assert.AreEqual(1,Result.UnitCount(PlayableOwner.Player,PlayableEntityKind.Explorer,0));
+            Assert.AreEqual(0,Result.UnitCount(PlayableOwner.Player,PlayableEntityKind.Tank,0));
+            Assert.AreEqual(1,Result.UnitCount(PlayableOwner.Player,PlayableEntityKind.Tank,1));
+            Assert.AreEqual(2,Result.UnitCount(PlayableOwner.Player,PlayableEntityKind.Tank,2));
+            Assert.AreEqual(1,Result.UnitCount(PlayableOwner.Player,PlayableEntityKind.Tank,3));
+            Assert.AreEqual(0,Result.UnitCount(PlayableOwner.Enemy,PlayableEntityKind.Tank,3));
+            Assert.AreEqual(0,Result.Players[0].UnitsBuilt);
+        }
+        [Test]public void LivingBuildingCountsIncludeStartsAndExcludeCancelledLostAndSoldBuildings()
+        {
+            Call("Step",1d);int cancelled=Factory(false);Send(PlayableCommandKind.CancelBuilding,new[]{cancelled});
+            Call("Step",1d);int factory=Factory();
+            Call("Step",1d);Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.SellBuilding,new[]{factory}));
+            Call("AdvanceBuildingLifecycle",(double)profile.BuildingSaleDemolitionSec+1);
+            Call("Step",1d);factory=Factory();Call("Step",1d);
+            Call("DamageWithOwner",factory,100000,0,(PlayableOwner?)PlayableOwner.Enemy);
+            var bytes=(byte[])Call("CaptureWorldBytes",7,"building-counts");
+            domain=Domain.GetMethod("RestoreWorldBytes",BindingFlags.NonPublic|BindingFlags.Static).Invoke(null,new object[]{bytes,profile,7,"building-counts"});
+            Assert.AreEqual(bytes,Call("CaptureWorldBytes",7,"building-counts"));Finish();
+            Assert.AreEqual(1,Result.BuildingCount(PlayableOwner.Player,PlayableBuildingKind.Headquarters,0));
+            Assert.AreEqual(0,Result.BuildingCount(PlayableOwner.Player,PlayableBuildingKind.Factory,1));
+            Assert.AreEqual(1,Result.BuildingCount(PlayableOwner.Player,PlayableBuildingKind.Factory,2));
+            Assert.AreEqual(0,Result.BuildingCount(PlayableOwner.Player,PlayableBuildingKind.Factory,3));
+            Assert.AreEqual(1,Result.BuildingCount(PlayableOwner.Player,PlayableBuildingKind.Factory,4));
+            Assert.AreEqual(0,Result.BuildingCount(PlayableOwner.Player,PlayableBuildingKind.Factory,5));
+            Assert.AreEqual(2,Result.Players[0].BuildingsBuilt);
+        }
         [Test]public void SalesAndVictimLossesNeverDuplicateConstructionOrAttackerCredit()
         {
             int factory=Factory();Call("Step",2d);
@@ -121,7 +188,7 @@ namespace Spacewars.Tests.EditMode
             Setup();Call("Step",2d);Finish();Assert.IsFalse(Result.Facts.Any(f=>f.Kind==MatchFactKind.PlayerLeft||f.Kind==MatchFactKind.PlayerDefeated));
         }
         [Test]public void InitialAssetsNeverScoreButStartingArmyAppears()
-        {Finish();Assert.AreEqual(7,Result.Seed);Assert.IsTrue(Result.Manual);Assert.IsNull(Result.WinnerTeam);Assert.IsFalse(Result.TeamsVisible);Assert.That(Result.Players.All(p=>p.Score==0&&p.UnitsBuilt==0&&p.BuildingsBuilt==0));Assert.That(Result.Players.All(p=>Result.Army(p.Owner,0)==profile.ExplorerPopulationCost));Assert.That(Result.Facts.All(f=>f.Kind==MatchFactKind.Army));Assert.That(Result.Players.All(p=>!Result.IsMaximum(p,5)));}
+        {Finish();Assert.AreEqual(7,Result.Seed);Assert.IsTrue(Result.Manual);Assert.IsNull(Result.WinnerTeam);Assert.IsFalse(Result.TeamsVisible);Assert.That(Result.Players.All(p=>p.Score==0&&p.UnitsBuilt==0&&p.BuildingsBuilt==0));Assert.That(Result.Players.All(p=>Result.Army(p.Owner,0)==profile.ExplorerPopulationCost));Assert.That(Result.Facts.All(f=>f.Kind==MatchFactKind.Army||f.Kind==MatchFactKind.BuildingCount||f.Kind==MatchFactKind.UnitCount));Assert.That(Result.Players.All(p=>Result.UnitCount(p.Owner,PlayableEntityKind.Explorer,0)==1&&Result.UnitCount(p.Owner,PlayableEntityKind.Tank,0)==0));Assert.AreEqual(2*Enum.GetValues(typeof(PlayableEntityKind)).Length,Result.Facts.Count(f=>f.Kind==MatchFactKind.UnitCount));Assert.AreEqual(2,Result.Facts.Count(f=>f.Kind==MatchFactKind.BuildingCount));Assert.That(Result.Facts.Where(f=>f.Kind==MatchFactKind.BuildingCount).All(f=>f.EntityKind==(int)PlayableBuildingKind.Headquarters&&f.Value==1));Assert.That(Result.Players.All(p=>!Result.IsMaximum(p,5)));}
         [Test]public void ActualIncomeIncludesZerosAndRefundsAreExcluded()
         {int factory=Factory(false);Send(PlayableCommandKind.CancelBuilding,new[]{factory});Call("Step",1d);Call("Step",1d);Finish();var p=Result.Players[0];Assert.AreEqual(profile.HeadquartersIncomePerSecond*2,p.EarnedCredits);Assert.AreEqual(0,p.BuildingsBuilt);Assert.AreEqual(Math.Floor(p.EarnedCredits/2),p.Score);Assert.AreEqual(0,Result.Income(p.Owner,0));Assert.AreEqual(profile.HeadquartersIncomePerSecond,Result.Income(p.Owner,1));Assert.AreEqual(0,Result.Income(p.Owner,3));Assert.IsTrue(Result.IsMaximum(p,0));Assert.IsTrue(Result.IsMaximum(Result.Players[1],0));Assert.AreEqual(0,Result.Ranked.First().Slot);}
         [Test]public void CompletionRecordsCurrentEventCostWithoutRewritingEarlierFacts()

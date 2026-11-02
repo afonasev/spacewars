@@ -1,6 +1,8 @@
 {
   "id": "split-screen-hud-v1",
-  "revision": 1,
+  "revision": 2,
   "thickness": 3,
-  "minimapGap": 4
+  "minimapGap": 4,
+  "botCameraSpeed": 45,
+  "botCameraHold": 1
 }

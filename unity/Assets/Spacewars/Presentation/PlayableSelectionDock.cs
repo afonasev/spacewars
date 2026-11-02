@@ -14,6 +14,8 @@ namespace Spacewars.Presentation
         private VisualElement selectionGroupPanel,selectionSummary,selectionStats;
         private Label selectionGroupCount,selectionCost,selectionRosterHint;
         private Button selectionExpand;
+        private VisualElement selectionExpandControl,selectionChevron;
+        private Label selectionTriggerHint;
         private PlayableEntitySnapshot[] selectionDockUnits=Array.Empty<PlayableEntitySnapshot>();
         private bool selectionRosterExpanded,selectionRosterPadFocus,selectionRosterReleaseGate;
         private int selectionRosterFocusId,selectionRosterColumns=10;
@@ -29,7 +31,13 @@ namespace Spacewars.Presentation
             selectionGroupPanel=new VisualElement{name="selection-group-panel"};dockBody.Add(selectionGroupPanel);
             var header=new VisualElement{name="selection-group-header"};header.style.flexDirection=FlexDirection.Row;header.style.alignItems=Align.Center;selectionGroupPanel.Add(header);
             selectionGroupCount=SelectionText("selection-group-count");selectionGroupCount.style.flexGrow=1;header.Add(selectionGroupCount);
-            selectionExpand=Button("⌃",()=>ToggleSelectionRoster(false));selectionExpand.name="selection-expand";selectionExpand.tooltip="Развернуть состав · LT на геймпаде";header.Add(selectionExpand);
+            selectionExpandControl=new VisualElement{name="selection-expand-control"};selectionExpandControl.style.flexDirection=FlexDirection.Row;selectionExpandControl.style.alignItems=Align.Center;selectionExpandControl.style.flexShrink=0;
+            selectionTriggerHint=SelectionText("selection-trigger-hint");selectionTriggerHint.text="RT";selectionTriggerHint.style.color=Muted;selectionExpandControl.Add(selectionTriggerHint);
+            selectionExpand=Button("",()=>ToggleSelectionRoster(false));selectionExpand.name="selection-expand";selectionExpand.tooltip="Развернуть состав · RT на геймпаде";
+            selectionChevron=new VisualElement{name="selection-chevron",pickingMode=PickingMode.Ignore};selectionChevron.style.flexGrow=1;selectionChevron.generateVisualContent+=ctx=>{
+                var painter=ctx.painter2D;var center=selectionChevron.contentRect.center;float half=selectionDockProfile.selectionFont/2;float direction=selectionRosterExpanded?-1:1;
+                painter.strokeColor=Ink;painter.lineWidth=2;painter.BeginPath();painter.MoveTo(center+new Vector2(-half,direction*half/2));painter.LineTo(center-new Vector2(0,direction*half/2));painter.LineTo(center+new Vector2(half,direction*half/2));painter.Stroke();
+            };selectionExpand.Add(selectionChevron);selectionExpandControl.Add(selectionExpand);header.Add(selectionExpandControl);
             selectionSummary=new VisualElement{name="selection-summary"};selectionSummary.style.flexDirection=FlexDirection.Row;selectionSummary.style.flexWrap=Wrap.Wrap;selectionGroupPanel.Add(selectionSummary);
             selectionGroupPanel.Add(selectionRoster);
             selectionRosterHint=SelectionText("selection-roster-hint");selectionRosterHint.text="Крестовина — выбор · A — юнит · B — назад";selectionGroupPanel.Add(selectionRosterHint);
@@ -43,7 +51,7 @@ namespace Spacewars.Presentation
         }
         private void ToggleSelectionRoster(bool controller)
         {
-            if(selectionDockUnits.Length<2||spectatorMode)return;
+            if(selectionDockUnits.Length<1||spectatorMode)return;
             selectionRosterExpanded=!selectionRosterExpanded;selectionRosterPadFocus=controller&&selectionRosterExpanded;
             selectionRosterFocusId=selectionDockUnits.Any(e=>e.Id==selectionRosterFocusId)?selectionRosterFocusId:selectionDockUnits[0].Id;
             if(!selectionRosterPadFocus)root.Focus();
@@ -74,12 +82,17 @@ namespace Spacewars.Presentation
                 selectionMembership=ids;
             }
             bool group=selectionDockUnits.Length>1,single=selectionDockUnits.Length==1;
-            if(!group){selectionRosterExpanded=false;EndSelectionRosterFocus();}
+            if(!single&&!group){selectionRosterExpanded=false;EndSelectionRosterFocus();}
             dockIdentity.style.display=group?DisplayStyle.None:DisplayStyle.Flex;
             selectionGroupPanel.style.display=group?DisplayStyle.Flex:DisplayStyle.None;
             contextStats.style.display=DisplayStyle.None;
             armyRegion.Q("context-health").style.display=building!=null?DisplayStyle.Flex:DisplayStyle.None;
-            selectionStats.style.display=single?DisplayStyle.Flex:DisplayStyle.None;selectionCost.style.display=single?DisplayStyle.Flex:DisplayStyle.None;
+            selectionStats.style.display=single&&selectionRosterExpanded?DisplayStyle.Flex:DisplayStyle.None;selectionCost.style.display=single&&selectionRosterExpanded?DisplayStyle.Flex:DisplayStyle.None;
+            var expandParent=single?dockIdentity:selectionGroupPanel.Q("selection-group-header");
+            if(selectionExpandControl.parent!=expandParent)expandParent.Add(selectionExpandControl);
+            selectionExpandControl.style.display=single||group?DisplayStyle.Flex:DisplayStyle.None;
+            var hintParent=single?dockContents:selectionGroupPanel;if(selectionRosterHint.parent!=hintParent)hintParent.Add(selectionRosterHint);
+            armyRegion.Q("context-health").style.display=building!=null||single&&!selectionRosterExpanded?DisplayStyle.Flex:DisplayStyle.None;
             foreach(var id in selectionTiles.Keys.Where(id=>!selectionDockUnits.Any(e=>e.Id==id)).ToArray())
             {selectionTiles[id].RemoveFromHierarchy();selectionTiles.Remove(id);}
             if(group)
@@ -138,9 +151,12 @@ namespace Spacewars.Presentation
         private void UpdateSelectionRosterVisibility()
         {
             if(selectionExpand==null)return;
-            bool expanded=selectionRosterExpanded&&selectionDockUnits.Length>1;
-            selectionRoster.style.display=expanded?DisplayStyle.Flex:DisplayStyle.None;
-            selectionExpand.text=expanded?"⌄":"⌃";selectionExpand.tooltip=(expanded?"Свернуть":"Развернуть")+" состав · LT на геймпаде";
+            bool expanded=selectionRosterExpanded&&selectionDockUnits.Length>0,single=selectionDockUnits.Length==1;
+            selectionRoster.style.display=expanded&&!single?DisplayStyle.Flex:DisplayStyle.None;
+            selectionStats.style.display=expanded&&single?DisplayStyle.Flex:DisplayStyle.None;selectionCost.style.display=expanded&&single?DisplayStyle.Flex:DisplayStyle.None;
+            if(single)armyRegion.Q("context-health").style.display=expanded?DisplayStyle.None:DisplayStyle.Flex;
+            selectionChevron.MarkDirtyRepaint();selectionTriggerHint.text=NativeControllerGlyph.Symbol("RT",SeatPad);selectionTriggerHint.style.display=battleController&&SeatPad!=null?DisplayStyle.Flex:DisplayStyle.None;selectionExpand.tooltip=(expanded?"Свернуть":"Развернуть")+(single?" подробности":" состав")+" · RT на геймпаде";
+            selectionRosterHint.text=single?"RT — свернуть · B — назад":"Крестовина — выбор · A — юнит · B — назад";
             selectionRosterHint.style.display=selectionRosterPadFocus?DisplayStyle.Flex:DisplayStyle.None;
             foreach(var pair in selectionTiles)
             {
@@ -152,12 +168,21 @@ namespace Spacewars.Presentation
         {
             var p=selectionDockProfile;bool group=selectionDockUnits.Length>1;
             float grid=p.selectionColumns*(p.selectionTileWidth+p.selectionGap);
-            float desired=group?(selectionRosterExpanded?Mathf.Max(grid,selectionSummaryWidth):Mathf.Max(p.dockActiveWidth,selectionSummaryWidth))+p.dockPadding*2:p.selectionWidth;
+            float desired=group?(selectionRosterExpanded?Mathf.Max(grid,selectionSummaryWidth):Mathf.Max(p.dockActiveWidth,selectionSummaryWidth))+p.dockPadding*2:selectionRosterExpanded?p.selectionWidth:p.dockActiveWidth+p.selectionIconSize*(battleController?3:2)+p.dockPadding*2;
             armyRegion.style.width=Mathf.Min(desired,available);dockPortrait.style.width=dockPortrait.style.height=p.selectionIconSize;
-            dockContents.style.display=group?DisplayStyle.None:DisplayStyle.Flex;
-            selectionExpand.style.width=selectionExpand.style.height=selectionExpand.style.minHeight=p.selectionIconSize;
+            bool compactSingle=!group&&!selectionRosterExpanded;
+            armyRegion.style.height=StyleKeyword.Auto;armyRegion.style.minHeight=0;dockBody.style.flexGrow=0;dockContents.style.flexGrow=selectionRosterExpanded?1:0;
+            armyRegion.style.paddingTop=armyRegion.style.paddingBottom=compactSingle?p.selectionGap*2:p.dockPadding;
+            dockIdentity.style.marginBottom=compactSingle?0:p.selectionGap;selectionLabel.style.minHeight=0;
+            var health=armyRegion.Q("context-health");health.style.width=StyleKeyword.Auto;health.style.flexWrap=Wrap.NoWrap;health[0].style.flexGrow=1;health[0].style.minWidth=0;
+            contextHealthText.style.width=StyleKeyword.Auto;contextHealthText.style.marginLeft=p.selectionGap;contextHealthText.style.marginTop=0;
+            dockContents.style.display=group||!selectionRosterExpanded?DisplayStyle.None:DisplayStyle.Flex;
+            selectionExpand.style.width=selectionExpand.style.minWidth=p.selectionIconSize;selectionExpand.style.height=selectionExpand.style.minHeight=p.selectionIconSize;
+            selectionExpand.style.backgroundColor=Color.clear;selectionExpand.style.backgroundImage=StyleKeyword.None;
+            selectionExpand.style.borderLeftWidth=selectionExpand.style.borderRightWidth=selectionExpand.style.borderTopWidth=selectionExpand.style.borderBottomWidth=0;
+            selectionExpand.style.marginRight=0;selectionTriggerHint.style.fontSize=p.selectionFont;selectionTriggerHint.style.marginLeft=p.selectionGap;
             selectionExpand.style.marginLeft=p.selectionGap;selectionExpand.style.marginTop=selectionExpand.style.marginBottom=0;
-            selectionExpand.style.paddingTop=selectionExpand.style.paddingBottom=0;selectionExpand.style.fontSize=p.selectionFont+4;
+            selectionExpand.style.paddingLeft=selectionExpand.style.paddingRight=selectionExpand.style.paddingTop=selectionExpand.style.paddingBottom=0;selectionExpand.style.whiteSpace=WhiteSpace.NoWrap;selectionExpand.style.fontSize=p.selectionFont+4;
             selectionRoster.style.marginTop=p.selectionGap;selectionSummary.style.marginTop=p.selectionGap;
             selectionGroupCount.style.fontSize=selectionCost.style.fontSize=selectionRosterHint.style.fontSize=p.selectionFont;
             foreach(var label in selectionSummary.Query<Label>().ToList())label.style.fontSize=p.selectionFont+2;
@@ -177,19 +202,20 @@ namespace Spacewars.Presentation
             if(unavailable){EndSelectionRosterFocus();return false;}
             if(selectionRosterReleaseGate)
             {
-                if(!pad.buttonSouth.isPressed&&!pad.buttonEast.isPressed&&!pad.buttonWest.isPressed&&!pad.buttonNorth.isPressed&&!pad.leftTrigger.isPressed&&pad.dpad.ReadValue()==Vector2.zero)selectionRosterReleaseGate=false;
+                if(!pad.buttonSouth.isPressed&&!pad.buttonEast.isPressed&&!pad.buttonWest.isPressed&&!pad.buttonNorth.isPressed&&!pad.rightTrigger.isPressed&&pad.dpad.ReadValue()==Vector2.zero)selectionRosterReleaseGate=false;
                 battleGestures.Cancel();return true;
             }
-            if(pad.leftTrigger.wasPressedThisFrame&&selectionDockUnits.Length>1)
+            if(pad.rightTrigger.wasPressedThisFrame&&selectionDockUnits.Length>0)
             {
                 battleController=true;battleGestures.Cancel();ToggleSelectionRoster(true);
                 if(!selectionRosterPadFocus)selectionRosterReleaseGate=true;return true;
             }
             if(!selectionRosterPadFocus)return false;
-            if(selectionDockUnits.Length<2){EndSelectionRosterFocus();return true;}
+            if(selectionDockUnits.Length<1){EndSelectionRosterFocus();return true;}
             battleController=true;battleGestures.Cancel();
             if(pad.startButton.wasPressedThisFrame){EndSelectionRosterFocus();if(localCoordinator!=null)localCoordinator.PauseFrom(this,true);else PauseFrom(this,true);return true;}
             if(pad.buttonEast.wasPressedThisFrame){EndSelectionRosterFocus();return true;}
+            if(selectionDockUnits.Length==1)return true;
             int index=Array.FindIndex(selectionDockUnits,e=>e.Id==selectionRosterFocusId);if(index<0)index=0;
             int delta=pad.dpad.right.wasPressedThisFrame?1:pad.dpad.left.wasPressedThisFrame?-1:pad.dpad.down.wasPressedThisFrame?selectionRosterColumns:pad.dpad.up.wasPressedThisFrame?-selectionRosterColumns:0;
             index=Mathf.Clamp(index+delta,0,selectionDockUnits.Length-1);selectionRosterFocusId=selectionDockUnits[index].Id;UpdateSelectionRosterVisibility();

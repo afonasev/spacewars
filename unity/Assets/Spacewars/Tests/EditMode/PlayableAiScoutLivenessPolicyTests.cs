@@ -3,6 +3,8 @@ using System.Linq;
 using System.Threading;
 using NUnit.Framework;
 using Spacewars.Runtime;
+using Spacewars.Presentation;
+using Spacewars.Simulation.Ai;
 using Spacewars.Simulation;
 
 namespace Spacewars.Tests.EditMode
@@ -44,6 +46,32 @@ namespace Spacewars.Tests.EditMode
             var publicTarget=observation.PublicScoutObjectives.Single().Approach;Assert.AreEqual(17,publicTarget.X);Assert.AreEqual(0,publicTarget.Z);
         }
 
+        [Test] public void CurrentAuthoredStartSurveyPointCoversActualPublicPlacementEnvelope()
+        {
+            var root=new System.IO.DirectoryInfo(System.IO.Directory.GetCurrentDirectory());
+            while(root!=null&&!System.IO.File.Exists(System.IO.Path.Combine(root.FullName,"workflow/project.json")))root=root.Parent;
+            Assert.NotNull(root);
+            var resources=System.IO.Path.Combine(root.FullName,"unity/Assets/Spacewars/Content/Resources");
+            var profile=PlayableProfile.Create(Newtonsoft.Json.JsonConvert.DeserializeObject<PlayableProfileData>(System.IO.File.ReadAllText(System.IO.Path.Combine(resources,"PlayableProfile.json"))),
+                new ThreeCrossingsMap(Newtonsoft.Json.JsonConvert.DeserializeObject<ThreeCrossingsProfileData>(System.IO.File.ReadAllText(System.IO.Path.Combine(resources,"ThreeCrossingsProfile.json")))));
+            var lobby=new NativeLobbyConfiguration{HasExplicitSeed=true,ExplicitSeed=4,Participants=new System.Collections.Generic.List<NativeLobbyParticipant>{new NativeLobbyParticipant{Name="Bot",Team=1,Color=0},new NativeLobbyParticipant{Name="Human",Human=true,Team=2,Color=1}}};
+            var configuration=NativeLobbyMatch.Create(profile,lobby);var domain=new PlayableDomain(profile,91,configuration);
+            const System.Reflection.BindingFlags flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+            try
+            {
+                var objectives=(PlayablePublicScoutObjective[])typeof(PlayableDomain).GetMethod("PublicObjectives",flags).Invoke(domain,new object[]{PlayableOwner.Player});
+                var envelopes=(AiIntelEnvelope[])typeof(PlayableDomain).GetMethod("PublicIntelEnvelopes",flags).Invoke(domain,null);
+                foreach(var target in objectives.Where(t=>t.Role==PlayablePublicScoutObjectiveRole.PossibleEnemyStart))
+                {
+                    var vision=new PlayableVision(0,128,128,1,1);vision.Refresh(new[]{new VisionSource(target.Approach,PlayableUnitRules.Vision(profile,PlayableEntityKind.Explorer))},Array.Empty<KnownBuilding>());
+                    Assert.True(envelopes.Single(e=>e.AreaId==target.SiteId).FullyCovered(vision.Snapshot()),"The actual public scout approach must survey the whole placement envelope of start "+target.SiteId);
+                    var site=configuration.Sites.Single(t=>t.Id==target.SiteId);
+                    foreach(var slot in site.Slots)Assert.Greater(AiOpponentSelector.Distance(target.Approach,slot.Position),Math.Max(profile.FactoryFootprintRadius,profile.ScienceFootprintRadius)+profile.ExplorerCollisionRadius,"Stay outside every public occupied pad.");
+                    Assert.Greater(AiOpponentSelector.Distance(target.Approach,site.Position),profile.HeadquartersFootprintRadius+profile.ExplorerCollisionRadius,"Stay outside an occupied HQ.");
+                }
+            }
+            finally{domain.Navigation.ReleaseCommittedHostRoot();domain.DestroyOwnedNavigation();}
+        }
         [Test] public void BothAuthoredStartApproachesAvoidOccupiedHomeSlots()
         {
             var profile=PlayableProfile.Default;

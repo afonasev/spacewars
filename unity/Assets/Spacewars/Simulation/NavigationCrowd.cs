@@ -318,7 +318,9 @@ namespace Spacewars.Simulation
             var unit=unitView[actor];
             if(!geometry.SegmentFree(unit.Position,end,unit.Radius)||!Traverse(unit.Location,end,unit.Radius,out var moved,unit.Id))return false;
             bool yielding=sampledMotion!=null&&sampledMotion[actor].Yielding;
-            if(terrain==null||!(yielding?sampledMotion[actor].OwnMoving:unit.Moving)||unit.Held)return true;
+            // Flat Native rows also publish typed physical routes. Their next
+            // corner must remain reachable after avoidance, just like terrain rows.
+            if(terrain==null&&preparedStep?.RecastRoutes[actor]==null||!(yielding?sampledMotion[actor].OwnMoving:unit.Moving)||unit.Held)return true;
             // The published cursor must remain reachable after an aligned turn or avoidance step.
             // Yielding restores its own cursor rather than the shortcut selected for this frame.
             int local=yielding?sampledMotion[actor].OwnLocalIndex:unit.localIndex;
@@ -490,8 +492,14 @@ namespace Spacewars.Simulation
             }
         }
         bool INavLayerSweepAuthority.TraceLayerSweep(ILayeredNavigationProvider provider,NavLocation from,NavPoint to,double radius,NavTypedRoute route,int cursor,INavStorageReservation r,out NavLocation reached,out IReadOnlyList<NavTypedLeg> trace){
-            reached=default;trace=null;if(!(terrain is IRecastPhysicalTerrain physical))return false;
-            using(var scratch=NavStorageScratch.Reserve(r,4096))return physical.TracePhysical(from,to,radius,provider,route,cursor,r,out reached,out trace);
+            reached=default;trace=null;
+            using(var scratch=NavStorageScratch.Reserve(r,4096)){
+                if(terrain is IRecastPhysicalTerrain physical)return physical.TracePhysical(from,to,radius,provider,route,cursor,r,out reached,out trace);
+                if(terrain!=null||!(provider is LayeredNavigationProvider flat)||flat.Id!="flat"||flat.SemanticsVersion!=1||flat.Surfaces.Count!=1||flat.Surfaces[0].Id!=NavLocation.FlatSurface||flat.Portals.Count!=0||from.SurfaceId!=NavLocation.FlatSurface)return false;
+                var end=new NavLocation(to,NavLocation.FlatSurface);
+                if(!geometry.SegmentFree(from.Position,to,radius)||!RecastLayerTrace.Try(provider,from,end,new NavClearanceProfile("ground",1,"ground",0,radius),out trace,r))return false;
+                reached=end;return true;
+            }
         }
         bool INavRecastSweepAuthority.AllowsRecastSweep(int actor,NavLocation from,NavPoint to,double radius)
         {int row=preparedStep==null?ActorIndex(actor):preparedStep.Find(actor);return row>=0&&geometry.SegmentFree(from.Position,to,radius)&&HeldSegmentFree(unitView[row],from.Position,to);}

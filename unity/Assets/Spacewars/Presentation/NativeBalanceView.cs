@@ -27,7 +27,7 @@ namespace Spacewars.Presentation
         private bool dirty;
         private string section="Юниты",entity="Танк",expanded="Юниты";
         private const string Changes="Изменения";
-        private static readonly string[] Categories={Changes,"Юниты","Здания","Экономика","Графика","Правила","ИИ","Звук"};
+        private static readonly string[] Categories={Changes,"Юниты","Здания",NativeBalanceLabels.Research,"Экономика",NativeBalanceLabels.Escalation,NativeBalanceLabels.Mechanics,"ИИ",NativeBalanceLabels.Graphics,"Звук"};
         private readonly Label context,status,help;
         private readonly TextField search;
         private readonly ScrollView fields;
@@ -60,7 +60,7 @@ namespace Spacewars.Presentation
             grid=new VisualElement();grid.style.width=Length.Percent(100);grid.style.flexDirection=FlexDirection.Row;grid.style.flexWrap=Wrap.Wrap;grid.style.alignContent=Align.FlexStart;grid.style.alignItems=Align.FlexStart;fields.Add(grid);
             context=OrbitalTheme.Text("","lab-context");card.Insert(card.IndexOf(body),context);
             help=OrbitalTheme.Text("","lab-inline-help");help.name="lab-focus-help";help.style.width=Length.Percent(100);help.style.display=DisplayStyle.None;
-            Page.RegisterCallback<GeometryChangedEvent>(_=>{bool compact=Page.resolvedStyle.width<900;LayoutColumns();sidebar.style.width=compact?190:238;title.style.fontSize=compact?18:22;title.style.marginBottom=4;card.style.paddingLeft=card.style.paddingRight=card.style.paddingTop=card.style.paddingBottom=10;});
+            Page.RegisterCallback<GeometryChangedEvent>(_=>{bool compact=Page.resolvedStyle.width<900;LayoutColumns();sidebar.style.width=compact?208:238;title.style.fontSize=compact?18:22;title.style.marginBottom=4;card.style.paddingLeft=card.style.paddingRight=card.style.paddingTop=card.style.paddingBottom=10;});
             var actions=new VisualElement(){name="lab-actions"};actions.style.flexDirection=FlexDirection.Row;actions.style.flexShrink=0;actions.style.marginTop=8;card.Add(actions);
             actions.Add(OrbitalTheme.Action("Назад",Back,"lab-back"));
             if(openProvingGround!=null)actions.Add(OrbitalTheme.Action("Открыть полигон",()=>Try(OpenProvingGround),"lab-proving-ground",true));
@@ -93,9 +93,10 @@ namespace Spacewars.Presentation
             catch(Exception e){draft=null;original=null;invalid.Clear();dirty=false;Refresh();grid.Clear();status.text="Версия недоступна: "+e.Message+". Продолжает действовать: "+store.ActiveIdentity+". Исходные данные сохранены; выберите другую версию или релизный Default.";}
         }
         private static string Number(double value)=>value.ToString("0.###",CultureInfo.InvariantCulture);
-        private static string AiRangeUnit(AiProfileField field)=>field.Unit switch{"weight"=>"баллов","buildings"=>"зданий","units"=>"юнитов","changes"=>"смен",_=>NativeBalanceLabels.Unit(field.Unit)};
+        private static string AiRangeUnit(AiProfileField field)=>field.Unit switch{"orders/min"=>"пр./мин","ratio/s"=>"доля/с","toggle"=>"0/1","weight"=>"баллов","buildings"=>"зданий","units"=>"юнитов","changes"=>"смен",_=>NativeBalanceLabels.Unit(field.Unit)};
         private static string AiUnit(AiProfileField field,double value)=>field.Unit switch
         {
+            "orders/min"=>"пр./мин","ratio/s"=>"доля/с","toggle"=>"0/1",
             "weight"=>CountForm(value,"балл","балла","баллов"),"buildings"=>CountForm(value,"здание","здания","зданий"),
             "units"=>CountForm(value,"юнит","юнита","юнитов"),"changes"=>CountForm(value,"смена","смены","смен"),
             _=>NativeBalanceLabels.Unit(field.Unit)
@@ -110,7 +111,7 @@ namespace Spacewars.Presentation
         {
             foreach(var f in PlayableProfileMetadata.Fields.Where(f=>NativeBalanceFields.Editable(f)&&Changed(f)))yield return NativeBalanceLabels.Label(f)+" ["+f.Path+"]: "+Number(f.Read(original))+" → "+(invalid.TryGetValue(f.Path,out var raw)?raw:Number(f.Read(draft)));
             foreach(var f in NativeBalanceFields.AiOpeningFields.Where(Changed))yield return f.Label+" ["+f.Path+"]: "+Number(aiOriginal.fields.Single(v=>v.path==f.Path).value)+" → "+(invalid.TryGetValue(f.Path,out var raw)?raw:Number(aiDraft.fields.Single(v=>v.path==f.Path).value));
-            foreach(var f in DetailFields(detailDraft).Where(DetailChanged))yield return "Графика / "+f.Group+" / "+f.Label+" ["+f.Path+"]: "+Number(DetailFields(detailOriginal).Single(v=>v.Path==f.Path).Read())+" → "+(invalid.TryGetValue(f.Path,out var raw)?raw:Number(f.Read()))+" "+f.Unit;
+            foreach(var f in DetailFields(detailDraft).Where(DetailChanged))yield return NativeBalanceLabels.Graphics+" / "+f.Group+" / "+f.Label+" ["+f.Path+"]: "+Number(DetailFields(detailOriginal).Single(v=>v.Path==f.Path).Read())+" → "+(invalid.TryGetValue(f.Path,out var raw)?raw:Number(f.Read()))+" "+f.Unit;
             foreach(var f in GameplayAudioMetadata.Fields.Where(f=>f.Read(audioOriginal)!=f.Read(audioDraft)||invalid.ContainsKey(f.Path)))yield return "Звук / "+f.Label+" ["+f.Path+"]: "+Number(f.Read(audioOriginal))+" → "+(invalid.TryGetValue(f.Path,out var raw)?raw:Number(f.Read(audioDraft)));
         }
         private int ChangeCount=>original==null?0:Differences().Count();
@@ -147,28 +148,48 @@ namespace Spacewars.Presentation
             foreach(var row in grid.Children().Where(e=>e.ClassListContains("lab-parameter-row")))row.style.width=Length.Percent(TwoColumns?50:100);
         }
         private bool TwoColumns=>Page.resolvedStyle.width>=1120&&!(section==Changes&&string.IsNullOrWhiteSpace(search.value));
+        private IEnumerable<string> Objects(string category)
+        {
+            var gameplay=PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable).Where(f=>NativeBalanceLabels.Section(f)==category).Select(NativeBalanceLabels.Entity);
+            var extra=category=="ИИ"?NativeBalanceFields.AiOpeningFields.Select(NativeBalanceLabels.AiEntity):category==NativeBalanceLabels.Graphics?DetailFields(detailDraft).Select(f=>f.Group):Array.Empty<string>();
+            return extra.Concat(gameplay).Distinct();
+        }
+        private bool ObjectChanged(string category,string obj=null)
+        {
+            return PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable).Any(f=>NativeBalanceLabels.Section(f)==category&&(obj==null||NativeBalanceLabels.Entity(f)==obj)&&Changed(f))||
+                category=="ИИ"&&NativeBalanceFields.AiOpeningFields.Any(f=>(obj==null||NativeBalanceLabels.AiEntity(f)==obj)&&Changed(f))||
+                category==NativeBalanceLabels.Graphics&&DetailFields(detailDraft).Any(f=>(obj==null||f.Group==obj)&&DetailChanged(f));
+        }
+        private void OpenObject(string category,string obj,bool clearSearch=false)
+        {
+            section=expanded=category;entity=obj;
+            if(clearSearch)search.SetValueWithoutNotify("");
+            RenderFields();navigation.SetScope(Page,Back,fields.Query<TextField>().First());
+        }
         private void RenderTree()
         {
-            var available=PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable).ToArray();var aiAvailable=NativeBalanceFields.AiOpeningFields;groups.Clear();
+            groups.Clear();
             foreach(var category in Categories)
             {
                 string choice=category;bool branch=choice!=Changes&&choice!="Звук";
                 var header=OrbitalTheme.Action((branch?(expanded==choice?"▾  ":"▸  "):"")+choice+(choice==Changes?" · "+ChangeCount:""),()=>{
-
                     expanded=branch&&expanded!=choice?choice:null;section=choice;
-                    if(branch){var objects=choice=="ИИ"?aiAvailable.Select(f=>f.Group).Distinct().ToArray():(choice=="Графика"?DetailFields(detailDraft).Select(f=>f.Group).Distinct():Array.Empty<string>()).Concat(available.Where(f=>NativeBalanceLabels.Section(f)==choice).Select(NativeBalanceLabels.Entity).Distinct()).ToArray();if(!objects.Contains(entity))entity=objects.FirstOrDefault();}
+                    if(branch&&!Objects(choice).Contains(entity))entity=Objects(choice).FirstOrDefault();
                     RenderFields();navigation.SetScope(Page,Back,Page.Q<Button>("lab-section-"+choice));
                 },"lab-section-"+choice,choice==section);
-                header.AddToClassList("lab-tree-section");header.EnableInClassList("lab-dirty",choice==Changes?ChangeCount>0:choice=="Звук"?GameplayAudioMetadata.Fields.Any(f=>f.Read(audioOriginal)!=f.Read(audioDraft)||invalid.ContainsKey(f.Path)):choice=="ИИ"?aiAvailable.Any(Changed):(choice=="Графика"&&DetailFields(detailDraft).Any(DetailChanged)||available.Any(f=>NativeBalanceLabels.Section(f)==choice&&Changed(f))));if(choice==Changes)header.style.fontSize=13;header.tooltip=choice==Changes?"Все отличия черновика от выбранной сохранённой версии, включая название.":"Открыть раздел. Остальные ветви дерева свернутся.";groups.Add(header);
+                header.AddToClassList("lab-tree-section");
+                header.EnableInClassList("lab-dirty",choice==Changes?ChangeCount>0:choice=="Звук"?GameplayAudioMetadata.Fields.Any(f=>f.Read(audioOriginal)!=f.Read(audioDraft)||invalid.ContainsKey(f.Path)):ObjectChanged(choice));
+                if(choice==Changes)header.style.fontSize=13;
+                header.tooltip=choice==Changes?"Все отличия черновика от выбранной сохранённой версии, включая название.":"Открыть раздел. Остальные ветви дерева свернутся.";groups.Add(header);
                 if(!branch||expanded!=choice)continue;
                 var children=new VisualElement(){name="lab-children-"+choice};children.AddToClassList("lab-tree-children");groups.Add(children);
-                var items=choice=="ИИ"?aiAvailable.Select(f=>f.Group).Distinct():(choice=="Графика"?DetailFields(detailDraft).Select(f=>f.Group).Distinct():Array.Empty<string>()).Concat(available.Where(f=>NativeBalanceLabels.Section(f)==choice).Select(NativeBalanceLabels.Entity).Distinct());
-                foreach(var item in items)
+                foreach(var item in Objects(choice))
                 {
-                    string obj=item;string visibleName=choice=="ИИ"?"Дебюты и мидгейм":obj;
-                    var action=OrbitalTheme.Action("",()=>{section=choice;entity=obj;RenderFields();navigation.SetScope(Page,Back,fields.Query<TextField>().First());},"lab-object-"+obj.Replace('/','-').Replace(' ','-'),obj==entity&&choice==section);
-                    var icon=new OrbitalGlyph(NativeBalanceLabels.Glyph(visibleName)){pickingMode=PickingMode.Ignore};icon.style.width=24;icon.style.height=24;icon.style.marginRight=6;action.Add(icon);
-                    action.Add(new Label(visibleName){pickingMode=PickingMode.Ignore});action.EnableInClassList("lab-dirty",choice=="ИИ"?aiAvailable.Any(f=>f.Group==obj&&Changed(f)):(DetailFields(detailDraft).Any(f=>f.Group==obj)?DetailFields(detailDraft).Where(f=>f.Group==obj).Any(DetailChanged):available.Any(f=>NativeBalanceLabels.Section(f)==choice&&NativeBalanceLabels.Entity(f)==obj&&Changed(f))));children.Add(action);
+                    string obj=item;var action=OrbitalTheme.Action("",()=>OpenObject(choice,obj),"lab-object-"+obj.Replace('/','-').Replace(' ','-'),obj==entity&&choice==section);
+                    string glyph=NativeBalanceLabels.Glyph(obj);
+                    if(glyph!=null){var icon=new OrbitalGlyph(glyph){pickingMode=PickingMode.Ignore};icon.style.width=24;icon.style.height=24;icon.style.marginRight=6;action.Add(icon);}
+                    action.style.height=StyleKeyword.Auto;var label=new Label(obj){pickingMode=PickingMode.Ignore};label.AddToClassList("lab-tree-label");label.style.fontSize=14;label.style.flexShrink=1;label.style.whiteSpace=WhiteSpace.Normal;action.Add(label);action.EnableInClassList("lab-dirty",ObjectChanged(choice,obj));children.Add(action);
+
                 }
             }
         }
@@ -180,12 +201,26 @@ namespace Spacewars.Presentation
             var visible=available.Where(f=>query.Length==0?(section==Changes?Changed(f):NativeBalanceLabels.Section(f)==section&&NativeBalanceLabels.Entity(f)==entity):(NativeBalanceLabels.Section(f)+" "+f.Path+" "+NativeBalanceLabels.Label(f)+" "+NativeBalanceLabels.Help(f)+" "+NativeBalanceLabels.Entity(f)).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
             context.style.display=section==Changes&&query.Length==0?DisplayStyle.None:DisplayStyle.Flex;
             context.text=query.Length>0?"Поиск по всем разделам · "+visible.Length+" параметров":section==Changes?Changes+" · "+ChangeCount:section+" / "+entity+" · "+visible.Length+" параметров";
-            var aiVisible=aiAvailable.Where(f=>query.Length==0?(section=="ИИ"&&f.Group==entity||section==Changes&&Changed(f)):("ИИ "+f.Group+" "+f.Path+" "+f.Label+" "+f.Description).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
+            var aiVisible=aiAvailable.Where(f=>query.Length==0?(section=="ИИ"&&NativeBalanceLabels.AiEntity(f)==entity||section==Changes&&Changed(f)):("ИИ "+f.Group+" "+f.Path+" "+f.Label+" "+f.Description).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
             var audioVisible=GameplayAudioMetadata.Fields.Where(f=>query.Length==0?(section=="Звук"||section==Changes&&(f.Read(audioOriginal)!=f.Read(audioDraft)||invalid.ContainsKey(f.Path))):("Звук "+f.Label+" "+f.Path+" "+f.Description).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
-            var detailVisible=DetailFields(detailDraft).Where(f=>query.Length==0?(section=="Графика"&&entity==f.Group||section==Changes&&DetailChanged(f)):("Графика LOD детализация "+f.Group+" "+f.Path+" "+f.Label+" "+f.Description).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
-            context.text=query.Length>0?"Поиск по всем разделам · "+(visible.Length+aiVisible.Length+audioVisible.Length+detailVisible.Length)+" параметров":section==Changes?Changes+" · "+ChangeCount:section=="Звук"?"Звук / Игровой микс · "+audioVisible.Length+" параметров":section=="ИИ"?"ИИ / Дебюты и мидгейм · "+aiVisible.Length+" параметров":section+" / "+entity+" · "+(visible.Length+detailVisible.Length)+" параметров";
+            var detailVisible=DetailFields(detailDraft).Where(f=>query.Length==0?(section==NativeBalanceLabels.Graphics&&entity==f.Group||section==Changes&&DetailChanged(f)):(NativeBalanceLabels.Graphics+" LOD детализация "+f.Group+" "+f.Path+" "+f.Label+" "+f.Description).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0).ToArray();
+            context.text=query.Length>0?"Поиск по всем разделам · "+(visible.Length+aiVisible.Length+audioVisible.Length+detailVisible.Length)+" параметров":section==Changes?Changes+" · "+ChangeCount:section=="Звук"?"Звук / Игровой микс · "+audioVisible.Length+" параметров":section+" / "+entity+" · "+(visible.Length+detailVisible.Length+aiVisible.Length)+" параметров";
+
             help.style.display=DisplayStyle.None;
             if(visible.Length==0&&aiVisible.Length==0&&audioVisible.Length==0&&detailVisible.Length==0)grid.Add(OrbitalTheme.Text(query.Length==0&&section==Changes?"Нет несохранённых изменений.":"Параметры не найдены. Попробуйте другое название.","orbital-muted"));
+            if(query.Length==0&&(section=="Юниты"||section=="Здания"))
+            {
+                var related=NativeBalanceLabels.RelatedResearch(entity);
+                if(related.Length>0)
+                {
+                    var links=new VisualElement(){name="lab-related-research"};links.style.width=Length.Percent(100);links.style.flexShrink=0;links.style.flexDirection=FlexDirection.Row;links.style.flexWrap=Wrap.Wrap;grid.Add(links);
+                    foreach(var target in related)
+                    {
+                        string research=target;var link=OrbitalTheme.Action("Исследования → "+research,()=>OpenObject(NativeBalanceLabels.Research,research,true),"lab-research-link-"+research.Replace(' ','-'));
+                        link.style.maxWidth=Length.Percent(100);link.style.whiteSpace=WhiteSpace.Normal;link.tooltip="Открыть исследование. Текущий черновик сохранится.";links.Add(link);
+                    }
+                }
+            }
             if(detailVisible.Length>0){
                 var hint=OrbitalTheme.Text("LOD: размер модели относительно высоты кадра. Следы: часть машин оставляет сплошной след, остальные — нет. Изменения применяются в следующей игре или в полигоне.","orbital-muted");hint.name="lab-lod-help";hint.style.whiteSpace=WhiteSpace.Normal;hint.style.width=Length.Percent(100);grid.Add(hint);
                 foreach(var field in detailVisible){
@@ -206,8 +241,9 @@ namespace Spacewars.Presentation
             if(aiVisible.Length>0)
             {
                 if(section=="ИИ")grid.Add(OrbitalTheme.Text("После сохранения настройки применятся к новым матчам; текущий матч не меняется.","orbital-muted"));
-                if(section=="ИИ")grid.Add(OrbitalTheme.Action("Сбросить ИИ по умолчанию",()=>Try(()=>{aiDraft=NativeBalanceFields.InitialAiOpeningProfile().CopyData();invalid.Keys.Where(k=>k.StartsWith("openingsMidgame.",StringComparison.Ordinal)).ToList().ForEach(k=>invalid.Remove(k));SetDirty();RenderFields();}),"lab-ai-reset"));
-                grid.Add(OrbitalTheme.Text("ИИ / Дебюты и мидгейм","lab-subheading"));
+                if(section=="ИИ")grid.Add(OrbitalTheme.Action("Сбросить ИИ по умолчанию",()=>Try(()=>{aiDraft=NativeBalanceFields.InitialAiOpeningProfile().CopyData();invalid.Keys.Where(k=>NativeBalanceFields.AiOpeningFields.Any(f=>f.Path==k)).ToList().ForEach(k=>invalid.Remove(k));SetDirty();RenderFields();}),"lab-ai-reset"));
+                grid.Add(OrbitalTheme.Text("ИИ / "+NativeBalanceLabels.AiEntity(aiVisible[0]),"lab-subheading"));
+
                 foreach(var field in aiVisible)
                 {
                     string tip=field.Description+"\nДиапазон: "+Number(field.Minimum)+"–"+Number(field.Maximum)+" "+AiRangeUnit(field)+" · шаг "+Number(field.Step);
@@ -222,7 +258,7 @@ namespace Spacewars.Presentation
                     foreach(int direction in new[]{-1,1}){int delta=direction;var adjust=OrbitalTheme.Action(delta<0?"−":"+",()=>Try(()=>{var current=aiDraft.fields.Single(v=>v.path==field.Path).value;NativeBalanceFields.Write(field,aiDraft,Math.Round(Math.Max(field.Minimum,Math.Min(field.Maximum,current+delta*field.Step)),6));invalid.Remove(field.Path);UpdateUnit();SetDirty();Show();}));adjust.AddToClassList("lab-adjust");adjust.focusable=false;adjust.SetEnabled(store.CanEdit);adjust.tooltip=tip;row.Add(adjust);}
                 }
             }
-            foreach(var bucket in visible.GroupBy(f=>query.Length==0&&section!=Changes?NativeBalanceLabels.Bucket(f):NativeBalanceLabels.Section(f)+" / "+NativeBalanceLabels.Entity(f)+" / "+NativeBalanceLabels.Bucket(f)))
+            foreach(var bucket in visible.GroupBy(f=>query.Length==0&&section!=Changes?NativeBalanceLabels.Bucket(f):NativeBalanceLabels.Section(f)+" / "+NativeBalanceLabels.Entity(f)+" / "+NativeBalanceLabels.Bucket(f)).OrderBy(b=>query.Length==0&&section==NativeBalanceLabels.Research?b.Key=="Уровень I"?0:b.Key=="Уровень II"?1:b.Key=="Уровень III"?2:3:0))
             {
                 var heading=OrbitalTheme.Text(bucket.Key,"lab-subheading");heading.style.width=Length.Percent(100);heading.style.flexShrink=0;grid.Add(heading);
                 foreach(var descriptor in bucket)
@@ -241,7 +277,13 @@ namespace Spacewars.Presentation
                     });Show();
                     var unit=new Label(NativeBalanceLabels.Unit(field.Unit)){tooltip=tip};unit.AddToClassList("lab-unit");row.Add(unit);
                     foreach(int direction in new[]{-1,1}){int delta=direction;var adjust=OrbitalTheme.Action(delta<0?"−":"+",()=>((Action<int>)button.userData)(delta));adjust.AddToClassList("lab-adjust");adjust.tooltip=tip;adjust.focusable=false;adjust.SetEnabled(store.CanEdit);row.Add(adjust);}
-                    var info=new Label("?"){tooltip=tip};info.AddToClassList("lab-info");row.Add(info);
+                    string helpText=tip+" · "+field.Path+" · Применение: следующая игра.";
+                    var info=new Button(){text="?",name="lab-info-"+field.FieldName,tooltip=tip};info.AddToClassList("lab-info");row.Add(info);
+                    info.clicked+=()=>{info.Focus();ShowHelp(row,helpText);};
+                    info.RegisterCallback<PointerEnterEvent>(_=>ShowHelp(row,helpText));
+                    info.RegisterCallback<PointerLeaveEvent>(_=>{if(help.parent==row&&Page.focusController?.focusedElement!=info)help.style.display=DisplayStyle.None;});
+                    info.RegisterCallback<FocusInEvent>(_=>ShowHelp(row,helpText));
+                    info.RegisterCallback<FocusOutEvent>(_=>{if(help.parent==row)help.style.display=DisplayStyle.None;});
                 }
             }
             if(audioVisible.Length>0){var heading=OrbitalTheme.Text("Звук / Игровой микс","lab-subheading");heading.style.width=Length.Percent(100);grid.Add(heading);}

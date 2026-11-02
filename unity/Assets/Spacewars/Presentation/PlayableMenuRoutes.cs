@@ -54,7 +54,7 @@ namespace Spacewars.Presentation
         private void TickMenuInput()
         {
             bool owned=MenuOwnsInput;var owner=localPauseOwner??this;owner.menuNavigation?.Tick();
-            if(!owned&&!MenuOwnsInput&&!SeatUsesKeyboard&&localInputFocused&&Keyboard.current?.escapeKey.wasPressedThisFrame==true){PauseFrom(this,true);menuNavigation?.UseKeyboardMouse();return;}
+            if(!owned&&!MenuOwnsInput&&!SeatUsesKeyboard&&localInputFocused&&Keyboard.current?.escapeKey.wasPressedThisFrame==true){if(orbitalOpen){CloseOrbital();return;}PauseFrom(this,true);menuNavigation?.UseKeyboardMouse();return;}
             if(!owned&&!MenuOwnsInput){var pressed=localPresentations.FirstOrDefault(seat=>seat==this&&seat.SeatPad?.startButton.wasPressedThisFrame==true);if(pressed!=null){PauseFrom(pressed,true);pressed.menuNavigation?.UseGamepad();}else if(localPresentations.Count==0&&MenuPad?.startButton.wasPressedThisFrame==true){Pause(true);menuNavigation?.UseGamepad();}}
         }
         private NativeBalanceStore balanceStore;

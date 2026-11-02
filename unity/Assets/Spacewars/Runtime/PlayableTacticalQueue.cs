@@ -127,13 +127,20 @@ namespace Spacewars.Runtime
         }
         private static PlayableCommand RecipientCommand(PlayableCommand c,int[] ids)
         {var copy=new PlayableCommand(c.Generation,c.Sequence,c.PlayerId,c.Kind,ids,c.Target,targetId:c.TargetId,origin:c.Origin,source:c.Source,jobId:c.JobId,actionId:c.ActionId);return c.TargetLocation.HasValue?copy.WithResolvedLocation(c.TargetLocation.Value):copy;}
+        private void InstallActivatedExecution(Unit u,QueueExecution e)
+        {
+            InstallExecution(u,e);
+            // Native installation starts motion. A late result for the same
+            // execution must still respect its current combat suspension.
+            if(e.Suspended)navigation.Crowd.Suspend(u.Id);
+        }
         private void ActivateTacticalRoute(NavigationRequest r)
         {
             if(!tacticalQueues.TryGetValue(r.Entity,out var q))return;var e=Matches(q.Active,r)?q.Active:Matches(q.Pending,r)?q.Pending:null;if(e==null)return;
             if(e.Interrupted){e.OverrideLocation=DomainLocation(r.GoalLocation);e.AttemptLocation=DomainLocation(r.GoalLocation);e.AttemptRequest=r.Request;e.AttemptOrder=r.Order;if(ReferenceEquals(e,q.Pending)){q.Pending.Failed=true;q.Active=null;units[r.Entity].CurrentOrder=null;units[r.Entity].HasAttackMove=false;units[r.Entity].Target=0;}return;}
-            if(e.Issuance.Command.Kind==PlayableCommandKind.Attack&&ReferenceEquals(e,q.Active)){e.AttemptLocation=DomainLocation(r.GoalLocation);e.RouteRequest=r.Request;e.RouteOrder=r.Order;InstallExecution(units[r.Entity],e);return;}
+            if(e.Issuance.Command.Kind==PlayableCommandKind.Attack&&ReferenceEquals(e,q.Active)){e.AttemptLocation=DomainLocation(r.GoalLocation);e.RouteRequest=r.Request;e.RouteOrder=r.Order;InstallActivatedExecution(units[r.Entity],e);return;}
             if(!e.Assigned.Equals(r.GoalLocation))return;
-            e.Failed=false;if(e.ActivationTick<0)e.ActivationTick=Tick;e.AttemptLocation=DomainLocation(r.GoalLocation);e.RouteRequest=r.Request;e.RouteOrder=r.Order;q.Active=e;q.Pending=null;q.OldMotionSuspended=false;InstallExecution(units[r.Entity],e);
+            e.Failed=false;if(e.ActivationTick<0)e.ActivationTick=Tick;e.AttemptLocation=DomainLocation(r.GoalLocation);e.RouteRequest=r.Request;e.RouteOrder=r.Order;q.Active=e;q.Pending=null;q.OldMotionSuspended=false;InstallActivatedExecution(units[r.Entity],e);
         }
         private void ObserveTacticalRequest(NavigationRequest r,bool combat=false)
         {

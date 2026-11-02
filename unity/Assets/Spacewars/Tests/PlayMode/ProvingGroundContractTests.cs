@@ -35,6 +35,38 @@ public sealed class ProvingGroundContractTests
         var domain=typeof(OfflineParticipantAuthority).GetField("domain",flags).GetValue(authority);
         return domain.GetType().GetMethod(method,flags).Invoke(domain,args);
     }
+    [Test] public void RemovingUpperDefenseLevelsNeverDisplaysPhantomHealthAboveTheMaximum()
+    {
+        var setup=new ProvingGroundSetup(PlayableProfile.Default);setup.SetResearch(0,PlayableResearchKind.UltimateDefensiveSystems,true);
+        Assert.IsNull(setup.PlaceUnit(0,PlayableEntityKind.Tank,new NavPoint(-12,-9)));
+        var authority=new OfflineParticipantAuthority(setup.Configuration(),109);
+        try{
+            Assert.AreEqual(150,authority.View("player-1").Entities.Single().ExactHealth);
+            Assert.IsNull(ResearchChainCall(authority,"SetProvingResearch",0,PlayableResearchKind.AdvancedDefensiveSystems,false));
+            var tank=authority.View("player-1").Entities.Single();Assert.AreEqual(115,tank.MaxHealth);Assert.AreEqual(115,tank.ExactHealth);Assert.AreEqual(115,tank.Health);
+            Assert.IsNull(ResearchChainCall(authority,"SetProvingResearch",0,PlayableResearchKind.TankChassis,true));
+            tank=authority.View("player-1").Entities.Single();Assert.AreEqual(140,tank.MaxHealth);Assert.AreEqual(140,tank.ExactHealth);Assert.AreEqual(140,tank.Health);
+        }finally{Destroy(authority);}
+    }
+    [Test] public void PanelCanRemoveCompletedAndQueuedCenterResearchAndReapplyWithoutDuplication()
+    {
+        var setup=ResearchChainSetup(upgraded:true);var authority=new OfflineParticipantAuthority(setup.Configuration(),106);
+        try{
+            int center=authority.View("player-1").Buildings.Single(b=>b.Owner==PlayableOwner.Player&&b.Kind==PlayableBuildingKind.ScientificCenter).Id;
+            double baseline=(double)ResearchChainCall(authority,"CurrentProvingResearchCost",0);
+            Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(106,1,"player-1",PlayableCommandKind.QueueResearch,new[]{center},researchKind:PlayableResearchKind.TankChassis)).Status);
+            ResearchChainCall(authority,"AdvanceResearch",setup.Profile.ProvingGroundActionSeconds);
+            Assert.True(authority.View("player-1").OwnerResearch.Single(o=>o.Kind==PlayableResearchKind.TankChassis).Complete);
+            Assert.IsNull(ResearchChainCall(authority,"SetProvingResearch",0,PlayableResearchKind.TankChassis,false));
+            Assert.False(authority.View("player-1").OwnerResearch.Any(o=>o.Kind==PlayableResearchKind.TankChassis));
+            Assert.AreEqual(baseline,ResearchChainCall(authority,"CurrentProvingResearchCost",0));
+            Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(106,2,"player-1",PlayableCommandKind.QueueResearch,new[]{center},researchKind:PlayableResearchKind.UltimateDefensiveSystems)).Status);
+            Assert.IsNull(ResearchChainCall(authority,"SetProvingResearch",0,PlayableResearchKind.ImprovedDefensiveSystems,false));
+            Assert.False(authority.View("player-1").OwnerResearch.Any(o=>PlayableResearchRules.Defense(o.Kind)));
+            for(int n=0;n<2;n++)Assert.IsNull(ResearchChainCall(authority,"SetProvingResearch",0,PlayableResearchKind.TankChassis,true));
+            Assert.AreEqual(baseline+setup.Profile.TankChassisCost,(double)ResearchChainCall(authority,"CurrentProvingResearchCost",0));
+        }finally{Destroy(authority);}
+    }
     [TestCase(0)] [TestCase(1)]
     public void ConcreteIsFreeOwnerSpecificAndResetDoesNotDoubleApply(int side)
     {
@@ -44,10 +76,10 @@ public sealed class ProvingGroundContractTests
             Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(97,1,owner,PlayableCommandKind.QueueResearch,new[]{center},researchKind:PlayableResearchKind.ReinforcedConcrete)).Status);
             Assert.AreEqual(setup.Profile.ProvingGroundActionSeconds,authority.View(owner).OwnerResearch.Single().Duration);Assert.Zero(authority.View(owner).Credits);
             ResearchChainCall(authority,"AdvanceResearch",5d);var after=authority.View(owner);
-            foreach(var b in after.Buildings)Assert.AreEqual(TerritoryRules.Health(setup.Profile,b.Kind)*((int)b.Owner==side?1.25:1),b.MaxHealth);
+            foreach(var b in after.Buildings)Assert.AreEqual(PlayableStatRounding.MaximumHealth(setup.Profile,TerritoryRules.Health(setup.Profile,b.Kind)*((int)b.Owner==side?1.25:1)),b.MaxHealth);
             Assert.AreEqual(200,(double)ResearchChainCall(authority,"ProvingCost",side,MatchFactKind.ResearchCompleted));
             var reset=(ProvingGroundSetup)ResearchChainCall(authority,"CaptureProvingSetup");var restored=new OfflineParticipantAuthority(reset.Configuration(),98);
-            try{foreach(var b in restored.View(owner).Buildings){Assert.AreEqual(TerritoryRules.Health(setup.Profile,b.Kind)*((int)b.Owner==side?1.25:1),b.MaxHealth);Assert.AreEqual(b.MaxHealth,b.ExactHealth??b.Health);}Assert.AreEqual(200,(double)ResearchChainCall(restored,"ProvingCost",side,MatchFactKind.ResearchCompleted));}
+            try{foreach(var b in restored.View(owner).Buildings){Assert.AreEqual(PlayableStatRounding.MaximumHealth(setup.Profile,TerritoryRules.Health(setup.Profile,b.Kind)*((int)b.Owner==side?1.25:1)),b.MaxHealth);Assert.AreEqual(b.MaxHealth,b.ExactHealth??b.Health);}Assert.AreEqual(200,(double)ResearchChainCall(restored,"ProvingCost",side,MatchFactKind.ResearchCompleted));}
             finally{Destroy(restored);}
         }finally{Destroy(authority);}
     }
@@ -243,7 +275,7 @@ public sealed class ProvingGroundContractTests
         var config=setup.Configuration();var a=new OfflineParticipantAuthority(config,82);
         try{
             var v=a.View("player-1");Assert.AreEqual(0,v.Credits);Assert.AreEqual(8,v.Buildings.Count);Assert.AreEqual(3,v.OwnerResearch.Count);Assert.True(v.Entities.Single().Upgraded);
-            Assert.AreEqual(setup.Profile.TankHealth*(1+setup.Profile.DefensiveSystemsLevel2BonusPercent/100),v.Entities.Single().MaxHealth,1e-6);
+            Assert.AreEqual(155,v.Entities.Single().MaxHealth,1e-6);
             Assert.AreEqual(0,a.View("enemy-1").OwnerResearch.Count);
             setup.SetResearch(0,PlayableResearchKind.ImprovedDefensiveSystems,false);Assert.False(setup.Research(0).Contains(PlayableResearchKind.AdvancedDefensiveSystems));Assert.AreEqual(3,config.ProvingGround.Research(0).Count,"Running recipe is a snapshot");
             var map=(ProvingGroundMap)setup.Profile.AuthoredMap;Assert.Greater(map.AttackDestination(PlayableOwner.Player).X,map.Headquarters(PlayableOwner.Enemy).X);Assert.Less(map.AttackDestination(PlayableOwner.Enemy).X,map.Headquarters(PlayableOwner.Player).X);

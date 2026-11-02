@@ -1,0 +1,34 @@
+[
+  {
+    "original": "unity/Assets/Spacewars/Tests/EditMode/AiPositionRefineryRuntimeTests.cs",
+    "archived": "tools/qa/ai-position-capture-history/AiPositionRefineryRuntimeTests.cs",
+    "sha256": "9235951e5be74f2e98ffb43df1f18111bb0b7327a572a6e182cd68d16dbe7b45",
+    "binding": "bb5c59b1c40fb4388f704e7019c9d603743989f9"
+  },
+  {
+    "original": "unity/Assets/Spacewars/Tests/EditMode/AiPositionRefineryRuntimeTests.cs.meta",
+    "archived": "tools/qa/ai-position-capture-history/AiPositionRefineryRuntimeTests.cs.meta",
+    "sha256": "ec955a2834f4555276bf108f3895db15a52d44a6bf6c481fc736a704765512c0",
+    "binding": "bb5c59b1c40fb4388f704e7019c9d603743989f9"
+  },
+  {
+    "original": "unity/Assets/Spacewars/Tests/EditMode/AiPositionRefineryReadbackTests.cs",
+    "archived": "tools/qa/ai-position-capture-history/AiPositionRefineryReadbackTests.cs",
+    "sha256": "1df19a45ce16c55dbf713d462d6b3ba4fe2ec1b8c503ce9dfc0d1dc172e58075",
+    "binding": "bb5c59b1c40fb4388f704e7019c9d603743989f9"
+  },
+  {
+    "original": "unity/Assets/Spacewars/Tests/EditMode/AiPositionRefineryReadbackTests.cs.meta",
+    "archived": "tools/qa/ai-position-capture-history/AiPositionRefineryReadbackTests.cs.meta",
+    "sha256": "e24c183a043902add97a57bb9d187eca4a10aaeb92d8fab167e2e39b738b3cee",
+    "binding": "bb5c59b1c40fb4388f704e7019c9d603743989f9"
+  },
+  {
+    "original": "unity/Assets/Spacewars/Tests/EditMode/AiPositionRepairRuntimeTests.cs",
+    "archived": "tools/qa/ai-position-capture-history/AiPositionRepairFailedCaptureReadbackTests.cs",
+    "method": "PositionRepair_ExistingFailedCaptureReadback",
+    "method_sha256": "9a868b3ed793c0237633abafa1c4ad0764451ae47481d403fbb6f3aa005e551f",
+    "retained_runtime_prefix_byte_identical": true,
+    "binding": "bb5c59b1c40fb4388f704e7019c9d603743989f9"
+  }
+]

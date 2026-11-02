@@ -387,6 +387,7 @@ namespace Spacewars.Runtime
             Attach(port);
             if(!port.TryObservePhysicalIngress(out var ingress,out var admissionPin))return false;
             using var observedPin=admissionPin;var observed=observedPin.Value;
+            if(port.UsesRecastGroundRoutes&&recastPreparation?.HasPendingAttachment(ingress)==true)return false;
             var source=port.PinCommittedHostRoot();
             NavigationRetentionBudget.Scope scope=null;
             NavigationHostRoot candidate=null;
@@ -439,6 +440,54 @@ namespace Spacewars.Runtime
             }
         }
 
+        internal long RecastPreparationCommittedWork{get;private set;}
+        internal long RecastPreparationRefusals{get;private set;}
+        internal long RecastPreparationPreScopeRefusals{get;private set;}
+        internal long RecastPreparationPreForkRefusals{get;private set;}
+        internal long RecastPreparationAdvanceEnteredRefusals{get;private set;}
+        internal long RecastPreparationPublicationRefusals{get;private set;}
+        internal int AdvancePhysicalRecastPreparation(PlayableRouteBinding binding,int workLimit)
+        {
+            var port=binding.RoutePort;
+            if(!port.UsesRecastGroundRoutes||workLimit<4||recastPreparation==null)return 0;
+            if(!port.TryObservePhysicalIngress(out var ingress,out var observedPin))return 0;
+            using var observed=observedPin;
+            if(!recastPreparation.HasPendingAttachment(ingress))return 0;
+            var source=port.PinCommittedHostRoot();NavigationHostRoot candidate=null;NavigationRetentionBudget.Scope scope=null;
+            bool published=false;int diagnosticStage=0;
+            void Refuse(){RecastPreparationRefusals++;
+                if(diagnosticStage==0)RecastPreparationPreScopeRefusals++;
+                else if(diagnosticStage==1)RecastPreparationPreForkRefusals++;
+                else if(diagnosticStage==2)RecastPreparationAdvanceEnteredRefusals++;
+                else RecastPreparationPublicationRefusals++;
+                // Before AdvanceAttachment the helper still holds only committed work.
+                // Discard it only after this attempt could have mutated its private state.
+                if(diagnosticStage>=2)recastPreparation.InvalidateAttachment(ingress);}
+            try{
+                if(source==null)return 0;
+                var f=source.Frontier;
+                if(f.Stage!=PumpStage.Solve||workLimit>f.SolveWorkLimit-f.SolveConsumed)throw new InvalidOperationException("Invalid Recast preparation allowance.");
+                if(!port.TryOpenPhysicalHostScope(NavigationPreparationKind.Solve,source.Epoch,port.Admission.PublicationIdentity,out scope)){Refuse();return 0;}
+                diagnosticStage=1;
+                if(!scope.TryReserve(OrdinaryPreparationReservation.Bytes)){Refuse();return 0;}
+                var r=new OrdinaryPreparationReservation(scope);candidate=source.ForkOwned(r);
+                BeforePrepare?.Invoke();if(Continue?.Invoke()==false)throw new OperationCanceledException();
+                diagnosticStage=2;
+                int used=recastPreparation.AdvanceAttachment(ingress,r,Math.Min(256,workLimit),()=>Continue?.Invoke()==false);
+                if(used==0)return 0;
+                if(used>256||used>workLimit)throw new InvalidOperationException("Recast preparation exceeded Solve allowance.");
+                candidate.SetFrontier(WithCounters(f,consumed:checked(f.SolveConsumed+used)),source.Epoch,checked(source.Progress+1));
+                candidate.SetOperation(new NavigationHostRoot.OperationDescriptor(PumpStage.Solve,0,true,true,default));
+                candidate.SealPrepared();scope.Attach(candidate);diagnosticStage=3;port.PublishPhysicalHostRoot(scope,source,candidate);published=true;
+                recastPreparation.CommitAttachment(ingress);RecastPreparationCommittedWork+=used;RefreshPhysicalFrontier(port);return used;
+            }
+            catch(OrdinaryPreparationReservation.Refused){if(!published)Refuse();else throw;return 0;}
+            catch(RecastNative.CapacityRefused){if(!published)Refuse();else throw;return 0;}
+            catch(PartitionNavigationProvider.CopyScratchRefused){if(!published)Refuse();else throw;return 0;}
+            catch(NavigationSession.PhysicalIngressRefused){if(!published)Refuse();else throw;return 0;}
+            catch(OperationCanceledException)when(Continue?.Invoke()==false){if(!published)recastPreparation.InvalidateAttachment(ingress);return 0;}
+            finally{candidate?.ReleaseStorage();scope?.Discard();source?.Release();}
+        }
         internal int AdvancePhysicalOrdinary(PlayableRouteBinding binding,int workLimit)
         {
             using var measured=PerformanceProfile.Measure(ProfileStage.PhysicalSolve);

@@ -160,7 +160,7 @@ namespace Spacewars.Runtime
             v.Target=r.ReadInt32();
             v.Position=ReadPoint(r);
             v.Kind=EnumValue<PlayableEntityKind>(r);
-            v.Damage=Number(r);
+            v.Damage=Number(r);if(v.Rocket!=null)v.Rocket.DirectDamage=v.Damage;
             v.Speed=Number(r);
             v.Radius=Number(r);
             v.Remaining=Number(r);

@@ -18,6 +18,13 @@ namespace Spacewars.Editor
         static bool Same(Mesh a,Mesh b)=>a.indexFormat==b.indexFormat&&a.bounds.Equals(b.bounds)&&a.subMeshCount==b.subMeshCount&&StaticBuildingMeshes.Fingerprint(a)==StaticBuildingMeshes.Fingerprint(b)&&a.bindposes.SequenceEqual(b.bindposes)&&a.boneWeights.SequenceEqual(b.boneWeights)&&Enumerable.Range(0,a.subMeshCount).All(i=>a.GetIndexStart(i)==b.GetIndexStart(i)&&a.GetIndexCount(i)==b.GetIndexCount(i)&&a.GetTopology(i)==b.GetTopology(i));
         static Mesh SaveMesh(Mesh mesh,string path)
         {
+            // Missing historical output may share an exact committed peer. Never
+            // overwrite that peer when an explicitly reworked mesh diverges.
+            string sharedPath=ExactResourceAliases.Resolve(path);
+            if(sharedPath!=path){
+                var shared=AssetDatabase.LoadAssetAtPath<Mesh>(sharedPath);
+                if(shared&&Same(shared,mesh)){Object.DestroyImmediate(mesh);return shared;}
+            }
             var saved=AssetDatabase.LoadAssetAtPath<Mesh>(path);
             if(saved){if(!Same(saved,mesh)){
                 var allowed=(Environment.GetEnvironmentVariable("SPACEWARS_LOD_REBUILD_KEYS")??"").Split(',');

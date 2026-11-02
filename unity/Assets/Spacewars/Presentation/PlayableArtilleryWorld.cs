@@ -68,7 +68,7 @@ namespace Spacewars.Presentation
                 shell.transform.rotation=Quaternion.Euler(0,-(float)p.Heading*Mathf.Rad2Deg,0)*Quaternion.Euler(0,0,(float)p.Pitch*Mathf.Rad2Deg);
                 if(p.Kind==PlayableEntityKind.Hawk)shell.transform.localScale=Vector3.one*(float)profile.HawkMissileVisualScale;
                 if(p.Kind==PlayableEntityKind.Hawk)
-                {hawkVisual=hawkVisual??HawkVisualProfile.Load();projectileVisuals.Exhaust(shell,(float)profile.HawkMissileLength*hawkVisual.exhaustLength,(float)profile.HawkMissileRadius*hawkVisual.exhaustWidth,(float)profile.WeaponMuzzleCoreRatio,(float)profile.ShkvalExhaustOpacity);}
+                {hawkVisual=hawkVisual??HawkVisualProfile.Load();projectileVisuals.Exhaust(shell,(float)profile.HawkMissileLength*hawkVisual.exhaustLength,(float)profile.HawkMissileRadius*hawkVisual.exhaustWidth,(float)profile.WeaponMuzzleCoreRatio,hawkVisual.exhaustOpacity);}
                 if(p.Kind==PlayableEntityKind.Shkval)
                 {
                     ApplyShkvalMuzzlePose(p,shell.transform);

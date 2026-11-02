@@ -46,8 +46,18 @@ namespace Spacewars.Presentation
             toggle.style.borderLeftWidth=toggle.style.borderRightWidth=toggle.style.borderTopWidth=toggle.style.borderBottomWidth=0;
             toggle.labelElement.style.color=color;toggle.labelElement.style.minWidth=0;toggle.labelElement.style.width=104;toggle.labelElement.style.flexGrow=1;toggle.labelElement.style.flexShrink=1;toggle.labelElement.style.whiteSpace=WhiteSpace.Normal;toggle.labelElement.style.marginLeft=toggle.labelElement.style.marginRight=0;
             var input=toggle.Q(className:"unity-base-field__input");if(input!=null){input.style.width=22;input.style.minWidth=22;input.style.height=22;input.style.minHeight=22;input.style.flexGrow=0;input.style.flexShrink=0;input.style.alignSelf=Align.Center;input.style.backgroundColor=Color.clear;input.style.borderLeftWidth=input.style.borderRightWidth=input.style.borderTopWidth=input.style.borderBottomWidth=0;input.style.paddingLeft=input.style.paddingRight=input.style.paddingTop=input.style.paddingBottom=0;input.style.marginLeft=input.style.marginRight=0;}
-            var check=toggle.Q(className:"unity-toggle__checkmark");if(check!=null){check.style.width=check.style.height=18;check.style.minWidth=check.style.minHeight=18;check.style.marginLeft=check.style.marginRight=0;}
+            var check=toggle.Q(className:"unity-toggle__checkmark");if(check!=null){
+                check.style.width=check.style.height=18;check.style.minWidth=check.style.minHeight=18;check.style.marginLeft=check.style.marginRight=0;
+                // Runtime panels do not install the Editor's default checkmark image.
+                // Draw from the field value so pointer and controller changes agree.
+                check.style.backgroundImage=StyleKeyword.None;
+                check.generateVisualContent+=ctx=>{var p=ctx.painter2D;p.strokeColor=toggle.value?OrbitalTheme.Cyan:OrbitalTheme.Muted;p.lineWidth=1.5f;
+                    p.BeginPath();p.MoveTo(new Vector2(2,2));p.LineTo(new Vector2(16,2));p.LineTo(new Vector2(16,16));p.LineTo(new Vector2(2,16));p.ClosePath();p.Stroke();
+                    if(toggle.value){p.strokeColor=Color.white;p.lineWidth=2.3f;p.BeginPath();p.MoveTo(new Vector2(5,9));p.LineTo(new Vector2(8,12));p.LineTo(new Vector2(14,5));p.Stroke();}};
+                toggle.RegisterValueChangedCallback(_=>check.MarkDirtyRepaint());
+            }
         }
+        private static int BuildingMetric(PlayableBuildingKind kind)=>kind==PlayableBuildingKind.Headquarters||kind==PlayableBuildingKind.Outpost||kind==PlayableBuildingKind.Mine||kind==PlayableBuildingKind.Refinery?0:kind==PlayableBuildingKind.ScientificCenter?3:1;
         private double MetricValue(int metric,PlayableOwner owner,double time)=>metric==0?Result.Income(owner,(int)Math.Floor(time+1e-8)):metric==1?Result.Army(owner,time):metric==2?(apmWindow.HasValue?Result.Apm(owner,time,apmWindow.Value):0):Result.ResearchCount(owner,time);
         private string MetricUnit(int metric)=>metric==2?" APM":metric==3?" шт.":"";
         private bool Applicable(int metric,MatchResultPlayer p)=>metric!=2||!p.IsAi||showAiApm;
@@ -56,7 +66,7 @@ namespace Spacewars.Presentation
             if(metric==3)return f.Kind==MatchFactKind.ResearchCompleted;
             bool building=f.Kind==MatchFactKind.BuildingCompleted||f.Kind==MatchFactKind.BuildingLost||f.Kind==MatchFactKind.BuildingSold;
             if(metric==1)return building&&(f.EntityKind==(int)PlayableBuildingKind.Factory||f.EntityKind==(int)PlayableBuildingKind.Hangar);
-            return metric==0&&(f.Kind==MatchFactKind.RefineryUpgradeCompleted||building&&(f.EntityKind==(int)PlayableBuildingKind.Headquarters||f.EntityKind==(int)PlayableBuildingKind.Outpost||f.EntityKind==(int)PlayableBuildingKind.Mine||f.EntityKind==(int)PlayableBuildingKind.Refinery));
+            return metric==0&&(f.Kind==MatchFactKind.RelayCaptured||f.Kind==MatchFactKind.RelayNeutralized||f.Kind==MatchFactKind.RefineryUpgradeCompleted||building&&(f.EntityKind==(int)PlayableBuildingKind.Headquarters||f.EntityKind==(int)PlayableBuildingKind.Outpost||f.EntityKind==(int)PlayableBuildingKind.Mine||f.EntityKind==(int)PlayableBuildingKind.Refinery));
         }
         private void AddGraph(VisualElement parent,string title,double maximum,int metric)
         {
@@ -75,7 +85,7 @@ namespace Spacewars.Presentation
                 else for(int second=0;second<=Math.Ceiling(Result.Duration);second++)points.Add(new Vector2((float)Math.Min(second,Result.Duration),(float)MetricValue(metric,p.Owner,Math.Min(second,Result.Duration))));
                 points.Add(new Vector2((float)Result.Duration,(float)MetricValue(metric,p.Owner,Result.Duration)));lines.Add(new ResultGraph.Line(p.Owner,p.Slot,playerColor(p),points));
             }
-            var graph=new ResultGraph(lines,visible,Result.Duration,maximum,(time,position)=>InspectGraph(metric,time,position),Result.Facts.Where(f=>GraphEvent(metric,f)).ToArray(),f=>MetricValue(metric,f.Owner,f.Seconds),f=>MakeEventIcon(f,18),OpenEvents,metric==1?Result.Facts.Where(PlayerExitFact).ToArray():Array.Empty<MatchFact>(),f=>(f.Kind==MatchFactKind.PlayerLeft?"↗ ":"× ")+playerName(Result.Players.First(p=>p.Owner==f.Owner))+" · "+TimeLabel(f.Seconds)){name="result-graph-"+metric,focusable=true};
+            var graph=new ResultGraph(lines,visible,Result.Duration,maximum,(time,position)=>InspectGraph(metric,time,position),Result.Facts.Where(f=>GraphEvent(metric,f)).ToArray(),f=>MetricValue(metric,f.Owner,f.Seconds),f=>MakeEventIcon(f,18,true),OpenEvents,metric==1?Result.Facts.Where(PlayerExitFact).ToArray():Array.Empty<MatchFact>(),f=>(f.Kind==MatchFactKind.PlayerLeft?"↗ ":"× ")+playerName(Result.Players.First(p=>p.Owner==f.Owner))+" · "+TimeLabel(f.Seconds)){name="result-graph-"+metric,focusable=true};
             graph.AddToClassList("result-focusable");graph.HideEvents=hideEvents;graph.style.flexGrow=1;graph.style.minHeight=0;graph.style.marginBottom=24;row.Add(graph);graphs.Add(graph);
             graph.RegisterCallback<GeometryChangedEvent>(_=>{if(activeMetric==metric&&popup==null&&graphTip.style.display.value==DisplayStyle.Flex)InspectGraph(metric,cursorTime,null);});
             graph.RegisterCallback<FocusInEvent>(_=>graph.style.borderLeftColor=OrbitalTheme.Cyan);graph.RegisterCallback<FocusOutEvent>(_=>graph.style.borderLeftColor=Color.clear);
@@ -104,10 +114,23 @@ namespace Spacewars.Presentation
                 var value=Text(MetricValue(metric,player.Owner,cursorTime).ToString("0.#")+MetricUnit(metric),12,playerColor(player));value.pickingMode=PickingMode.Ignore;value.style.marginBottom=0;value.style.unityTextAlign=TextAnchor.MiddleRight;value.style.unityFontStyleAndWeight=closest==player.Owner?FontStyle.Bold:FontStyle.Normal;row.Add(value);
                 if(metric<2){var glyph=new OrbitalGlyph(metric==0?"credits":"army"){Tint=playerColor(player)};glyph.style.width=16;glyph.style.height=16;glyph.style.marginLeft=4;row.Add(glyph);}
                 cursorRows.Add(row);
+                if(metric!=2){
+                    var counts=Row();counts.name="result-building-counts-"+player.Slot;counts.pickingMode=PickingMode.Ignore;counts.style.flexWrap=Wrap.Wrap;
+                    foreach(PlayableBuildingKind kind in Enum.GetValues(typeof(PlayableBuildingKind))){
+                        int count=Result.BuildingCount(player.Owner,kind,cursorTime);if(count==0||BuildingMetric(kind)!=metric)continue;
+                        var cell=Row();cell.name="result-building-count-"+player.Slot+"-"+kind;cell.pickingMode=PickingMode.Ignore;cell.style.width=156;cell.style.height=22;cell.style.alignItems=Align.Center;
+                        var icon=new OrbitalGlyph(OrbitalPrecision.BuildingGlyph(kind)){Tint=playerColor(player),pickingMode=PickingMode.Ignore};icon.style.width=16;icon.style.height=16;icon.style.marginRight=4;cell.Add(icon);
+                        var label=Text(OfflinePadWorldActions.Name(kind)+" ×"+count,10,playerColor(player));label.pickingMode=PickingMode.Ignore;label.style.marginBottom=0;cell.Add(label);counts.Add(cell);
+                    }
+                    cursorRows.Add(counts);
+                }
             }
             if(cursorRows.childCount==0)cursorRows.Add(Text("Нет выбранных игроков",11,OrbitalTheme.Muted));
             var position=local.HasValue?chart.LocalToWorld(local.Value):chart.LocalToWorld(new Vector2((float)(cursorTime/Math.Max(1,Result.Duration))*chart.contentRect.width,chart.contentRect.height*.4f));
-            PositionOverlay(graphTip,Root.WorldToLocal(position)+new Vector2(14,10),250,60+cursorRows.childCount*27);
+            int columns=Math.Max(1,Math.Min(3,cursorRows.Children().Where(r=>r.name.StartsWith("result-building-counts-")).Select(r=>r.childCount).DefaultIfEmpty(0).Max()));
+            float height=50;
+            foreach(var row in cursorRows.Children())height+=(float)(row.name.StartsWith("result-building-counts-")?22*Math.Ceiling(row.childCount/(double)columns):27);
+            PositionOverlay(graphTip,Root.WorldToLocal(position)+new Vector2(14,10),Math.Max(250,columns*156+22),height);
         }
     }
 }

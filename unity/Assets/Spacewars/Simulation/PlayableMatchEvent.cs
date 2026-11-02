@@ -1,6 +1,6 @@
 namespace Spacewars.Simulation
 {
-    public enum MatchEventKind { BuildingAttacked, UnitsAttacked, BuildingCompleted, UnitReady, ResearchCompleted }
+    public enum MatchEventKind { BuildingAttacked, UnitsAttacked, BuildingCompleted, UnitReady, ResearchCompleted, MineCaptured, UnitCaptured, RelayControlLost }
     // Transient presentation fact. No hidden target identity, AI input or checkpoint data.
     public sealed class PlayableMatchEvent
     {

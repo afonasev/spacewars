@@ -157,8 +157,14 @@ internal static class Checks
             var s = Lab.Case(3, 176) with { Tick = 0, ProtectedFunds = 100 }; var f = new Funding(s); f.Observe(s);
             Require(f.Ledger.Reserved == 0, "Three living units must not create a new science hold under floor 10.");
         });
-        Check("existing-center-survives-unit-loss", () => Require(Lab.Technology(Lab.Case(3, 600, true)).Action?.Kind == PlayableCommandKind.QueueResearch,
-            "The new-center floor must not block useful existing-center research."));
+        Check("existing-center-survives-unit-loss", () => {
+            int living=(int)Lab.Ai.Value("openingsMidgame.specializedLiving");
+            Require(living<floor, "Fixture must remain below the new-center floor while satisfying unchanged specialized eligibility.");
+            Require(Lab.Technology(Lab.Case(living, 600, true)).Action?.Kind == PlayableCommandKind.QueueResearch,
+                "The new-center floor must not block eligible useful existing-center research.");
+            Require(Lab.Technology(Lab.Case(3, 600, true)).Action == null,
+                "Historical three-unit case must retain the current military research minimum.");
+        });
         Check("partial-funding-protects-committed-money", () => {
             var s = Lab.Case(floor, 176) with { Tick = 0, ProtectedFunds = 100 }; var f = new Funding(s); f.Observe(s);
             Require(f.Ledger.Reserved == 76 && f.Ledger.Available == 100 && f.Ledger.PaidTotal == 0, "Savings must protect 100 without inventing spending.");

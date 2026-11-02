@@ -42,10 +42,10 @@ namespace Spacewars.Runtime
 
         internal PlayableAiAction Admit(PlayableAiObservation observation,PlayableAiAction candidate)
         {
-            if(HasPendingObligation||candidate.Kind!=PlayableCommandKind.BuildAt)throw new InvalidOperationException("Invalid economy commit.");
+            if(HasPendingObligation||candidate.Kind!=PlayableCommandKind.BuildAt&&candidate.Kind!=PlayableCommandKind.UpgradeRefinery)throw new InvalidOperationException("Invalid economy commit.");
             pending=candidate.BuildingKind==PlayableBuildingKind.Factory?Obligation.Factory:candidate.BuildingKind==PlayableBuildingKind.Refinery?Obligation.Refinery:Obligation.Mine;
             pendingGeneration=observation.Generation;pendingActionId=nextActionId++;
-            return new PlayableAiAction(pendingActionId,candidate.PlayerId,candidate.ProfileId,candidate.ProfileRevision,candidate.Generation,candidate.SnapshotSequence,candidate.Kind,siteId:candidate.SiteId,slotId:candidate.SlotId,parentId:candidate.ParentId,buildingKind:candidate.BuildingKind,seed:candidate.Seed,sourceIdentity:candidate.SourceIdentity);
+            return new PlayableAiAction(pendingActionId,candidate.PlayerId,candidate.ProfileId,candidate.ProfileRevision,candidate.Generation,candidate.SnapshotSequence,candidate.Kind,candidate.CopyEntityIds(),siteId:candidate.SiteId,slotId:candidate.SlotId,parentId:candidate.ParentId,buildingKind:candidate.BuildingKind,seed:candidate.Seed,sourceIdentity:candidate.SourceIdentity);
         }
 
         public void ObserveReceipt(PlayableAiTraceRecord record)

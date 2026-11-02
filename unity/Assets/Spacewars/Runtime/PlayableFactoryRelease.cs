@@ -114,6 +114,7 @@ namespace Spacewars.Runtime
             if(b.LaunchTime<duration)return;
             int id;
             try{id=SpawnUnit(exit,b.Owner,order.Kind);}catch(NavigationRetentionBudget.CapacityRefused){return;}
+            catch(NavigationCommandRefused refused)when(refused.Reason==NavigationCommandRefused.Cause.ReadsetChanged){return;}
             navigation.Crowd.TryGet(id,out var actor);actor.Heading=b.Heading;units[id].Turret=b.Heading;
             // Single owner-thread boundary: the same new Unit now participates in
             // commands, target selection, direct/AoE damage and weapons.

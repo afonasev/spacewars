@@ -24,7 +24,7 @@ namespace Spacewars.Presentation
         public PlayableProfileData Settings(PlayableProfile profile){if(!ReferenceEquals(profile,cachedProfile)){cachedProfile=profile;settings=profile.CopyData();}return settings;}
         public Entry Latest=>history.LastOrDefault();
         public int Count=>history.Count;
-        public static string Label(MatchEventKind kind)=>kind==MatchEventKind.BuildingAttacked?"Здание атаковано":kind==MatchEventKind.UnitsAttacked?"Юниты атакованы":kind==MatchEventKind.BuildingCompleted?"Здание построено":kind==MatchEventKind.UnitReady?"Юнит готов":"Исследование завершено";
+        public static string Label(MatchEventKind kind)=>kind==MatchEventKind.MineCaptured?"Ваша шахта захвачена":kind==MatchEventKind.UnitCaptured?"Ваш юнит захвачен":kind==MatchEventKind.RelayControlLost?"Вы потеряли контроль над вышкой связи":kind==MatchEventKind.BuildingAttacked?"Здание атаковано":kind==MatchEventKind.UnitsAttacked?"Юниты атакованы":kind==MatchEventKind.BuildingCompleted?"Здание построено":kind==MatchEventKind.UnitReady?"Юнит готов":"Исследование завершено";
         public void Update(PlayableSnapshot view,bool overview,double now,PlayableProfile profile)
         {
             var data=Settings(profile);string nextContext=overview?"overview":view.OwnerId;

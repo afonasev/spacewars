@@ -166,6 +166,9 @@ namespace Spacewars.Presentation
         public GameObject HawkRocket(Transform parent,float radius,float length,Color owner)
         {
             var rocket=Rocket(parent,radius,length,owner);
+            // Neutral metal separates the flying body from its bright exhaust and team livery.
+            // Team identification stays on the existing band; geometry and nose contact are unchanged.
+            rocket.transform.Find("rocket-body").GetComponent<Renderer>().sharedMaterial=Material("#b8c1c8",true,.65f,.4f);
             Part("hawk-nozzle-rim",rocket.transform,Axial("hawk-nozzle:"+radius+":"+length,radius*.85f,radius*.85f,length*.055f,16),Material("#7a858f",true,.8f,.3f),-length*.35f);
             string key="hawk-fin:"+radius+":"+length;
             if(!meshes.TryGetValue(key,out var fin))
@@ -173,7 +176,7 @@ namespace Spacewars.Presentation
                 fin=new Mesh{name=key};fin.vertices=new[]{new Vector3(-length*.30f,radius,0),new Vector3(-length*.29f,radius*1.9f,0),new Vector3(-length*.04f,radius,0)};fin.triangles=new[]{0,1,2,2,1,0};fin.RecalculateNormals();fin.RecalculateBounds();resources.Add(fin);meshes.Add(key,fin);
             }
             for(int i=0;i<4;i++){var part=Part("hawk-fin",rocket.transform,fin,Material("#394652",true,.6f,.35f));part.transform.localRotation=Quaternion.Euler(i*90,0,0);}
-            Part("hawk-band",rocket.transform,Axial("hawk-band:"+radius+":"+length,radius*1.01f,radius*1.01f,length*.04f,16),Material("#d79a40",true,.4f,.4f),length*.12f);
+            Part("hawk-band",rocket.transform,Axial("hawk-band:"+radius+":"+length,radius*1.01f,radius*1.01f,length*.04f,16),Material("#"+ColorUtility.ToHtmlStringRGB(owner),true,.4f,.4f),length*.12f);
             return rocket;
         }
         public void Exhaust(GameObject rocket,float length,float radius,float core,float opacity)

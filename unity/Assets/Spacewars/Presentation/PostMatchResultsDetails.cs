@@ -18,13 +18,13 @@ namespace Spacewars.Presentation
         private static bool ResearchFact(MatchFact f)=>f.Kind==MatchFactKind.ResearchCompleted||f.Kind==MatchFactKind.ResearchOrdered;
         private static bool UnitFact(MatchFact f)=>f.Kind==MatchFactKind.UnitCompleted||f.Kind==MatchFactKind.UnitOrdered||f.Kind==MatchFactKind.UnitDestroyed;
         private static bool UpgradeFact(MatchFact f)=>f.Kind==MatchFactKind.RefineryUpgradeCompleted||f.Kind==MatchFactKind.RefineryUpgradeOrdered;
-        private string NameOf(MatchFact f)=>PlayerExitFact(f)?playerName(Result.Players.First(p=>p.Owner==f.Owner)):ResearchFact(f)?PlayableResearchRules.Name((PlayableResearchKind)f.EntityKind):UpgradeFact(f)?"Улучшение завода":UnitFact(f)?OfflinePadWorldActions.Name((PlayableEntityKind)f.EntityKind):OfflinePadWorldActions.Name((PlayableBuildingKind)f.EntityKind);
-        private string GlyphOf(MatchFact f)=>PlayerExitFact(f)?"army":ResearchFact(f)?OrbitalPrecision.ResearchGlyph((PlayableResearchKind)f.EntityKind):UpgradeFact(f)?"upgrade":UnitFact(f)?((PlayableEntityKind)f.EntityKind).ToString().ToLowerInvariant():OrbitalPrecision.BuildingGlyph((PlayableBuildingKind)f.EntityKind);
+        private string NameOf(MatchFact f)=>f.Kind==MatchFactKind.RelayCaptured||f.Kind==MatchFactKind.RelayNeutralized?f.Name:PlayerExitFact(f)?playerName(Result.Players.First(p=>p.Owner==f.Owner)):ResearchFact(f)?PlayableResearchRules.Name((PlayableResearchKind)f.EntityKind):UpgradeFact(f)?"Улучшение: "+OfflinePadWorldActions.Name((PlayableBuildingKind)f.EntityKind):UnitFact(f)?OfflinePadWorldActions.Name((PlayableEntityKind)f.EntityKind):OfflinePadWorldActions.Name((PlayableBuildingKind)f.EntityKind);
+        private string GlyphOf(MatchFact f)=>PlayerExitFact(f)?"army":ResearchFact(f)?OrbitalPrecision.ResearchGlyph((PlayableResearchKind)f.EntityKind):UpgradeFact(f)?OrbitalPrecision.BuildingArtwork((PlayableBuildingKind)f.EntityKind,true):UnitFact(f)?((PlayableEntityKind)f.EntityKind).ToString().ToLowerInvariant():OrbitalPrecision.BuildingGlyph((PlayableBuildingKind)f.EntityKind);
         private Color FactColor(MatchFact f)=>playerColor(Result.Players.First(p=>p.Owner==f.Owner));
-        private static bool Crossed(MatchFact f)=>f.Kind==MatchFactKind.BuildingSold||f.Kind==MatchFactKind.BuildingLost;
+        private static bool Crossed(MatchFact f)=>f.Kind==MatchFactKind.BuildingSold||f.Kind==MatchFactKind.BuildingLost||f.Kind==MatchFactKind.RelayNeutralized;
         private string EventDescription(MatchFact f)
         {
-            string action=f.Kind==MatchFactKind.PlayerDefeated?"Побеждён":f.Kind==MatchFactKind.PlayerLeft?"Вышел из игры":f.Kind==MatchFactKind.BuildingSold?"Продано":f.Kind==MatchFactKind.BuildingLost?"Уничтожено":f.Kind==MatchFactKind.BuildingCompleted?"Построено":f.Kind==MatchFactKind.UnitCompleted?"Произведено":"Завершено";
+            string action=f.Kind==MatchFactKind.RelayCaptured?"Захвачено":f.Kind==MatchFactKind.RelayNeutralized?"Контроль потерян":f.Kind==MatchFactKind.PlayerDefeated?"Побеждён":f.Kind==MatchFactKind.PlayerLeft?"Вышел из игры":f.Kind==MatchFactKind.BuildingSold?"Продано":f.Kind==MatchFactKind.BuildingLost?"Уничтожено":f.Kind==MatchFactKind.BuildingCompleted?"Построено":f.Kind==MatchFactKind.UnitCompleted?"Произведено":"Завершено";
             string description=ResearchFact(f)||UpgradeFact(f)?f.Name:"";
             return TimeLabel(f.Seconds)+" · "+playerName(Result.Players.First(p=>p.Owner==f.Owner))+"\n"+action+(string.IsNullOrEmpty(description)?"":"\n"+description);
         }
@@ -38,6 +38,7 @@ namespace Spacewars.Presentation
                 PlayableEntityKind.Hawk=>"Боевой вертолёт. Выпускает две ракеты залпом по наземным и воздушным целям.",_=>""};
             return ((PlayableBuildingKind)f.EntityKind) switch {
                 PlayableBuildingKind.Factory=>"Производит наземную боевую технику.",PlayableBuildingKind.Hangar=>"Производит боевые вертолёты.",
+                PlayableBuildingKind.RelayTower=>"Постоянная захватываемая вышка. Приносит доход владельцу; не строится и не атакуется.",
                 PlayableBuildingKind.Refinery=>"Приносит доход. Улучшение увеличивает выработку кредитов.",PlayableBuildingKind.Mine=>"Приносит доход с занятой ресурсной позиции.",
                 PlayableBuildingKind.ScientificCenter=>"Позволяет проводить исследования и открывать улучшения.",PlayableBuildingKind.Headquarters=>"Главное здание базы и центр строительства.",PlayableBuildingKind.Outpost=>"Передовой центр строительства.",_=>""};
         }
@@ -76,11 +77,19 @@ namespace Spacewars.Presentation
             if(descriptionTip!=null){var t=descriptionTip.worldBound;region=Rect.MinMaxRect(Math.Min(region.xMin,t.xMin),Math.Min(region.yMin,t.yMin),Math.Max(region.xMax,t.xMax),Math.Max(region.yMax,t.yMax));}
             return region.Contains(position);
         }
-        private VisualElement MakeEventIcon(MatchFact f,int size)
+        private VisualElement MakeEventIcon(MatchFact f,int size,bool currentCount=false,bool includeOrders=false)
         {
             var cell=new VisualElement{focusable=true};cell.AddToClassList("result-focusable");cell.style.width=size;cell.style.height=size;cell.style.minWidth=size;cell.style.flexShrink=0;
             var glyph=new OrbitalGlyph(GlyphOf(f)){Tint=FactColor(f)};glyph.style.width=size;glyph.style.height=size;if(UnitFact(f))glyph.Q<ModelPortrait>("glyph-model").SetOutlineColor(OrbitalTheme.Ink);cell.Add(glyph);
             if(Crossed(f)){var cross=Text("╱",size,FactColor(f));cross.pickingMode=PickingMode.Ignore;cross.style.position=Position.Absolute;cross.style.left=0;cross.style.top=-3;cell.Add(cross);}
+            bool inventory=UnitFact(f)||f.Kind==MatchFactKind.BuildingOrdered||f.Kind==MatchFactKind.BuildingCompleted||Crossed(f)&&f.Kind!=MatchFactKind.RelayNeutralized;
+            if(currentCount&&inventory){
+                int count=includeOrders?Result.InventoryAtOrder(f):UnitFact(f)?Result.UnitCount(f.Owner,(PlayableEntityKind)f.EntityKind,f.Seconds):Result.BuildingCount(f.Owner,(PlayableBuildingKind)f.EntityKind,f.Seconds);
+                string value=count.ToString();float width=3+value.Length*6+2;
+                cell.style.flexDirection=FlexDirection.Row;cell.style.width=cell.style.minWidth=size+width;glyph.style.flexShrink=0;
+                var number=Text(value,10,FactColor(f));number.name="result-current-count";number.pickingMode=PickingMode.Ignore;number.tooltip=(includeOrders?"В наличии и заказано на ":"В наличии на ")+TimeLabel(f.Seconds)+": "+value;
+                number.style.marginBottom=0;number.style.marginLeft=3;number.style.marginRight=0;number.style.paddingLeft=number.style.paddingRight=0;number.style.flexShrink=0;number.style.alignSelf=Align.FlexEnd;cell.Add(number);
+            }
             cell.RegisterCallback<FocusInEvent>(_=>cell.style.backgroundColor=new Color(.12f,.27f,.32f));cell.RegisterCallback<FocusOutEvent>(_=>cell.style.backgroundColor=Color.clear);return cell;
         }
         private void OpenEvents(VisualElement anchor,IReadOnlyList<MatchFact> facts)
@@ -90,7 +99,7 @@ namespace Spacewars.Presentation
             popupScroll=OrbitalTheme.Scroll();popupScroll.name="result-popup-scroll";popupScroll.style.maxHeight=220;popup.Add(popupScroll);
             foreach(var f in facts.OrderBy(f=>f.Tick).ThenBy(f=>f.Sequence))
             {
-                var entry=Row();entry.name="result-popup-event-"+f.Sequence;entry.focusable=true;entry.AddToClassList("result-focusable");entry.style.minHeight=30;entry.style.alignItems=Align.Center;entry.Add(MakeEventIcon(f,19));
+                var entry=Row();entry.name="result-popup-event-"+f.Sequence;entry.focusable=true;entry.AddToClassList("result-focusable");entry.style.minHeight=30;entry.style.alignItems=Align.Center;entry.Add(MakeEventIcon(f,19,true));
                 var label=Text(TimeLabel(f.Seconds)+" · "+NameOf(f)+(f.Kind==MatchFactKind.BuildingSold?" · продано":f.Kind==MatchFactKind.BuildingLost?" · уничтожено":""),11,FactColor(f));label.style.whiteSpace=WhiteSpace.Normal;label.style.marginLeft=6;label.style.marginBottom=0;entry.Add(label);
                 entry.userData=(Action)(()=>ShowDescription(entry,f));entry.RegisterCallback<PointerEnterEvent>(_=>ShowDescription(entry,f));entry.RegisterCallback<FocusInEvent>(_=>ShowDescription(entry,f));entry.RegisterCallback<GeometryChangedEvent>(_=>{if(descriptionAnchor==entry&&descriptionTip!=null)PlaceDescription(entry);});popupScroll.Add(entry);
             }

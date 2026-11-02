@@ -192,11 +192,21 @@ namespace Spacewars.Runtime
                     var bindings=orderedRecipes.Select((i,index)=>new NavArrivalWorkingBinding(i.Entity,version>=3?ResolveProvider(workingProviderIds[index],i,version==4?physicalWork.PhysicalInput.WorkingBindings.Single(b=>b.Entity==i.Entity).Provider:null):ArrivalProvider(i.Geometry,i.HeldIdentity),
                         new NavGraphProfile(NavigationAdmission.ExactProfileBinding(i.Profile),"distance",1,i.Profile.GridCell))).ToArray();
                     var initialProvider=version>=3?ResolveProvider(inputProviderId,orderedRecipes[0],version==4?physicalWork.PhysicalInput.Provider:null):bindings[0].Provider;
-                    if(bindings.Length==0||bindings[0].Provider.Binding!=providerKey||bindings[0].Profile.ExactProfileBinding!=graphProfile||bindings[0].Profile.GridCell!=cell||
-                        a.Intents.Any(i=>i.MemberIdentity.GroupId!=a.Group)||members.Length!=a.Intents.Length)throw new ArgumentException("Invalid saved arrival binding.");
+                    // The primary profile is chosen in request order; working
+                    // bindings are independently sorted by entity. Mixed-unit groups
+                    // need not have the same first member in those two orders.
+                    var inputProfile=version==4?physicalWork.PhysicalInput.Profile:bindings[0].Profile;
+                    if(bindings.Length==0||initialProvider.Binding!=providerKey||inputProfile.ExactProfileBinding!=graphProfile||inputProfile.GridCell!=cell||
+                        a.Intents.Any(i=>i.MemberIdentity.GroupId!=a.Group)||members.Length!=a.Intents.Length)throw new ArgumentException(
+                        "Invalid saved arrival binding. attempt="+a.Id+" group="+a.Group+" primaryId="+inputProviderId+
+                        " savedProvider="+providerKey+" primaryProvider="+initialProvider.Binding+" firstWorkingProvider="+(bindings.Length==0?"missing":bindings[0].Provider.Binding)+
+                        " savedProfile="+graphProfile+" firstWorkingProfile="+(bindings.Length==0?"missing":bindings[0].Profile.ExactProfileBinding)+
+                        " savedCell="+cell.ToString("R",System.Globalization.CultureInfo.InvariantCulture)+" firstWorkingCell="+(bindings.Length==0?"missing":bindings[0].Profile.GridCell.ToString("R",System.Globalization.CultureInfo.InvariantCulture))+
+                        " primaryProfile="+(physicalWork==null?"legacy":physicalWork.PhysicalInput.Profile.ExactProfileBinding)+" primaryCell="+(physicalWork==null?"legacy":physicalWork.PhysicalInput.Profile.GridCell.ToString("R",System.Globalization.CultureInfo.InvariantCulture))+
+                        " members="+members.Length+" intents="+a.Intents.Length+" wrongGroup="+a.Intents.Any(i=>i.MemberIdentity.GroupId!=a.Group));
                     foreach(var m in members){var i=a.Intents.SingleOrDefault(i=>i.Request==m.RequestSequence);
                         if(i==null||m.EntityId!=i.Entity||m.Incarnation!=i.MemberIdentity.Incarnation||m.MobilityRevision!=i.MemberIdentity.MobilityRevision||m.MemberOrderRevision!=i.MemberIdentity.OrderRevision||m.GroupId!=a.Group||m.Radius!=i.Profile.Radius||!m.Origin.Equals(i.StartLocation))throw new ArgumentException("Invalid saved arrival member.");}
-                    a.Input=new NavArrivalInput(topology,profileIdentity,initialProvider,bindings[0].Profile,terms,limits,
+                    a.Input=new NavArrivalInput(topology,profileIdentity,initialProvider,inputProfile,terms,limits,
                         new NavArrivalCandidateSource(source,revision,requested,candidates),members,new NavArrivalOccupancySnapshot(Generation,occupants),labels,bindings,true);
                     if(a.Input.StableKey!=sealedInput)throw new ArgumentException("Arrival input digest mismatch.");
                     var journal=Array(r,()=>new ArrivalAdvance{Epoch=r.ReadInt64(),External=r.ReadInt64(),Allocation=r.ReadInt32(),Graph=r.ReadInt32(),Field=r.ReadInt32(),Connectors=r.ReadInt32(),Bookkeeping=r.ReadInt32(),Maintenance=r.ReadInt32()});

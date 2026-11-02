@@ -11,6 +11,20 @@ public class PortraitActionWheelTests
 {
     PlayableSnapshot Snapshot(PlayableBuildingSnapshot building,PlayableResearchOrderSnapshot[] research=null,int credits=1000)=>new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,credits,null,Array.Empty<PlayableEntitySnapshot>(),new[]{building},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,ownerResearch:research,researchAvailability:Enum.GetValues(typeof(PlayableResearchKind)).Cast<PlayableResearchKind>().Select(k=>new PlayableResearchAvailabilitySnapshot(k,PlayableResearchRules.Cost(PlayableProfile.Default,k),true)).ToArray(),activeProfile:PlayableProfile.Default);
     PlayableBuildingSnapshot Factory()=>new PlayableBuildingSnapshot(7,PlayableOwner.Player,PlayableBuildingKind.Factory,default,100,1,0,0,default,lifecycle:new PlayableBuildingLifecycleSnapshot(false,0,false,false,0,0,null,null,1,300,false));
+    [Test] public void PortraitUpgradeChevronsResetWhenArtworkChanges()
+    {
+        var art=new RadialArtwork();
+        foreach(var key in new[]{"factoryUpgraded","hangarUpgraded","refineryUpgraded","scientificCenterUpgraded","tankHybridUpgraded","explorerUpgraded","shkval-guidance-3","hawkUpgraded"})
+        {
+            art.Set(key,true);Assert.AreEqual(DisplayStyle.Flex,art.Q<PortraitUpgradeMark>().style.display.value);
+            Assert.AreEqual(DisplayStyle.None,art.Q<Label>("upgrade-mark").style.display.value);
+            art.Set(key,true,available:false);Assert.False(art.Q<PortraitUpgradeMark>().Available);
+            art.Set(key,false);Assert.AreEqual(DisplayStyle.None,art.Q<PortraitUpgradeMark>().style.display.value);
+        }
+        art.Set("tankHybrid");Assert.AreEqual(DisplayStyle.None,art.Q<Label>("upgrade-mark").style.display.value);
+        Assert.AreEqual(DisplayStyle.None,art.Q<PortraitUpgradeMark>().style.display.value);
+        art.Set("weapon-systems-1");Assert.AreEqual(DisplayStyle.None,art.Q<Label>("upgrade-mark").style.display.value);
+    }
     [Test] public void VariantACardKeepsValuesAndClearsActionSpecificHints()
     {
         var actions=OfflinePadWorldActions.Building(Snapshot(Factory()),PlayableProfile.Default,7);
@@ -82,6 +96,17 @@ public class PortraitActionWheelTests
             Assert.NotNull(DockArtwork.TextureFor(key));Assert.NotNull(DockArtwork.TextureFor(key+"-outline"));
         }
         Assert.AreNotSame(DockArtwork.TextureFor("hawk"),DockArtwork.TextureFor("hawkUpgraded"));
+    }
+    [Test] public void UpgradePortraitFramingEnlargesVisibleModelsAndPreservesOutline()
+    {
+        foreach(var key in new[]{"tankHybridUpgraded","explorerUpgraded","shkval-guidance-3","hawkUpgraded","scientificCenterUpgraded"})
+        {
+            var frame=PortraitFraming.UvFor(key);Assert.Greater(frame.width,0);Assert.Less(frame.width,1);Assert.Greater(frame.height,0);Assert.Less(frame.height,1);
+            var portrait=new ModelPortrait();portrait.Set(key,fitContent:true);
+            Assert.AreEqual(frame,portrait.Q<Image>("model-portrait").uv);Assert.AreEqual(frame,portrait.Q<Image>("portrait-outline").uv);
+            Assert.AreSame(DockArtwork.TextureFor(key),portrait.Q<Image>("model-portrait").image);
+            portrait.Set(key);Assert.AreEqual(new Rect(0,0,1,1),portrait.Q<Image>("model-portrait").uv);
+        }
     }
     [Test] public void NeutralClearsDetailsAndPreservesOnlySelectionFooter()
     {

@@ -40,7 +40,7 @@ namespace Spacewars.Runtime
         internal PlayableAuthorityTick(PlayableDomain domain,AiAuthorityScheduler scheduler,int seed,OfflineMatchConfiguration configuration=null,bool asynchronousRoutes=false)
         {this.domain=domain;this.scheduler=scheduler;this.seed=seed;domain.BindMatchSeed(seed);savedConfiguration=configuration;SetRouteDeliveryPolicy(asynchronousRoutes);}
         private void SetRouteDeliveryPolicy(bool asynchronous)
-        {asynchronousRoutes=asynchronous;domain.NonblockingNavigationPreparation=asynchronous;domain.Navigation.SuspendPendingMovement=asynchronous||tickQuanta;domain.Navigation.TickQuantaEnabled=tickQuanta;}
+        {domain.ConfigureCombatExecutionOwners(()=>scheduler.Owners);asynchronousRoutes=asynchronous;domain.NonblockingNavigationPreparation=asynchronous;domain.Navigation.SuspendPendingMovement=asynchronous||tickQuanta;domain.Navigation.TickQuantaEnabled=tickQuanta;}
         public PlayableAuthorityTick(OfflineMatchConfiguration configuration,long generation,AiProfile aiProfile=null,AiDifficulty difficulty=AiDifficulty.Fighter,bool asynchronousRoutes=false)
         {
             if(configuration==null)throw new ArgumentNullException(nameof(configuration));

@@ -151,7 +151,7 @@ namespace Spacewars.Runtime
             try
             {
 #endif
-            if(m!=null&&o.OwnerResearch.Any(r=>r.Kind==m.Branch))
+            if(m!=null&&(m.Phase==Stage.Research||m.Branch!=PlayableResearchKind.ShkvalGuidance)&&o.OwnerResearch.Any(r=>r.Kind==m.Branch))
             {
 #if UNITY_INCLUDE_TESTS
                 diagnosticOutcome="completed-research-cleared-funding";
@@ -377,7 +377,11 @@ namespace Spacewars.Runtime
         public bool Valid(AiBudgetEntry e,PlayableAiObservation o,PlayableProfile p,AiBudgetLedger b,AiDecisionArbiter a)
         {
             var m=Load(a);if(m==null||m.Expired||e.Id!=Id(m)||m.Owner!=owner||m.Generation!=generation)return false;
-            if(o.OwnerResearch.Any(r=>r.Kind==m.Branch)||!AiTechnologyPlanner.ProductivePrerequisiteReady(o,AiResearchCatalog.For(m.Branch)))return false;
+            // A science build can also serve ordinary Shkval production after a
+            // previous center was lost and Guidance is already owned. Research
+            // eligibility is a research-stage gate; build admission stays below.
+            bool productionScience=m.Branch==PlayableResearchKind.ShkvalGuidance&&m.Phase!=Stage.Research;
+            if(!productionScience&&(o.OwnerResearch.Any(r=>r.Kind==m.Branch)||!AiTechnologyPlanner.ProductivePrerequisiteReady(o,AiResearchCatalog.For(m.Branch))))return false;
             if(m.Phase==Stage.Science){var reject=AiEconomyAdmission.Reject(o,p,e.Action);return reject==null||reject=="insufficient credits";}
             return m.Phase==Stage.AwaitingScience?AcceptedScience(m,b)&&(Center(m,o)!=null&&PaidScience(m,b)||b.Capture().Unpaid.Any(e=>ScienceEntry(m,e))):Center(m,o)!=null&&(m.BuildReceipt==null||PaidScience(m,b));
         }

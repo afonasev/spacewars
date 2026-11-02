@@ -41,7 +41,7 @@ namespace Spacewars.Tests.EditMode
             var unit=View().Entities.Single();Health(1,123.25);Health(center,100.5);double credits=View().ExactCredits;
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.QueueResearch,center));Assert.AreEqual(credits-200,View().ExactCredits);
             Call("AdvanceResearch",29d);Assert.AreEqual(123.25,Health(1));Call("AdvanceResearch",1d);
-            Assert.AreEqual(123.25*1.25,Health(1));Assert.AreEqual(125.625,Health(center));Assert.AreEqual(p.HeadquartersHealth*1.25,View().Buildings.Single(b=>b.Id==1).MaxHealth);
+            Assert.AreEqual(123.25*1.25,Health(1));Assert.AreEqual(100.5*315/250,Health(center));Assert.AreEqual(p.HeadquartersHealth*1.25,View().Buildings.Single(b=>b.Id==1).MaxHealth);
             Assert.AreEqual(enemyHp,(double)enemy.GetType().GetField("Health").GetValue(enemy));Assert.AreEqual(unit.ExactHealth,View().Entities.Single().ExactHealth);
             Assert.AreEqual(PlayableCommandStatus.Rejected,Send(PlayableCommandKind.QueueResearch,center));Call("AdvanceResearch",30d);Assert.AreEqual(123.25*1.25,Health(1));
             Call("Damage",center,10000);Assert.AreEqual(p.HeadquartersHealth*1.25,View().Buildings.Single(b=>b.Id==1).MaxHealth);
@@ -49,7 +49,7 @@ namespace Spacewars.Tests.EditMode
         [Test] public void ConstructionBeforeAndAfterCompletionUsesResearchedMaximumAndPreservesDamage()
         {
             int factory=Build(PlayableBuildingKind.Factory,1,false);Call("AdvanceBuildings",3d);Health(factory,Health(factory)-7.25);double before=Health(factory);
-            Complete();Assert.AreEqual(before*1.25,Health(factory));Call("AdvanceBuildings",100d);Assert.AreEqual((p.FactoryHealth-7.25)*1.25,Health(factory),1e-8);
+            Complete();Assert.AreEqual(before*315/250,Health(factory));Call("AdvanceBuildings",100d);Assert.AreEqual((p.FactoryHealth-7.25)*315/250,Health(factory),1e-8);
             int refinery=Build(PlayableBuildingKind.Refinery,3);Assert.AreEqual(p.RefineryHealth*1.25,Health(refinery),1e-8);
         }
         [TestCase(200d)] [TestCase(123.25d)] public void RepairInProgressKeepsPaidFractionAndSaveRestoreIsExact(double health)
@@ -72,8 +72,8 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void SaleUsesHealthFractionAndProfileApplyDoesNotDropResearchMaximum()
         {
-            Complete();int factory=Build(PlayableBuildingKind.Factory,1);Health(factory,p.FactoryHealth*.625);var b=View().Buildings.Single(x=>x.Id==factory);Assert.AreEqual((int)Math.Floor(p.FactoryCreditCost*p.BuildingSaleRefundRatio*.5),b.PrivateState.Lifecycle.Refund);
-            var data=p.CopyData();data.revision++;Call("ApplyBalance",PlayableProfile.Create(data));Assert.AreEqual(p.FactoryHealth*.625,Health(factory));Assert.AreEqual(p.FactoryHealth*1.25,View().Buildings.Single(x=>x.Id==factory).MaxHealth);
+            Complete();int factory=Build(PlayableBuildingKind.Factory,1);Health(factory,157.5);var b=View().Buildings.Single(x=>x.Id==factory);Assert.AreEqual((int)Math.Floor(p.FactoryCreditCost*p.BuildingSaleRefundRatio*.5),b.PrivateState.Lifecycle.Refund);
+            var data=p.CopyData();data.revision++;Call("ApplyBalance",PlayableProfile.Create(data));Assert.AreEqual(157.5,Health(factory));Assert.AreEqual(315,View().Buildings.Single(x=>x.Id==factory).MaxHealth);
         }
         [Test] public void QueuedConcreteUsesCommonTermsWithoutInventingAnArmyAiChoice()
         {
@@ -86,7 +86,7 @@ namespace Spacewars.Tests.EditMode
         {
             int factory=Build(PlayableBuildingKind.Factory,1,false);Call("AdvanceBuildings",3d);
             var data=p.CopyData();data.revision++;data.reinforcedConcreteBonusPercent=75;data.reinforcedConcreteLevel2BonusPercent=100;var changed=PlayableProfile.Create(data);Call("ApplyBalance",changed);
-            Complete();Call("AdvanceBuildings",100d);Assert.AreEqual(p.FactoryHealth*1.75,Health(factory),1e-8);Assert.AreEqual(Health(factory),View().Buildings.Single(b=>b.Id==factory).MaxHealth);
+            Complete();Call("AdvanceBuildings",100d);Assert.AreEqual(440,Health(factory),1e-8);Assert.AreEqual(Health(factory),View().Buildings.Single(b=>b.Id==factory).MaxHealth);
         }
         [Test] public void SecondConcreteRequiresFirstAndLocalUpgradedCenterAndReplacesTotal()
         {

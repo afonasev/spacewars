@@ -10,8 +10,8 @@ namespace Spacewars.Runtime
     // Private authority wire, explicit schema. Never included in an owner snapshot.
     internal static class AiStateWire
     {
-        // Inner AI schema 14 is reserved by the outer pending-route maintenance envelope.
-        internal const int Version=17;
+        // Inner AI schema 15 is reserved by the outer pending-route maintenance envelope.
+        internal const int Version=19;
         internal static bool CallbackGenerationMatches(PlayableAiTraceRecord record,long generation)
         {
             if(record.ReceiptIdentity!=null)return record.ReceiptIdentity.Generation==generation;
@@ -294,6 +294,7 @@ namespace Spacewars.Runtime
                 AiStateWire.Require(!string.IsNullOrWhiteSpace(p.Key)&&p.Value.FirstTick>=0&&p.Value.FirstTick<=tick&&p.Value.NextRetry>=0&&p.Value.Failures>=0&&!history.ContainsKey(p.Key),"arbiter history");
                 if(p.Key==AiExpansionFinancial.MemoKey)AiStateWire.Require(p.Value.FirstTick==0&&p.Value.NextRetry==0&&p.Value.Failures==0&&!string.IsNullOrWhiteSpace(p.Value.Conditions),"site finance memo requires typed payload and no hidden clock or retry counter");
                 if(p.Key.StartsWith(ArmyResearchMemoPrefix,StringComparison.Ordinal))AiStateWire.Require(Enum.TryParse<PlayableResearchKind>(p.Value.Conditions,out var armyKind)&&PlayableResearchRules.Global(armyKind)&&p.Value.Conditions==armyKind.ToString()&&p.Key==ArmyResearchMemoPrefix+armyKind&&p.Value.NextRetry==0&&p.Value.Failures==0,"observed army research fact");
+                if(p.Key==PositionGoalKey)ValidatePositionSaving(p.Value.Conditions,p.Value.FirstTick,p.Value.NextRetry,p.Value.Failures,tick,owner,generation,profile,ai);
                 if(p.Key==FundingMemoKey){AiStateWire.Require(p.Value.Failures==0,"funding memo is not retry history");AiTechnologyFunding.ValidateMemory(p.Value.Conditions,p.Value.FirstTick,p.Value.NextRetry,tick,owner,generation,profile,ai);}
             }
             foreach(var p in entries)history.Add(p.Key,p.Value);
@@ -334,8 +335,9 @@ namespace Spacewars.Runtime
                 String(w,p.PolicyName);w.Write(p.Scout);
                 var i=p.Intent;String(w,i.Id);w.Write(i.ExpiresTick);w.Write(i.Credits);w.Write(i.Population);WorldWire.Array(w,i.Claims.ToArray(),c=>String(w,c));w.Write(i.Priority);Number(w,i.Utility);String(w,i.Conditions);String(w,i.Reason);w.Write(i.StartupFund);String(w,i.ReservationId);w.Write(i.Overdue);
             });
+            combatAttention.Write(w);combatMicro.Write(w);WriteExecutionState(w);
         }
-        internal static PlayableAiOwnerLoop ReadState(BinaryReader r,PlayableProfile profile,AiProfile ai,long generation,int seed,long tick,string legacyAiHash=null)
+        internal static PlayableAiOwnerLoop ReadState(BinaryReader r,PlayableProfile profile,AiProfile ai,long generation,int seed,long tick,string legacyAiHash=null,bool reviewClone=false)
         {
             string id=String(r);int revision=r.ReadInt32();string hash=String(r);
             AiStateWire.Require(id==ai.Id&&revision==ai.Revision&&(hash==ai.Hash||legacyAiHash!=null&&hash==legacyAiHash),"AI profile mismatch");
@@ -364,7 +366,7 @@ namespace Spacewars.Runtime
                     (p.ObservationIdentity=="observation-"+PlayableAiObservation.CurrentSchemaVersion+":"+profile.ProfileId+"@"+profile.Revision+":"+o.OwnerId+":"+generation+":"+p.SnapshotSequence+":"+p.ObservationTick+":"+seed||
                      p.ObservationIdentity=="observation-"+PlayableAiObservation.ParticipantSchemaVersion+":"+profile.ProfileId+"@"+profile.Revision+":"+o.OwnerId+":"+generation+":"+p.SnapshotSequence+":"+p.ObservationTick+":"+seed),"pending binding");
                 p.Intent=new AiIntent(id,p.PolicyName,a,expires,credits,population,claims,priority,utility,conditions,reason,startup,startupId,overdue);
-                p.Receipt=o.Feedback(p.PolicyName,p.LocalActionId,generation);
+                p.Receipt=p.PolicyName==AiCombatMicroPolicy.Policy?o.combatMicro.Receipt:o.Feedback(p.PolicyName,p.LocalActionId,generation);
                 AiStateWire.Require(p.Scout==(p.PolicyName=="scout"),"scout callback");return p;
             }));
             AiStateWire.Require(o.pendingItems.Count<=o.actionLimit&&o.pendingItems.Select(p=>p.PolicyName).Distinct().Count()==o.pendingItems.Count,"pending ledger capacity/policy");
@@ -378,16 +380,20 @@ namespace Spacewars.Runtime
             AiStateWire.Require(m==null||m.OwnerId==o.OwnerId&&m.Generation==generation&&m.SourceIdentity==opening.SourceIdentity,"mission binding");
             AiStateWire.Require(c==null||c.OwnerId==o.OwnerId&&c.Generation==generation&&c.Seed==seed&&c.ProfileId==profile.ProfileId&&c.ProfileRevision==profile.Revision&&c.ReviewedTick<=tick&&c.DecisionSequence>=0,"strategy RNG binding");
             var ar=o.artillery.Capture();AiStateWire.Require(ar==null||ar.Seed==seed&&ar.Generation==generation&&ar.ReviewedTick<=tick,"artillery binding");
+            o.combatAttention=AiCombatMicroAttention.Read(r,tick,ai,difficulty);o.combatMicro=AiCombatMicroPolicy.Read(r,tick,generation);
+            o.combatMicro.ValidateOwner(o.OwnerId);o.ReadExecutionState(r);o.executionReviewClone=reviewClone;
+            AiStateWire.Require((o.combatMicro.PendingId==0)==!o.pendingItems.Any(x=>x.PolicyName==AiCombatMicroPolicy.Policy),"orphan micro obligation");
+            foreach(var item in o.pendingItems.Where(x=>x.PolicyName==AiCombatMicroPolicy.Policy)){o.combatMicro.ValidatePending(item.Action,item.LocalActionId);item.Receipt=o.Feedback(item.PolicyName,item.LocalActionId,generation);}
             o.Checkpoint=o.Capture().BindNativeProfile(ai,o.nativeConfig);return o;
         }
         private long PolicyPending(string name)
         {
-            switch(name){case AiDefensePlanner.Policy:return defense.PendingId;case AiArmyPlanner.Policy:return armyPlanner.PendingId;case AiArmyPlanner.FlankPolicy:return flankPlanner.PendingId;case "infrastructure":return infrastructure.PendingId;case "expansion":return expansion.PendingId;case "economy":return economy.StatePendingId;case "production":return production.StatePendingId;case "research":return research.StatePendingId;case "scout":return scout.StatePendingId;case "mission-defense":return mission.StatePendingId;case "artillery":return artillery.StatePendingId;default:throw new ArgumentException("Unknown pending policy.");}
+            switch(name){case AiCombatMicroPolicy.Policy:return combatMicro.PendingId;case AiDefensePlanner.Policy:return defense.PendingId;case AiArmyPlanner.Policy:return armyPlanner.PendingId;case AiArmyPlanner.FlankPolicy:return flankPlanner.PendingId;case "infrastructure":return infrastructure.PendingId;case "expansion":return expansion.PendingId;case "economy":return economy.StatePendingId;case "production":return production.StatePendingId;case "research":return research.StatePendingId;case "scout":return scout.StatePendingId;case "mission-defense":return mission.StatePendingId;case "artillery":return artillery.StatePendingId;default:throw new ArgumentException("Unknown pending policy.");}
         }
         private Action<PlayableAiTraceRecord> Feedback(string name,long id,long generation)
         {
             AiStateWire.Require(PolicyPending(name)==id,"terminal callback local ID");
-            switch(name){case AiArmyPlanner.FlankPolicy:AiStateWire.Require(flankPlanner.PendingGeneration==generation,"callback generation");return flankPlanner.ObserveReceipt;case AiArmyPlanner.Policy:AiStateWire.Require(armyPlanner.PendingGeneration==generation,"callback generation");return armyPlanner.ObserveReceipt;case "infrastructure":AiStateWire.Require(infrastructure.PendingGeneration==generation,"callback generation");return infrastructure.ObserveReceipt;case "expansion":AiStateWire.Require(expansion.PendingGeneration==generation,"callback generation");return expansion.ObserveReceipt;case "economy":AiStateWire.Require(economy.StatePendingGeneration==generation,"callback generation");return economy.ObserveReceipt;
+            switch(name){case AiCombatMicroPolicy.Policy:AiStateWire.Require(combatMicro.PendingGeneration==generation,"micro callback generation");return combatMicro.Receipt;case AiArmyPlanner.FlankPolicy:AiStateWire.Require(flankPlanner.PendingGeneration==generation,"callback generation");return flankPlanner.ObserveReceipt;case AiArmyPlanner.Policy:AiStateWire.Require(armyPlanner.PendingGeneration==generation,"callback generation");return armyPlanner.ObserveReceipt;case "infrastructure":AiStateWire.Require(infrastructure.PendingGeneration==generation,"callback generation");return infrastructure.ObserveReceipt;case "expansion":AiStateWire.Require(expansion.PendingGeneration==generation,"callback generation");return expansion.ObserveReceipt;case "economy":AiStateWire.Require(economy.StatePendingGeneration==generation,"callback generation");return economy.ObserveReceipt;
                 case "production":AiStateWire.Require(production.StatePendingGeneration==generation,"callback generation");return production.ObserveReceipt;
                 case "research":AiStateWire.Require(research.StatePendingGeneration==generation,"callback generation");return research.ObserveReceipt;
                 case "scout":AiStateWire.Require(scout.StatePendingGeneration==generation,"callback generation");return scout.ObserveReceipt;

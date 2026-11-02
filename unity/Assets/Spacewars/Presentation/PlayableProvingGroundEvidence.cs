@@ -135,6 +135,10 @@ namespace Spacewars.Presentation
                 Click(provingGroundLayer.Q<Button>("proving-unit-"+side+"-Tank"));
                 var site=profile.AuthoredMap.Sites(profile)[side];
                 PlaceProvingGround(site.Slots[0].Position);Click(provingConstruction.Q<Button>("proving-build-Factory"));
+                // Scientific construction requires a completed factory or hangar.
+                // Respect the ordinary tech prerequisite; retain the ten-building
+                // and three-research assertions and the existing deadlines.
+                yield return Until(()=>view.Buildings.Any(b=>b.SiteId==site.Id&&b.Kind==PlayableBuildingKind.Factory&&b.Phase==ConstructionPhase.Ready),"factory prerequisite ready on side "+side);
                 PlaceProvingGround(site.Slots[1].Position);Click(provingConstruction.Q<Button>("proving-build-ScientificCenter"));
             }
             long setupGeneration=generation;

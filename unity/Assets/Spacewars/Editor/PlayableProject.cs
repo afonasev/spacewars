@@ -50,7 +50,12 @@ namespace Spacewars.Editor
             try
             {
                 File.WriteAllText(metadata,"{\"date\":\""+date+"\"}");AssetDatabase.ImportAsset(metadata,ImportAssetOptions.ForceSynchronousImport);
-                var report=BuildPipeline.BuildPlayer(new BuildPlayerOptions{scenes=new[]{ScenePath},locationPathName=output,target=target,options=BuildOptions.DetailedBuildReport});
+                var options=BuildOptions.DetailedBuildReport;
+                string compression=System.Environment.GetEnvironmentVariable("SPACEWARS_RELEASE_COMPRESSION")??"none";
+                if(compression=="lz4hc")options|=BuildOptions.CompressWithLz4HC;
+                else if(compression!="none")throw new BuildFailedException("Unsupported Player compression: "+compression);
+                if(System.Environment.GetEnvironmentVariable("SPACEWARS_RELEASE_DEVELOPMENT")=="1")options|=BuildOptions.Development;
+                var report=BuildPipeline.BuildPlayer(new BuildPlayerOptions{scenes=new[]{ScenePath},locationPathName=output,target=target,options=options});
                 if(report.summary.result!=BuildResult.Succeeded)throw new BuildFailedException(report.summary.result.ToString());
                 Debug.Log("NATIVE_RELEASE_BUILD_PASS target="+target+" bytes="+report.summary.totalSize);
             }

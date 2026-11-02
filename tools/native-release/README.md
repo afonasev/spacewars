@@ -83,3 +83,15 @@ Pass `--notes tools/native-release/notes/<name>.json` to `publish.py` when prepa
 Use real screenshots of the identified revision. Images are optional for text-only fixes; add two ordered images captioned before/after when useful. PNG inputs must be noninterlaced 8-bit grayscale/RGB/RGBA, at most 4096 pixels per side and 8 MiB. Paths must be relative to the repository; the source revision must be an ancestor of the release. Missing, corrupt, oversized or uncommitted assets reject preparation. Caption/text fields are plain single lines.
 
 Preparation copies images to content-addressed `notes-<sha256>.png` assets **before signing the release inventory**, and writes matching Markdown in the release body. Existing draft readback verifies every image's size/hash before publication. Keep published attachments with their release. The updater accepts only images explicitly attached to the same release, serves them via the authenticated menu-only `/history-image` endpoint and stores verified images/history under the installed root's `history/<channel>/` directory. No automatic cache deletion is performed. A successfully viewed release can be reopened offline; images are requested only for the selected release. Failed media leaves the caption and text usable. In-game preview activation enlarges the image; Back restores the same history focus and scroll.
+
+## Local test clients and lossless compression
+
+For a local Development/test Player with the existing native QA hooks and required match logging:
+
+```sh
+SPACEWARS_RELEASE_COMMITTED_ASSETS=1 python3 tools/native-release/build.py --platform macos-universal --version VERSION --channel test --release-date YYYY-MM-DD --development --compression none
+```
+
+Use the corresponding Windows target `windows-x64`. `--development` rejects the production channel. A bound build records the development flag and data compression. The default remains `none`: uncompressed Unity data compresses better in the installer. `--compression lz4hc` uses lossless chunk compression to reduce installed Player size; it can produce a larger outer LZMA installer. Neither route changes texture/mesh quality. Select the profile by the measured installed-size/download tradeoff; do not infer gameplay or device acceptance from byte counts.
+
+Mac packaging defaults to LZMA DMG (`ULMO`, supported on macOS 10.15+, below the project's macOS 11 minimum); `--dmg-format UDZO` retains the former zlib format. Windows uses solid LZMA with a 64 MiB dictionary; `--lzma-dict-mb 8|32|64` is a bounded override passed through the local or configured remote compiler. Dictionary size is approximately the required decompression memory, so 64 MiB adds about 56 MiB over the old 8 MiB setting. Local packaging never publishes a release. Keep source/byte identities, verify lossless extraction and retain the exact test installer before removing staging.

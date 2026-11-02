@@ -55,8 +55,20 @@ namespace Spacewars.Input.Tests
                     if(expanded)foreach(var tile in tiles){Inside(panel.worldBound,tile.worldBound,"individual portrait");Assert.NotNull(tile.Q("unit-health"));Assert.Greater(tile.worldBound.width,20);}
                     Assert.AreEqual(count,Get<VisualElement>(seat,"selectionSummary").Query<Label>().ToList().Sum(l=>int.Parse(l.text)));
                 }
+                else if(!expanded)
+                {
+                    Assert.AreEqual(DisplayStyle.None,Get<VisualElement>(seat,"selectionStats").style.display.value);
+                    Assert.AreEqual(DisplayStyle.None,Get<VisualElement>(seat,"selectionCost").style.display.value);
+                    Assert.AreEqual(DisplayStyle.Flex,panel.Q("context-health").style.display.value);
+                    Assert.NotNull(panel.Q<Button>("selection-expand"));
+                    var identity=Get<VisualElement>(seat,"dockIdentity");
+                    Assert.LessOrEqual(panel.worldBound.yMax-identity.worldBound.yMax,panel.resolvedStyle.paddingBottom+1,"collapsed card has no reserved empty tail");
+                    Assert.LessOrEqual(panel.worldBound.height,identity.worldBound.height+panel.resolvedStyle.paddingTop+panel.resolvedStyle.paddingBottom+1,"collapsed height follows header content");
+                    Assert.AreEqual("",panel.Q<Button>("selection-expand").text,"expand control uses vector chevron rather than a trigger rectangle");
+                }
                 else
                 {
+                    Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(seat,"selectionStats").style.display.value);
                     var cells=Get<VisualElement>(seat,"selectionStats").Children().Where(e=>e.style.display.value!=DisplayStyle.None).ToArray();Assert.GreaterOrEqual(cells.Length,8);
                     foreach(var cell in cells){var key=cell.Q<Label>("selection-stat-label");var value=cell.Q<Label>("selection-stat-value");Inside(panel.worldBound,key.worldBound,"stat key");Inside(panel.worldBound,value.worldBound,"stat value");Assert.False(key.worldBound.Overlaps(value.worldBound),"stat text cannot overlap");}
                     var keys=cells.Select(c=>c.Q<Label>("selection-stat-label").text).ToArray();foreach(var key in new[]{"Здоровье","Урон","Дальность","Скорость","Обзор","Производство","Место в армии"})Assert.Contains(key,keys);
@@ -71,6 +83,8 @@ namespace Spacewars.Input.Tests
             {
                 CompactContext(1,kind,true);
                 yield return Capture("compact-single-"+humans+"-"+kind,()=>CompactCaptureContext(1,kind),w,h,captureChecks:()=>AssertCompactSelection(false,1),refreshWorld:false);
+                foreach(var seat in Seats)Call(seat,"ToggleSelectionRoster",false);
+                yield return Capture("expanded-single-"+humans+"-"+kind,()=>CompactCaptureContext(1,kind,true),w,h,captureChecks:()=>AssertCompactSelection(true,1),refreshWorld:false);
             }
             CompactContext(50,reset:true);
             yield return Capture("compact-group50-"+humans,()=>CompactCaptureContext(50),w,h,captureChecks:()=>AssertCompactSelection(false,50),refreshWorld:false);
@@ -88,22 +102,22 @@ namespace Spacewars.Input.Tests
             compactBases.Clear();yield return StartOrdinary(2);CompactContext(50,reset:true);
             var first=Seats[0];var second=Seats[1];var camera=Get<Camera>(first,"cameraView");float zoom=camera.orthographicSize;
             int receipts=Runtime.OfflineFrame.Receipts.Count;
-            Press(pads[0].leftTrigger);InputSystem.Update();Call(first,"PollOrdinaryPad");
+            Press(pads[0].rightTrigger);InputSystem.Update();Call(first,"PollOrdinaryPad");
             Assert.True(Get<bool>(first,"selectionRosterExpanded"));Assert.True(Get<bool>(first,"selectionRosterPadFocus"));Assert.False(Get<bool>(second,"selectionRosterExpanded"));
-            Release(pads[0].leftTrigger);InputSystem.Update();Call(first,"PollOrdinaryPad");
+            Release(pads[0].rightTrigger);InputSystem.Update();Call(first,"PollOrdinaryPad");
             Press(pads[0].dpad.down);InputSystem.Update();Call(first,"PollOrdinaryPad");Assert.AreEqual(zoom,camera.orthographicSize,"roster down cannot zoom");
             int focus=Get<int>(first,"selectionRosterFocusId");Assert.Greater(focus,20000);
             Release(pads[0].dpad.down);InputSystem.Update();Call(first,"PollOrdinaryPad");
             Press(pads[0].buttonEast);InputSystem.Update();Call(first,"PollOrdinaryPad");Assert.False(Get<bool>(first,"selectionRosterPadFocus"));Assert.AreEqual(50,Selection(first).Count);
             Release(pads[0].buttonEast);InputSystem.Update();Call(first,"PollOrdinaryPad");Assert.AreEqual(receipts,Runtime.OfflineFrame.Receipts.Count,"back cannot issue world order");
-            // LT closes the still-expanded list; a second LT reopens with focus.
-            Press(pads[0].leftTrigger);InputSystem.Update();Call(first,"PollOrdinaryPad");Release(pads[0].leftTrigger);InputSystem.Update();Call(first,"PollOrdinaryPad");
-            Press(pads[0].leftTrigger);InputSystem.Update();Call(first,"PollOrdinaryPad");Release(pads[0].leftTrigger);InputSystem.Update();Call(first,"PollOrdinaryPad");
+            // RT closes the still-expanded list; a second RT reopens with focus.
+            Press(pads[0].rightTrigger);InputSystem.Update();Call(first,"PollOrdinaryPad");Release(pads[0].rightTrigger);InputSystem.Update();Call(first,"PollOrdinaryPad");
+            Press(pads[0].rightTrigger);InputSystem.Update();Call(first,"PollOrdinaryPad");Release(pads[0].rightTrigger);InputSystem.Update();Call(first,"PollOrdinaryPad");
             Press(pads[0].buttonSouth);InputSystem.Update();Call(first,"PollOrdinaryPad");CollectionAssert.AreEqual(new[]{focus},Selection(first));Assert.AreEqual(50,Selection(second).Count);
             Release(pads[0].buttonSouth);InputSystem.Update();Call(first,"PollOrdinaryPad");Assert.AreEqual(receipts,Runtime.OfflineFrame.Receipts.Count);
             CompactContext(50,reset:true);Call(first,"ToggleSelectionRoster",false);Call(first,"SelectRosterUnit",20002,true);Assert.AreEqual(49,Selection(first).Count);Assert.False(Selection(first).Contains(20002));
-            CompactContext(50,reset:true);Press(pads[0].leftTrigger);InputSystem.Update();Call(first,"PollOrdinaryPad");Put(first,"mapOpen",true);Call(first,"PollOrdinaryPad");Assert.False(Get<bool>(first,"selectionRosterPadFocus"));Put(first,"mapOpen",false);
-            Release(pads[0].leftTrigger);InputSystem.Update();
+            CompactContext(50,reset:true);Press(pads[0].rightTrigger);InputSystem.Update();Call(first,"PollOrdinaryPad");Put(first,"mapOpen",true);Call(first,"PollOrdinaryPad");Assert.False(Get<bool>(first,"selectionRosterPadFocus"));Put(first,"mapOpen",false);
+            Release(pads[0].rightTrigger);InputSystem.Update();
         }
     }
 }

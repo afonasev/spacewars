@@ -209,16 +209,16 @@ namespace Spacewars.Runtime
             if(name.Owner==null){if(location.Value.SurfaceId!=NavLocation.FlatSurface)throw new InvalidOperationException("Crowd surface has no owned name role.");return default;}
             return name;
         }
-        private NavigationCrowdNameBacking CaptureCrowdNameReferences(INavStorageReservation reservation,int excludedEntity=0,NavUnit prospective=null)
+        private NavigationCrowdNameBacking CaptureCrowdNameReferences(INavStorageReservation reservation,int excludedEntity=0,NavUnit prospective=null,int[] excludedEntities=null)
         {
-            int count;using(EnterTransport())count=Crowd.Units.Count-(excludedEntity!=0&&Crowd.TryGet(excludedEntity,out _)?1:0)+(prospective==null?0:1);
+            int count;using(EnterTransport())count=Crowd.Units.Count-(excludedEntities?.Length??0)-(excludedEntity!=0&&Crowd.TryGet(excludedEntity,out _)?1:0)+(prospective==null?0:1);
             using(NavStorageScratch.Reserve(reservation,checked(64L+4L*count+3L*count*NavStorageLayout.ValueBytes(typeof(NavNameReference))))){
                 var names=new NavNameReference[count*3];var keys=new int[count];int pinned=0;
                 try{
                     using(EnterTransport()){
                         int i=0;bool inserted=false;
                         void Row(NavUnit u){if(i>=count)throw new InvalidOperationException("Crowd name source changed during preparation.");keys[i]=u.Id;names[i*3]=OwnedOrFlatName(u.Location);names[i*3+1]=OwnedOrFlatName(u.GoalLocation);names[i*3+2]=OwnedOrFlatName(u.FailedGoal);for(int n=0;n<3;n++){names[i*3+n].Owner?.Retain();pinned++;}i++;}
-                        foreach(var u in Crowd.Units){if(excludedEntity!=0&&u.Id==excludedEntity)continue;if(prospective!=null&&u.Id==prospective.Id)throw new InvalidOperationException("Prospective actor already exists.");if(prospective!=null&&!inserted&&prospective.Id<u.Id){Row(prospective);inserted=true;}Row(u);}
+                        foreach(var u in Crowd.Units){if(excludedEntity!=0&&u.Id==excludedEntity||excludedEntities!=null&&Array.BinarySearch(excludedEntities,u.Id)>=0)continue;if(prospective!=null&&u.Id==prospective.Id)throw new InvalidOperationException("Prospective actor already exists.");if(prospective!=null&&!inserted&&prospective.Id<u.Id){Row(prospective);inserted=true;}Row(u);}
                         if(prospective!=null&&!inserted)Row(prospective);if(i!=count)throw new InvalidOperationException("Crowd name source changed during preparation.");
                     }
                     // Hydration may preserve a historical actor iteration order.

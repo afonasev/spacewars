@@ -54,7 +54,7 @@ namespace Spacewars.Tests.EditMode
         private static object Start()=>Activator.CreateInstance(typeof(AiBudgetLedger).Assembly.GetType("Spacewars.Runtime.AiExpansionFinancial"),F,null,new object[]{"player-1",71L},null);
         private static void Observe(object f,AiBudgetLedger b,AiDecisionArbiter a,AiExpansionPlanner ex,PlayableAiObservation o,PlayableProfile p=null,int protect=0,bool allowed=true)
         {
-            p=p??MapProfile();var opening=Opening();b.ObserveBank(o.Credits);Call(f,"Reconcile",o,p,AiProfile.Initial,opening,b,a,ex);var old=Call(f,"Detach",b);
+            p=p??MapProfile();var opening=Opening();opening.Observe(o,null,null,AiProfile.Initial);b.ObserveBank(o.Credits);Call(f,"Reconcile",o,p,AiProfile.Initial,opening,b,a,ex);var old=Call(f,"Detach",b);
             Call(f,"PriorityCost",o,p,AiProfile.Initial,a,ex,old,allowed);Call(f,"Observe",o,p,AiProfile.Initial,opening,b,a,ex,old,protect,allowed);
         }
         private static void Validate(object f,AiBudgetLedger b,AiDecisionArbiter a,long tick,PlayableProfile p=null)

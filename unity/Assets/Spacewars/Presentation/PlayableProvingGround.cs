@@ -24,6 +24,7 @@ namespace Spacewars.Presentation
         private int provingSide;
         private PlayableEntityKind? provingUnit;
         private VisualElement provingConstruction,provingMapParent;
+        private Button provingPhaseButton;
         private int provingMapIndex;
         private bool ProvingPreparation=>provingGround!=null&&!provingGroundBattle&&!provingGroundBusy;
         private void RestoreProvingMap()
@@ -89,7 +90,11 @@ namespace Spacewars.Presentation
             provingLeft=provingRight=null;provingStatus=null;provingUnitDetail=null;
 
             provingLeft=ProvingPanel(0);provingRight=ProvingPanel(1);
-            provingStatus=LobbyText("ПОЛИГОН · свободное управление · Esc — начать бой",14);provingStatus.name="proving-status";
+            var phaseRow=new VisualElement{pickingMode=PickingMode.Ignore};phaseRow.style.position=Position.Absolute;phaseRow.style.left=Length.Percent(26);phaseRow.style.right=Length.Percent(26);phaseRow.style.top=8;phaseRow.style.alignItems=Align.Center;
+            provingPhaseButton=Button(provingGroundBattle?"К расстановке":provingStartButton.text,()=>{if(provingGroundBattle)ResetProvingGround();else StartProvingGround();});
+            provingPhaseButton.name="proving-phase";provingPhaseButton.style.width=200;provingPhaseButton.style.height=40;phaseRow.Add(provingPhaseButton);provingGroundLayer.Add(phaseRow);
+            ProvingMouseOnly(phaseRow);
+            provingStatus=LobbyText("ПОЛИГОН · свободное управление",14);provingStatus.name="proving-status";
             provingStatus.pickingMode=PickingMode.Ignore;provingStatus.style.position=Position.Absolute;
             provingStatus.style.left=Length.Percent(26);provingStatus.style.right=Length.Percent(26);provingStatus.style.top=70;
             provingStatus.style.whiteSpace=WhiteSpace.Normal;provingStatus.style.unityTextAlign=TextAnchor.UpperCenter;provingGroundLayer.Add(provingStatus);
@@ -141,9 +146,9 @@ namespace Spacewars.Presentation
                     var mark=toggle.Q(className:"unity-toggle__checkmark");mark.style.width=mark.style.minWidth=18;mark.style.height=mark.style.minHeight=18;mark.style.marginLeft=mark.style.marginRight=0;
                     row.Add(toggle);var label=new Label(ProvingResearchName(k)){name="proving-research-label-"+side+"-"+k};label.style.fontSize=13;label.style.marginLeft=2;label.style.marginRight=0;label.style.paddingLeft=label.style.paddingRight=0;label.style.whiteSpace=WhiteSpace.Normal;label.style.flexGrow=1;label.style.flexShrink=1;label.style.flexBasis=0;label.style.minWidth=0;row.Add(label);
                     label.RegisterCallback<ClickEvent>(_=>{if(toggle.enabledSelf)toggle.value=!toggle.value;});
-                    row.RegisterCallback<PointerEnterEvent>(_=>ShowProvingDetail(row,side,title+"\n"+PlayableResearchRules.Description(profile,k)+(PlayableResearchRules.Previous(k).HasValue?"\nСначала исследуются предыдущие уровни.":"")+"\n\nБесплатно · "+profile.ProvingGroundActionSeconds.ToString("0.#")+" с"));
+                    row.RegisterCallback<PointerEnterEvent>(_=>ShowProvingDetail(row,side,title+"\n"+PlayableResearchRules.Description(profile,k)+(PlayableResearchRules.Previous(k).HasValue?"\nСначала исследуются предыдущие уровни.":"")+"\n\nПрименяется сразу · без зданий. Снимите галку, чтобы отменить."));
                     row.RegisterCallback<PointerLeaveEvent>(_=>{if(provingUnitDetail!=null)provingUnitDetail.style.display=DisplayStyle.None;});
-                    toggle.RegisterValueChangedCallback(e=>{if(e.newValue)QueueProvingResearch(side,k);});
+                    toggle.RegisterValueChangedCallback(e=>{if(!runtime.SetProvingGroundResearch(side,k,e.newValue))provingStatus.text="Действие сейчас недоступно";});
                 }
             }
             return panel;
@@ -174,7 +179,7 @@ namespace Spacewars.Presentation
             provingUnitDetail.style.top=Mathf.Clamp(anchor.y,6,Mathf.Max(6,root.contentRect.height-height-6));
             provingUnitDetail.style.display=DisplayStyle.Flex;provingUnitDetail.BringToFront();
         }
-        private bool ProvingGroundOverUi(Vector2 point)=>provingGround!=null&&(provingLeft?.worldBound.Contains(point)==true||provingRight?.worldBound.Contains(point)==true||provingConstruction?.worldBound.Contains(point)==true);
+        private bool ProvingGroundOverUi(Vector2 point)=>provingGround!=null&&(provingLeft?.worldBound.Contains(point)==true||provingRight?.worldBound.Contains(point)==true||provingConstruction?.worldBound.Contains(point)==true||provingPhaseButton?.worldBound.Contains(point)==true);
         private static void ProvingMouseOnly(VisualElement panel)
         {
             // Keep pointer callbacks, but never let Toolkit focus/submit navigation capture camera keys.
@@ -200,6 +205,25 @@ namespace Spacewars.Presentation
             modalTitle.text="Полигон";resumeButton.text="Продолжить";
         }
         // Ordinary input handles maps/camera. This is the sole preparation world-click path.
+        private NavPoint ProvingPlacementPoint(Vector2 screen)
+        {
+            if(provingUnit!=PlayableEntityKind.Hawk)return Ground(screen);
+            var ray=cameraView.ScreenPointToRay(screen);
+            // The proving map is flat. Test every possible clearance plane and keep
+            // the nearest valid body center, including flight above buildings.
+            double center=PlayableUnitRules.HawkBodyHeight(profile)/2;
+            var heights=new[]{profile.HawkClearance+center}.Concat(view.Buildings.Where(b=>b.Phase!=ConstructionPhase.Pending).Select(b=>PlayableUnitRules.AirBuildingHeight(profile,b.Kind)+profile.HawkClearance+center));
+            double nearest=double.PositiveInfinity;NavPoint result=new NavPoint(double.NaN,double.NaN);
+            foreach(double height in heights){
+                if(!new Plane(Vector3.up,new Vector3(0,(float)height,0)).Raycast(ray,out float distance)||distance>=nearest)continue;
+                var at=ray.GetPoint(distance);var point=new NavPoint(at.x,at.z);double actual=profile.HawkClearance+center;
+                foreach(var building in view.Buildings.Where(b=>b.Phase!=ConstructionPhase.Pending))
+                    if(ProvingDistance(point,building.Position)<TerritoryRules.Radius(profile,building.Kind)+profile.HawkRadius)actual=Math.Max(actual,PlayableUnitRules.AirBuildingHeight(profile,building.Kind)+profile.HawkClearance+center);
+                if(Math.Abs(actual-height)>1e-6)continue;
+                nearest=distance;result=point;
+            }
+            return result;
+        }
         private void PlaceProvingGround(NavPoint point)
         {
             if(!ProvingPreparation)return;
@@ -253,12 +277,6 @@ namespace Spacewars.Presentation
             var command=new PlayableCommand(generation,++sequence,side==0?"player-1":"enemy-1",kind,ids,siteId:site,slotId:slot,buildingKind:buildingKind,parentId:parent,researchKind:research);
             if(!runtime.EditProvingGround(command))provingStatus.text="Действие сейчас недоступно";
         }
-        private void QueueProvingResearch(int side,PlayableResearchKind kind)
-        {
-            var center=ProvingView(side)?.Buildings.FirstOrDefault(b=>(int)b.Owner==side&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.Progress>=1&&(!PlayableResearchRules.NeedsUpgradedCenter(kind)||b.ScientificCenterUpgraded));
-            if(center==null){provingStatus.text=PlayableResearchRules.NeedsUpgradedCenter(kind)?"Нужен улучшенный научный центр":"Нужен готовый собственный Научный центр";return;}
-            ProvingCommand(side,PlayableCommandKind.QueueResearch,new[]{center.Id},research:kind);
-        }
         private void UpdateProvingGroundUi()
         {
             if(provingGround==null||provingGroundBusy||runtime==null)return;
@@ -268,8 +286,8 @@ namespace Spacewars.Presentation
                 if(provingGroundBattle||provingTabs[side]!="Исследования")continue;
                 var view=ProvingView(side);
                 foreach(PlayableResearchKind kind in Enum.GetValues(typeof(PlayableResearchKind))){var toggle=provingGroundLayer?.Q<Toggle>("proving-research-"+side+"-"+kind);if(toggle==null)continue;
-                    var order=view.OwnerResearch.FirstOrDefault(o=>o.Kind==kind);toggle.SetValueWithoutNotify(order!=null);toggle.SetEnabled(order==null);
-                    toggle.tooltip=order?.Complete==true?"Завершено":order?.Active==true?"Выполняется · "+(int)(order.Progress*100)+"%":order!=null?"В очереди":PlayableResearchRules.Name(kind);}
+                    var order=view.OwnerResearch.FirstOrDefault(o=>o.Kind==kind);toggle.SetValueWithoutNotify(order!=null);toggle.SetEnabled(true);
+                    toggle.tooltip=order?.Complete==true?"Применено · снимите галку для отмены":order?.Active==true?"Выполняется · "+(int)(order.Progress*100)+"%":order!=null?"В очереди":PlayableResearchRules.Name(kind);}
             }
             if(runtime.ProvingGroundEditStatus!=null&&provingStatus!=null)provingStatus.text=runtime.ProvingGroundEditStatus;
         }

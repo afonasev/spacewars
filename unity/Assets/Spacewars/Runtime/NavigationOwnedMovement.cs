@@ -142,7 +142,7 @@ namespace Spacewars.Runtime
                 actors=Crowd.Units.Count;groupCount=groups.Count;attemptCount=liveArrivalTables.Count;leaseCount=liveArrivalLeaseTable?.Count??0;publication=admissionPublicationIdentity;operation=authorityOperationIdentity;sourceCrowd=Crowd;
             }
             if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,Generation,publication,out var scope))return RefuseOwnedMovement(1);
-            using(scope){PreparedMovement c=null;try{
+            using(scope){PreparedMovement c=null;MotionPublication publicationRecord=null;NavigationMotionAdoption adoption=null;try{
                 c=PreparedMovement.Create(actors,groupCount,attemptCount,leaseCount,scope.OwnedReservation());c.Frame=NavPreparedCrowdStep.Create(sourceCrowd,actors,scope.OwnedReservation());
                 using(EnterTransport()){
                     if(operation!=authorityOperationIdentity||!ReferenceEquals(sourceCrowd,Crowd)||publication!=admissionPublicationIdentity||actors!=Crowd.Units.Count||groupCount!=groups.Count||attemptCount!=liveArrivalTables.Count||leaseCount!=(liveArrivalLeaseTable?.Count??0)||barrierAnswers.Count!=0||Answers.Count!=0)return RefuseOwnedMovement(2);
@@ -168,16 +168,17 @@ namespace Spacewars.Runtime
                 if(MovementDiagnosticObserver!=null){var trace=new StringBuilder();for(int i=0;i<c.Frame.After.Length;i++){var before=c.Frame.Before[i];var after=c.Frame.After[i];if(i>0)trace.Append(';');trace.Append(after.Id).Append(':').Append(before.Position.X.ToString("R",System.Globalization.CultureInfo.InvariantCulture)).Append(',').Append(before.Position.Z.ToString("R",System.Globalization.CultureInfo.InvariantCulture)).Append('/').Append(before.Heading.ToString("R",System.Globalization.CultureInfo.InvariantCulture)).Append('/').Append(before.Moving).Append("->").Append(after.Position.X.ToString("R",System.Globalization.CultureInfo.InvariantCulture)).Append(',').Append(after.Position.Z.ToString("R",System.Globalization.CultureInfo.InvariantCulture)).Append('/').Append(after.Heading.ToString("R",System.Globalization.CultureInfo.InvariantCulture)).Append('/').Append(after.Moving).Append(" cap=").Append(c.Frame.Preferred[i].ToString("R",System.Globalization.CultureInfo.InvariantCulture)).Append(" yield=").Append(c.Frame.Motion[i].Yielding);}LastOwnedMovementComputation=trace.ToString();}
                 using(EnterTransport()){if(!MovementSourceCurrent(c))return RefuseOwnedMovement(5);if(!MovementCleanupNoOp(c))return null;}
                 c.Admission=PrepareAdmissionProjection(c.Groups,c.Pending,c.Sequence,checked(publication+1),c.Operation,scope,c.SourceAdmission,rebindGroups:c.Changes,rebindGroupCount:c.ChangeCount);
-                for(int i=0;i<c.ChangeCount;i++)c.Changes[i].Next.Retain();c.Destinations=true;scope.Attach(c);
+                for(int i=0;i<c.ChangeCount;i++)c.Changes[i].Next.Retain();c.Destinations=true;publicationRecord=PrepareMotionPublication(c,c.Frame,c.Operation,false,scope,out adoption);scope.Attach(c);
                 Action<object> publish=_=>{
+                    EnterMotionPublication(publicationRecord,adoption);
                     if(!MovementSourceCurrent(c)||scope.IsCancelled||c.Operation>long.MaxValue-3||OwnedMovementPublications==int.MaxValue)throw new InvalidOperationException("Prepared movement lost final source.");
                     var token=ObserveLiveWriteToken();for(int i=0;i<c.ChangeCount;i++)c.Changes[i].Source.Owner.ValidateMarchWrite(c.Changes[i].Source,token);
-                    long before=GC.GetAllocatedBytesForCurrentThread();
+                    long before=GC.GetAllocatedBytesForCurrentThread();BeginMotionWrite(publicationRecord);
                     for(int i=0;i<c.ChangeCount;i++){ref var change=ref c.Changes[i];change.Retired=change.Source.Version;change.Source.Owner.ApplyMarchNoThrow(change.Next);}
-                    c.RetiredTraffic=trafficAuthority;trafficAuthority=c.Traffic;c.Traffic=null;c.Frame.ApplyNoThrow();if(PublishAdmissionOwnerNoThrow(c.Admission)){c.Admission=null;c.AdmissionChanged=true;}authorityOperationIdentity=c.Operation+3;OwnedMovementPublications++;c.Destinations=false;c.Published=true;LastOwnedMovementPublicationAllocatedBytes=GC.GetAllocatedBytesForCurrentThread()-before;
+                    c.RetiredTraffic=trafficAuthority;trafficAuthority=c.Traffic;c.Traffic=null;c.Frame.ApplyNoThrow();if(PublishAdmissionOwnerNoThrow(c.Admission)){c.Admission=null;c.AdmissionChanged=true;}authorityOperationIdentity=c.Operation+3;OwnedMovementPublications++;c.Destinations=false;c.Published=true;CompleteMotionPublication(publicationRecord,adoption);LastOwnedMovementPublicationAllocatedBytes=GC.GetAllocatedBytesForCurrentThread()-before;
                 };
-                using(EnterTransport())scope.Publish(c,publish);scope.ResolveCommitted();CaptureRecastMovementReceipt(c.Frame);if(c.AdmissionChanged)SignalHost();return true;
-            }catch(InvalidOperationException error){if(c?.Published==true)throw;return RefuseOwnedMovement(6,error);}finally{c?.Dispose();}}
+                using(EnterTransport())scope.Publish(c,publish);scope.ResolveCommitted();ThrowMotionPublicationFailure();CaptureRecastMovementReceipt(c.Frame);if(c.AdmissionChanged)SignalHost();return true;
+            }catch(InvalidOperationException error){if(c?.Published==true)throw;return RefuseOwnedMovement(6,error);}finally{try{EndMotionPreparation(publicationRecord,adoption);}finally{c?.Dispose();}}}
         }
         private static bool TerminalMemberMatches(NavUnit actor,NavigationAuthorityMember.Values member,NavigationAuthorityGroup.Values order,NavigationInstalledExecutionOwner installed,bool detached)
         {

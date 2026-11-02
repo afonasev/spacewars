@@ -37,12 +37,7 @@ namespace Spacewars.Runtime
                 h=Math.Max(h,AirSurface(b.Position)+BuildingHeightForAir(b.Kind));
             return h+profile.HawkClearance;
         }
-        private double BuildingHeightForAir(PlayableBuildingKind k)
-        {
-            if(k==PlayableBuildingKind.Hangar)return profile.HangarModelHeightMeters*profile.HangarModelScale;
-            double visual=k==PlayableBuildingKind.Headquarters?profile.HeadquartersModelHeightMeters*profile.HeadquartersModelScale:k==PlayableBuildingKind.Factory?profile.FactoryModelHeightMeters*profile.FactoryModelScale:k==PlayableBuildingKind.Refinery?profile.RefineryModelHeightMeters*profile.RefineryModelScale:k==PlayableBuildingKind.Outpost?profile.OutpostModelHeightMeters*profile.OutpostModelScale:k==PlayableBuildingKind.Mine?profile.MineModelHeightMeters*profile.MineModelScale:profile.ScienceModelHeightMeters*profile.ScienceModelScale;
-            return Math.Max(profile.ShkvalBuildingCollisionHeight,visual);
-        }
+        private double BuildingHeightForAir(PlayableBuildingKind k)=>PlayableUnitRules.AirBuildingHeight(profile,k);
         private PlayableCommandStatus ApplyAirCommand(PlayableCommand command,out string message,bool recordHuman)
         {
             message="Invalid aircraft order.";var ids=command.CopyEntityIds();var owner=OwnerFor(command.PlayerId);
@@ -97,12 +92,14 @@ namespace Spacewars.Runtime
             return destinations.ToArray();
         }
         private void SetAirOrder(Unit u,PlayableCommand command,NavPoint goal)
+            =>SetPreparedAirOrder(u,command,goal,ref nextOrderRevision,VisibleTarget);
+        private void SetPreparedAirOrder(Unit u,PlayableCommand command,NavPoint goal,ref long revision,Func<PlayableOwner,int,bool> visible)
         {
             ResetDefaultCombat(u);
             var a=u.Air;var n=a.Actor;bool previousShort=a.Short&&n.Moving;bool stationary=!n.Moving&&Distance(default,a.Velocity)<1e-5;
             if(u.BurstRemaining>0)u.Reload=profile.HawkReloadSeconds;u.BurstRemaining=0;u.BurstTarget=0;u.StoppedSeconds=0;
             a.Short=false;a.Escape=false;a.FacingTarget=0;n.Held=false;
-            u.LastOrder=new PlayableOrderStamp(u.Id,u.Owner,navigation.Generation,nextOrderRevision++,command.Sequence,Tick,command.Origin,command.Kind,command.Source,command.JobId,command.ActionId);
+            u.LastOrder=new PlayableOrderStamp(u.Id,u.Owner,navigation.Generation,revision++,command.Sequence,Tick,command.Origin,command.Kind,command.Source,command.JobId,command.ActionId);
             if(command.Kind==PlayableCommandKind.Stop||command.Kind==PlayableCommandKind.Hold)
             {n.Goal=n.Position;n.Moving=false;n.Held=command.Kind==PlayableCommandKind.Hold;n.Outcome=n.Held?NavigationOutcome.Held:NavigationOutcome.Stopped;u.CurrentOrder=null;u.Target=0;u.ExplicitTarget=false;return;}
             if(command.Kind==PlayableCommandKind.Attack||command.Kind==PlayableCommandKind.Follow)
@@ -111,32 +108,32 @@ namespace Spacewars.Runtime
             if(stationary&&!previousShort&&sideways)
             {
                 a.Short=distance<=profile.HawkShortDistance;
-                if(!a.Short&&u.Target!=0&&VisibleTarget(u.Owner,u.Target)){a.Short=true;a.Escape=true;a.FacingTarget=u.Target;}
+                if(!a.Short&&u.Target!=0&&visible(u.Owner,u.Target)){a.Short=true;a.Escape=true;a.FacingTarget=u.Target;}
             }
             a.ShortRemaining=profile.HawkShortSeconds;n.Goal=goal;n.Moving=true;n.Outcome=NavigationOutcome.Moving;
             u.HasAttackMove=command.Kind==PlayableCommandKind.AttackMove;u.AttackMove=goal;u.ExplicitTarget=false;
             u.CurrentOrder=new PlayableTacticalOrderSnapshot(u.Id,u.Owner,navigation.Generation,command.Sequence,Tick,u.HasAttackMove?PlayableTacticalOrderKind.AttackMove:PlayableTacticalOrderKind.Move,goal,0);
         }
-        private void AdvanceHawks(double dt)
+        private void CalculateHawks(AirCalculation frame,double dt)
         {
-            var all=units.Values.Where(u=>u.Air!=null).OrderBy(u=>u.Id).ToArray();
+            var all=frame.Units;
             foreach(var u in all)
             {
-                var a=u.Air;var n=a.Actor;a.PreviousHeight=a.Height;
+                var a=u.Air;var n=a.Actor;var trace=frame.Trace(u.Id);a.PreviousHeight=a.Height;
                 if(a.Departing)
                 {
                     double safe=ClearHeight(n.Position);a.Height=ApproachAir(a.Height,safe,profile.HawkClimbSpeed*dt);
                     if(a.Height>=safe-1e-7)a.Departing=false;
-                    else{double aim=n.Heading;if(Target(u.Target,out var liftTarget,out _)&&VisibleTarget(u.Owner,u.Target)&&Distance(n.Position,liftTarget)>1e-9)aim=Math.Atan2(liftTarget.Z-n.Position.Z,liftTarget.X-n.Position.X);AdvanceAirYaw(a,aim,dt);continue;}
+                    else{double aim=n.Heading;if(frame.Target(u.Target,out var liftTarget,out _)&&frame.VisibleTarget(u.Owner,u.Target)&&Distance(n.Position,liftTarget)>1e-9)aim=Math.Atan2(liftTarget.Z-n.Position.Z,liftTarget.X-n.Position.X);AdvanceAirYaw(a,aim,dt);continue;}
                 }
-                if(u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Follow&&TryActor(u.CurrentOrder.TargetId,out var leader))
+                if(u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Follow&&frame.TryActor(u.CurrentOrder.TargetId,out var leader))
                 {n.Goal=PlayableUnitRules.FollowGoal(profile,leader.Position,leader.Heading);n.Moving=Distance(n.Position,n.Goal)>profile.FollowArrivalTolerance;}
                 bool yielding=a.Yielding;var savedGoal=n.Goal;bool savedMoving=n.Moving;
                 if(yielding){n.Goal=a.YieldGoal;n.Moving=true;}
                 double distance=Distance(n.Position,n.Goal);double desired=Math.Atan2(n.Goal.Z-n.Position.Z,n.Goal.X-n.Position.X);
-                if(a.Short&&a.Escape&&(a.ShortRemaining<=0||!VisibleTarget(u.Owner,a.FacingTarget))){a.Short=false;a.Escape=false;}
-                double facing=desired;if(a.Short&&a.Escape&&Target(a.FacingTarget,out var enemy,out _))facing=Math.Atan2(enemy.Z-n.Position.Z,enemy.X-n.Position.X);
-                bool aimExists=Target(u.Target,out var aimPoint,out _);bool idleAim=!n.Moving&&aimExists&&VisibleTarget(u.Owner,u.Target);if(idleAim&&Distance(n.Position,aimPoint)>1e-9)facing=Math.Atan2(aimPoint.Z-n.Position.Z,aimPoint.X-n.Position.X);else if(idleAim)facing=n.Heading;
+                if(a.Short&&a.Escape&&(a.ShortRemaining<=0||!frame.VisibleTarget(u.Owner,a.FacingTarget))){a.Short=false;a.Escape=false;}
+                double facing=desired;if(a.Short&&a.Escape&&frame.Target(a.FacingTarget,out var enemy,out _))facing=Math.Atan2(enemy.Z-n.Position.Z,enemy.X-n.Position.X);
+                bool aimExists=frame.Target(u.Target,out var aimPoint,out _);bool idleAim=!n.Moving&&aimExists&&frame.VisibleTarget(u.Owner,u.Target);if(idleAim&&Distance(n.Position,aimPoint)>1e-9)facing=Math.Atan2(aimPoint.Z-n.Position.Z,aimPoint.X-n.Position.X);else if(idleAim)facing=n.Heading;
                 double yawTarget=(n.Moving&&(!a.Short||a.Escape)||idleAim)?Math.Max(-profile.HawkYawSpeed,Math.Min(profile.HawkYawSpeed,Angle(facing-n.Heading)/dt)):0;
                 a.YawVelocity=ApproachAir(a.YawVelocity,yawTarget,profile.HawkYawAcceleration*dt);n.Heading=Angle(n.Heading+a.YawVelocity*dt);
                 double forward=0,right=0;
@@ -160,7 +157,7 @@ namespace Spacewars.Runtime
                 var delta=new NavPoint(wanted.X-a.Velocity.X,wanted.Z-a.Velocity.Z);double change=Distance(default,delta);double fraction=change>acceleration*dt?acceleration*dt/change:1;
                 var velocity=new NavPoint(a.Velocity.X+delta.X*fraction,a.Velocity.Z+delta.Z*fraction);
                 var next=new NavPoint(n.Position.X+velocity.X*dt,n.Position.Z+velocity.Z*dt);
-                double required=ClearHeight(n.Position),nextClear=ClearHeight(next);
+                double required=ClearHeight(n.Position),nextClear=ClearHeight(next);trace.Nominal=next;trace.NominalClearance=nextClear;
                 if(n.Moving&&distance>1e-9)
                 {
                     double look=Math.Min(distance,profile.HawkLookahead);
@@ -169,6 +166,7 @@ namespace Spacewars.Runtime
                     for(int k=1;k<=steps;k++){double t=look*k/steps/distance;required=Math.Max(required,ClearHeight(new NavPoint(n.Position.X+(n.Goal.X-n.Position.X)*t,n.Position.Z+(n.Goal.Z-n.Position.Z)*t)));}
                 }
                 a.Height=ApproachAir(a.Height,Math.Max(required,nextClear),dt*(a.Height<Math.Max(required,nextClear)?profile.HawkClimbSpeed:profile.HawkDescentSpeed));
+                trace.AssignedHeight=a.Height;trace.HeightAssigned=true;
                 bool geometryClear=AirInside(next)&&a.Height+1e-7>=nextClear&&AirSweepClear(n.Position,next,a.Height);
                 if(!geometryClear||!AirSeparation(u,next,all))
                 {
@@ -182,9 +180,13 @@ namespace Spacewars.Runtime
                 double ax=(velocity.X-a.Velocity.X)/dt,az=(velocity.Z-a.Velocity.Z)/dt;
                 a.Pitch=ApproachAir(a.Pitch,(velocity.X*Math.Cos(n.Heading)+velocity.Z*Math.Sin(n.Heading))/profile.HawkSpeed*profile.HawkCruisePitch+(ax*Math.Cos(n.Heading)+az*Math.Sin(n.Heading))/profile.HawkAcceleration*profile.HawkAccelerationPitch,profile.HawkAttitudeSpeed*dt);
                 a.Roll=ApproachAir(a.Roll,Math.Max(-profile.HawkBank,Math.Min(profile.HawkBank,(-ax*Math.Sin(n.Heading)+az*Math.Cos(n.Heading))/profile.HawkAcceleration*profile.HawkBank+a.YawVelocity/profile.HawkYawSpeed*profile.HawkBank)),profile.HawkAttitudeSpeed*dt);
-                n.Position=next;a.Velocity=velocity;
+                trace.Final=next;n.Position=next;a.Velocity=velocity;
                 if(yielding){if(Distance(n.Position,a.YieldGoal)<=profile.Navigation.ArrivalTolerance&&Distance(default,velocity)<.01){a.Yielding=false;a.Velocity=default;}n.Goal=savedGoal;n.Moving=savedMoving;if(!a.Yielding&&n.Held)n.Goal=n.Position;continue;}
-                if(!n.Moving&&Distance(default,velocity)<1e-5){a.Short=false;n.Outcome=n.Held?NavigationOutcome.Held:NavigationOutcome.Arrived;if(u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move||u.CurrentOrder?.Kind==PlayableTacticalOrderKind.AttackMove)u.CurrentOrder=null;if(a.Deferred.Count>0){var command=a.Deferred.Dequeue();SetAirOrder(u,command,command.Target);}}
+                if(!n.Moving&&Distance(default,velocity)<1e-5){
+                    // Braking inertia can carry an aircraft out of tolerance after the first crossing.
+                    // A move is complete only after settling inside the configured arrival radius.
+                    if(!n.Held&&u.Target==0&&(u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move||u.CurrentOrder?.Kind==PlayableTacticalOrderKind.AttackMove)&&Distance(n.Position,n.Goal)>profile.Navigation.ArrivalTolerance){n.Moving=true;n.Outcome=NavigationOutcome.Moving;continue;}
+                    a.Short=false;n.Outcome=n.Held?NavigationOutcome.Held:NavigationOutcome.Arrived;if(u.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move||u.CurrentOrder?.Kind==PlayableTacticalOrderKind.AttackMove)u.CurrentOrder=null;if(a.Deferred.Count>0){var command=a.Deferred.Dequeue();SetPreparedAirOrder(u,command,command.Target,ref frame.NextRevision,frame.VisibleTarget);}}
             }
         }
         private void AdvanceAirYaw(AirState a,double desired,double dt)

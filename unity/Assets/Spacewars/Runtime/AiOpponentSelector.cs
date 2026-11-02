@@ -10,7 +10,7 @@ namespace Spacewars.Runtime
     internal sealed class AiOpponentAssessment
     {
         internal int Team, TargetId; internal PlayableRouteTargetKind Kind;
-        internal double Threat, EconomicValue, Reachability, Opportunity, NewFrontCost, Score, ArrivalSeconds;
+        internal double Threat, EconomicValue, Reachability, Opportunity, NewFrontCost, Score, ArrivalSeconds, FortificationRisk;
         internal long SourceTick; internal NavPoint Target;
     }
     internal static class AiOpponentSelector
@@ -32,7 +32,7 @@ namespace Spacewars.Runtime
             if(expected.Any(team=>!known.Any(g=>g.Key==team)))return false;
             return ready.Where(b=>b.Owner==o.Owner).Sum(Income)>known.Max(g=>g.Sum(Income));
         }
-        internal static AiOpponentAssessment[] Assess(PlayableAiObservation o,PlayableProfile gameplay,AiProfile profile,int currentTarget=0)
+        internal static AiOpponentAssessment[] Assess(PlayableAiObservation o,PlayableProfile gameplay,AiProfile profile,int currentTarget=0,AiKnowledgeState knowledge=null,IReadOnlyDictionary<string,long> memory=null)
         {
             var own=o.Entities.Where(u=>u.Owner==o.Owner&&u.Health>0&&AiRosterCatalog.Initial.For(u.Kind).lineWeight>0).ToArray();
             var centers=o.Buildings.Where(b=>b.Owner==o.Owner&&b.Health>0&&(b.Kind==PlayableBuildingKind.Headquarters||b.Kind==PlayableBuildingKind.Outpost)).ToArray();
@@ -53,10 +53,12 @@ namespace Spacewars.Runtime
                     // A currently observed attack on another hostile team is a public opportunity.
                     if(enemies.Any(e=>e.TargetId>0&&o.Entities.Any(t=>t.Id==e.TargetId&&o.IsHostile(t.Owner)&&Team(o,t.Owner)!=team)))opportunity=1;
                     double front=currentTeam>=0&&currentTeam!=team?1:0;
+                    var recipients=own.Where(u=>g.Any(r=>r.UnitId==u.Id)).ToArray();
+                    double fortification=AiActiveStrategyPolicy.FortificationPower(o,gameplay,profile,recipients,g.Key,route.Target,knowledge,memory)/Math.Max(1,AiActiveStrategyPolicy.Force(recipients,gameplay,profile));
                     return new AiOpponentAssessment{Team=team,TargetId=g.Key,Kind=route.Kind,Target=route.Target,SourceTick=o.Tick,
-                        Threat=threat,EconomicValue=economy,Reachability=reach,Opportunity=opportunity,NewFrontCost=front,
+                        Threat=threat,EconomicValue=economy,Reachability=reach,Opportunity=opportunity,NewFrontCost=front,FortificationRisk=fortification,
                         ArrivalSeconds=cost/gameplay.TankSpeed,
-                        Score=profile.Value("utility.target.threat")*threat+profile.Value("utility.target.economicValue")*economy+profile.Value("utility.target.reachability")*reach+profile.Value("utility.target.opportunity")*opportunity-profile.Value("utility.target.newFrontCost")*front};
+                        Score=profile.Value("utility.target.threat")*threat+profile.Value("utility.target.economicValue")*economy+profile.Value("utility.target.reachability")*reach+profile.Value("utility.target.opportunity")*opportunity-profile.Value("utility.target.newFrontCost")*front-profile.Value("activeStrategy.fortificationWeight")*fortification};
                 }).OrderByDescending(a=>a.Score).ThenBy(a=>a.Team).ThenBy(a=>a.TargetId).ToArray();
         }
     }

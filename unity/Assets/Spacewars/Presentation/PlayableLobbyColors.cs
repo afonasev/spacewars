@@ -11,7 +11,7 @@ namespace Spacewars.Presentation
         private Button lobbyColorAnchor;
         private void OpenLobbyColorPicker(LobbyColorField field,NativeLobbyParticipant participant)
         {
-            CloseLobbyColorPicker(false);lobbyColorAnchor=field.Trigger;
+            CloseLobbyScreenPicker(false);CloseLobbyColorPicker(false);lobbyColorAnchor=field.Trigger;
             lobbyColorOverlay=new VisualElement{name="lobby-color-overlay"};
             lobbyColorOverlay.style.position=Position.Absolute;
             lobbyColorOverlay.style.left=lobbyColorOverlay.style.right=lobbyColorOverlay.style.top=lobbyColorOverlay.style.bottom=0;

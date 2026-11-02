@@ -26,9 +26,10 @@ namespace Spacewars.Simulation
         {
             private readonly Dictionary<ILayeredNavigationProvider,ILayeredNavigationProvider> providers=new Dictionary<ILayeredNavigationProvider,ILayeredNavigationProvider>();
             private readonly Dictionary<string,ILayeredNavigationProvider> bindings=new Dictionary<string,ILayeredNavigationProvider>();
-            internal LogicalDeclarations(NavArrivalInput exact=null){if(exact!=null){bindings[exact.Provider.Binding]=exact.Provider;foreach(var b in exact.WorkingBindings)bindings[b.Provider.Binding]=b.Provider;}}
+            private readonly bool exactFlat;
+            internal LogicalDeclarations(NavArrivalInput exact=null,bool flat=false){exactFlat=flat;if(exact!=null){bindings[exact.Provider.Binding]=exact.Provider;foreach(var b in exact.WorkingBindings)bindings[b.Provider.Binding]=b.Provider;}}
             private readonly Dictionary<NavScheduledRequest,NavScheduledRequest> recipes=new Dictionary<NavScheduledRequest,NavScheduledRequest>();
-            internal ILayeredNavigationProvider Provider(ILayeredNavigationProvider p){if(!providers.TryGetValue(p,out var copy)){if(!(p is PartitionNavigationProvider partition))throw new ArgumentException("Historical snapshot requires concrete Partition.");copy=bindings.TryGetValue(p.Binding,out var exact)?exact:partition.DetachedSnapshot();providers.Add(p,copy);bindings[copy.Binding]=copy;if(!providers.ContainsKey(copy))providers.Add(copy,copy);}return copy;}
+            internal ILayeredNavigationProvider Provider(ILayeredNavigationProvider p){if(!providers.TryGetValue(p,out var copy)){if(exactFlat&&CertifiedFlat(p)&&bindings.TryGetValue(p.Binding,out var bound)&&CertifiedFlat(bound))copy=bound;else{if(!(p is PartitionNavigationProvider partition))throw new ArgumentException("Historical snapshot requires concrete Partition.");copy=bindings.TryGetValue(p.Binding,out var exact)?exact:partition.DetachedSnapshot();}providers.Add(p,copy);bindings[copy.Binding]=copy;if(!providers.ContainsKey(copy))providers.Add(copy,copy);}return copy;}
             private static NavGraphProfile Profile(NavGraphProfile p)=>new NavGraphProfile(p.ExactProfileBinding,p.CostId,p.CostRevision,p.GridCell);
             private static NavClearanceProfile Clearance(NavClearanceProfile p)=>new NavClearanceProfile(p.Id,p.Revision,p.MobilityClass,p.MobilityRevision,p.Radius);
             internal static NavTerminalRegion Region(NavTerminalRegion p)=>p==null?null:new NavTerminalRegion(p.Id,p.Revision,p.Requested.Detached(),p.Candidates.Select(x=>x.Detached()));
@@ -69,7 +70,7 @@ namespace Spacewars.Simulation
         }
         private static Checkpoint RebindLogical(NavArrivalInput input,Checkpoint saved)
         {
-            if(saved==null||saved.Version<6)return saved;var state=saved.CopyLogical();var copies=new LogicalDeclarations(input);CopyLogicalDeclarations(state,copies,input);if(saved.Historical!=null){var h=saved.Historical;state.Historical=new HistoricalCheckpoint{Page0Occupancy=h.Page0Occupancy==null?null:(int[])h.Page0Occupancy.Clone(),Removal=h.Removal==null?null:(int[])h.Removal.Clone(),Input=h.Input,Work=h.Work,EpochBase=h.EpochBase,Gate=h.Gate,Cursor=h.Cursor,Member=h.Member,Leg=h.Leg,Legs=h.Legs,Recipe=copies.Recipe(h.Recipe)};}return state;
+            if(saved==null||saved.Version<6)return saved;var state=saved.CopyLogical();var copies=new LogicalDeclarations(input,flat:saved.Version==24);CopyLogicalDeclarations(state,copies,input);if(saved.Historical!=null){var h=saved.Historical;state.Historical=new HistoricalCheckpoint{Page0Occupancy=h.Page0Occupancy==null?null:(int[])h.Page0Occupancy.Clone(),Removal=h.Removal==null?null:(int[])h.Removal.Clone(),Input=h.Input,Work=h.Work,EpochBase=h.EpochBase,Gate=h.Gate,Cursor=h.Cursor,Member=h.Member,Leg=h.Leg,Legs=h.Legs,Recipe=copies.Recipe(h.Recipe)};}return state;
         }
         private void RestoreHistorical(Checkpoint state)
         {

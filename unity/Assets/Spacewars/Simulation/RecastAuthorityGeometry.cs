@@ -19,6 +19,7 @@ namespace Spacewars.Simulation
         internal readonly float[] Vertices;internal readonly int[] Triangles;internal readonly byte[] Areas,Directed;
         private readonly string[] areaIds;
         private readonly IPlayableTerrain terrain;private readonly NavGeometry sourceGeometry;
+        internal double SupportHalfExtent {get;}
         internal NavOwnedStorage SourceStorageRoot=>sourceGeometry?.StorageRoot;
         internal bool DirectPhysical(NavLocation from,NavLocation to)=>terrain is StackedRampQualificationMap physical&&from.SurfaceId=="ramp-support"&&to.SurfaceId=="ramp-support"&&physical.Provider.CanSweep(from,to,new NavClearanceProfile("ground",1,"ground",0,Radius))&&(sourceGeometry==null||sourceGeometry.SegmentFree(from.Position,to.Position,Radius));
         internal readonly float CellSize,CellHeight,Radius;
@@ -26,12 +27,12 @@ namespace Spacewars.Simulation
         public int TriangleCount=>Areas.Length;
         private RecastAuthorityGeometry(IPlayableTerrain terrain,Dictionary<string,byte> ids,float[] vertices,int[] triangles,byte[] areas,byte[] directed,NavigationProfile profile,int visibleGeometryRevision,float[] links,byte[] linkAreas,byte[] linkDirections,uint[] linkIds,NavGeometry sourceGeometry)
         {
-            this.sourceGeometry=sourceGeometry.Obstacles.Count==0?null:sourceGeometry;
+            this.sourceGeometry=sourceGeometry.Obstacles.Count==0?null:sourceGeometry;SupportHalfExtent=sourceGeometry.HalfExtent;
             Links=links;LinkAreas=linkAreas;LinkDirections=linkDirections;LinkIds=linkIds;
             this.terrain=terrain;areaIds=ids.OrderBy(x=>x.Value).Select(x=>x.Key).ToArray();Vertices=vertices;Triangles=triangles;Areas=areas;Directed=directed;
             // Raster precision derives from the existing local geometry resolution.
             CellSize=(float)profile.LocalGridCell;CellHeight=CellSize/4;Radius=(float)profile.Radius;
-            Binding=NavContract.Digest(w=>{w.Write("recast-authority-v2");w.Write(Upstream);w.Write(terrain.Id);w.Write(terrain.Revision);w.Write(terrain.SurfaceSemanticsVersion);w.Write(visibleGeometryRevision);w.Write(profile.ProfileId);w.Write(profile.Revision);
+            Binding=NavContract.Digest(w=>{w.Write("recast-authority-v2");w.Write(Upstream);w.Write(terrain?.Id??NavLocation.FlatSurface);w.Write(terrain?.Revision??1);w.Write(terrain?.SurfaceSemanticsVersion??1);w.Write(visibleGeometryRevision);w.Write(profile.ProfileId);w.Write(profile.Revision);
                 w.Write(CellSize);w.Write(CellHeight);w.Write(Radius);foreach(var pair in ids.OrderBy(x=>x.Value)){w.Write(pair.Key);w.Write(pair.Value);}
                 w.Write(vertices.Length);foreach(float x in vertices)w.Write(x);w.Write(triangles.Length);foreach(int x in triangles)w.Write(x);foreach(byte x in areas)w.Write(x);foreach(byte x in directed)w.Write(x);w.Write(Links.Length);foreach(float x in Links)w.Write(x);foreach(byte x in LinkAreas)w.Write(x);foreach(byte x in LinkDirections)w.Write(x);foreach(uint x in LinkIds)w.Write(x);});
         }
@@ -39,6 +40,10 @@ namespace Spacewars.Simulation
         internal byte Area(string surface){int index=Array.IndexOf(areaIds,surface);return index>=0?(byte)(index+1):throw new ArgumentException("Unknown authority surface.");}
         internal float[] Point(NavLocation location)
         {
+            if(terrain==null){
+                if(location.SurfaceId!=NavLocation.FlatSurface||Math.Abs(location.Position.X)>SupportHalfExtent||Math.Abs(location.Position.Z)>SupportHalfExtent)throw new ArgumentException("Unknown flat support location.");
+                return new[]{(float)location.Position.X,0f,(float)location.Position.Z};
+            }
             MapSupport support=null;
             foreach(var piece in terrain.Supports)if(piece.SurfaceId==location.SurfaceId&&piece.Bounds.Footprint.Contains(location.Position)){
                 if(support!=null&&Math.Abs(support.HeightAt(location.Position)-piece.HeightAt(location.Position))>1e-8)throw new ArgumentException("Conflicting physical support pieces.");support=piece;
@@ -52,7 +57,7 @@ namespace Spacewars.Simulation
         // The construction reservation covers live list capacities, copied output,
         // digest stream and both clipping generations under the existing limits.
         internal static long ScratchBound(IPlayableTerrain terrain,NavGeometry geometry,bool foundation){
-            long sources=terrain.Supports.Sum(x=>(long)x.Bounds.Footprint.Triangles.Count/3);
+            long sources=terrain==null?2:terrain.Supports.Sum(x=>(long)x.Bounds.Footprint.Triangles.Count/3);
             long points=checked(3+3*sources);
             long clipping=foundation?checked(4L*ClipPartCapacity*(64+16*points)+4L*65536*8+6L*(64+32*points)):0;
             long source=checked(64L*(SourceTriangleCapacity+2));
@@ -65,15 +70,19 @@ namespace Spacewars.Simulation
             =>PrepareCore(terrain,visibleGeometry,profile,foundation,cancelled);
         private static RecastAuthorityGeometry PrepareCore(IPlayableTerrain terrain,NavGeometry visibleGeometry,NavigationProfile profile,RecastAuthorityGeometry foundation,Func<bool> cancelled)
         {
-            if(terrain==null||visibleGeometry==null||profile==null)throw new ArgumentNullException();
+            if(visibleGeometry==null||profile==null)throw new ArgumentNullException();
             if(cancelled?.Invoke()==true)throw new OperationCanceledException();
-            if(foundation!=null&&!ReferenceEquals(foundation.terrain,terrain))throw new ArgumentException("Foundation terrain owner changed.");
+            if(foundation!=null&&(!ReferenceEquals(foundation.terrain,terrain)||foundation.SupportHalfExtent!=visibleGeometry.HalfExtent))throw new ArgumentException("Foundation terrain owner changed.");
             var layered=(terrain as ILayeredPlayableTerrain)?.LayeredNavigation;
-            if(terrain.Supports.Count<1||terrain.Supports.Select(s=>s.SurfaceId).Distinct(StringComparer.Ordinal).Count()>63)throw new InvalidOperationException("Recast semantic area capacity exceeded.");
-            var ids=new Dictionary<string,byte>(StringComparer.Ordinal);foreach(var s in terrain.Supports){if(string.IsNullOrEmpty(s.SurfaceId))throw new ArgumentException("Missing support surface.");if(!ids.ContainsKey(s.SurfaceId))ids.Add(s.SurfaceId,(byte)(ids.Count+1));}
+            // Flat gameplay has no authored map. Its support is the actual
+            // arena plane; this temporary compiler input never becomes a map
+            // or changes the gameplay provider/binding.
+            IReadOnlyList<MapSupport> supports=terrain?.Supports??new[]{new MapSupport("flat-plane",new NavObstacle(-visibleGeometry.HalfExtent,-visibleGeometry.HalfExtent,visibleGeometry.HalfExtent,visibleGeometry.HalfExtent),false,surfaceId:NavLocation.FlatSurface)};
+            if(supports.Count<1||supports.Select(s=>s.SurfaceId).Distinct(StringComparer.Ordinal).Count()>63)throw new InvalidOperationException("Recast semantic area capacity exceeded.");
+            var ids=new Dictionary<string,byte>(StringComparer.Ordinal);foreach(var s in supports){if(string.IsNullOrEmpty(s.SurfaceId))throw new ArgumentException("Missing support surface.");if(!ids.ContainsKey(s.SurfaceId))ids.Add(s.SurfaceId,(byte)(ids.Count+1));}
             var directed=new byte[4096];foreach(byte a in ids.Values)directed[a*64+a]=1;
             // Non-layered authority TerrainLocations treats these named seams as bidirectional.
-            if(layered==null)foreach(var link in terrain.SurfaceTransitions){byte a=ids[link.From],b=ids[link.To];directed[a*64+b]=directed[b*64+a]=1;}
+            if(layered==null&&terrain!=null)foreach(var link in terrain.SurfaceTransitions){byte a=ids[link.From],b=ids[link.To];directed[a*64+b]=directed[b*64+a]=1;}
             var links=new List<float>();var linkAreas=new List<byte>();var linkDirections=new List<byte>();var linkIds=new List<uint>();
             if(layered!=null){
                 if(layered.Surfaces.Count!=ids.Count||layered.Surfaces.Any(s=>!ids.ContainsKey(s.Id)))throw new ArgumentException("Physical and semantic layers differ.");
@@ -82,7 +91,7 @@ namespace Spacewars.Simulation
                     if(terrain is IRecastPhysicalTerrain physical&&!physical.NativePortal(portal.Id))continue;
                     if(layered.QualifyPortal(portal.Id,clearance).Status!=NavConnectorStatus.Ready||!visibleGeometry.SegmentFree(portal.Entry.Position,portal.Exit.Position,profile.Radius))continue;
                     foreach(var endpoint in new[]{portal.Entry,portal.Exit}){
-                        MapSupport piece=null;foreach(var candidate in terrain.Supports)if(candidate.SurfaceId==endpoint.SurfaceId&&candidate.Bounds.Footprint.Contains(endpoint.Position)){if(piece!=null&&Math.Abs(piece.HeightAt(endpoint.Position)-candidate.HeightAt(endpoint.Position))>1e-8)throw new ArgumentException("Conflicting portal support.");piece=candidate;}
+                        MapSupport piece=null;foreach(var candidate in supports)if(candidate.SurfaceId==endpoint.SurfaceId&&candidate.Bounds.Footprint.Contains(endpoint.Position)){if(piece!=null&&Math.Abs(piece.HeightAt(endpoint.Position)-candidate.HeightAt(endpoint.Position))>1e-8)throw new ArgumentException("Conflicting portal support.");piece=candidate;}
                         if(piece==null)throw new ArgumentException("Portal has no physical support.");links.Add((float)endpoint.Position.X);links.Add((float)piece.HeightAt(endpoint.Position));links.Add((float)endpoint.Position.Z);
                     }
                     linkAreas.Add(ids[portal.Entry.SurfaceId]);linkAreas.Add(ids[portal.Exit.SurfaceId]);linkDirections.Add((byte)(portal.Direction==NavPortalDirection.Both?1:0));linkIds.Add((uint)(Enumerable.Range(0,layered.Portals.Count).First(i=>layered.Portals[i].Id==portal.Id)+1));
@@ -99,7 +108,7 @@ namespace Spacewars.Simulation
             else {
             var earlier=new List<NavPoint[]>();
             string priorSurface=null;
-            foreach(var support in (layered==null?terrain.Supports:terrain.Supports.OrderBy(s=>s.SurfaceId,StringComparer.Ordinal).ToArray())){
+            foreach(var support in (layered==null?supports:supports.OrderBy(s=>s.SurfaceId,StringComparer.Ordinal).ToArray())){
                 if(terrain is IRecastPhysicalTerrain physical&&!physical.NativeSupport(support))continue;
                 if(layered!=null&&support.SurfaceId!=priorSurface)earlier.Clear();priorSurface=support.SurfaceId;
                 var poly=support.Bounds.Footprint;
@@ -118,7 +127,7 @@ namespace Spacewars.Simulation
             // Every obstacle is from the published knowledge-scoped authority snapshot.
             // A null-area prism removes its footprint on all supported gameplay layers,
             // matching current NavGeometry's XZ obstacle semantics.
-            var heights=terrain.Supports.SelectMany(s=>s.Bounds.Footprint.Vertices.Select(s.HeightAt)).ToArray();
+            var heights=supports.SelectMany(s=>s.Bounds.Footprint.Vertices.Select(s.HeightAt)).ToArray();
             double top=heights.Max()+2,bottom=heights.Min()-2;
             foreach(var obstacle in visibleGeometry.Obstacles){
                 NavPolygon p;

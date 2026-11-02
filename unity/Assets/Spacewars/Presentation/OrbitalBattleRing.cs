@@ -42,7 +42,7 @@ namespace Spacewars.Presentation
             Vector2[] outline=Array.Empty<Vector2>();float gap,corner;
             public void Geometry(int index,int count,float diameter,bool disc,float nextGap,float nextCorner)
             {
-                if(Index!=index||Count!=count||Diameter!=diameter||gap!=nextGap||corner!=nextCorner){outline=RadialPetalGeometry.Outline(diameter,index,count,nextGap,nextCorner);fitCached=false;}
+                if(Index!=index||Count!=count||Diameter!=diameter||gap!=nextGap||corner!=nextCorner){outline=RadialPetalGeometry.Outline(diameter,index,count,nextGap,nextCorner);fitCached=false;utilityCached=false;}
                 Index=index;Count=count;Diameter=diameter;Disc=disc;gap=nextGap;corner=nextCorner;
             }
             public readonly RadialArtwork Icon;public readonly Label Title,Price,Badge;public readonly VisualElement Lock;
@@ -125,6 +125,89 @@ namespace Spacewars.Presentation
                 Price.style.left=fittedPrice.x;Price.style.top=fittedPrice.y;Price.style.width=priceWidth;
                 Badge.style.left=fittedPrice.x+priceWidth+rowGap;Badge.style.top=fittedPrice.y;
             }
+            (Vector2 anchor,float width,float height,float titleWidth,float titleHeight,float priceWidth,float priceHeight,float gap,float padding) utilityKey;
+            string utilityTitle;
+            bool utilityCached;
+            Rect utilityIcon,utilityLabel,utilityPrice;
+            public void FitUtility(Vector2 anchor,float iconWidth,float iconHeight,float rowGap,float padding)
+            {
+                // Fit the rendered text metrics, not the default padded label rows.
+                var titleSize=Title.MeasureTextSize(Title.text,0,MeasureMode.Undefined,0,MeasureMode.Undefined);
+                var priceSize=string.IsNullOrEmpty(Price.text)?Vector2.zero:Price.MeasureTextSize(Price.text,0,MeasureMode.Undefined,0,MeasureMode.Undefined);
+                float titleHeight=titleSize.y,titleWidth=titleSize.x,priceHeight=priceSize.y,priceWidth=priceSize.x;
+                var key=(anchor,iconWidth,iconHeight,titleWidth,titleHeight,priceWidth,priceHeight,rowGap,padding);
+                if(!utilityCached||!utilityKey.Equals(key)||utilityTitle!=Title.text)
+                {
+                    bool Fits(Rect rect){rect.xMin-=padding;rect.xMax+=padding;rect.yMin-=padding;rect.yMax+=padding;return RadialPetalGeometry.ContainsRectangle(outline,rect);}
+                    float left=outline.Min(v=>v.x),right=outline.Max(v=>v.x),top=outline.Min(v=>v.y),bottom=outline.Max(v=>v.y);
+                    bool found=false;
+                    // Search resolution is a bounded fitting invariant, not UI tuning.
+                    // Keep text readable and move the complete stack to the nearest
+                    // valid location. Test each row against the actual curved petal.
+                    for(int scaleStep=8;scaleStep>=4&&!found;scaleStep--)
+                    {
+                        float scale=scaleStep/8f,w=iconWidth*scale,h=iconHeight*scale;
+                        float stackHeight=h+rowGap+titleHeight+(priceHeight>0?rowGap+priceHeight:0);
+                        float best=float.PositiveInfinity;
+                        for(int iy=0;iy<=32;iy++)for(int ix=0;ix<=32;ix++)
+                        {
+                            var at=new Vector2(Mathf.Lerp(left,right,ix/32f),Mathf.Lerp(top,bottom,iy/32f));
+                            float distance=(at-anchor).sqrMagnitude;if(distance>=best)continue;
+                            var icon=new Rect(at.x-w/2,at.y-stackHeight/2,w,h);
+                            var label=new Rect(at.x-titleWidth/2,icon.yMax+rowGap,titleWidth,titleHeight);
+                            var price=new Rect(at.x-priceWidth/2,label.yMax+rowGap,priceWidth,priceHeight);
+                            if(!Fits(icon)||!Fits(label)||priceHeight>0&&!Fits(price))continue;
+                            utilityIcon=icon;utilityLabel=label;utilityPrice=price;best=distance;found=true;
+                        }
+                    }
+                    if(!found)
+                    {
+                        // Diagonal wedges can have room for each row without room
+                        // for a straight stack. Preserve text size and let rows follow
+                        // the petal independently, with the same separation margin.
+                        float stackHeight=iconHeight+rowGap+titleHeight+(priceHeight>0?rowGap+priceHeight:0);
+                        var iconTarget=new Vector2(anchor.x,anchor.y-stackHeight/2+iconHeight/2);
+                        var labelTarget=new Vector2(anchor.x,iconTarget.y+iconHeight/2+rowGap+titleHeight/2);
+                        var priceTarget=new Vector2(anchor.x,labelTarget.y+titleHeight/2+rowGap+priceHeight/2);
+                        List<Rect> Candidates(float w,float h,Vector2 target)
+                        {
+                            var result=new List<Rect>();
+                            for(int iy=0;iy<=32;iy++)for(int ix=0;ix<=32;ix++)
+                            {
+                                var rect=new Rect(Mathf.Lerp(left,right,ix/32f)-w/2,Mathf.Lerp(top,bottom,iy/32f)-h/2,w,h);
+                                if(Fits(rect))result.Add(rect);
+                            }
+                            return result.OrderBy(r=>(r.center-target).sqrMagnitude).ToList();
+                        }
+                        bool Separate(Rect a,Rect b){a.xMin-=rowGap;a.xMax+=rowGap;a.yMin-=rowGap;a.yMax+=rowGap;return !a.Overlaps(b);}
+                        var labels=Candidates(titleWidth,titleHeight,labelTarget);
+                        var prices=priceHeight>0?Candidates(priceWidth,priceHeight,priceTarget):new List<Rect>{default};
+                        float best=float.PositiveInfinity;
+                        for(int scaleStep=8;scaleStep>=4&&!found;scaleStep--)
+                        {
+                            var icons=Candidates(iconWidth*scaleStep/8f,iconHeight*scaleStep/8f,iconTarget);
+                            foreach(var label in labels)foreach(var icon in icons)
+                            {
+                                if(icon.center.y>=label.center.y||!Separate(icon,label))continue;
+                                float score=(icon.center-iconTarget).sqrMagnitude+(label.center-labelTarget).sqrMagnitude;
+                                if(score>=best)continue;
+                                foreach(var price in prices)
+                                {
+                                    if(priceHeight>0&&(price.center.y<=label.center.y||!Separate(icon,price)||!Separate(label,price)))continue;
+                                    float total=score+(priceHeight>0?(price.center-priceTarget).sqrMagnitude:0);
+                                    if(total<best){best=total;utilityIcon=icon;utilityLabel=label;utilityPrice=price;found=true;}
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    utilityKey=key;utilityTitle=Title.text;utilityCached=found&&titleWidth>0;
+                }
+                if(!utilityCached)return;
+                Icon.style.left=utilityIcon.x;Icon.style.top=utilityIcon.y;Icon.style.width=utilityIcon.width;Icon.style.height=utilityIcon.height;
+                Title.style.left=utilityLabel.x;Title.style.top=utilityLabel.y;Title.style.width=utilityLabel.width;Title.style.height=utilityLabel.height;
+                Price.style.left=utilityPrice.x;Price.style.top=utilityPrice.y;Price.style.width=utilityPrice.width;Price.style.height=utilityPrice.height;
+            }
             public override bool ContainsPoint(Vector2 point)=>Disc?DiscContains(point,Diameter):RadialPetalGeometry.Contains(outline,point);
         }
         public float PreferredDetailWidth=>detailFrame.PreferredWidth;
@@ -199,6 +282,7 @@ namespace Spacewars.Presentation
                 float radius=SingleDisc?0:next.Length==2?(InnerRatio+OuterRatio)/2:next.Length==1?.28f:.33f;
                 float x=size/2+(float)Math.Cos(angle)*size*radius,y=size/2+(float)Math.Sin(angle)*size*radius;
                 bool dense=size<220;float width=size*(SingleDisc?.9f:dense?.36f:.30f);bool portrait=a.Presentation?.Artwork!=null;float iconWidth=portrait?(dense?54:78):(dense?22:32),iconHeight=portrait?(dense?48:70):(dense?18:28);
+                if(OrbitalGlyph.IsUtilityArtwork(OrbitalPrecision.Glyph(a.Sector.Id)))iconWidth=iconHeight=cardProfile.utilityIconSize;
                 b.Icon.style.left=x-iconWidth/2;b.Icon.style.top=y-(portrait?(dense?35:49):(dense?23:32));b.Icon.style.width=iconWidth;b.Icon.style.height=iconHeight;
                 b.Title.style.fontSize=b.Price.style.fontSize=SingleDisc?13:dense?10:13;
                 b.Title.style.left=x-width/2;b.Title.style.top=y-(SingleDisc?7:4);b.Title.style.width=width;b.Title.style.height=SingleDisc?34:22;b.Title.style.whiteSpace=SingleDisc?WhiteSpace.Normal:WhiteSpace.NoWrap;
@@ -266,7 +350,18 @@ namespace Spacewars.Presentation
                 }
                 b.Badge.text=a.Repeat?"∞":"";
                 if(portrait&&!construction&&!SingleDisc&&inputMode!="baseWheel"&&!group&&a.Sector.Hold!="repeat")
-                    b.FitPortrait(new Vector2(x,y),iconWidth*Mathf.Min(1,cardProfile.compositionSize/iconHeight),Mathf.Min(iconHeight,cardProfile.compositionSize),cardProfile.labelGap,cardProfile.labelGap);
+                {
+                    float desired=a.Presentation.Upgrade?cardProfile.upgradePortraitSize:cardProfile.compositionSize;
+                    float aspect=iconWidth/iconHeight;
+                    if(a.Presentation.Upgrade)
+                    {
+                        var texture=DockArtwork.TextureFor(a.Presentation.Artwork);var frame=PortraitFraming.UvFor(a.Presentation.Artwork);
+                        if(texture!=null)aspect=texture.width*frame.width/(texture.height*frame.height);
+                    }
+                    b.FitPortrait(new Vector2(x,y),aspect*desired,desired,cardProfile.labelGap,cardProfile.labelGap);
+                }
+                bool utility=a.Sector.Id=="rally"||a.Sector.Id.EndsWith(":repair")||a.Sector.Id.EndsWith(":sale")||a.Sector.Id.EndsWith(":remove");
+                if(utility&&!SingleDisc)b.FitUtility(new Vector2(x,y),iconWidth,iconHeight,cardProfile.labelGap,cardProfile.sectorGap/2);
                 bool available=a.Sector.Enabled&&(a.Command!=null||a.Sector.Hold!="repeat");b.Title.style.color=available?OrbitalTheme.Ink:OrbitalTheme.Muted;
                 b.Icon.Set(a.Presentation?.Artwork??OrbitalPrecision.Glyph(a.Sector.Id),a.Presentation?.Upgrade==true,a.Sector.Id==highlighted,available);
                 b.tooltip=a.Detail;

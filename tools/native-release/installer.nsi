@@ -16,6 +16,10 @@ InstallDir "$PROGRAMFILES64\${APPNAME}"
 InstallDirRegKey HKLM "Software\${APPNAME}" "InstallDir"
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma
+!ifndef LZMA_DICT_MB
+!define LZMA_DICT_MB 64
+!endif
+SetCompressorDictSize ${LZMA_DICT_MB}
 ; Exact AppleDouble names emitted by older macOS packaging, not user data.
 !macro RemoveLegacyPackagingMetadata
  Delete "$INSTDIR\._"

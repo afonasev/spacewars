@@ -43,3 +43,13 @@ class VolumeIconTests(unittest.TestCase):
    self.assertEqual((volume/'.VolumeIcon.icns').read_bytes(),icon.read_bytes())
    command.assert_called_once_with(['SetFile','-a','C',volume])
 if __name__=='__main__':unittest.main()
+
+class DmgCompressionTests(unittest.TestCase):
+ def test_lossless_lzma_default_and_explicit_legacy_format(self):
+  with tempfile.TemporaryDirectory() as temp:
+   root=pathlib.Path(temp);artifact=root/'test.dmg';artifact.write_bytes(b'stale')
+   with patch.object(package,'run') as run:
+    package.create_dmg(root,artifact)
+    self.assertFalse(artifact.exists());self.assertIn('ULMO',run.call_args[0][0])
+    package.create_dmg(root,artifact,'UDZO');self.assertIn('UDZO',run.call_args[0][0])
+    with self.assertRaisesRegex(ValueError,'unsupported'):package.create_dmg(root,artifact,'unknown')

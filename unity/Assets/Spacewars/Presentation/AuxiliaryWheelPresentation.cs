@@ -32,7 +32,7 @@ namespace Spacewars.Presentation
                 {
                     var ids=new HashSet<int>(members);
                     data.Composition=view.Entities.Where(e=>e.Owner==view.Owner&&e.Health>0&&ids.Contains(e.Id)).GroupBy(e=>e.Kind).OrderBy(g=>(int)g.Key).Select(g=>
-                    {bool upgraded=RadialActionPresentation.Upgraded(g.Key,view.OwnerResearch);return new RadialCompositionItem{Title=OfflinePadWorldActions.Name(g.Key),Artwork=RadialActionPresentation.UnitArtwork(g.Key,upgraded),Upgraded=upgraded,Count=g.Count()};}).Concat(view.Buildings.Where(b=>b.Owner==view.Owner&&b.Health>0&&ids.Contains(b.Id)).Select(b=>new RadialCompositionItem{Title=OfflinePadWorldActions.Name(b.Kind),Artwork=OrbitalPrecision.BuildingGlyph(b.Kind),Count=1})).ToArray();
+                    {bool upgraded=RadialActionPresentation.Upgraded(g.Key,view.OwnerResearch);return new RadialCompositionItem{Title=OfflinePadWorldActions.Name(g.Key),Artwork=RadialActionPresentation.UnitArtwork(g.Key,upgraded),Upgraded=upgraded,Count=g.Count()};}).Concat(view.Buildings.Where(b=>b.Owner==view.Owner&&b.Health>0&&ids.Contains(b.Id)).Select(b=>new RadialCompositionItem{Title=OfflinePadWorldActions.Name(b.Kind),Artwork=OrbitalPrecision.BuildingArtwork(b),Upgraded=b.ModelUpgraded,Count=1})).ToArray();
 
                 }
                 var action=new OfflinePadAction(s.Id,data.Title,s.Enabled){Presentation=data};

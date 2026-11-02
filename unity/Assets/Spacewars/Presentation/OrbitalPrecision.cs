@@ -10,18 +10,20 @@ namespace Spacewars.Presentation
         static readonly System.Collections.Generic.Dictionary<string, Texture2D> Textures = new();
         readonly Image artwork;
         readonly ModelPortrait portrait;
-        readonly VisualElement emblem;
+        readonly ResearchIcon emblem;
         readonly VisualElement progressOverlay;
         string kind;
         Color tint = OrbitalTheme.Ink;
+        readonly RadialCardProfile profile=RadialCardProfile.Load();
+        public static bool IsUtilityArtwork(string key)=>key=="repair"||key=="sale"||key=="rally";
         public string Kind { get => kind; set { if(kind==value)return;kind=value;UpdateArtwork(); } }
-        public Color Tint { get => tint; set { tint=value;artwork.tintColor=new Color(value.r/OrbitalTheme.Ink.r,value.g/OrbitalTheme.Ink.g,value.b/OrbitalTheme.Ink.b,value.a);portrait.SetOutlineColor(value==OrbitalTheme.Ink?new Color(.60f,.72f,.77f,.65f):value);emblem.MarkDirtyRepaint(); } }
+        public Color Tint { get => tint; set { tint=value;float brightness=IsUtilityArtwork(kind)?profile.utilityIconBrightness:1;artwork.tintColor=new Color(value.r/OrbitalTheme.Ink.r*brightness,value.g/OrbitalTheme.Ink.g*brightness,value.b/OrbitalTheme.Ink.b*brightness,value.a);portrait.SetOutlineColor(value==OrbitalTheme.Ink?new Color(.60f,.72f,.77f,.65f):value);emblem.Set(kind,tint!=OrbitalTheme.Muted); } }
         double progress=-1;
         public double Progress { get => progress; set { progress=value;progressOverlay.MarkDirtyRepaint(); } }
         public static Texture2D TextureFor(string kind)
         {
             var portrait=DockArtwork.TextureFor(kind);if(portrait!=null)return portrait;
-            string asset=kind switch { "credits" or "income" or "sale" => "dollar", "science" => "scientific-center", "building" => "headquarters", _ => kind };
+            string asset=kind switch { "reinforced-concrete-2" => "reinforced-concrete", "credits" or "income" => "dollar", "science" => "scientific-center", "building" => "headquarters", _ => kind };
             if(string.IsNullOrEmpty(asset))return null;
             if(!Textures.TryGetValue(asset,out var texture)){
                 texture=Resources.Load<Texture2D>("OrbitalIcons/"+asset);
@@ -36,9 +38,9 @@ namespace Spacewars.Presentation
             artwork.style.position=Position.Absolute;artwork.style.left=0;artwork.style.right=0;artwork.style.top=0;artwork.style.bottom=0;
             Add(artwork);
             portrait=new ModelPortrait("glyph-portrait"){name="glyph-model"};
-            emblem=new VisualElement{name="glyph-emblem",pickingMode=PickingMode.Ignore};
+            emblem=new ResearchIcon{name="glyph-emblem",pickingMode=PickingMode.Ignore};
             foreach(var layer in new VisualElement[]{portrait,emblem}){layer.style.position=Position.Absolute;layer.style.left=layer.style.right=layer.style.top=layer.style.bottom=0;Add(layer);}
-            emblem.generateVisualContent+=ctx=>{if(ResearchEmblem.Supports(this.kind))ResearchEmblem.Draw(ctx,this.kind,emblem.contentRect,tint==OrbitalTheme.Ink?OrbitalTheme.Cyan:tint);};
+
             // Paint after the texture so opaque silhouette pixels cannot hide the existing arc.
             progressOverlay=new VisualElement {name="glyph-progress",pickingMode=PickingMode.Ignore};
             progressOverlay.style.position=Position.Absolute;progressOverlay.style.left=0;progressOverlay.style.right=0;progressOverlay.style.top=0;progressOverlay.style.bottom=0;
@@ -53,13 +55,14 @@ namespace Spacewars.Presentation
             emblem.style.display=isEmblem?DisplayStyle.Flex:DisplayStyle.None;
             artwork.image=model||isEmblem?null:TextureFor(kind);
             artwork.style.display=model||isEmblem?DisplayStyle.None:DisplayStyle.Flex;
-            Tint=tint;emblem.MarkDirtyRepaint();
+            Tint=tint;emblem.Set(kind,tint!=OrbitalTheme.Muted);
         }
         public void Set(string kind,Color tint,double progress=-1){Kind=kind;Tint=tint;Progress=progress;MarkDirtyRepaint();}
         void Draw(MeshGenerationContext ctx)
         {
             float w=contentRect.width,h=contentRect.height;
-            if(w<=0||h<=0||Progress<0)return;
+            if(w<=0||h<=0)return;
+            if(Progress<0)return;
             var p=ctx.painter2D;p.strokeColor=OrbitalTheme.Cyan;p.lineWidth=3;p.BeginPath();
             p.Arc(new Vector2(w/2,h/2),Mathf.Min(w,h)*.47f,-90,-90+(float)Math.Min(1,Progress)*360);p.Stroke();
         }
@@ -74,6 +77,7 @@ namespace Spacewars.Presentation
             Spacewars.Simulation.PlayableBuildingKind.SentryTurret=>"sentry-turret",
             Spacewars.Simulation.PlayableBuildingKind.Headquarters=>"headquarters",
             Spacewars.Simulation.PlayableBuildingKind.Outpost=>"outpost",
+            Spacewars.Simulation.PlayableBuildingKind.RelayTower=>"relay-tower",
             Spacewars.Simulation.PlayableBuildingKind.Mine=>"mine",
             Spacewars.Simulation.PlayableBuildingKind.Hangar=>"hangar",
             Spacewars.Simulation.PlayableBuildingKind.Factory=>"factory",
@@ -81,12 +85,20 @@ namespace Spacewars.Presentation
             Spacewars.Simulation.PlayableBuildingKind.ScientificCenter=>"science",
             _=>"building"
         };
+        public static string BuildingArtwork(Spacewars.Simulation.PlayableBuildingKind kind,bool upgraded=false)=>upgraded?kind switch {
+            Spacewars.Simulation.PlayableBuildingKind.Factory=>"factoryUpgraded",
+            Spacewars.Simulation.PlayableBuildingKind.Hangar=>"hangarUpgraded",
+            Spacewars.Simulation.PlayableBuildingKind.Refinery=>"refineryUpgraded",
+            Spacewars.Simulation.PlayableBuildingKind.ScientificCenter=>"scientificCenterUpgraded",
+            _=>BuildingGlyph(kind)
+        }:BuildingGlyph(kind);
+        public static string BuildingArtwork(Spacewars.Simulation.PlayableBuildingSnapshot building)=>BuildingArtwork(building.Kind,building.ModelUpgraded);
         public static string ResearchGlyph(Spacewars.Simulation.PlayableResearchKind kind)=>kind switch {
             Spacewars.Simulation.PlayableResearchKind.TankChassis=>"chassis",
             Spacewars.Simulation.PlayableResearchKind.ExplorerAssaultGuns=>"assault",
             Spacewars.Simulation.PlayableResearchKind.ShkvalGuidance=>"guidance",
             Spacewars.Simulation.PlayableResearchKind.ReinforcedConcrete=>"reinforced-concrete",
-            Spacewars.Simulation.PlayableResearchKind.AdvancedReinforcedConcrete=>"reinforced-concrete",
+            Spacewars.Simulation.PlayableResearchKind.AdvancedReinforcedConcrete=>"reinforced-concrete-2",
             Spacewars.Simulation.PlayableResearchKind.HawkSalvoSystems=>"hawk-salvo",
             Spacewars.Simulation.PlayableResearchKind.ImprovedWeaponSystems=>"weapon-systems-1",
             Spacewars.Simulation.PlayableResearchKind.AdvancedWeaponSystems=>"weapon-systems-2",
@@ -94,7 +106,7 @@ namespace Spacewars.Presentation
             Spacewars.Simulation.PlayableResearchKind.AdvancedDefensiveSystems=>"defensive-systems-2",
             Spacewars.Simulation.PlayableResearchKind.UltimateWeaponSystems=>"weapon-systems-3",
             Spacewars.Simulation.PlayableResearchKind.UltimateDefensiveSystems=>"defensive-systems-3",
-            Spacewars.Simulation.PlayableResearchKind.ScientificCenterUpgrade=>"upgrade",
+            Spacewars.Simulation.PlayableResearchKind.ScientificCenterUpgrade=>"scientificCenterUpgraded",
             _=>"science"
         };
         public static string Glyph(string id)
@@ -105,8 +117,8 @@ namespace Spacewars.Presentation
             return suffix switch {
                 "rally"=>"rally", "sale"=>"sale", "repair"=>"repair", "upgrade"=>"upgrade", "producer-upgrade"=>"upgrade",
                 "tank"=>"tank", "explorer"=>"explorer", "shkval"=>"shkval", "hawk"=>"hawk",
-                "tank-chassis"=>"chassis", "explorer-assault-guns"=>"assault", "shkval-guidance"=>"guidance", "HawkSalvoSystems"=>"hawk-salvo", "ReinforcedConcrete"=>"reinforced-concrete", "AdvancedReinforcedConcrete"=>"reinforced-concrete",
-                "UltimateWeaponSystems"=>"weapon-systems-3", "UltimateDefensiveSystems"=>"defensive-systems-3", "ScientificCenterUpgrade"=>"upgrade",
+                "tank-chassis"=>"chassis", "explorer-assault-guns"=>"assault", "shkval-guidance"=>"guidance", "HawkSalvoSystems"=>"hawk-salvo", "ReinforcedConcrete"=>"reinforced-concrete", "AdvancedReinforcedConcrete"=>"reinforced-concrete-2",
+                "UltimateWeaponSystems"=>"weapon-systems-3", "UltimateDefensiveSystems"=>"defensive-systems-3", "ScientificCenterUpgrade"=>"scientificCenterUpgraded",
                 "ImprovedWeaponSystems"=>"weapon-systems-1", "AdvancedWeaponSystems"=>"weapon-systems-2",
                 "ImprovedDefensiveSystems"=>"defensive-systems-1", "AdvancedDefensiveSystems"=>"defensive-systems-2",
                 _=>"building"

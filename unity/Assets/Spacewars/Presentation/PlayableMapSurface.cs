@@ -44,6 +44,7 @@ namespace Spacewars.Presentation
             var basaltArt=p.AuthoredMap is BasaltCrownMap?BasaltCrownArtProfile.Load():null;
             var basaltMines=p.AuthoredMap is BasaltCrownMap bm?BasaltCrownDetails.Mines(bm,p):null;
             var sitePads=p.AuthoredMap is BasaltCrownMap padMap?BasaltCrownDetails.SitePads(padMap,p,basaltArt):Array.Empty<BasaltCrownDetails.SitePad>();
+            var cityPads=p.AuthoredMap is AntennaCityMap cityPadMap?AntennaCityPads.Create(cityPadMap,p):Array.Empty<AntennaCityPads.Pad>();
             var foundryArt=p.AuthoredMap is FoundryMap?FoundrySurfaceProfile.Load():null;
             var heights=p.AuthoredMap==null?null:new float[terrain.Length];
             var dockMap=p.AuthoredMap as NullDockMap;
@@ -82,6 +83,10 @@ namespace Spacewars.Presentation
                             color=Color.Lerp(color,Color.white,dockArt.siteDiskLift);
                     }
                     terrain[y*size+x]=mapSupport==null?Color.clear:obstacle?new Color(.22f,.28f,.32f):color;
+                }
+                else if(p.AuthoredMap is AntennaCityMap city){
+                    var pad=cityPads.FirstOrDefault(a=>a.Outer.Contains(terrainPoint));
+                    terrain[y*size+x]=mapSupport==null?Color.clear:obstacle?PlayableWorld.CityBlock:pad!=null?AntennaCityPads.At(pad,terrainPoint):mapSupport.Id.Contains("ramp")?PlayableWorld.CityRamp:mapSupport.Height>0?PlayableWorld.CityPlaza:city.Streets.Any(r=>r.Contains(terrainPoint))?PlayableWorld.CityRoad:PlayableWorld.CityGround;
                 }
                 else if(p.AuthoredMap is CrimsonGroveMap){var art=groveArt;terrain[y*size+x]=mapSupport==null?Color.clear:obstacle?art.Leaves:art.Ground;}
                 else if(p.AuthoredMap is WhiteMeridianMap meridian){
@@ -171,6 +176,11 @@ namespace Spacewars.Presentation
         private IReadOnlyList<PlayableMapMark> marks;
         private HashSet<int> selected;
         private NavPoint[] footprint;
+        private NavPoint? scanPreview;private double scanRadius;private IReadOnlyList<OrbitalScanLine> scanLines=Array.Empty<OrbitalScanLine>();
+        private IReadOnlyList<OrbitalScanTriangle> scanTriangles=Array.Empty<OrbitalScanTriangle>();
+        public void SetScanTriangles(IReadOnlyList<OrbitalScanTriangle> triangles){scanTriangles=triangles;MarkDirtyRepaint();}
+        public void SetScanLines(IReadOnlyList<OrbitalScanLine> lines){scanLines=lines;MarkDirtyRepaint();}
+        public void SetScanPreview(NavPoint? point,double radius){scanPreview=point;scanRadius=radius;MarkDirtyRepaint();}
         private PlayableBuildingSnapshot[] rallyBuildings=Array.Empty<PlayableBuildingSnapshot>();
         public int RallyFlagCount=>rallyBuildings.Length;
         private PlayableMapTransform transform;
@@ -179,10 +189,21 @@ namespace Spacewars.Presentation
             this.profile=profile;this.terrain=terrain;pickingMode=PickingMode.Ignore;style.overflow=Overflow.Hidden;
             generateVisualContent+=Draw;orderMarkers=new PlayableOrderMarkerLayer(location=>Point(location.Position),true);Add(orderMarkers);
         }
-        public void Rebind(PlayableProfile next,Texture2D texture){profile=next;terrain=texture;marks=null;campaignGoals=null;footprint=null;rallyBuildings=Array.Empty<PlayableBuildingSnapshot>();MarkDirtyRepaint();}
+        readonly Dictionary<int,PlayableMapMark> relayMemory=new Dictionary<int,PlayableMapMark>();
+        PlayableOwner relayViewer;long relayGeneration=-1,relayTick=-1;
+        public void Rebind(PlayableProfile next,Texture2D texture){relayMemory.Clear();profile=next;terrain=texture;marks=null;campaignGoals=null;footprint=null;rallyBuildings=Array.Empty<PlayableBuildingSnapshot>();MarkDirtyRepaint();}
         public void Set(PlayableSnapshot view,HashSet<int> selection,NavPoint[] camera)
         {
-            transform=new PlayableMapTransform(view.Vision.HalfWidth,view.Vision.HalfDepth);marks=PlayableMapView.Marks(view);selected=selection;footprint=camera;
+            scanLines=view.ScanLines;scanTriangles=view.ScanTriangles;
+            transform=new PlayableMapTransform(view.Vision.HalfWidth,view.Vision.HalfDepth);marks=PlayableMapView.Marks(view);
+            if(relayGeneration!=view.Generation||relayViewer!=view.Owner||view.Tick<relayTick)relayMemory.Clear();
+            relayGeneration=view.Generation;relayViewer=view.Owner;relayTick=view.Tick;
+            marks=marks.Select(m=>{
+                if(m.Kind!=PlayableBuildingKind.RelayTower)return m;
+                bool visible=view.Sites.Any(s=>s.Site.Id==-m.Id);
+                if(visible){relayMemory[m.Id]=m;return m;}
+                return relayMemory.TryGetValue(m.Id,out var remembered)?new PlayableMapMark(m.Id,m.Position,m.Kind,MapMarkState.Memory,remembered.Owner):m;
+            }).ToArray();selected=selection;footprint=camera;
             rallyBuildings=view.Buildings.Where(b=>PlayableMenuDescriptions.RallyProducer(b.Kind)&&selection.Contains(b.Id)&&b.Owner==view.Owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.HasRally==true&&b.PrivateState.Lifecycle?.Selling!=true).ToArray();MarkDirtyRepaint();
         }
         public void SetPublic(IReadOnlyList<PlayableMapMark> publicMarks,double extent)
@@ -218,7 +239,7 @@ namespace Spacewars.Presentation
                 float radius=unit?Mathf.Clamp((float)(profile.MinimapUnitMarkerSize*w/(2*transform.HalfWidth)),1.25f,2f):
                     m.Kind==PlayableBuildingKind.Headquarters?headquartersRadius:
                     m.Kind==PlayableBuildingKind.Outpost?headquartersRadius*.62f:
-                    m.Kind==PlayableBuildingKind.Mine?headquartersRadius*.54f:
+                    (m.Kind==PlayableBuildingKind.Mine||m.Kind==PlayableBuildingKind.RelayTower)?headquartersRadius*.54f:
                     Mathf.Clamp(headquartersRadius*.38f*(float)profile.MinimapMarkerSize,1.8f,headquartersRadius*.48f);
                 Color color=Owner(m.Owner);if(m.State==MapMarkState.Memory)color=Color.Lerp(color,Color.gray,(float)profile.FogMemoryDesaturation)*(float)profile.FogMemoryBrightness;
                 painter.strokeColor=unit?color:selected.Contains(m.Id)?Color.white:new Color(.13f,.19f,.19f);
@@ -232,6 +253,7 @@ namespace Spacewars.Presentation
                         if(i==0)painter.MoveTo(corner);else painter.LineTo(corner);
                     }
                 }
+                else if(m.Kind==PlayableBuildingKind.RelayTower){painter.MoveTo(p+new Vector2(0,-radius));painter.LineTo(p+new Vector2(radius*.8f,radius));painter.LineTo(p+new Vector2(-radius*.8f,radius));}
                 else if(m.Kind==PlayableBuildingKind.Outpost){painter.MoveTo(p+new Vector2(-radius,-radius));painter.LineTo(p+new Vector2(radius,-radius));painter.LineTo(p+new Vector2(radius,radius));painter.LineTo(p+new Vector2(-radius,radius));}
                 else{painter.MoveTo(p+new Vector2(-radius,-radius));painter.LineTo(p+new Vector2(radius,-radius));painter.LineTo(p+new Vector2(radius,radius));painter.LineTo(p+new Vector2(-radius,radius));}
                 painter.ClosePath();
@@ -249,6 +271,13 @@ namespace Spacewars.Presentation
                 painter.BeginPath();painter.MoveTo(at+new Vector2(0,-size*2));painter.LineTo(at+new Vector2(size,-size*1.5f));painter.LineTo(at+new Vector2(0,-size));painter.ClosePath();painter.Fill();
             }
             if(campaignGoals!=null)foreach(var goal in campaignGoals.Where(g=>!g.Complete)){var p=Point(goal.Point);painter.strokeColor=Color.cyan;painter.fillColor=Color.cyan;painter.lineWidth=2;painter.BeginPath();painter.MoveTo(p);painter.LineTo(p+new Vector2(0,-14));painter.LineTo(p+new Vector2(9,-10));painter.LineTo(p+new Vector2(0,-6));painter.Stroke();}
+            float scanWidth=(float)profile.CopyData().orbitalScanLineWidth;
+            PlayableBootstrap.DrawScanFaces(ctx,scanTriangles,Point);
+            foreach(var segment in scanLines)PlayableBootstrap.DrawScanLine(painter,Point(segment.From),Point(segment.To),(float)segment.Opacity,scanWidth);
+            if(scanPreview.HasValue)for(int i=0;i<128;i++){
+                NavPoint At(int step)=>new NavPoint(scanPreview.Value.X+Math.Cos(step*Math.PI/64)*scanRadius,scanPreview.Value.Z+Math.Sin(step*Math.PI/64)*scanRadius);
+                PlayableBootstrap.DrawScanLine(painter,Point(At(i)),Point(At(i+1)),1,scanWidth);
+            }
             foreach(var signal in teamSignals)TeamSignalArtwork.Mark(painter,Point(signal.Point),signal.Kind,(float)profile.TeamSignalMapPixels,(float)signal.Alpha(signalTick,profile),true);
             if(footprint!=null){painter.BeginPath();painter.strokeColor=Color.white;painter.lineWidth=(float)profile.MinimapCameraStroke;for(int i=0;i<footprint.Length;i++){if(i==0)painter.MoveTo(new Vector2(Mathf.Clamp(Point(footprint[i]).x,0,w),Mathf.Clamp(Point(footprint[i]).y,0,h)));else painter.LineTo(new Vector2(Mathf.Clamp(Point(footprint[i]).x,0,w),Mathf.Clamp(Point(footprint[i]).y,0,h)));}painter.ClosePath();painter.Stroke();}
         }

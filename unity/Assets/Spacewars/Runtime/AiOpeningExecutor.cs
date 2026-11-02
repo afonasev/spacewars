@@ -152,7 +152,9 @@ namespace Spacewars.Runtime
         }
         internal PlayableProfile PlayableProfileForObservation{get;set;}
         internal int RequiredHomeRefineryCount(AiProfile p)=>opening.Opening==PlayableAiOpening.GreedySafe||greedyAir?(int)V(p,"greedyIncome"):teamAirWinner==opening.OwnerId||opening.Opening==PlayableAiOpening.Safe||opening.Opening==PlayableAiOpening.Air?(int)V(p,"doubleIncome"):1;
-        internal bool CanFundIncomeCapture(PlayableAiObservation o,AiProfile p)=>Income(o)>0;
+        // A new strategic savings clock starts only after the actual chosen
+        // home producer and required income are ready (Hangar for Air).
+        internal bool CanFundIncomeCapture(PlayableAiObservation o,AiProfile p)=>HomeEconomyReady(o,p);
         internal bool HomeEconomyReady(PlayableAiObservation o,AiProfile p)=>producerChosen&&Ready(o,Producer)&&Income(o)>=RequiredHomeRefineryCount(p);
         public bool MissingEssentialEconomy(PlayableAiObservation o,AiProfile p)=>!HomeEconomyReady(o,p)||!initialForceFulfilled||ReinforcementPending(o);
         internal bool InitialGrowthCommitmentPending(PlayableAiObservation o,AiProfile p)=>HomeEconomyReady(o,p)&&(!initialForceFulfilled||ReinforcementPending(o));

@@ -27,8 +27,15 @@ namespace Spacewars.Presentation
     // owner projection. Presentation never enumerates authority/private opponents.
     public static class OfflinePadWorldActions
     {
+        // Presentation order only; authority, prerequisites and research identifiers stay unchanged.
+        public static int ResearchMenuOrder(PlayableResearchKind kind)=>kind switch {
+            PlayableResearchKind.TankChassis=>0,PlayableResearchKind.ExplorerAssaultGuns=>1,
+            PlayableResearchKind.ShkvalGuidance=>2,PlayableResearchKind.HawkSalvoSystems=>3,
+            _=>PlayableResearchRules.Weapon(kind)?4:PlayableResearchRules.Defense(kind)?5:PlayableResearchRules.Concrete(kind)?6:7
+        };
+        public static bool ShkvalAvailable(PlayableSnapshot view)=>view.Buildings.Any(b=>b.Owner==view.Owner&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.Phase==ConstructionPhase.Ready&&b.Health>0&&b.PrivateState?.Lifecycle?.Selling!=true);
         public static string Name(PlayableEntityKind kind)=>kind==PlayableEntityKind.Hawk?"Ястреб":kind==PlayableEntityKind.Explorer?"Исследователь":kind==PlayableEntityKind.Shkval?"Шквал":"Танк";
-        public static string Name(PlayableBuildingKind kind)=>kind==PlayableBuildingKind.GaussTower?"Гаусс-башня":kind==PlayableBuildingKind.RepairTower?"Ремонтная вышка":kind==PlayableBuildingKind.SentryTurret?"Пулемётная турель":kind==PlayableBuildingKind.Hangar?"Ангар":kind==PlayableBuildingKind.Headquarters?"Штаб":kind==PlayableBuildingKind.Outpost?"Форпост":kind==PlayableBuildingKind.Mine?"Шахта":kind==PlayableBuildingKind.Factory?"Фабрика":kind==PlayableBuildingKind.Refinery?"Завод переработки":"Научный центр";
+        public static string Name(PlayableBuildingKind kind)=>kind==PlayableBuildingKind.GaussTower?"Гаусс-башня":kind==PlayableBuildingKind.RepairTower?"Ремонтная вышка":kind==PlayableBuildingKind.SentryTurret?"Пулемётная турель":kind==PlayableBuildingKind.Hangar?"Ангар":kind==PlayableBuildingKind.Headquarters?"Штаб":kind==PlayableBuildingKind.Outpost?"Форпост":kind==PlayableBuildingKind.RelayTower?"Вышка связи":kind==PlayableBuildingKind.Mine?"Шахта":kind==PlayableBuildingKind.Factory?"Фабрика":kind==PlayableBuildingKind.Refinery?"Завод переработки":"Научный центр";
         private static OfflinePadActionCommand Command(PlayableCommandKind kind,int building,PlayableEntityKind unit=PlayableEntityKind.Tank,PlayableResearchKind research=PlayableResearchKind.TankChassis)=>new OfflinePadActionCommand{Kind=kind,Entities=new[]{building},Unit=unit,Research=research};
         public static OfflinePadAction[] Building(PlayableSnapshot view,PlayableProfile profile,int id,bool includeRally=true,bool freeEconomy=false)
         {
@@ -39,10 +46,10 @@ namespace Spacewars.Presentation
                 if(b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar){
                     int MenuOrder(PlayableEntityKind unit)=>unit==PlayableEntityKind.Explorer?profile.ExplorerProductionMenuOrder:unit==PlayableEntityKind.Shkval?profile.ShkvalProductionMenuOrder:profile.TankProductionMenuOrder;
                     foreach(var unit in (b.Kind==PlayableBuildingKind.Hangar?new[]{PlayableEntityKind.Hawk}:new[]{PlayableEntityKind.Explorer,PlayableEntityKind.Tank,PlayableEntityKind.Shkval}).OrderBy(MenuOrder)){
-                        double cost=PlayableUnitRules.Cost(profile,unit);bool manual=(freeEconomy||view.ExactCredits>=cost)&&state.Orders.Count<6;
-                        var action=new OfflinePadAction(id+":"+(unit==PlayableEntityKind.Hawk?"hawk":unit==PlayableEntityKind.Explorer?"explorer":unit==PlayableEntityKind.Shkval?"shkval":"tank"),"Произвести: "+Name(unit),true,PlayableMenuDescriptions.Unit(profile,unit,view.OwnerResearch,freeEconomy:freeEconomy)+(manual?"":(!freeEconomy&&view.ExactCredits<cost?" · Недостаточно кредитов для разовой покупки":" · Очередь заполнена")),"repeat");
+                        double cost=PlayableUnitRules.Cost(profile,unit);bool prerequisite=unit!=PlayableEntityKind.Shkval||ShkvalAvailable(view);bool manual=prerequisite&&(freeEconomy||view.ExactCredits>=cost)&&state.Orders.Count<6;
+                        var action=new OfflinePadAction(id+":"+(unit==PlayableEntityKind.Hawk?"hawk":unit==PlayableEntityKind.Explorer?"explorer":unit==PlayableEntityKind.Shkval?"shkval":"tank"),"Произвести: "+Name(unit),prerequisite||(state.Repeat&&state.RepeatKind==unit),PlayableMenuDescriptions.Unit(profile,unit,view.OwnerResearch,freeEconomy:freeEconomy)+(manual?"":(!prerequisite?" · Нужен готовый собственный Научный центр":!freeEconomy&&view.ExactCredits<cost?" · Недостаточно кредитов для разовой покупки":" · Очередь заполнена")),"repeat");
                         action.Price=freeEconomy?null:(double?)cost;action.Command=manual?Command(PlayableUnitRules.ProductionCommand(unit),id,unit):null;
-                        action.HoldCommand=Command(PlayableCommandKind.ToggleRepeatProduction,id,unit);action.Repeat=state.Repeat&&state.RepeatKind==unit;if(action.Repeat)action.Label+=" ∞";
+                        action.HoldCommand=prerequisite||(state.Repeat&&state.RepeatKind==unit)?Command(PlayableCommandKind.ToggleRepeatProduction,id,unit):null;action.Repeat=state.Repeat&&state.RepeatKind==unit;if(action.Repeat)action.Label+=" ∞";
                         var active=state.Orders.FirstOrDefault(o=>!o.IsUpgrade&&o.Kind==unit&&o.Active);if(active!=null)action.Progress=active.Progress;
                         if(state.Orders.Count>0&&!action.Repeat)action.Detail+="\nПовтор сохраняет порядок общей очереди";
                         if(action.Repeat&&!action.Progress.HasValue)action.Detail+=freeEconomy?" · ∞: ожидание лимита или выпуска":" · ∞: ожидание ресурсов или лимита";actions.Add(action);
@@ -56,7 +63,7 @@ namespace Spacewars.Presentation
                     actions.Add(new OfflinePadAction(id+":producer-upgrade",cancel?"Отменить улучшение":state.Upgrade?.Complete==true?"Здание улучшено":"Улучшить здание",enabled,upgradeDetail){Price=freeEconomy?null:(double?)profile.ProducerUpgradeCost(b.Kind),Progress=upgrade?.Active==true?(double?)upgrade.Progress:null,Command=enabled?new OfflinePadActionCommand{Kind=cancel?PlayableCommandKind.CancelProductionOrder:PlayableCommandKind.UpgradeProducer,Entities=new[]{id},ProductionOrderId=upgrade?.Id??0}:null});
                 }
                 if(b.Kind==PlayableBuildingKind.ScientificCenter){
-                    foreach(var kind in System.Enum.GetValues(typeof(PlayableResearchKind)).Cast<PlayableResearchKind>()){
+                    foreach(var kind in System.Enum.GetValues(typeof(PlayableResearchKind)).Cast<PlayableResearchKind>().OrderBy(ResearchMenuOrder)){
                         // selectedWorldActions excludes a researched/queued action
                         // whose upgradeCommand is absent; do not retain a fake sector.
                         if(view.OwnerResearch.Any(o=>o.Kind==kind&&(!PlayableResearchRules.Local(kind)||o.CenterId==id))||!PlayableResearchRules.Prerequisite(kind,view.OwnerResearch))continue;
@@ -82,7 +89,7 @@ namespace Spacewars.Presentation
         }
         public static OfflinePadAction[] Build(PlayableSnapshot view,PlayableProfile profile,int siteId,int slotId,bool freeEconomy=false)
         {
-            var site=view.Sites.FirstOrDefault(s=>s.Site.Id==siteId);if(site==null)return Array.Empty<OfflinePadAction>();
+            var site=view.Sites.FirstOrDefault(s=>s.Site.Id==siteId);if(site==null||site.Site.Kind==PlayableBuildingKind.RelayTower)return Array.Empty<OfflinePadAction>();
             bool occupied=view.Buildings.Any(b=>b.SiteId==siteId&&b.SlotId==slotId);
             if(occupied)return Array.Empty<OfflinePadAction>();
             if(slotId!=0&&(site.Owner!=view.Owner||!site.Ready||!site.Site.Slots.Concat(site.Site.DefenseSlots(profile)).Any(s=>s.Id==slotId)||!view.Buildings.Any(b=>b.Id==site.CenterId&&b.Owner==view.Owner&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true)))return Array.Empty<OfflinePadAction>();

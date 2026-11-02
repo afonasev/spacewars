@@ -25,6 +25,24 @@ namespace Spacewars.Tests.EditMode
         }
         private PlayableCommandStatus Attack(int unit,int target)
         {var args=new object[]{new PlayableCommand(1,1,"player-1",PlayableCommandKind.Attack,new[]{unit},targetId:target),null};return (PlayableCommandStatus)Type.GetMethod("Apply",Flags).Invoke(domain,args);}
+        [TestCase("own",true)][TestCase("visible-enemy",true)][TestCase("remembered-enemy",false)][TestCase("hidden-enemy",false)]
+        public void BuildingProjectileProducerIdentityRespectsCurrentVisibility(string mode,bool expected)
+        {
+            var full=(PlayableSnapshot)Call("Snapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+            var source=full.Buildings.First(b=>b.Owner==(mode=="own"?PlayableOwner.Player:PlayableOwner.Enemy));
+            var own=View().Entities.First(u=>u.Owner==PlayableOwner.Player);
+            if(mode=="visible-enemy"||mode=="remembered-enemy")
+            {
+                int scout=(int)Call("SpawnUnit",new NavPoint(source.Position.X-8,source.Position.Z),PlayableOwner.Player,PlayableEntityKind.Explorer);
+                Call("RefreshVision");Assert.True(View().Vision.IsVisible(source.Position));Assert.True(View().Buildings.Any(b=>b.Id==source.Id));
+                if(mode=="remembered-enemy"){Call("Damage",scout,100000);Call("RefreshVision");Assert.False(View().Vision.IsVisible(source.Position));Assert.True(View().Vision.KnownBuildings.Any(b=>b.Id==source.Id),"Remembered identity alone must not reveal the firing building.");}
+            }
+            var list=(IList)Type.GetField("projectiles",Flags).GetValue(domain);var type=Type.GetNestedType("Projectile",BindingFlags.NonPublic);var projectile=Activator.CreateInstance(type);
+            void Set(string field,object value)=>type.GetField(field).SetValue(projectile,value);
+            Set("Id",701);Set("Owner",source.Id);Set("Target",own.Id);Set("Faction",source.Owner);Set("Position",own.Position);Set("Kind",PlayableEntityKind.Explorer);list.Add(projectile);
+            var projected=View().Projectiles.Single(p=>p.Id==701);Assert.AreEqual(expected?source.Id:0,projected.OwnerId);Assert.AreEqual(own.Id,projected.TargetId);
+            Assert.AreEqual(source.Id,((PlayableSnapshot)Call("Snapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7)).Projectiles.Single(p=>p.Id==701).OwnerId,"The authority snapshot always retains the actual producer.");
+        }
         [Test] public void ProjectileVisibilityAndEndpointIdentitiesDoNotRevealHiddenActors()
         {
             var list=(IList)Type.GetField("projectiles",Flags).GetValue(domain);var projectileType=Type.GetNestedType("Projectile",BindingFlags.NonPublic);
@@ -84,6 +102,7 @@ namespace Spacewars.Tests.EditMode
         [Test] public void EnemyResearchAdmissionUsesOwnCenterAndPrivateQueue()
         {
             Call("AddBuilding",PlayableOwner.Enemy,PlayableBuildingKind.ScientificCenter,new NavPoint(25,8),true);
+            Call("AddBuilding",PlayableOwner.Enemy,PlayableBuildingKind.Factory,new NavPoint(25,16),true);
             var enemy=View(PlayableOwner.Enemy);
             var center=enemy.Buildings.Single(b=>b.Owner==PlayableOwner.Enemy&&b.Kind==PlayableBuildingKind.ScientificCenter);
             Assert.AreEqual(PlayableCommandStatus.InvalidEntity,ApplyOwner(new PlayableCommand(1,1,"player-1",PlayableCommandKind.QueueResearch,new[]{center.Id})));
@@ -125,6 +144,32 @@ namespace Spacewars.Tests.EditMode
             Assert.True(identity.Matches(enemy));Assert.False(identity.Matches(player));
             var colonProfileIdentity="observation-13:local:main@1:enemy-1:1:2:3:7";
             Assert.AreEqual("enemy-1",new PlayableAiTraceRecord(colonProfileIdentity,1,0,0,0,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"",sourceIdentity:PlayableAiOpeningComposition.SourceIdentity).OwnerId);
+        }
+        [TestCase(false)][TestCase(true)]
+        public void ArrivedWithdrawalProjectsNextHomeLegUnlessAlreadyAtHome(bool atHome)
+        {
+            var p=PlayableProfile.Default;var initial=View();var unit=initial.Entities.Single();var home=initial.Buildings.Single(b=>b.Owner==PlayableOwner.Player);
+            var from=new NavPoint(home.Position.X+12,home.Position.Z+6);double radius=PlayableUnitRules.Radius(p,unit.Kind);
+            Nav.Crowd.Remove(unit.Id);Nav.Crowd.Add(unit.Id,from,radius,p.Navigation.TankSpeed,p.Navigation.TankTurnSpeed);
+            var request=new PlayableRouteRequest(unit.Id,PlayableRouteTargetKind.FriendlyAnchor,home.Id,1,0,from,radius,home.Position);
+            var admitted=RouteView(request).RouteProofs.Single();var stopped=atHome?admitted.Goal:from;
+            if(atHome){Nav.Crowd.Remove(unit.Id);Nav.Crowd.Add(unit.Id,stopped,radius,p.Navigation.TankSpeed,p.Navigation.TankTurnSpeed);}
+            var actor=Nav.Crowd.Units.Single(u=>u.Id==unit.Id);
+            typeof(NavUnit).GetProperty("Goal").SetValue(actor,stopped);
+            typeof(NavUnit).GetProperty("Outcome").SetValue(actor,NavigationOutcome.Arrived);
+            var units=(IDictionary)Type.GetField("units",Flags).GetValue(domain);var body=units[unit.Id];
+            body.GetType().GetField("LastOrder").SetValue(body,new PlayableOrderStamp(unit.Id,PlayableOwner.Player,1,1,1,0,PlayableOrderOrigin.Ai,PlayableCommandKind.Move,PlayableAiOpeningComposition.SourceIdentity,1,1));
+            var registry=new AiArmyRegistryState{OwnerId="player-1",Generation=1,Armies=new[]{new AiArmyState{Id=1,OwnerId="player-1",TacticalOwner=AiArmyPlanner.Policy,Phase=AiArmyPhase.Retreating,Members=new[]{unit.Id},Reinforcements=Array.Empty<int>()}}};
+            try
+            {
+                var view=View();var vision=Call("Vision",PlayableOwner.Player);
+                request=new PlayableRouteRequest(unit.Id,PlayableRouteTargetKind.FriendlyAnchor,home.Id,1,0,stopped,radius,home.Position);
+                var proofs=(PlayableRouteProof[])Call("ProjectRoutes",PlayableOwner.Player,new[]{request},vision,view.Entities,view.Buildings,registry,false);
+                var proof=proofs.Single();Assert.True(AiTacticalExecutor.WithdrawalRoute(PlayableAiObservation.From(view),proof,p));
+                Assert.AreEqual(atHome,proof.Goal.Equals(stopped),"Only actual home arrival retains the stopped native goal; an intermediate arrival must get a new certified home leg.");
+                Assert.AreEqual(home.Id,proof.TargetId);Assert.AreEqual(proof.Goal,proof.Path.Last());
+            }
+            finally{Nav.ReleaseCommittedHostRoot();Call("DestroyOwnedNavigation");}
         }
         [Test] public void RouteProofUsesCurrentNavigationGeometryAndOwnerVisibleSemanticAnchor()
         {

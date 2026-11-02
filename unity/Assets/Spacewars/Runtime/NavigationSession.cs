@@ -46,6 +46,7 @@ namespace Spacewars.Runtime
         internal NavigationCaptureDtoStorage CaptureDto;
         internal NavigationHostRoot CaptureRoot;
         internal NavPagedList<long> CaptureBank,PreparedBank;
+        internal NavigationMotionSources CaptureMotionSources,PreparedMotionSources;
         internal NavigationAuthorityOwners CaptureAuthority;
         internal NavigationTrafficAuthority CaptureTraffic,PreparedTraffic;
         internal NavigationArrivalCatalog CaptureArrivalCatalog;
@@ -56,7 +57,7 @@ namespace Spacewars.Runtime
         internal int[][] CaptureExtraLayouts;internal int[] CaptureAnswerTrackingLayout;
         internal NavNameReference[] CaptureCrowdNames;internal int[] CaptureCrowdKeys,CaptureCrowdFlags;internal NavPoint[] CaptureCrowdPoints;
         private static void ReleasePins(NavOwnedStorage[] entries){if(entries!=null)foreach(var entry in entries)entry?.Release();}
-        internal void ReleaseCatalogPins(){CaptureBank?.Release();CaptureBank=null;PreparedBank?.Release();PreparedBank=null;CaptureTraffic?.Release();CaptureTraffic=null;PreparedTraffic?.Release();PreparedTraffic=null;CaptureLeaseCatalog?.Release();CaptureLeaseCatalog=null;CaptureArrivalCatalog?.Release();CaptureArrivalCatalog=null;CaptureTerrainNames?.Release();CaptureTerrainNames=null;ReleasePins(CaptureRequests);ReleasePins(CaptureGeometries);ReleasePins(CaptureGroups);ReleasePins(CaptureIdentities);ReleasePins(CaptureActorGlobal);ReleasePins(CaptureActorLocal);ReleasePins(CaptureInstalled);ReleasePins(CaptureAnswerTrackingOwners);CaptureAnswerTrackingOwners=null;CaptureAnswerTrackingLayout=null;ReleasePins(CaptureProbeAnswers);ReleasePins(CaptureMailboxAnswers);ReleasePins(CaptureBarrierAnswers);CaptureProbeAnswers=CaptureMailboxAnswers=CaptureBarrierAnswers=null;CaptureActorGlobal=CaptureActorLocal=CaptureInstalled=null;CaptureRequests=CaptureGeometries=CaptureGroups=CaptureIdentities=null;CaptureExtraLayouts=null;if(CaptureCrowdNames!=null)foreach(var name in CaptureCrowdNames)name.Owner?.Release();CaptureCrowdNames=null;CaptureCrowdKeys=CaptureCrowdFlags=null;CaptureCrowdPoints=null;}
+        internal void ReleaseCatalogPins(){CaptureMotionSources?.Release();CaptureMotionSources=null;PreparedMotionSources?.Release();PreparedMotionSources=null;CaptureBank?.Release();CaptureBank=null;PreparedBank?.Release();PreparedBank=null;CaptureTraffic?.Release();CaptureTraffic=null;PreparedTraffic?.Release();PreparedTraffic=null;CaptureLeaseCatalog?.Release();CaptureLeaseCatalog=null;CaptureArrivalCatalog?.Release();CaptureArrivalCatalog=null;CaptureTerrainNames?.Release();CaptureTerrainNames=null;ReleasePins(CaptureRequests);ReleasePins(CaptureGeometries);ReleasePins(CaptureGroups);ReleasePins(CaptureIdentities);ReleasePins(CaptureActorGlobal);ReleasePins(CaptureActorLocal);ReleasePins(CaptureInstalled);ReleasePins(CaptureAnswerTrackingOwners);CaptureAnswerTrackingOwners=null;CaptureAnswerTrackingLayout=null;ReleasePins(CaptureProbeAnswers);ReleasePins(CaptureMailboxAnswers);ReleasePins(CaptureBarrierAnswers);CaptureProbeAnswers=CaptureMailboxAnswers=CaptureBarrierAnswers=null;CaptureActorGlobal=CaptureActorLocal=CaptureInstalled=null;CaptureRequests=CaptureGeometries=CaptureGroups=CaptureIdentities=null;CaptureExtraLayouts=null;if(CaptureCrowdNames!=null)foreach(var name in CaptureCrowdNames)name.Owner?.Release();CaptureCrowdNames=null;CaptureCrowdKeys=CaptureCrowdFlags=null;CaptureCrowdPoints=null;}
         // Private world capture has already detached the complete Navigation
         // section. Keep DTO/catalog/root pins, but end these serialized copies
         // before the enclosing section allocates its final backing.
@@ -517,20 +518,20 @@ namespace Spacewars.Runtime
             new Dictionary<NavigationRequest,string>();
         private int transferCallbackThread;
         private void RejectTransferCallbackReentry()
-        {if(transferCallbackThread==System.Threading.Thread.CurrentThread.ManagedThreadId)throw new InvalidOperationException("Route registration cannot reenter navigation authority.");}
+        {if(motionPhase==2||System.Threading.Thread.CurrentThread.ManagedThreadId==motionAuthorityThread)AssertMotionQuiescent();if(transferCallbackThread==System.Threading.Thread.CurrentThread.ManagedThreadId)throw new InvalidOperationException("Route registration cannot reenter navigation authority.");}
         private int admissionBatchDepth;
         // Runtime operation identity; depth alone cannot detect a nested batch
         // that returned to the same depth while a candidate was prepared.
         private long authorityOperationIdentity;
         private T AdmissionBatch<T>(Func<T> work)
         {
-            using(EnterTransport()){RejectTransferCallbackReentry();authorityOperationIdentity=checked(authorityOperationIdentity+1);admissionBatchDepth++;bool committed=false;
+            AssertMotionOperational();using(EnterTransport()){RejectTransferCallbackReentry();authorityOperationIdentity=checked(authorityOperationIdentity+1);admissionBatchDepth++;bool committed=false;
                 try{var result=work();committed=true;return result;}
                 finally{admissionBatchDepth--;if(committed&&admissionBatchDepth==0)PublishAdmission();}}
         }
         private void AdmissionBatch(Action work)
         {
-            using(EnterTransport()){RejectTransferCallbackReentry();authorityOperationIdentity=checked(authorityOperationIdentity+1);admissionBatchDepth++;bool committed=false;
+            AssertMotionOperational();using(EnterTransport()){RejectTransferCallbackReentry();authorityOperationIdentity=checked(authorityOperationIdentity+1);admissionBatchDepth++;bool committed=false;
                 try{work();committed=true;}
                 finally{admissionBatchDepth--;if(committed&&admissionBatchDepth==0)PublishAdmission();}}
         }
@@ -800,6 +801,7 @@ namespace Spacewars.Runtime
         {using(var state=CaptureOwnedState())return state.TransferPublic();}
         internal NavigationSessionState CaptureOwnedState()
         {
+            AssertMotionQuiescent();
             bool existingPrepared;using(EnterTransport())existingPrepared=CanPrepareCaptureGraph();
             if(existingPrepared)return CapturePreparedOwnedState();
             RefreshOwnedGroupMembers();
@@ -820,7 +822,7 @@ namespace Spacewars.Runtime
                     if(operation!=authorityOperationIdentity||publication!=admissionPublicationIdentity)throw new InvalidOperationException("Capture source changed during admission.");
                     if(commandGroup!=null||admissionBatchDepth!=0)throw new InvalidOperationException("Cannot capture an open navigation admission batch.");
                     arrivalCapture?.Observe(this);leaseCapture?.Observe(this);
-                    state=CaptureStateLocked(captureScope.OwnedReservation());terrainNameOwners.Retain();state.CaptureTerrainNames=terrainNameOwners;state.CaptureBank=creditBank;state.CaptureBank?.Retain();root=committedHostRoot;root?.Retain();authority=authorityOwners;authority?.Retain();
+                    state=CaptureStateLocked(captureScope.OwnedReservation());terrainNameOwners.Retain();state.CaptureTerrainNames=terrainNameOwners;state.CaptureMotionSources=motionSources;state.CaptureMotionSources?.Retain();state.CaptureBank=creditBank;state.CaptureBank?.Retain();root=committedHostRoot;root?.Retain();authority=authorityOwners;authority?.Retain();
                 }
                 state.CaptureRoot=root;state.CaptureAuthority=authority;state.CaptureBudget=physicalHostBudget;
                 try{if(arrivalCapture!=null){arrivalCapture.Seal(captureScope.OwnedReservation());arrivalCapture.Catalog.Retain();state.CaptureArrivalCatalog=arrivalCapture.Catalog;}if(leaseCapture!=null){leaseCapture.Seal(captureScope.OwnedReservation());leaseCapture.Catalog.Retain();state.CaptureLeaseCatalog=leaseCapture.Catalog;}if(root!=null){state.CaptureOutput=CaptureHostAuthority(root,authority,state);state.HostAuthority=state.CaptureOutput.Bytes;}return state;}
@@ -919,9 +921,9 @@ namespace Spacewars.Runtime
             if(state.RestoreBudget!=null){if(physicalHostBudget!=null&&!ReferenceEquals(physicalHostBudget,state.RestoreBudget))throw new ArgumentException("Destination has another outer ledger.");physicalHostBudget=state.RestoreBudget;}
             ValidateInstalledExecutionLayout(state);
             ValidateSurfaceState(state);
-            NavigationHostRoot decodedHost;NavigationAuthorityOwners decodedAuthority;NavigationTrafficAuthority decodedTraffic=null;NavPagedList<long> decodedBank=null;long decodedPublication=0;
-            if(state.HostPrepared){decodedBank=state.PreparedBank;state.PreparedBank=null;decodedHost=state.PreparedHost;decodedAuthority=state.PreparedAuthority;decodedTraffic=state.PreparedTraffic;state.PreparedTraffic=null;state.PreparedHost=null;state.PreparedAuthority=null;state.HostPrepared=false;}
-            else DecodeDetachedHostAuthority(state.HostAuthority,physicalHostBudget,null,out decodedHost,out decodedAuthority,out decodedPublication,out decodedTraffic,out decodedBank);
+            NavigationHostRoot decodedHost;NavigationAuthorityOwners decodedAuthority;NavigationTrafficAuthority decodedTraffic=null;NavigationMotionSources decodedMotionSources=null;NavPagedList<long> decodedBank=null;long decodedPublication=0;
+            if(state.HostPrepared){decodedMotionSources=state.PreparedMotionSources;state.PreparedMotionSources=null;decodedBank=state.PreparedBank;state.PreparedBank=null;decodedHost=state.PreparedHost;decodedAuthority=state.PreparedAuthority;decodedTraffic=state.PreparedTraffic;state.PreparedTraffic=null;state.PreparedHost=null;state.PreparedAuthority=null;state.HostPrepared=false;}
+            else DecodeDetachedHostAuthority(state.HostAuthority,physicalHostBudget,null,out decodedHost,out decodedAuthority,out decodedPublication,out decodedTraffic,out decodedBank,out decodedMotionSources);
             bool restoreComplete=false;
             try{
             replayOnlyProjection=decodedHost?.ReplayOnlyProjection??false;
@@ -1032,6 +1034,7 @@ namespace Spacewars.Runtime
             RestoreInstalledExecutions(state,geometryTable,decodedAuthority);
             BindInstalledHostOwners(decodedHost);
             ValidateMarchCheckpoint();
+            if(decodedMotionSources!=null&&decodedMotionSources.Generation!=Generation)throw new ArgumentException("Native source generation mismatch.");
             ValidateRestoredTraffic(decodedTraffic);trafficAuthority=decodedTraffic;decodedTraffic=null;creditBank=decodedBank;decodedBank=null;
             // A new snapshot object represents the captured accepted publication.
             // Legacy formats deliberately receive a fresh identity and replay.
@@ -1044,15 +1047,16 @@ namespace Spacewars.Runtime
             if(decodedAuthority?.HasCatalog==true){var decodedDirectories=ReplaceAuthorityCore(geometry,navigationGeometry,profile);decodedDirectories.Release();}
             if(decodedAuthority?.HasCatalog!=true){PublishLegacyAdmissionNoThrow(null);admissionPublicationIdentity=state.AdmissionPublicationIdentity==0?0:state.AdmissionPublicationIdentity-1;}
             PublishAdmission();
-            restoreComplete=true;return restored;
+            motionSources=decodedMotionSources;decodedMotionSources=null;restoreComplete=true;return restored;
             }finally{
                 if(!restoreComplete&&ReferenceEquals(committedHostRoot,decodedHost)){committedHostRoot=null;decodedHost?.Release();}
                 else if(!ReferenceEquals(committedHostRoot,decodedHost))decodedHost?.Release();
-                decodedAuthority?.Release();decodedTraffic?.Release();decodedBank?.Release();
+                decodedAuthority?.Release();decodedTraffic?.Release();decodedBank?.Release();decodedMotionSources?.Release();
             }
         }
         public bool MoveGroup(int[] ids, NavPoint[] goals)
         {
+            AssertMotionOperational();
             var prepared=TryPreparedOrdinaryMoveGroup(ids,goals);
             if(prepared==false&&commandGroup!=null)commandMoveRefused=true;
             return prepared??AdmissionBatch(()=>MoveGroupLocked(ids,goals));
@@ -1107,6 +1111,7 @@ namespace Spacewars.Runtime
         }
         public bool Move(int id,NavPoint goal)
         {
+            AssertMotionOperational();
             if(commandGroup==null&&admissionBatchDepth==0){
                 if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,Generation,admissionPublicationIdentity,out var inputScope))return false;
                 using(inputScope)using(NavStorageScratch.Reserve(inputScope.OwnedReservation(),88)){
@@ -1127,9 +1132,10 @@ namespace Spacewars.Runtime
             var groupMember=Member(id);if(groupMember!=null){groupMember.Goal=goal;groupMember.GoalLocation=goalLocation;groupMember.HasGoal=true;}
             ClearFailure(id);pending[id]=request;movementIdentities[id]=request.HeldIdentity;reservations[id]=goal;PublishAdmission();RouteRequested?.Invoke(request);return true;
         }
-        public void Stop(int id,bool hold){if(TryOwnedStopGroup(new[]{id},hold).HasValue)return;using(EnterTransport()){CancelArrival(id,true);ClearFailure(id);MovementCancelled?.Invoke(id);long order;orders.TryGetValue(id,out order);orders[id]=order+1;pending.Remove(id);reservations.Remove(id);retainedGoals.Remove(id);movementIdentities.Remove(id);SetInstalledExecution(id,null);Crowd.Stop(id,hold);PublishAdmission();}}
+        public void Stop(int id,bool hold){AssertMotionOperational();if(TryOwnedStopGroup(new[]{id},hold).HasValue)return;using(EnterTransport()){CancelArrival(id,true);ClearFailure(id);MovementCancelled?.Invoke(id);long order;orders.TryGetValue(id,out order);orders[id]=order+1;pending.Remove(id);reservations.Remove(id);retainedGoals.Remove(id);movementIdentities.Remove(id);SetInstalledExecution(id,null);Crowd.Stop(id,hold);PublishAdmission();}}
         public bool Remove(int id)
         {
+            AssertMotionOperational();
             using(EnterTransport())if(!Crowd.TryGet(id,out _))return false;
             var owned=TryOwnedStopGroup(new[]{id},false,remove:true);
             if(owned.HasValue){if(!owned.Value)throw new InvalidOperationException("Owned actor removal preparation refused.");return true;}
@@ -1192,12 +1198,12 @@ namespace Spacewars.Runtime
         public void ChangeGeometry(NavGeometry next)
         {if(!TryChangeGeometry(next))throw new InvalidOperationException("Owned geometry replacement preparation refused.");}
         internal Exception LastGeometryPreparationFailure{get;private set;}
-        internal bool TryChangeGeometry(NavGeometry next,PlayableDomain domain=null)
+        internal bool TryChangeGeometry(NavGeometry next,PlayableDomain domain=null,int[] removedActors=null)
         {
             LastGeometryPreparationFailure=null;
             if(next==null)throw new ArgumentNullException(nameof(next));
-            var owned=TryOwnedOrdinaryRebind(profile,geometryTarget:next,geometryDomain:domain);if(owned.HasValue){if(!owned.Value&&LastGeometryPreparationFailure==null)LastGeometryPreparationFailure=new InvalidOperationException("Geometry rebind source changed during preparation.");return owned.Value;}
-            if(physicalArrivalEnabled&&groupCommandBacking!=null){LastGeometryPreparationFailure=LastGeometryPreparationFailure??new InvalidOperationException("Owned geometry rebind source is not eligible.");return false;}
+            var owned=TryOwnedOrdinaryRebind(profile,geometryTarget:next,geometryDomain:domain,removedActors:removedActors);if(owned.HasValue){if(!owned.Value&&LastGeometryPreparationFailure==null)LastGeometryPreparationFailure=new InvalidOperationException("Geometry rebind source changed during preparation.");return owned.Value;}
+            if(removedActors!=null||physicalArrivalEnabled&&groupCommandBacking!=null){LastGeometryPreparationFailure=LastGeometryPreparationFailure??new InvalidOperationException("Owned geometry rebind source is not eligible.");return false;}
             AdmissionBatch(()=>ChangeGeometryLocked(next));return true;
         }
         private void ChangeGeometryLocked(NavGeometry next)
@@ -1251,6 +1257,7 @@ namespace Spacewars.Runtime
         public void ApplyResults()=>TryApplyResultsPrepared();
         private bool TryApplyResultsPrepared()
         {
+            AssertMotionOperational();
             PrepareOwnedReadyArrivals();int remaining;using(EnterTransport())remaining=checked(barrierAnswers.Count+Answers.Count);
             while(remaining>0){
                 if(!TryPrepareAnswerNamesBatch(out var single,true))return false;
@@ -1353,11 +1360,20 @@ namespace Spacewars.Runtime
         internal bool SuspendPendingMovement {get;set;}
         public void Step(double dt)
         {
+            AssertMotionOperational();
             LastOwnedMovementNullReason=0;LastOwnedMovementNullDetail=null;LastOwnedMovementNullActor=0;LastOwnedMovementNullGroup=0;LastOwnedMovementComputation=null;LastTrafficDispatchStage=0;LastNavigationStepPath=0;
             try{
                 if(dt<=0||double.IsNaN(dt)||double.IsInfinity(dt)){LastNavigationStepPath=1;throw new ArgumentException("Invalid step duration.");}
                 var movement=TryPublishOwnedMovement(dt);if(movement.HasValue){LastNavigationStepPath=movement.Value?2:3;return;}
                 var traffic=TryDispatchPreparedTraffic(dt);if(traffic.HasValue){LastNavigationStepPath=traffic.Value?4:5;return;}
+                if(motionAuthority!=null){
+                    // A bound Runtime owner may only use complete prepared
+                    // publications. Service the existing result prefix but never
+                    // fall through to live per-actor compatibility mutation.
+                    if(PrepareOwnedReadyArrivals()){LastNavigationStepPath=20;return;}
+                    if(!TryPrepareAnswerNamesBatch(out var preparedNames,false,true)){LastNavigationStepPath=20;return;}
+                    using(preparedNames){var prepared=TryPublishOwnedResultBatch(preparedNames,dt,true,requireTrafficFrame:true);LastNavigationStepPath=prepared==true?21:20;return;}
+                }
                 NavMotionWorkspace workspace;
                 try{workspace=CreateCompatibilityMotionWorkspace(Crowd);}catch(InvalidOperationException){LastNavigationStepPath=6;return;}
                 using(workspace){

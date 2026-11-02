@@ -40,7 +40,7 @@ namespace Spacewars.Tests.EditMode
             return PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,41,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,cash,null,units,buildings.ToArray(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sites:sites.ToArray(),publicScoutObjectives:objectives,routeProofs:new[]{proof},activeProfile:p,homeSiteId:homeId));
         }
         private static void Observe(object f,AiBudgetLedger b,AiDecisionArbiter a,AiExpansionPlanner ex,PlayableAiObservation o,int protect=0,bool allowed=true,PlayableProfile p=null)
-        {p=p??PlayableProfile.Default;var opening=Opening();b.ObserveBank(o.Credits);Call(f,"Reconcile",o,p,AiProfile.Initial,opening,b,a,ex);var old=Call(f,"Detach",b);Call(f,"Observe",o,p,AiProfile.Initial,opening,b,a,ex,old,protect,allowed);}
+        {p=p??PlayableProfile.Default;var opening=Opening();opening.Observe(o,null,null,AiProfile.Initial);b.ObserveBank(o.Credits);Call(f,"Reconcile",o,p,AiProfile.Initial,opening,b,a,ex);var old=Call(f,"Detach",b);Call(f,"Observe",o,p,AiProfile.Initial,opening,b,a,ex,old,protect,allowed);}
         private static void Validate(object f,AiBudgetLedger b,AiDecisionArbiter a,long tick,PlayableProfile p=null)
         {p=p??PlayableProfile.Default;Call(f,"Validate",p,AiProfile.Initial,b,a,tick,41,TerritoryRules.Sites(p),2);}
         [TestCase(3)][TestCase(4)]

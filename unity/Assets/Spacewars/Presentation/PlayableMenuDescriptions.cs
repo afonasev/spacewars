@@ -30,7 +30,7 @@ namespace Spacewars.Presentation
             double income=kind==PlayableBuildingKind.Refinery&&upgraded?p.RefineryUpgradedIncome:TerritoryRules.Income(p,kind);
             return OfflinePadWorldActions.Name(kind)+"\n"+role+"\n\n"+
                 (!freeEconomy&&income>0?"Доход: +"+N(income)+" кредитов каждые "+N(p.IncomePeriodSeconds)+" с\n":"")+
-                "Здоровье: "+N(maxHealth??TerritoryRules.Health(p,kind))+"\n"+(freeEconomy?"Бесплатно":"Стоимость: "+N(TerritoryRules.Cost(p,kind))+" кредитов")+"\nПостройка: "+N(freeEconomy?p.ProvingGroundActionSeconds:TerritoryRules.Duration(p,kind))+" с";
+                "Здоровье: "+N(maxHealth??PlayableStatRounding.MaximumHealth(p,TerritoryRules.Health(p,kind)))+"\n"+(freeEconomy?"Бесплатно":"Стоимость: "+N(TerritoryRules.Cost(p,kind))+" кредитов")+"\nПостройка: "+N(freeEconomy?p.ProvingGroundActionSeconds:TerritoryRules.Duration(p,kind))+" с";
         }
         public static string[] DefenseStats(PlayableProfile p,PlayableBuildingKind kind,IEnumerable<PlayableResearchOrderSnapshot> research)
         {
@@ -39,11 +39,11 @@ namespace Spacewars.Presentation
             switch(kind)
             {
                 case PlayableBuildingKind.SentryTurret:return new[]{
-                    "Урон за попадание: "+N(p.TurretDamage*multiplier),"Очередь: "+N(p.TurretBurstSize)+" выстр.",
+                    "Урон за попадание: "+N(PlayableStatRounding.Damage(p,p.TurretDamage*multiplier)),"Очередь: "+N(p.TurretBurstSize)+" выстр.",
                     "Интервал: "+N(p.TurretBurstShotIntervalMs/1000d)+" с","Пауза: "+N(p.TurretBurstPauseMs/1000d)+" с",
                     "Дальность: "+N(p.TurretRange)+" м"};
                 case PlayableBuildingKind.GaussTower:return new[]{
-                    "Урон за попадание: "+N(p.GaussDamage*multiplier),"Перезарядка: "+N(p.GaussReloadSeconds)+" с",
+                    "Урон за попадание: "+N(PlayableStatRounding.Damage(p,p.GaussDamage*multiplier)),"Перезарядка: "+N(p.GaussReloadSeconds)+" с",
                     "Дальность: "+N(p.GaussRange)+" м","Остаток урона: "+N(p.GaussPierceRetention*100)+"%"};
                 case PlayableBuildingKind.RepairTower:return new[]{"Скорость ремонта: "+N(p.RepairTowerHealthPerSecond)+" HP/с"};
                 default:return Array.Empty<string>();
@@ -62,14 +62,14 @@ namespace Spacewars.Presentation
                 PlayableEntityKind.Shkval=>"Ракетная артиллерия для огневой поддержки с большой дистанции. Нуждается в прикрытии.",
                 _=>"Боевой вертолёт с ракетным вооружением. Перелетает препятствия и атакует наземные цели; территории не захватывает."};
             double damage=kind==PlayableEntityKind.Tank?p.TankWeaponDamage:kind==PlayableEntityKind.Explorer?p.ExplorerDamage:kind==PlayableEntityKind.Shkval?p.ShkvalDamage:p.HawkDamage;
-            damage*=Systems(true,entity?.WeaponSystemsLevel??Level(true));
-            double health=entity==null?PlayableUnitRules.Health(p,kind)*Systems(false,Level(false)):PlayableUnitRules.MaximumHealth(p,entity);
+            damage=PlayableStatRounding.Damage(p,damage*Systems(true,entity?.WeaponSystemsLevel??Level(true)));
+            double health=entity==null?PlayableStatRounding.MaximumHealth(p,PlayableUnitRules.Health(p,kind)*Systems(false,Level(false))*(kind==PlayableEntityKind.Tank&&upgraded?1+p.TankChassisHealthBonusPercent/100:1)):PlayableUnitRules.MaximumHealth(p,entity);
             string fire=kind==PlayableEntityKind.Tank?"Перезарядка: "+N(p.TankWeaponReloadSeconds)+" с":kind==PlayableEntityKind.Explorer?
                 "Выстрелов в очереди: "+N(upgraded?p.ExplorerAssaultBurstSize:p.ExplorerBurstSize)+"\nИнтервал выстрелов: "+N(p.ExplorerBurstShotIntervalMs/1000d)+" с\nПауза между очередями: "+N(p.ExplorerBurstPauseMs/1000d)+" с":kind==PlayableEntityKind.Shkval?
-                "Интервал пусков: "+N(p.ShkvalFireIntervalMs/1000d)+" с":
+                "Интервал пусков: "+N(p.ShkvalFireIntervalMs/1000d)+" с\nРадиус взрыва: "+N(PlayableUnitRules.ShkvalBlastRadius(p,upgraded))+" м":
                 "Интервал ракет в залпе: "+N(salvo?p.HawkUpgradedSalvoDelay:p.HawkSalvoDelay)+" с\nПерезарядка: "+N(salvo?p.HawkUpgradedReloadSeconds:p.HawkReloadSeconds)+" с";
-            return OfflinePadWorldActions.Name(kind)+"\n"+role+"\n\nЗдоровье: "+(entity==null?N(health):N(entity.ExactHealth??entity.Health)+" / "+N(health))+
-                "\nУрон за попадание: "+N(damage)+"\n"+fire+
+            return OfflinePadWorldActions.Name(kind)+"\n"+role+"\n\nЗдоровье: "+(entity==null?N(health):N(PlayableStatRounding.DisplayHealth(entity.ExactHealth??entity.Health))+" / "+N(health))+
+                (kind==PlayableEntityKind.Shkval?"\nПрямое попадание: "+N(PlayableStatRounding.Damage(p,p.ShkvalDirectHitDamage*Systems(true,entity?.WeaponSystemsLevel??Level(true))))+"\nУрон по площади: "+N(damage):"\nУрон за попадание: "+N(damage))+"\n"+fire+
                 "\nДальность огня: "+N(PlayableUnitRules.Range(p,kind,upgraded))+" м\nСкорость: "+N(PlayableUnitRules.Speed(p,kind,upgraded))+" м/с\nОбзор: "+N(PlayableUnitRules.Vision(p,kind))+" м"+
                 "\n\n"+(freeEconomy?"Бесплатно":"Стоимость: "+N(PlayableUnitRules.Cost(p,kind))+" кредитов")+"\nПроизводство: "+N(freeEconomy?p.ProvingGroundActionSeconds:PlayableUnitRules.Duration(p,kind))+" с\nМесто в армии: "+N(PlayableUnitRules.Population(p,kind));
         }

@@ -21,7 +21,7 @@ namespace Spacewars.Simulation
 
         // Admission and host construction must agree on the same immutable map set.
         public static bool SupportsTerrain(IPlayableTerrain terrain)
-            =>terrain is ThreeCrossingsMap||terrain is FoundryMap||terrain is BasaltCrownMap||terrain is MossHighlandMap||terrain is CampaignOpeningMap||terrain is WhiteMeridianMap||terrain is AiTestMap||terrain is ProvingGroundMap||terrain is CrimsonGroveMap||terrain is NullDockMap;
+            =>terrain is ThreeCrossingsMap||terrain is FoundryMap||terrain is BasaltCrownMap||terrain is MossHighlandMap||terrain is CampaignOpeningMap||terrain is WhiteMeridianMap||terrain is AiTestMap||terrain is ProvingGroundMap||terrain is CrimsonGroveMap||terrain is NullDockMap||terrain is AntennaCityMap;
 
         public PartitionNavigationProvider(IPlayableTerrain terrain, NavGeometry movementGeometry, string holdBinding)
         {
@@ -83,6 +83,11 @@ namespace Spacewars.Simulation
         public double HalfExtent { get; }
         public long EstimatedRetainedBytes { get; }
         internal bool SameArrangement(PartitionNavigationProvider other)=>other!=null&&locations.SameArrangement(other.locations);
+        // Borrowed immutable laws from this exact retained physical provider,
+        // in the same precedence order as its support selector. The caller keeps
+        // the owning accepted route/source pin alive; no terrain catalog lookup.
+        internal int SupportLawCount=>locations.Supports.Count;
+        internal MapSupport SupportLawAt(int index)=>locations.Supports[index];
         internal int TracePortalBound=>locations.TracePortalBound;
         internal long TraceScratchBound=>locations.TraceScratchBound;
         public IReadOnlyList<NavLayerSurface> Surfaces { get; private set; }

@@ -19,9 +19,9 @@ namespace Spacewars.Simulation
     // Deliberately excludes HP, queues, progress, targets and other live state.
     public sealed class KnownBuilding
     {
-        public KnownBuilding(int id,int team,PlayableOwner owner,PlayableBuildingKind kind,NavPoint position,double heading,bool refineryUpgraded=false,bool scientificCenterUpgraded=false)
-        {ScientificCenterUpgraded=scientificCenterUpgraded;RefineryUpgraded=refineryUpgraded;Id=id;Team=team;Owner=owner;Kind=kind;Position=position;Heading=heading;}
-        public bool ScientificCenterUpgraded{get;} public bool ModelUpgraded=>RefineryUpgraded||ScientificCenterUpgraded; public bool RefineryUpgraded{get;} public int Id{get;} public int Team{get;} public PlayableOwner Owner{get;}
+        public KnownBuilding(int id,int team,PlayableOwner owner,PlayableBuildingKind kind,NavPoint position,double heading,bool refineryUpgraded=false,bool scientificCenterUpgraded=false,bool producerUpgraded=false)
+        {ProducerUpgraded=producerUpgraded;ScientificCenterUpgraded=scientificCenterUpgraded;RefineryUpgraded=refineryUpgraded;Id=id;Team=team;Owner=owner;Kind=kind;Position=position;Heading=heading;}
+        public bool ScientificCenterUpgraded{get;} public bool ProducerUpgraded{get;} public bool ModelUpgraded=>RefineryUpgraded||ScientificCenterUpgraded||ProducerUpgraded; public bool RefineryUpgraded{get;} public int Id{get;} public int Team{get;} public PlayableOwner Owner{get;}
         public PlayableBuildingKind Kind{get;} public NavPoint Position{get;} public double Heading{get;}
     }
 
@@ -179,7 +179,7 @@ namespace Spacewars.Simulation
             }
             return true;
         }
-        private static bool Same(KnownBuilding a,KnownBuilding b)=>a.Id==b.Id&&a.Team==b.Team&&a.Owner==b.Owner&&a.Kind==b.Kind&&a.Position.X==b.Position.X&&a.Position.Z==b.Position.Z&&a.Heading==b.Heading&&a.RefineryUpgraded==b.RefineryUpgraded&&a.ScientificCenterUpgraded==b.ScientificCenterUpgraded;
+        private static bool Same(KnownBuilding a,KnownBuilding b)=>a.Id==b.Id&&a.Team==b.Team&&a.Owner==b.Owner&&a.Kind==b.Kind&&a.Position.X==b.Position.X&&a.Position.Z==b.Position.Z&&a.Heading==b.Heading&&a.RefineryUpgraded==b.RefineryUpgraded&&a.ScientificCenterUpgraded==b.ScientificCenterUpgraded&&a.ProducerUpgraded==b.ProducerUpgraded;
         private void Explore(VisionSource[] previous)
         {
             CoverageUpdates++;

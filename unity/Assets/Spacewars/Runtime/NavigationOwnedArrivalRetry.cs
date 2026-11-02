@@ -60,7 +60,7 @@ namespace Spacewars.Runtime
                         var occupancy=CaptureArrivalOccupancySnapshot(attempt.Input.Members);int ordinal=0;
                         foreach(var proposal in attempt.Work.Proposals.OrderBy(value=>value.Member.RequestSequence)){
                             for(int n=0;n<c.Retries.Length;n++){ref var row=ref c.Retries[n];if(!row.Selected||row.Source.Request.Request!=proposal.Member.RequestSequence||!CurrentArrivalIntent(row.Source.Request))continue;
-                                row.ArrivalProposal=proposal;row.ArrivalOrder=ordinal++;row.ArrivalKind=occupancy.Occupants.Any(o=>o.BlocksPlacement&&ArrivalOverlap(proposal.Endpoint,proposal.Member.Radius,o.Location,o.Radius))?(byte)2:(byte)1;if(row.ArrivalKind==1)c.ArrivalAssignments++;break;
+                                row.ArrivalProposal=proposal;row.ArrivalOrder=ordinal++;row.ArrivalKind=occupancy.Occupants.Any(o=>o.BlocksFor(proposal.Member,occupancy.Generation)&&ArrivalOverlap(proposal.Endpoint,proposal.Member.Radius,o.Location,o.Radius))?(byte)2:(byte)1;if(row.ArrivalKind==1)c.ArrivalAssignments++;break;
                             }
                         }
                         for(int n=0;n<c.Retries.Length;n++){ref var row=ref c.Retries[n];if(!row.Selected||row.ArrivalKind!=0)continue;if(CurrentArrivalIntent(row.Source.Request)&&attempt.SnapshotStatus!=NavArrivalStatus.Stale){row.ArrivalKind=3;row.ArrivalTerminalStatus=attempt.Work.MemberOutcomes.TryGetValue(row.Entity,out var outcome)?outcome:attempt.SnapshotStatus;c.ArrivalTerminalCount++;}else row.ArrivalKind=2;row.ArrivalOrder=ordinal++;}

@@ -24,11 +24,11 @@ public sealed class PlayableProductionHudTests
         Call("CreateProductionHud",root);
     }
     [TearDown] public void Cleanup()=>UnityEngine.Object.DestroyImmediate(host);
-    private void Show(long[] ids,bool paused=false,PlayableEntityKind kind=PlayableEntityKind.Tank,bool hangar=false,int phase=0,bool repeat=false)
+    private void Show(long[] ids,bool paused=false,PlayableEntityKind kind=PlayableEntityKind.Tank,bool hangar=false,int phase=0,bool repeat=false,bool science=true)
     {
         var orders=ids.Select((id,i)=>new PlayableProductionOrderSnapshot(id,kind,150,3,15,i==0?7.5:15,i==0)).ToArray();
         var factory=new PlayableBuildingSnapshot(5,PlayableOwner.Player,hangar?PlayableBuildingKind.Hangar:PlayableBuildingKind.Factory,default,250,1,ids.Length,0.5,default,orders:orders,launchPhase:phase,repeat:repeat,repeatKind:kind);
-        var view=new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,paused,PlayableMatchOutcome.Playing,900,null,Array.Empty<PlayableEntitySnapshot>(),new[]{factory},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(9,ids.Length>0?3:0,100));
+        var view=new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,paused,PlayableMatchOutcome.Playing,900,null,Array.Empty<PlayableEntitySnapshot>(),science?new[]{factory,new PlayableBuildingSnapshot(6,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,default,250,1,0,0,default)}:new[]{factory},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(9,ids.Length>0?3:0,100));
         Set("view",view);Set("paused",paused);((Label)Get("selectionLabel")).text="ФАБРИКА";Call("UpdateProductionHud",factory);
     }
     [Test] public void HangarShowsHawkIconAndActualReleasePhase()
@@ -52,6 +52,11 @@ public sealed class PlayableProductionHudTests
     {
         Show(new long[]{20,21},kind:PlayableEntityKind.Shkval);var slots=root.Query<Button>().ToList();Assert.AreEqual("50%\n8с",slots[0].text);Assert.AreEqual("Ждёт",slots[1].text);Assert.AreEqual("shkval",slots[0].Q<OrbitalGlyph>().Kind);Assert.That(slots[0].tooltip,Does.Contain("Шквал"));Assert.True(((Button)Get("shkvalButton")).enabledSelf);
         Show(new long[]{20,21},true,PlayableEntityKind.Shkval);Assert.False(((Button)Get("shkvalButton")).enabledSelf);
+    }
+    [Test] public void MissingCenterDisablesNewShkvalButRetainsPaidQueueAndRepeatCancellation()
+    {
+        Show(new long[]{20,21},kind:PlayableEntityKind.Shkval,science:false);Assert.False(((Button)Get("shkvalButton")).enabledSelf);Assert.That(((Button)Get("shkvalButton")).tooltip,Does.Contain("Научный центр"));Assert.True(root.Query<Button>().First().enabledSelf);var view=(PlayableSnapshot)Get("view");var action=OfflinePadWorldActions.Building(view,PlayableProfile.Default,5).Single(a=>a.Sector.Id=="5:shkval");Assert.False(action.Sector.Enabled);Assert.Null(action.Command);Assert.Null(action.HoldCommand);
+        Show(Array.Empty<long>(),kind:PlayableEntityKind.Shkval,repeat:true,science:false);Assert.True(((Button)Get("shkvalButton")).enabledSelf);
     }
     [Test] public void ExplorerQueueShowsKindProgressAndPausedControl()
     {

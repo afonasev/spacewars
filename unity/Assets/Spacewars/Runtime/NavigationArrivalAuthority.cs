@@ -397,7 +397,7 @@ namespace Spacewars.Runtime
                 var intent=attempt.Intents.Single(r=>r.Request==proposal.Member.RequestSequence);
                 if(!CurrentArrivalIntent(intent))continue;
                 var occupancy=CaptureArrivalOccupancySnapshot(attempt.Input.Members);
-                if(occupancy.Occupants.Any(o=>o.BlocksPlacement&&ArrivalOverlap(proposal.Endpoint,proposal.Member.Radius,o.Location,o.Radius))){
+                if(occupancy.Occupants.Any(o=>o.BlocksFor(proposal.Member,occupancy.Generation)&&ArrivalOverlap(proposal.Endpoint,proposal.Member.Radius,o.Location,o.Radius))){
                     RetryArrival(intent);continue;
                 }
                 var r=new NavigationRequest(intent.Session,intent.Request,intent.Entity,intent.Order,intent.Profile,intent.Geometry,

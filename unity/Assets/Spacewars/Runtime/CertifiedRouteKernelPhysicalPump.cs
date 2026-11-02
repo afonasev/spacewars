@@ -179,8 +179,18 @@ namespace Spacewars.Runtime
                         }
                         if(!PublishPhysicalFrame(port,WithCounters(f,PumpStage.Solve,solveLimit:checked(grant*WorkUnitsPerRequestBudget))))return;break;
                     case PumpStage.Solve:
-                        AdvancePhysicalOrdinary(binding,f.SolveWorkLimit-f.SolveConsumed);RefreshPhysicalFrontier(port);
-                        if(pumpStage==PumpStage.Solve&&!PublishPhysicalFrame(port,WithCounters(CapturePumpFrontier(),PumpStage.Ready)))return;break;
+                        if(!port.UsesRecastGroundRoutes){
+                            AdvancePhysicalOrdinary(binding,f.SolveWorkLimit-f.SolveConsumed);RefreshPhysicalFrontier(port);
+                            if(pumpStage==PumpStage.Solve&&!PublishPhysicalFrame(port,WithCounters(CapturePumpFrontier(),PumpStage.Ready)))return;break;
+                        }
+                        int local=AdvancePhysicalRecastPreparation(binding,f.SolveWorkLimit-f.SolveConsumed);RefreshPhysicalFrontier(port);
+                        var afterLocal=CapturePumpFrontier();int remaining=afterLocal.SolveWorkLimit-afterLocal.SolveConsumed;
+                        // Existing generic work gets the remainder after one local
+                        // slice. Only an idle solver leaves room for another slice.
+                        if(remaining>0)AdvancePhysicalOrdinary(binding,remaining);RefreshPhysicalFrontier(port);
+                        if(pumpStage!=PumpStage.Solve)break;
+                        if(local>0&&CapturePumpFrontier().SolveConsumed<CapturePumpFrontier().SolveWorkLimit)break;
+                        if(!PublishPhysicalFrame(port,WithCounters(CapturePumpFrontier(),PumpStage.Ready)))return;break;
                     case PumpStage.Ready:
                         if(f.ReadyUsed<grant&&TransferPhysicalReady(binding,grant-f.ReadyUsed)>0){RefreshPhysicalFrontier(port);break;}
                         if(!PublishPhysicalFrame(port,WithCounters(CapturePumpFrontier(),PumpStage.Projection)))return;break;

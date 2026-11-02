@@ -150,8 +150,10 @@ namespace Spacewars.Runtime
                 else
                 {
                     if(site.Owner!=o.Owner)return "site not owned";
-                    if(a.BuildingKind!=PlayableBuildingKind.Factory&&a.BuildingKind!=PlayableBuildingKind.Refinery&&a.BuildingKind!=PlayableBuildingKind.ScientificCenter&&a.BuildingKind!=PlayableBuildingKind.Hangar)return "unsupported slot building";
-                    if(!site.Site.Slots.Any(s=>s.Id==a.SlotId))return "slot unavailable";
+                    bool defense=TerritoryRules.Defensive(a.BuildingKind);
+                    if(!defense&&a.BuildingKind!=PlayableBuildingKind.Factory&&a.BuildingKind!=PlayableBuildingKind.Refinery&&a.BuildingKind!=PlayableBuildingKind.ScientificCenter&&a.BuildingKind!=PlayableBuildingKind.Hangar)return "unsupported slot building";
+                    if(TerritoryRules.DefenseSlot(a.SlotId)!=defense||!(defense?site.Site.DefenseSlots(profile):site.Site.Slots).Any(s=>s.Id==a.SlotId))return "slot unavailable";
+                    if(a.BuildingKind==PlayableBuildingKind.GaussTower&&!o.Buildings.Any(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true))return "ready science prerequisite";
                     if(o.Buildings.Any(b=>b.SiteId==a.SiteId&&b.SlotId==a.SlotId))return "slot occupied";
                     var parent=o.Buildings.FirstOrDefault(b=>b.Id==site.CenterId&&b.Id==a.ParentId&&b.Owner==o.Owner);
                     if(parent==null||parent.Health<=0||parent.Phase!=ConstructionPhase.Ready||parent.PrivateState==null||parent.PrivateState.Lifecycle?.Selling==true)return "ready live parent prerequisite";
@@ -167,6 +169,7 @@ namespace Spacewars.Runtime
                 if(descriptor==null||!string.IsNullOrWhiteSpace(descriptor.exclusionReason))return "unsupported production descriptor";
                 var kind=descriptor.kind;
                 if(descriptor.unlockDependencies.Any(r=>!o.OwnerResearch.Any(q=>q.Kind==r&&q.Complete)))return "production unlock prerequisite";
+                if(kind==PlayableEntityKind.Shkval&&!o.Buildings.Any(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true))return "ready science prerequisite";
                 if(!PlayableUnitRules.Supported(kind)||a.EntityIds.Count!=1)return "unsupported production";
                 var producer=o.Buildings.FirstOrDefault(b=>b.Id==a.EntityIds[0]&&b.Owner==o.Owner);
                 if(producer==null||producer.Kind!=descriptor.producer||producer.Health<=0||producer.Phase!=ConstructionPhase.Ready||producer.PrivateState==null||producer.PrivateState.Lifecycle?.Selling==true)return "ready live producer prerequisite";
@@ -174,6 +177,14 @@ namespace Spacewars.Runtime
                 if(idleProducer&&producer.PrivateState.QueueCount>0)return producer.PrivateState.Orders.Any(q=>q.Active&&q.Remaining<=0)?"producer exit blocked":"producer queue busy";
                 if(o.Population==null||o.Population.Capacity-o.Population.Living-o.Population.Reserved<catalog.PopulationCost(kind,profile))return "population capacity";
                 return o.Credits<catalog.CreditCost(kind,profile)?"insufficient credits":null;
+            }
+            if(a.Kind==PlayableCommandKind.UpgradeRefinery)
+            {
+                if(a.EntityIds.Count!=1)return "one upgrade recipient required";
+                var b=o.Buildings.FirstOrDefault(x=>x.Id==a.EntityIds[0]&&x.Owner==o.Owner);
+                if(b==null||b.Health<=0||b.Phase!=ConstructionPhase.Ready||b.Kind!=PlayableBuildingKind.Refinery||b.PrivateState?.Lifecycle?.Selling==true)return "ready owned refinery required";
+                if(b.RefineryUpgraded||b.PrivateState?.Upgrade==null||b.PrivateState.Upgrade.Active)return "upgrade unavailable";
+                return b.PrivateState.Upgrade.BlockedReason??(o.Credits<profile.RefineryUpgradeCost?"insufficient credits":null);
             }
             if(a.Kind==PlayableCommandKind.StartBuildingRepair||a.Kind==PlayableCommandKind.SellBuilding)
             {

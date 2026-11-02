@@ -20,7 +20,7 @@ namespace Spacewars.Presentation
         private KeyboardSelectable[] KeyboardEntities() => view.Entities.Where(e=>e.Health>0).Select(e=>new KeyboardSelectable(e.Id,(int)e.Kind,e.Owner==view.Owner,false,e.Position.X,e.Position.Z))
             .Concat(view.Buildings.Where(b=>b.Health>0&&b.Phase!=ConstructionPhase.Pending).Select(b=>new KeyboardSelectable(b.Id,(int)b.Kind,b.Owner==view.Owner,true,b.Position.X,b.Position.Z))).ToArray();
         private NativeLocalInputProfile KeyboardProfile => keyboardProfile ?? (keyboardProfile=JsonUtility.FromJson<NativeLocalInputProfile>(Resources.Load<TextAsset>("NativeLocalInputProfile").text));
-        private bool WorldKeyboardOwnsToolkit=>!signalWheelOpen&&SeatUsesKeyboard&&input?.WorldInputEnabled==true&&!MenuOwnsInput&&input.IsKeyboardInUi?.Invoke()!=true;
+        private bool WorldKeyboardOwnsToolkit=>!orbitalOpen&&!orbitalReleaseGate&&!signalWheelOpen&&SeatUsesKeyboard&&input?.WorldInputEnabled==true&&!MenuOwnsInput&&input.IsKeyboardInUi?.Invoke()!=true;
         private bool KeyboardBlocksCamera
         {
             get
@@ -29,11 +29,11 @@ namespace Spacewars.Presentation
                 return MenuOwnsInput||focused is TextField||focused?.GetFirstAncestorOfType<TextField>()!=null;
             }
         }
-        private bool WorldCameraOwnsToolkit=>!signalWheelOpen&&SeatUsesKeyboard&&input?.WorldInputEnabled==true&&!KeyboardBlocksCamera;
+        private bool WorldCameraOwnsToolkit=>!orbitalOpen&&!orbitalReleaseGate&&!signalWheelOpen&&SeatUsesKeyboard&&input?.WorldInputEnabled==true&&!KeyboardBlocksCamera;
         private void BindKeyboardCommands()
         {
-            input.SignalPointer=SignalPointer;input.SignalModal=()=>signalWheelOpen;input.CancelSignal=()=>CancelTeamSignal();
-            input.IsKeyboardBlockingCamera=()=>signalWheelOpen||KeyboardBlocksCamera;
+            input.SignalPointer=(at,left,down,alt)=>ScanPointer(at,left,down,alt)||SignalPointer(at,left,down,alt);input.SignalModal=()=>signalWheelOpen||orbitalOpen||orbitalReleaseGate;input.CancelSignal=()=>{if(orbitalOpen)CloseOrbital();else CancelTeamSignal();};
+            input.IsKeyboardBlockingCamera=()=>BotCameraLocked||orbitalOpen||orbitalReleaseGate||signalWheelOpen||KeyboardBlocksCamera;
             input.SelectionDragPixels=(float)profile.SelectionDragPixels;
             input.DoubleClickMilliseconds=KeyboardProfile.doubleTapMs;
             input.SelectionKey=KeyboardSelection;
@@ -43,13 +43,13 @@ namespace Spacewars.Presentation
             // HUD overlays still block orders, but must not cover the camera edge zones.
             input.IsPointerBlockingCamera=point=>!cameraView.pixelRect.Contains(point);
             input.EdgePanAxis=point=>SeatUsesKeyboard?AngularCommandCursor.EdgePan(point,cameraView.pixelRect,(float)profile.CameraEdgePanZonePixels):Vector2.zero;
-            input.EdgePan=axis=>cameraView.transform.position+=NativeCameraScrollSettings.Displacement(cameraView.transform,axis,NativeCameraScrollSettings.EdgeSpeed(profile.CameraEdgePanSpeed),Time.unscaledDeltaTime);
+            input.EdgePan=axis=>{if(!BotCameraLocked)cameraView.transform.position+=NativeCameraScrollSettings.Displacement(cameraView.transform,axis,NativeCameraScrollSettings.EdgeSpeed(profile.CameraEdgePanSpeed),Time.unscaledDeltaTime);};
             commandCursor=new AngularCommandCursor();commandCursor.Set(false);
         }
         private void RememberKeyboardCamera()
         { keyboardHomePosition=cameraView.transform.position;keyboardHomeRotation=cameraView.transform.rotation;keyboardHomeZoom=cameraView.orthographicSize; }
         private void ResetKeyboardCamera()
-        { cameraView.transform.SetPositionAndRotation(keyboardHomePosition,keyboardHomeRotation);cameraView.orthographicSize=keyboardHomeZoom; }
+        { if(BotCameraLocked)return;cameraView.transform.SetPositionAndRotation(keyboardHomePosition,keyboardHomeRotation);cameraView.orthographicSize=keyboardHomeZoom; }
         private void KeyboardSelection(int index,bool assign,double time)
         {
             if(view==null)return;
@@ -101,7 +101,7 @@ namespace Spacewars.Presentation
             bool units=view.Entities.Any(e=>e.Owner==view.Owner&&e.Health>0&&selection.Contains(e.Id));
             bool map=MapAt(point)>0;
             bool building=selection.Any(id=>view.Buildings.Any(b=>b.Id==id));
-            commandCursor?.Set(field&&!building&&(input.AttackMode||units&&!map&&(HostileAt(point)||IsWreckAt(point)))&&!battleRally);
+            commandCursor?.Set(field&&!building&&(input.AttackMode||units&&!map&&(HostileAt(point)||IsWreckAt(point)))&&!battleRally&&!scanTargeting);
 
         }
     }

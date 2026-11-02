@@ -31,6 +31,7 @@ namespace Spacewars.Tests.EditMode
                     : new[] { endpoint };
                 if(flatCandidateCount>0)candidates=Enumerable.Range(0,flatCandidateCount).Select(i=>NavigationArrivalTestFactory.At(5+.2*(i%8),.2*(i/8),surface)).ToArray();
                 if(unreachableFirst)candidates[1]=NavigationArrivalTestFactory.At(-5,5,surface);
+                if(!partition&&candidateAt!=null)candidates=candidates.Select((at,index)=>candidateAt(index,at)).ToArray();
                 if(partition){var clearance=NavigationArrivalTestFactory.Member(31,0,origin,.2).Clearance;Assert.True(((PartitionNavigationProvider)provider).TryLocate(new NavPoint(-24,0),clearance,out origin));Assert.True(((PartitionNavigationProvider)provider).TryLocate(new NavPoint(-22,0),clearance,out endpoint));candidates=Enumerable.Range(0,flatCandidateCount>0?flatCandidateCount:8).Select(i=>candidateAt!=null?candidateAt(i,endpoint):new NavLocation(new NavPoint(-22+2*(i%4),2*(i/4)),endpoint.SurfaceId)).ToArray();Member=NavigationArrivalTestFactory.Member(31,0,origin,.2);}
                 var originals=Enumerable.Range(0,memberCount).Select(i=>i==0?Member:NavigationArrivalTestFactory.Member(31+i,0,partition?origin:NavigationArrivalTestFactory.At(-5,-i,surface),variableRadii?.2+.07*i:.2)).ToArray();
                 var candidateSource = new NavArrivalCandidateSource("physical-arrival-work", 1, endpoint, candidates);
@@ -129,6 +130,76 @@ namespace Spacewars.Tests.EditMode
             for(int i=0;i<16&&CurrentArrivalPhase(work)!="SolvePage";i++)work.Advance(i+1,10000,new NavEpochQuota(0,0,0,0,0));
             Assert.AreEqual("SolvePage",CurrentArrivalPhase(work));
         }
+        [TestCase("own",true)][TestCase("own",false)]
+        [TestCase("foreign",true)][TestCase("foreign",false)]
+        [TestCase("incarnation",true)][TestCase("incarnation",false)]
+        [TestCase("pending",true)][TestCase("pending",false)]
+        [TestCase("equal",true)][TestCase("newer",true)][TestCase("held",true)]
+        public void OwnInstalledReplacementKeepsPreferredPointWithoutReleasingForeignBlocking(string kind,bool owned)
+        {
+            var point=NavigationArrivalTestFactory.At(2,0);
+            NavArrivalOccupant occupant=kind=="pending"?NavigationArrivalTestFactory.Pending(31,point,.2,8,"pending"):
+                kind=="held"?NavigationArrivalTestFactory.Actor(31,point,.2,true,"held"):
+                new NavArrivalOccupant(NavArrivalOccupantKind.InstalledReservation,kind=="foreign"?32:31,kind=="incarnation"?2:1,point,.2,true,"installed",
+                    NavArrivalReservationKind.InstalledExecution,0,kind=="equal"?131:kind=="newer"?132:8,point);
+            using(var fixture=new OwnedArrivalFixture(true,samePoint:true,occupants:new[]{occupant})){
+                NavigationArrivalWork work=null;
+                try{
+                    work=owned?fixture.NewWork(w=>FinishOwnedArrival(w)):new NavigationArrivalWork(fixture.UnownedInput);
+                    if(!owned)FinishOwnedArrival(work);
+                    Assert.AreEqual(NavArrivalStatus.Ready,work.Status,"Independent allocation completes with per-member terminal outcomes");
+                    Assert.True(fixture.Input.Occupancy.Occupants.Single().BlocksPlacement,"The shared reservation row is retained");
+                    if(kind=="own"){
+                        Assert.AreEqual(point,work.Proposals.Single().Endpoint);
+                        Assert.True(work.Proposals.Single().Proof.ValidateAgainst(fixture.Input,work.Proposals.Single().Member,point));
+                        Assert.True(occupant.BlocksFor(fixture.Member,2),"A foreign generation cannot supersede this reservation");
+                    }else {Assert.Zero(work.Proposals.Count);Assert.AreEqual(NavArrivalStatus.NoAvailableSlot,work.Save().MemberOutcomes.Single().Value);}
+                }finally{work?.ReleaseOwner();}
+            }
+        }
+        private static NavArrivalInput RebindOccupancyRequest(NavArrivalInput input,long request,params NavArrivalOccupant[] occupants)
+        {
+            var m=input.Members.Single();
+            var member=new NavArrivalMember(m.EntityId,m.Incarnation,m.Order,m.MobilityRevision,m.Origin,m.Clearance,m.WorldGeneration,m.GroupId,
+                m.RootOrderRevision,m.CommandSequence,m.IssuedTick,m.ActivationRevision,m.MemberOrderRevision,request,m.HoldBinding);
+            return new NavArrivalInput(input.TopologyIdentity,input.ProfileIdentity,input.Provider,input.Profile,input.ArrivalProfile,input.Limits,input.Source,
+                new[]{member},new NavArrivalOccupancySnapshot(input.Occupancy.Generation,occupants),input.MaxLabels,input.WorkingBindings,true);
+        }
+        [TestCase("older",true)][TestCase("crossing",false)][TestCase("none",true)][TestCase("multiple",false)]
+        public void HistoricalOwnReservationRequestRebindPreservesOnlyTheSameEligibility(string kind,bool reusable)
+        {
+            var budget=new NavigationRetentionBudget();NavigationArrivalWork old=null,current=null,next=null;
+            using(var fixture=new OwnedArrivalFixture(true,partition:true)){
+                try{
+                    var point=fixture.UnownedInput.Source.Requested;var row=NavigationArrivalTestFactory.Installed(31,point,.2,kind=="crossing"?19:8,"installed");
+                    var rows=kind=="none"?new[]{NavigationArrivalTestFactory.Actor(31,point,.2,false,"moving-actor")}:kind=="multiple"?new[]{row,NavigationArrivalTestFactory.Installed(31,point,.2,9,"other-installed")}:new[]{row};
+                    old=PaidPageBirth(budget,RebindOccupancyRequest(fixture.UnownedInput,18,rows));
+                    current=PaidPageBirth(budget,RebindOccupancyRequest(fixture.UnownedInput,22,rows),old);
+                    Assert.AreEqual(reusable,(bool)typeof(NavigationArrivalWork).GetMethod("HistoricalMemberSame",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(current,new object[]{0}));
+                    next=Fork(current,budget,22,w=>w.Advance(0,2,PrefixZero));
+                    Assert.AreEqual(reusable,PrefixState(next).Oracle!=null,"The actual paid header/member guards decide whether the oracle survives");
+                }finally{next?.ReleaseOwner();current?.ReleaseOwner();old?.ReleaseOwner();}
+            }
+            PrefixNoLeaks(budget);
+        }
+        [TestCase("actor")][TestCase("incarnation")][TestCase("history")][TestCase("kind")]
+        public void HistoricalOccupancyGuardRejectsChangedEligibilityMetadataAtTheSameFootprint(string change)
+        {
+            var budget=new NavigationRetentionBudget();NavigationArrivalWork old=null,current=null;
+            using(var fixture=new OwnedArrivalFixture(true,partition:true)){
+                try{
+                    var point=fixture.UnownedInput.Source.Requested;var before=NavigationArrivalTestFactory.Installed(31,point,.2,8,"installed");
+                    var after=change=="kind"?NavigationArrivalTestFactory.Pending(31,point,.2,8,"pending"):
+                        new NavArrivalOccupant(NavArrivalOccupantKind.InstalledReservation,change=="actor"?32:31,change=="incarnation"?2:1,point,.2,true,"installed",
+                            NavArrivalReservationKind.InstalledExecution,0,change=="history"?9:8,point);
+                    old=PaidPageBirth(budget,RebindOccupancyRequest(fixture.UnownedInput,18,before));
+                    current=PaidPageBirth(budget,RebindOccupancyRequest(fixture.UnownedInput,18,after),old);
+                    int row=((PartitionNavigationProvider)fixture.UnownedInput.Provider).MonotonePartCount;
+                    Assert.False((bool)typeof(NavigationArrivalWork).GetMethod("HistoricalPartSame",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(current,new object[]{row}));
+                }finally{current?.ReleaseOwner();old?.ReleaseOwner();}
+            }
+            PrefixNoLeaks(budget);
+        }
         [TestCase(true,true,1,true)][TestCase(true,true,1,false)]
         [TestCase(false,true,1,true)][TestCase(false,true,1,false)]
         [TestCase(true,false,1,true)][TestCase(true,false,1,false)]
@@ -141,9 +212,9 @@ namespace Spacewars.Tests.EditMode
                 try{
                     work=owned?fixture.NewWork(PrepareArrivalModeRows):new NavigationArrivalWork(fixture.UnownedInput);
                     if(!owned)PrepareArrivalModeRows(work);
-                    var rows=ArrivalModeRequests(work);Assert.AreEqual(2,rows.Length);
+                    var rows=ArrivalModeRequests(work);Assert.AreEqual(flat&&independent&&members>1?1:2,rows.Length,"Independent flat groups solve the earliest candidate before creating its successor.");
                     for(int n=0;n<rows.Length;n++){
-                        Assert.AreEqual(flat&&independent&&members==1,rows[n].Singleton);Assert.False(rows[n].Query);
+                        Assert.AreEqual(flat&&independent,rows[n].Singleton);Assert.False(rows[n].Query);
                         Assert.AreEqual(fixture.Input.Source.Candidates[n],rows[n].Subscription.AssignedEndpoint);
                         Assert.AreEqual(fixture.Member.Origin,rows[n].Subscription.Origin);
                     }
@@ -191,13 +262,14 @@ namespace Spacewars.Tests.EditMode
         [TestCase("prepare")]
         [TestCase("scan")]
         [TestCase("solve")]
+        [TestCase("own-reservation")]
         public void BodyOwnedArrivalWorkRoundTripsPartialContinuationAndExactNextAdvance(string phaseName)
         {
-            using (var fixture = new OwnedArrivalFixture(false))
+            using (var fixture = new OwnedArrivalFixture(phaseName=="own-reservation",samePoint:phaseName=="own-reservation",occupants:phaseName=="own-reservation"?new[]{NavigationArrivalTestFactory.Installed(31,NavigationArrivalTestFactory.At(2,0),.2,8,"installed")}:null))
             {
                 var work = fixture.NewWork(w =>
                 {
-                    if (phaseName == "prepare")
+                    if (phaseName == "prepare"||phaseName=="own-reservation")
                         Assert.AreEqual(NavArrivalStatus.BudgetExhausted, w.Advance(1, 1, ArrivalWorkQuota));
                     else if (phaseName == "scan")
                     {
@@ -229,6 +301,7 @@ namespace Spacewars.Tests.EditMode
                     next.Advance(40, 10000, ArrivalWorkQuota);
                     originalFullStatus = FinishOwnedArrival(next);
                 });
+                if(phaseName=="own-reservation"){Assert.AreEqual(NavArrivalStatus.Ready,originalFullStatus);Assert.AreEqual(fixture.Input.Source.Requested,originalFull.Proposals.Single().Endpoint);}
                 byte[] expectedFull = CaptureGraph(fixture.Budget, originalFull);
                 originalFull.ReleaseOwner();
                 originalNext.ReleaseOwner();

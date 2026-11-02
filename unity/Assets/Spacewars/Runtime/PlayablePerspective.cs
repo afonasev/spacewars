@@ -102,6 +102,8 @@ namespace Spacewars.Runtime
         private IEnumerable<VisionSource> VisionSources(PlayableOwner owner)
         {
             if(offline?.ProvingGround!=null){yield return new VisionSource(default(NavPoint),profile.ArenaHalfExtent*2);yield break;}
+            foreach(var mine in mines)if(!Hostile(mine.Owner,owner))yield return new VisionSource(mine.Point,mine.Vision);
+            foreach(var scan in scans)if(!Hostile(scan.Owner,owner))yield return new VisionSource(scan.Point,scan.Radius);
             foreach(var u in units.Values)if(!Hostile(u.Owner,owner)&&u.Health>0&&TryActor(u.Id,out var n))yield return new VisionSource(n.Position,PlayableUnitRules.Vision(profile,u.Kind));
             foreach(var b in buildings.Values)if(!Hostile(b.Owner,owner))
             {
@@ -113,7 +115,7 @@ namespace Spacewars.Runtime
         {
             using var measured=PerformanceProfile.Measure(ProfileStage.Vision);
             if(VisionInputsUnchanged())return;
-            var actual=buildings.Values.Where(b=>b.Phase!=ConstructionPhase.Pending).Select(b=>new KnownBuilding(b.Id,TeamOf(b.Owner),b.Owner,b.Kind,b.Position,b.Heading,b.Upgrade?.Complete==true,CenterUpgraded(b.Id))).ToArray();
+            var actual=buildings.Values.Where(b=>b.Phase!=ConstructionPhase.Pending).Select(b=>new KnownBuilding(b.Id,TeamOf(b.Owner),b.Owner,b.Kind,b.Position,b.Heading,b.Upgrade?.Complete==true,CenterUpgraded(b.Id),b.ProducerUpgrade?.Complete==true)).ToArray();
             foreach(PlayableOwner owner in Owners)Vision(owner).Refresh(VisionSources(owner),actual);
             RememberVisionInputs();
         }
@@ -174,7 +176,7 @@ namespace Spacewars.Runtime
                 if(!fullOverview&&b.Owner!=owner&&(Hostile(b.Owner,owner)&&b.Phase==ConstructionPhase.Pending||!v.IsVisible(b.Position)))continue;
                 bool own=fullOverview||b.Owner==owner;double duration=TerritoryRules.Duration(Terms(b.TermsRevision),b.Kind);
                 bs.Add(new PlayableBuildingSnapshot(b.Id,b.Owner,b.Kind,b.Position,(int)Math.Ceiling(b.Health),b.Ready?1:b.Build/duration,
-                    own?b.Queue:0,own?b.ProductionProgress:0,own?b.Rally:default(NavPoint),b.SiteId,b.SlotId,b.ParentId,b.Phase,own?b.BlockedReason:null,b.Heading,own,own?ProductionSnapshot(b):null,own&&b.RepeatTank,own?LifecycleSnapshot(b):null,own?UpgradeSnapshot(b):null,b.Upgrade?.Complete==true,own?b.RepeatKind:PlayableEntityKind.Tank,b.Kind==PlayableBuildingKind.ScientificCenter&&own?ResearchSnapshot(b.Owner):null,own&&b.HasRally,own?PendingRally(b.Id):null,exactHealth:own?b.Health:(double?)null,launchPhase:b.LaunchPhase,launchTime:b.LaunchTime,launchKind:FactoryStagedKind(b),launchUpgraded:b.Kind==PlayableBuildingKind.Hangar?HawkSalvo(b.Owner):FactoryStagedUpgraded(b),maxHealth:BuildingMaximumHealth(b.Owner,b.Kind),turret:TurretSnapshot(b,fullOverview?(PlayableOwner?)null:owner),healing:RepairTowerSnapshot(b,fullOverview?(PlayableOwner?)null:owner),scientificCenterUpgraded:CenterUpgraded(b.Id)));
+                    own?b.Queue:0,own?b.ProductionProgress:0,own?b.Rally:default(NavPoint),b.SiteId,b.SlotId,b.ParentId,b.Phase,own?b.BlockedReason:null,b.Heading,own,own?ProductionSnapshot(b):null,own&&b.RepeatTank,own?LifecycleSnapshot(b):null,own?UpgradeSnapshot(b):null,b.Upgrade?.Complete==true,own?b.RepeatKind:PlayableEntityKind.Tank,b.Kind==PlayableBuildingKind.ScientificCenter&&own?ResearchSnapshot(b.Owner):null,own&&b.HasRally,own?PendingRally(b.Id):null,exactHealth:own?b.Health:(double?)null,launchPhase:b.LaunchPhase,launchTime:b.LaunchTime,launchKind:FactoryStagedKind(b),launchUpgraded:b.Kind==PlayableBuildingKind.Hangar?HawkSalvo(b.Owner):FactoryStagedUpgraded(b),maxHealth:BuildingMaximumHealth(b.Owner,b.Kind),turret:TurretSnapshot(b,fullOverview?(PlayableOwner?)null:owner),healing:RepairTowerSnapshot(b,fullOverview?(PlayableOwner?)null:owner),scientificCenterUpgraded:CenterUpgraded(b.Id),producerUpgraded:b.ProducerUpgrade?.Complete==true));
             }
             }
             PerformanceProfile.Add(ProfileWork.SnapshotBuildings,bs.Count);
@@ -185,7 +187,7 @@ namespace Spacewars.Runtime
                 bool visible=p.Faction==owner||v.IsVisible(p.Position);
                 var r=p.Rocket;bool markerVisible=r!=null&&!r.BuildingTarget&&(p.Faction==owner||v.IsVisible(r.Predicted.Point.Ground));
                 if(!visible&&!markerVisible)continue;
-                int source=visible&&es.Any(e=>e.Id==p.Owner)?p.Owner:0;
+                int source=visible&&(es.Any(e=>e.Id==p.Owner)||bs.Any(b=>b.Id==p.Owner&&(fullOverview||b.Owner==owner||v.IsVisible(b.Position))))?p.Owner:0;
                 int target=visible&&(es.Any(e=>e.Id==p.Target)||bs.Any(b=>b.Id==p.Target))?p.Target:0;
                 if(r==null){ps.Add(new PlayableProjectileSnapshot(p.Id,source,target,p.Position,p.Kind,Math.Atan2(p.DirectionZ,p.DirectionX),height:p.Height,pitch:p.Spatial?Math.Atan2(p.Hawk?.Direction.Y??p.DirectionY,Math.Sqrt(Math.Pow(p.Hawk?.Direction.X??p.DirectionX,2)+Math.Pow(p.Hawk?.Direction.Z??p.DirectionZ,2))):Math.Atan(p.VerticalSlope),faction:p.Faction));continue;}
                 double u=r.Elapsed/r.Flight.Duration;var point=r.Flight.Point(u);var tangent=r.Flight.Tangent(u);
@@ -227,14 +229,14 @@ namespace Spacewars.Runtime
                 Income(owner)/profile.IncomePeriodSeconds,information,discovered,SnapshotValueForTests("Population",()=>Population(owner)),impacts.Where(p=>(fullOverview||(p.VisibleMask&(1<<(int)owner))!=0)&&v.IsVisible(p.Point.Ground)).Select(p=>new PlayableImpactSnapshot(p.Id,p.Owner,p.Point,p.Radius,p.Tick,fullOverview?255:1<<(int)owner)).ToArray(),researchAvailability:SnapshotValueForTests("ResearchAvailability",()=>ResearchAvailability(owner)),ownerResearch:SnapshotValueForTests("ResearchSnapshot",()=>ResearchSnapshot(owner)),publicScoutObjectives:objectives,
                 ownCenterDamage:centerDamage.Values.Where(d=>d.Owner==owner&&bs.Any(b=>b.Id==d.CenterId&&b.Health>0)&&es.Any(e=>e.Id==d.AttackerId&&e.Owner!=owner)).OrderBy(d=>d.CenterId).ThenBy(d=>d.AttackerId).Select(d=>d.Copy()).ToArray(),
                 routeProofs:SnapshotValueForTests("Routes",()=>ProjectRoutesCore(owner,routeRequests,v,es,bs,armyState,expansionRoutes||readyRoutesOnly,readyRoutesOnly)),
-                artillerySupport:ProjectArtillery(owner,v,es,bs,armyState),owner:owner,exactCredits:Balance(owner),ownerId:offline==null?null:offline.Roster[(int)owner].Id,team:TeamOf(owner),participants:offline?.Roster.ToArray(),activeProfile:profile,homeSiteId:HomeSite(owner),ownerEliminated:eliminated.Contains(owner),settledIncome:SettledIncome(owner),mission:owner==PlayableOwner.Player?CampaignProjection():null,intelEnvelopes:PublicIntelEnvelopes(),groundTrails:expansionRoutes?null:groundTrails.Visible(Tick,fullOverview?null:information,profile.GroundTrailLifetimeTicks),sounds:expansionRoutes?null:Sounds(fullOverview?(PlayableOwner?)null:owner),incomeEvents:expansionRoutes||fullOverview?null:IncomeEvents(owner),wrecks:WreckSnapshots(fullOverview?(PlayableOwner?)null:owner),buildingDestructions:BuildingDestructions(fullOverview?(PlayableOwner?)null:owner)).WithTeamSignals(teamSignals&&!expansionRoutes&&!fullOverview?ProjectTeamSignals(owner):null).WithMatchEvents(expansionRoutes?null:MatchEvents(fullOverview?(PlayableOwner?)null:owner));
+                artillerySupport:ProjectArtillery(owner,v,es,bs,armyState),owner:owner,exactCredits:Balance(owner),ownerId:offline==null?null:offline.Roster[(int)owner].Id,team:TeamOf(owner),participants:offline?.Roster.ToArray(),activeProfile:profile,homeSiteId:HomeSite(owner),ownerEliminated:eliminated.Contains(owner),settledIncome:SettledIncome(owner),mission:owner==PlayableOwner.Player?CampaignProjection():null,intelEnvelopes:PublicIntelEnvelopes(),groundTrails:expansionRoutes?null:groundTrails.Visible(Tick,fullOverview?null:information,profile.GroundTrailLifetimeTicks),sounds:expansionRoutes?null:Sounds(fullOverview?(PlayableOwner?)null:owner),incomeEvents:expansionRoutes||fullOverview?null:IncomeEvents(owner),wrecks:WreckSnapshots(fullOverview?(PlayableOwner?)null:owner),buildingDestructions:BuildingDestructions(fullOverview?(PlayableOwner?)null:owner)).WithMines(expansionRoutes?Array.Empty<OrbitalMineSnapshot>():MineSnapshots(fullOverview?null:information),expansionRoutes?Array.Empty<OrbitalMineBlastSnapshot>():MineBlastSnapshots(fullOverview?null:information)).WithOrbital(OrbitalView(owner)).WithScanLines(expansionRoutes?Array.Empty<OrbitalScanLine>():ScanLines(information),expansionRoutes?null:ScanTriangles(information)).WithTeamSignals(teamSignals&&!expansionRoutes&&!fullOverview?ProjectTeamSignals(owner):null).WithMatchEvents(expansionRoutes?null:MatchEvents(fullOverview?(PlayableOwner?)null:owner));
 #else
             return new PlayableSnapshot(profile.ProfileId,profile.Revision,navigation.Generation,seed,sequence,Tick,status,paused,Outcome,
                 (int)Math.Floor(Balance(owner)),projectileGeometry,es.ToArray(),bs.ToArray(),ps.ToArray(),metrics,failure,liveSites,
                 Income(owner)/profile.IncomePeriodSeconds,information,discovered,Population(owner),impacts.Where(p=>(fullOverview||(p.VisibleMask&(1<<(int)owner))!=0)&&v.IsVisible(p.Point.Ground)).Select(p=>new PlayableImpactSnapshot(p.Id,p.Owner,p.Point,p.Radius,p.Tick,fullOverview?255:1<<(int)owner)).ToArray(),researchAvailability:ResearchAvailability(owner),ownerResearch:ResearchSnapshot(owner),publicScoutObjectives:objectives,
                 ownCenterDamage:centerDamage.Values.Where(d=>d.Owner==owner&&bs.Any(b=>b.Id==d.CenterId&&b.Health>0)&&es.Any(e=>e.Id==d.AttackerId&&e.Owner!=owner)).OrderBy(d=>d.CenterId).ThenBy(d=>d.AttackerId).Select(d=>d.Copy()).ToArray(),
                 routeProofs:ProjectRoutesCore(owner,routeRequests,v,es,bs,armyState,expansionRoutes||readyRoutesOnly,readyRoutesOnly),
-                artillerySupport:ProjectArtillery(owner,v,es,bs,armyState),owner:owner,exactCredits:Balance(owner),ownerId:offline==null?null:offline.Roster[(int)owner].Id,team:TeamOf(owner),participants:offline?.Roster.ToArray(),activeProfile:profile,homeSiteId:HomeSite(owner),ownerEliminated:eliminated.Contains(owner),settledIncome:SettledIncome(owner),mission:owner==PlayableOwner.Player?CampaignProjection():null,intelEnvelopes:PublicIntelEnvelopes(),groundTrails:expansionRoutes?null:groundTrails.Visible(Tick,fullOverview?null:information,profile.GroundTrailLifetimeTicks),sounds:expansionRoutes?null:Sounds(fullOverview?(PlayableOwner?)null:owner),incomeEvents:expansionRoutes||fullOverview?null:IncomeEvents(owner),wrecks:WreckSnapshots(fullOverview?(PlayableOwner?)null:owner),buildingDestructions:BuildingDestructions(fullOverview?(PlayableOwner?)null:owner)).WithTeamSignals(teamSignals&&!expansionRoutes&&!fullOverview?ProjectTeamSignals(owner):null).WithMatchEvents(expansionRoutes?null:MatchEvents(fullOverview?(PlayableOwner?)null:owner));
+                artillerySupport:ProjectArtillery(owner,v,es,bs,armyState),owner:owner,exactCredits:Balance(owner),ownerId:offline==null?null:offline.Roster[(int)owner].Id,team:TeamOf(owner),participants:offline?.Roster.ToArray(),activeProfile:profile,homeSiteId:HomeSite(owner),ownerEliminated:eliminated.Contains(owner),settledIncome:SettledIncome(owner),mission:owner==PlayableOwner.Player?CampaignProjection():null,intelEnvelopes:PublicIntelEnvelopes(),groundTrails:expansionRoutes?null:groundTrails.Visible(Tick,fullOverview?null:information,profile.GroundTrailLifetimeTicks),sounds:expansionRoutes?null:Sounds(fullOverview?(PlayableOwner?)null:owner),incomeEvents:expansionRoutes||fullOverview?null:IncomeEvents(owner),wrecks:WreckSnapshots(fullOverview?(PlayableOwner?)null:owner),buildingDestructions:BuildingDestructions(fullOverview?(PlayableOwner?)null:owner)).WithMines(expansionRoutes?Array.Empty<OrbitalMineSnapshot>():MineSnapshots(fullOverview?null:information),expansionRoutes?Array.Empty<OrbitalMineBlastSnapshot>():MineBlastSnapshots(fullOverview?null:information)).WithOrbital(OrbitalView(owner)).WithScanLines(expansionRoutes?Array.Empty<OrbitalScanLine>():ScanLines(information),expansionRoutes?null:ScanTriangles(information)).WithTeamSignals(teamSignals&&!expansionRoutes&&!fullOverview?ProjectTeamSignals(owner):null).WithMatchEvents(expansionRoutes?null:MatchEvents(fullOverview?(PlayableOwner?)null:owner));
 #endif
         }
         private AiIntelEnvelope[] publicIntelEnvelopes;
@@ -380,7 +382,7 @@ namespace Spacewars.Runtime
                 else
 #endif
                 if(request==null||request.UnitId<=0||request.TargetId<=0||request.Generation!=navigation.Generation||request.Tick!=Tick||!units.TryGetValue(request.UnitId,out unit)||unit.Owner!=owner||unit.Health<=0||!TryActor(unit.Id,out nav)||request.Origin.X!=nav.Position.X||request.Origin.Z!=nav.Position.Z||request.Radius!=nav.Radius)continue;
-                NavPoint target,goal;bool buildingTarget=false;double friendlyRadius=0;int friendlyVariant=0;
+                NavPoint target,goal;bool buildingTarget=false,settledFollow=false;double friendlyRadius=0;int friendlyVariant=0;
                 if(request.Kind==PlayableRouteTargetKind.VisibleEnemy)
                 {
                     var enemy=entities.FirstOrDefault(e=>e.Id==request.TargetId&&Hostile(e.Owner,owner)&&e.Health>0);
@@ -400,6 +402,8 @@ namespace Spacewars.Runtime
                     var home=buildings.FirstOrDefault(b=>b.Id==request.TargetId&&b.Owner==owner&&b.Health>0&&b.Phase==ConstructionPhase.Ready);
                     bool currentLeg=ally!=null&&ally.Id==unit.Id&&ally.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move&&ally.CurrentOrder.Destination.Equals(request.Target);
                     bool followLeg=ally!=null&&ally.Id!=unit.Id&&PlayableUnitRules.FollowGoal(profile,ally.Position,ally.HullHeading).Equals(request.Target);
+                    settledFollow=followLeg&&unit.CurrentOrder?.Kind==PlayableTacticalOrderKind.Follow&&unit.CurrentOrder.TargetId==ally.Id&&
+                        Distance(nav.Position,ally.Position)<=profile.FollowDistance+profile.FollowArrivalTolerance;
                     friendlyVariant=currentLeg?1:followLeg?2:0;
                     if(ally==null&&home==null)continue;target=goal=currentLeg?ally.CurrentOrder.Destination:followLeg?request.Target:ally!=null?ally.Position:home.Position;buildingTarget=!currentLeg&&!followLeg;
                     if(ally!=null&&!currentLeg&&!followLeg)
@@ -452,7 +456,9 @@ namespace Spacewars.Runtime
                     .Where(p=>safeGeometry.IsFree(p,radius))
                     .Where(p=>request.Kind!=PlayableRouteTargetKind.FriendlyAnchor||entities.Where(e=>e.Id!=unit.Id).All(e=>
                         Distance(p,e.Position)>=Math.Max(profile.Navigation.ArrivalSlotSpacing,4*radius+2*profile.Navigation.ArrivalTolerance+2*profile.Navigation.LocalGridCell)&&
-                        (e.CurrentOrder?.Kind!=PlayableTacticalOrderKind.Move||Distance(p,e.CurrentOrder.Destination)>=Math.Max(profile.Navigation.ArrivalSlotSpacing,4*radius+2*profile.Navigation.ArrivalTolerance+2*profile.Navigation.LocalGridCell))))
+                        (e.CurrentOrder?.Kind!=PlayableTacticalOrderKind.Move||Distance(p,e.CurrentOrder.Destination)>=Math.Max(profile.Navigation.ArrivalSlotSpacing,4*radius+2*profile.Navigation.ArrivalTolerance+2*profile.Navigation.LocalGridCell))&&
+                        (e.Queue?.PendingAiRouteViable!=true||e.Queue.Pending?.Kind!=PlayableCommandKind.Move||!e.Queue.Pending.Anchor.HasValue||
+                            Distance(p,e.Queue.Pending.Anchor.Value.Position)>=Math.Max(profile.Navigation.ArrivalSlotSpacing,4*radius+2*profile.Navigation.ArrivalTolerance+2*profile.Navigation.LocalGridCell))))
                     .OrderBy(p=>Distance(nav.Position,p)).ToArray():new[]{goal};
                 // Arrival clears the tactical order, but the native crowd retains its
                 // accepted goal. Publish that exact goal through the existing home proof.
@@ -460,7 +466,16 @@ namespace Spacewars.Runtime
                     actor.CurrentOrder==null&&nav.Outcome==NavigationOutcome.Arrived&&actor.OrderStamp?.Origin==PlayableOrderOrigin.Ai&&actor.OrderStamp.Kind==PlayableCommandKind.Move&&
                     actor.OrderStamp.Owner==owner&&actor.OrderStamp.Generation==navigation.Generation&&actor.OrderStamp.Source==PlayableAiOpeningComposition.SourceIdentity&&
                     armyState!=null&&armyState.Generation==navigation.Generation&&armyState.Armies.Any(a=>(a.Phase==AiArmyPhase.Retreating||a.Phase==AiArmyPhase.Recovering)&&AiArmyPlanner.IsArmyPolicy(a.TacticalOwner)&&a.Members.Contains(actor.Id)&&!a.Reinforcements.Contains(actor.Id));
-                if(withdrawalArrival)goals=Distance(nav.Goal,target)<=friendlyRadius+profile.Navigation.ArrivalTolerance&&safeGeometry.IsFree(nav.Goal,radius)?new[]{nav.Goal}:Array.Empty<NavPoint>();
+                // An intermediate escape leg may also have arrived. Retain its
+                // exact goal only when it actually reaches this home; otherwise
+                // keep the ordinary free home candidates for the next leg.
+                bool regroupLeg=request.Kind==PlayableRouteTargetKind.FriendlyAnchor&&buildings.Any(b=>b.Id==request.TargetId)&&
+                    actor.OrderStamp?.Origin==PlayableOrderOrigin.Ai&&actor.OrderStamp.Kind==PlayableCommandKind.Move&&
+                    actor.OrderStamp.Owner==owner&&actor.OrderStamp.Generation==navigation.Generation&&actor.OrderStamp.Source==PlayableAiOpeningComposition.SourceIdentity&&
+                    (actor.CurrentOrder==null&&nav.Outcome==NavigationOutcome.Arrived||
+                     actor.CurrentOrder?.Kind==PlayableTacticalOrderKind.Move&&actor.CurrentOrder.CommandSequence==actor.OrderStamp.Sequence&&actor.CurrentOrder.Destination.Equals(nav.Goal))&&
+                    armyState!=null&&armyState.Generation==navigation.Generation&&armyState.Armies.Any(a=>a.Phase==AiArmyPhase.Regrouping&&AiArmyPlanner.IsArmyPolicy(a.TacticalOwner)&&a.Members.Contains(actor.Id));
+                if((withdrawalArrival||regroupLeg)&&Distance(nav.Goal,target)<=friendlyRadius+profile.Navigation.ArrivalTolerance&&safeGeometry.IsFree(nav.Goal,radius))goals=new[]{nav.Goal};
 #if UNITY_INCLUDE_TESTS
                 int candidateCount=goals.Length;
                 bool proofPublished=false;
@@ -516,6 +531,14 @@ namespace Spacewars.Runtime
 #endif
                         continue;
                     }
+                    // A completed Follow witness may retain an old bend after
+                    // both endpoints converge. Inside the native Follow stopping
+                    // ring, certify the current tiny leg against both
+                    // geometries instead of treating that old detour as distance
+                    // still to assemble. Pending/empty work is never bypassed,
+                    // and the completed solver answer remains unchanged.
+                    if(profile.AuthoredMap==null&&!navigation.UsesRecastGroundRoutes&&settledFollow&&path.Length>1&&
+                        Geometry.SegmentFree(nav.Position,candidate,radius)&&safeGeometry.SegmentFree(nav.Position,candidate,radius))path=new[]{candidate};
 #if UNITY_INCLUDE_TESTS
                     if(capture)
                     {
@@ -589,11 +612,15 @@ namespace Spacewars.Runtime
                 vision.IsVisible(new NavPoint(obstacle.MinX,obstacle.MaxZ))&&
                 vision.IsVisible(new NavPoint(obstacle.MaxX,obstacle.MaxZ));
         internal string ArmyMoveRejection(PlayableAiAction action,bool withdrawal)
+            =>ArmyMoveRejection(action,withdrawal,out _,null);
+        // Optional call-local witnesses for additional policy checks. Partial paths
+        // from a pending/rejected batch must never authorize any recipient.
+        private string ArmyMoveRejection(PlayableAiAction action,bool withdrawal,out PlayableAiObservation observed,Dictionary<int,NavPoint[]> validatedPaths)
         {
             var owner=OwnerFor(action.PlayerId);var lane=armySafetyPathLane;lane?.BeginProjection(owner);
             try{
             var snapshot=PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,action.Seed,owner);
-            var o=PlayableAiObservation.From(snapshot);var vision=Vision(owner);
+            var o=PlayableAiObservation.From(snapshot);observed=o;var vision=Vision(owner);
             var leader=action.Kind==PlayableCommandKind.Follow?o.Entities.FirstOrDefault(u=>u.Id==action.TargetId&&u.Owner==owner&&u.Health>0):null;
             if(action.Kind==PlayableCommandKind.Follow&&(leader==null||Spacewars.Simulation.Ai.AiRosterCatalog.Initial.For(leader.Kind).lineWeight<=0))return "leader unavailable";
             var target=leader==null?action.Target:PlayableUnitRules.FollowGoal(profile,leader.Position,leader.HullHeading);
@@ -638,6 +665,7 @@ namespace Spacewars.Runtime
                 if(path.Length==0||!path.Last().Equals(goal))return "ground route unreachable";
                 if(!(withdrawal?AiTacticalExecutor.WithdrawalPathForUnit(o,unit.Position,path,radius,profile,airborne):AiTacticalExecutor.SafePathForUnit(o,unit.Position,path,radius,profile,airborne)))return "observed threat blocks path";
                 if(!airborne){var at=unit.Position;foreach(var point in path){if(!geometry.SegmentFree(at,point,radius))return "ground segment blocked";at=point;}}
+                validatedPaths?.Add(unit.Id,path);
             }
             if(pathWorkPending)throw new ObservedPathPending();
             return null;

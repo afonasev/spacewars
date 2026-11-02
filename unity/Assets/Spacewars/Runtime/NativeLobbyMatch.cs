@@ -32,6 +32,7 @@ namespace Spacewars.Runtime
         {
             int seed=setup.ResolveSeed();
             var roster=setup.Participants.Select((p,i)=>new OfflineParticipant(i==0?"player-1":"foundry-"+(i+1),i+1,p.Team,p.Human?OfflineControl.Human:OfflineControl.Ai)).ToArray();
+            if(profile.AuthoredMap is AntennaCityMap city)return city.Configuration(profile,seed,roster);
             if(profile.AuthoredMap is NullDockMap dock)return dock.Configuration(profile,seed,roster);
             if(profile.AuthoredMap is CrimsonGroveMap grove)return grove.Configuration(profile,seed,roster);
             if(profile.AuthoredMap is WhiteMeridianMap meridian)return meridian.Configuration(profile,seed,roster);

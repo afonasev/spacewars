@@ -49,6 +49,23 @@ namespace Spacewars.Runtime
         // Selected reads retain the same detached state (including disbanded rows).
         // Call again after an admission: never cache or expose the owned army.
         internal AiArmyState[] CaptureArmy(long id)=>armies.TryGetValue(id,out var army)?new[]{army.Copy()}:System.Array.Empty<AiArmyState>();
+        // Synchronous owner-guard view only. Never retain this registry-backed
+        // view in detached work; copy each required value under its input grant.
+        internal readonly struct GuardView
+        {
+            readonly AiArmyState army;
+            internal GuardView(AiArmyState army){this.army=army;}
+            internal long Id=>army.Id;internal string OwnerId=>army.OwnerId;
+            internal bool Major=>army.Major;internal AiArmyPhase Phase=>army.Phase;
+            internal int MemberCount=>army.Members.Length;internal int ReinforcementCount=>army.Reinforcements.Length;
+            internal int MemberAt(int index)=>army.Members[index];internal int ReinforcementAt(int index)=>army.Reinforcements[index];
+            // Linear membership predicates retain the original semantics; callers
+            // must account these counts rather than claim a constant-time scan.
+            internal bool ContainsMember(int id)=>System.Array.IndexOf(army.Members,id)>=0;
+            internal bool ContainsReinforcement(int id)=>System.Array.IndexOf(army.Reinforcements,id)>=0;
+        }
+        internal bool TryReadGuard(long id,out GuardView view)
+        {if(armies.TryGetValue(id,out var army)){view=new GuardView(army);return true;}view=default;return false;}
         public long ArmyFor(int unit)=>membership.TryGetValue(unit,out var id)?id:0;
         // The validated registry owns both maps. Query the current assignment;
         // a detached deep capture is only needed when exporting army state.
@@ -75,8 +92,22 @@ namespace Spacewars.Runtime
             a.Members=a.Members.Concat(ids).OrderBy(x=>x).ToArray();a.Reinforcements=a.Reinforcements.Concat(ids).OrderBy(x=>x).ToArray();
             foreach(var unit in ids)membership.Add(unit,id);AssertInvariants();return true;
         }
+        internal void ReleaseMembers(long id,string tacticalOwner,IEnumerable<int> ids)
+        {
+            if(!armies.TryGetValue(id,out var a)||a.Phase==AiArmyPhase.Disbanded||a.TacticalOwner!=tacticalOwner)return;
+            var released=new HashSet<int>(ids);
+            foreach(var unit in a.Members.Where(released.Contains))membership.Remove(unit);
+            a.Members=a.Members.Where(unit=>!released.Contains(unit)).ToArray();a.Reinforcements=a.Reinforcements.Where(unit=>!released.Contains(unit)).ToArray();
+            if(a.Members.Length==0)Disband(id);else if(!a.Members.Contains(a.LeaderId))a.LeaderId=a.Members[0];
+            AssertInvariants();
+        }
         internal void JoinReinforcements(long id,string tacticalOwner,IEnumerable<int> ids)
         {if(armies.TryGetValue(id,out var a)&&a.TacticalOwner==tacticalOwner){a.Reinforcements=a.Reinforcements.Except(ids).ToArray();AssertInvariants();}}
+        internal bool BeginRepairReturn(long id,string tacticalOwner,int unit)
+        {
+            if(!armies.TryGetValue(id,out var a)||a.TacticalOwner!=tacticalOwner||a.Phase==AiArmyPhase.Disbanded||!a.Members.Contains(unit)||a.LeaderId==unit)return false;
+            a.Reinforcements=a.Reinforcements.Append(unit).Distinct().OrderBy(x=>x).ToArray();AssertInvariants();return true;
+        }
         private bool Binding(PlayableAiObservation o)=>o!=null&&o.OwnerId==OwnerId&&o.Generation==Generation;
         private bool Units(PlayableAiObservation o,int[] ids,AiArmyRole role,AiRosterCatalog catalog,int? required=null)
         {
@@ -131,9 +162,14 @@ namespace Spacewars.Runtime
             {foreach(var id in a.Members.Where(id=>!live.Contains(id)).ToArray())membership.Remove(id);a.Members=a.Members.Where(live.Contains).ToArray();a.Reinforcements=a.Reinforcements.Where(live.Contains).ToArray();if(a.Members.Length==0)Disband(a.Id);else a.LeaderId=a.Members.Contains(a.LeaderId)?a.LeaderId:a.Members[0];}
             AssertInvariants();
         }
+        // Bound by the owner loop to its current observed proposal/persisted reservation.
+        // No authorization callback means no exception to tactical ownership.
+        internal Func<AiIntent,bool> CombatMicroAuthorization;
         public string Reject(AiIntent intent)
         {
             if(intent.Action.PlayerId!=OwnerId||intent.Action.Generation!=Generation)return "army owner/generation mismatch";
+            bool micro=intent.Policy==AiCombatMicroPolicy.Policy;
+            if(micro&&CombatMicroAuthorization?.Invoke(intent)!=true)return "micro reservation not authorized";
             bool defenseHandoff=intent.Policy==AiDefensePlanner.Policy&&intent.Priority>=2&&
                 intent.Action.Kind==PlayableCommandKind.Attack&&CanAdmitDefense(intent.Action.EntityIds);
             foreach(var id in intent.Action.EntityIds)
@@ -148,7 +184,7 @@ namespace Spacewars.Runtime
                     a.TacticalOwner==AiDefensePlanner.Policy&&a.Major&&a.Reinforcements.Contains(id)&&intent.Action.EntityIds.All(unit=>membership.TryGetValue(unit,out var assigned)&&assigned==a.Id);
                 bool defenseCoreAttack=intent.Policy==AiDefensePlanner.Policy&&intent.Action.Kind==PlayableCommandKind.Attack&&a.TacticalOwner==AiDefensePlanner.Policy&&a.Major&&
                     a.Members.Contains(id)&&!a.Reinforcements.Contains(id)&&intent.Action.EntityIds.All(unit=>membership.TryGetValue(unit,out var assigned)&&assigned==a.Id&&!a.Reinforcements.Contains(unit));
-                if(a.TacticalOwner!=intent.Policy&&!preparationHandoff&&!defenseAssembly&&!defenseCoreAttack&&!defenseHandoff)return "unit tactical owner conflict";
+                if(a.TacticalOwner!=intent.Policy&&!micro&&!preparationHandoff&&!defenseAssembly&&!defenseCoreAttack&&!defenseHandoff)return "unit tactical owner conflict";
                 if(!a.Major&&intent.Action.Kind!=PlayableCommandKind.Move&&intent.Action.Kind!=PlayableCommandKind.Hold&&intent.Action.Kind!=PlayableCommandKind.Stop&&
                     !defenseHandoff&&!(preparationHandoff&&intent.Action.Kind==PlayableCommandKind.BuildAt)&&!(a.Role==AiArmyRole.Transport&&intent.Action.Kind==PlayableCommandKind.BuildAt))return "scout/transport combat requires major army";
             }

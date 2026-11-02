@@ -13,11 +13,11 @@ namespace Spacewars.Editor
  // never scene objects, renderer visibility, Unity colliders or navigation footprints.
  public static class BuildingCombatExport
  {
-  static readonly string[] Keys={"headquarters-a","factory-armored","mine-armored","outpost-b","scientificCenter","refinery","refineryUpgraded","hangar"};
+  static readonly string[] Keys={"headquarters-a","factory-armored","mine-armored","outpost-b","research-scanner","research-scanner-upgraded","refinery","refineryUpgraded","hangar"};
   [Serializable] sealed class Row {public string key,prefabHash,surfaceHash;public int parts,triangles;}
   [Serializable] sealed class Manifest {public string version;public float doorTravel;public Row[] models;}
   static string Hash(byte[] b){using var sha=SHA256.Create();return BitConverter.ToString(sha.ComputeHash(b)).Replace("-","").ToLowerInvariant();}
-  public static void Export(){ShkvalMonolithAssets.Prepare();Generate(true);}
+  public static void Export(){Generate(true);}
   public static void Validate(){Generate(false);}
   static void Generate(bool write)
   {
@@ -30,6 +30,8 @@ namespace Spacewars.Editor
     string path="Assets/Spacewars/Content/Resources/StyleA/"+key+".prefab";
     var prefab=AssetDatabase.LoadAssetAtPath<GameObject>(path);if(!prefab)throw new Exception("Missing combat source "+key);
     var filters=prefab.GetComponentsInChildren<MeshFilter>(true).Where(f=>f.sharedMesh&&f.GetComponent<MeshRenderer>()).ToArray();
+    // Bake the authored mine-only world yaw into the immutable surface, matching PlayableWorld.Facing.
+    var modelYaw=key=="mine-armored"?Quaternion.Euler(0,Spacewars.Presentation.ArmoredMineProfile.Load().facingYawDegrees,0):Quaternion.identity;
     float roller=prefab.GetComponentsInChildren<Transform>(true).FirstOrDefault(t=>t.name=="gateRollerStore")?.localPosition.y??0;
     var bytes=new MemoryStream();int triangles=0;
     using(var w=new BinaryWriter(bytes,Encoding.UTF8,true))
@@ -48,7 +50,7 @@ namespace Spacewars.Editor
       var axis=pivot?prefab.transform.InverseTransformVector(pivot.parent.TransformVector(Vector3.up)):Vector3.zero;
       w.Write(motion);w.Write(index);w.Write(pivot?pivot.localPosition.y:0);w.Write(axis.x);w.Write(axis.y);w.Write(axis.z);
       var verts=f.sharedMesh.vertices;var indices=f.sharedMesh.triangles;w.Write(verts.Length);w.Write(indices.Length);triangles+=indices.Length/3;
-      foreach(var v in verts){var at=prefab.transform.InverseTransformPoint(f.transform.TransformPoint(v));w.Write(at.x);w.Write(at.y);w.Write(at.z);}
+      foreach(var v in verts){var at=modelYaw*prefab.transform.InverseTransformPoint(f.transform.TransformPoint(v));w.Write(at.x);w.Write(at.y);w.Write(at.z);}
       foreach(int i in indices)w.Write(i);
      }
     }

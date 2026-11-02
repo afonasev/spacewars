@@ -116,7 +116,7 @@ namespace Spacewars.Simulation
     // pop, arc relaxation and reconstructed leg. Zero heuristic is admissible A*.
     public sealed partial class NavIncrementalSingletonRoute : NavOwnedStorage
     {
-        private enum Phase { Direct, Origins, Endpoints, Search, Trace, Reconstruct, Done, QueryCandidates, QueryValidate }
+        private enum Phase { Direct, Origins, Endpoints, Search, Trace, Reconstruct, Done, QueryCandidates, QueryValidate, FlatCatalog }
         private readonly LayeredNavigationGraph graph; private readonly NavRouteSubscription subscription;
         private NavOwnedStorage ownedSubscription;
         private NavCowDictionary<int,double> starts,ends,distance;
@@ -155,27 +155,29 @@ namespace Spacewars.Simulation
             }finally{copy?.MetadataOwner.Release();regionCopy?.StorageRoot.ReleaseOwner();}
         }
         internal NavIncrementalSingletonRoute ForkOwned(INavStorageReservation reservation)
-        {NavStorageAdmission.RequireOwned(reservation,this);NavStorageAdmission.RequireOwned(reservation,graph);return ForkPrepared(reservation.TryReserve);}
+        {NavStorageAdmission.RequireOwned(reservation,this);if(!IsFlat)NavStorageAdmission.RequireOwned(reservation,graph);return ForkPrepared(reservation.TryReserve);}
         public NavSolveStatus Status {get;private set;}public NavTypedRoute Route {get;private set;}
         internal NavIncrementalSingletonRoute ForkPrepared(Func<long,bool> reserve)
         {
             if(!frozen)throw new InvalidOperationException("Seal committed singleton before preparing a fork.");if(reserve==null)throw new ArgumentException("Missing singleton admission.");
+            if(IsFlat)return ForkFlat(reserve);
             var fork=new NavIncrementalSingletonRoute(graph,subscription,maxStates,NavStorageLayout.Before(reserve,2048),false,true,queryRegion:queryRegion){queryCandidate=queryCandidate,queryChosenCandidate=queryChosenCandidate,phase=phase,cursor=cursor,arcCursor=arcCursor,current=current,chosen=chosen,reconstructCursor=reconstructCursor,reconstructLeg=reconstructLeg,traceNode=traceNode,best=best,routeCost=routeCost,startSeeded=startSeeded,Status=Status};
             try{fork.starts=starts.ForkPrepared(reserve);fork.ends=ends.ForkPrepared(reserve);fork.distance=distance.ForkPrepared(reserve);fork.previous=previous.ForkPrepared(reserve);fork.frontier=frontier.ForkPrepared(reserve);fork.legs=legs.Fork(reserve);fork.chain=chain.Fork(reserve);if(Route!=null){Route.Retain();fork.Route=Route;fork.borrowedRoute=true;}return fork;}catch{fork.ReleaseStorage();throw;}
         }
         internal void ReleaseStorage(){if(released)return;released=true;Release();}
         internal override void ReleaseOwner()=>ReleaseStorage();
-        protected override void ReleaseEdges(){starts?.Release();ends?.Release();distance?.Release();previous?.Release();frontier?.Release();legs?.Release();chain?.Release();Route?.Release();ownedSubscription?.Release();queryRegionOwner?.Release();graph.Release();}
-        internal void SealPrepared(){frozen=true;starts.Seal();ends.Seal();distance.Seal();previous.Seal();frontier.Seal();legs.Seal();chain.Seal();reservation=null;}
+        protected override void ReleaseEdges(){starts?.Release();ends?.Release();distance?.Release();previous?.Release();frontier?.Release();legs?.Release();chain?.Release();Route?.Release();ownedSubscription?.Release();queryRegionOwner?.Release();graph?.Release();flatNodes?.Release();flatGrid?.Release();flatRecipe?.StorageRoot?.Release();}
+        internal void SealPrepared(){flatNodes?.Seal();flatGrid?.Seal();frozen=true;starts.Seal();ends.Seal();distance.Seal();previous.Seal();frontier.Seal();legs.Seal();chain.Seal();reservation=null;}
         public int FrontierCount => frontier.Count;
         public int LegCount => legs.Count;
         internal string DiagnosticProgress=>"phase="+phase+" cursor="+cursor+" arcCursor="+arcCursor+" current="+current+" queryCandidate="+queryCandidate+" chosen="+chosen;
         public int StateCount => starts.Count + ends.Count + distance.Count + previous.Count + chain.Count;
-        internal long EstimatedRetainedBytes=>StorageBytes+starts.CommittedStorageBytes(4)+ends.CommittedStorageBytes(4)+distance.CommittedStorageBytes(4)+previous.CommittedStorageBytes(4)+frontier.CommittedStorageBytes+legs.CommittedStorageBytes(8)+NavStorageLayout.Charge(128)*legs.Count+chain.CommittedStorageBytes(128)+(Route==null?0:512L);
+        internal long EstimatedRetainedBytes=>(IsFlat?FlatBytes:0)+StorageBytes+starts.CommittedStorageBytes(4)+ends.CommittedStorageBytes(4)+distance.CommittedStorageBytes(4)+previous.CommittedStorageBytes(4)+frontier.CommittedStorageBytes+legs.CommittedStorageBytes(8)+NavStorageLayout.Charge(128)*legs.Count+chain.CommittedStorageBytes(128)+(Route==null?0:512L);
         internal static long InitialStorageBytes=>NavStorageLayout.Charge(2048)+12*NavStorageLayout.Charge(128)+NavStorageLayout.Charge(64)+NavStorageLayout.Charge(128)+2*NavPagedList<NavTypedLeg>.InitialStorageBytes;
         internal long NextGrowthBytes {
             get {
                 if(Status!=NavSolveStatus.Pending)return 0;
+                if(IsFlat)return FlatGrowth;
                 switch(phase){
                     case Phase.Direct:return 512;
                     case Phase.Origins:return starts.MutationGrowthBytes(4);
@@ -193,6 +195,7 @@ namespace Spacewars.Simulation
         {
             public int Version { get; internal set; }
             public string GraphKey { get; internal set; }
+            internal FlatCheckpoint Flat;
             public string SubscriptionKey { get; internal set; }
             public NavSolveStatus Status { get; internal set; }
             internal int Phase, Cursor, ArcCursor, Current, Chosen, ReconstructCursor, ReconstructLeg, TraceNode;
@@ -205,19 +208,19 @@ namespace Spacewars.Simulation
             internal NavTypedLeg[] Legs;
             internal NavGraphArc[] Chain;
         }
-        public Checkpoint Save() => new Checkpoint {
+        public Checkpoint Save() { if(IsFlat)return SaveFlat();return new Checkpoint {
             Version = queryRegion==null?2:3,QueryRegionKey=queryRegion?.StableKey,QueryCandidate=queryCandidate,QueryChosenCandidate=queryChosenCandidate, GraphKey = graph.Binding.StableKey, SubscriptionKey = subscription.StableKey,
             Status = Status, Phase = (int)phase, Cursor = cursor, ArcCursor = arcCursor,
             Current = current, Chosen = chosen, ReconstructCursor = reconstructCursor, ReconstructLeg = reconstructLeg, TraceNode = traceNode,
             Best = best, RouteCost = routeCost, StartSeeded = startSeeded,
             Starts = starts.ToArray(), Ends = ends.ToArray(), Distance = distance.ToArray(),
             Previous = previous.Select(pair=>new KeyValuePair<int,NavGraphArc>(pair.Key,pair.Value.Detached())).ToArray(), Frontier = frontier.ToArray(),FrontierShape=frontier.SaveShape(), Legs = legs.Select(leg=>leg.Detached()).ToArray(), Chain = chain.Select(arc=>arc.Detached()).ToArray()
-        };
+        };}
         public static NavIncrementalSingletonRoute Restore(LayeredNavigationGraph graph, NavRouteSubscription subscription,
             Checkpoint state, int maxStates = int.MaxValue,NavTerminalRegion queryRegion=null)
         {
             var work = new NavIncrementalSingletonRoute(graph, subscription, maxStates,queryRegion);
-            if (state == null || (state.Version != 1&&state.Version!=2&&state.Version!=3) || (state.Version==3)!=(queryRegion!=null) || state.QueryRegionKey!=queryRegion?.StableKey || state.GraphKey != graph.Binding.StableKey ||
+            if (state == null || state.Flat!=null || (state.Version != 1&&state.Version!=2&&state.Version!=3) || (state.Version==3)!=(queryRegion!=null) || state.QueryRegionKey!=queryRegion?.StableKey || state.GraphKey != graph.Binding.StableKey ||
                 state.SubscriptionKey != subscription.StableKey || state.Distance.Length > maxStates ||
                 state.Frontier.Length > maxStates || state.Phase < 0 || state.Phase > (int)(queryRegion==null?Phase.Done:Phase.QueryValidate))
                 throw new ArgumentException("Invalid or stale singleton checkpoint.");
@@ -240,6 +243,7 @@ namespace Spacewars.Simulation
         }
         public NavWorkResult Advance(int quota)
         {
+            if(IsFlat)throw new InvalidOperationException("Flat N1 requires separately paid Graph/Connector primitives.");
             if (quota < 0) throw new ArgumentOutOfRangeException(nameof(quota));if(frozen&&Status==NavSolveStatus.Pending)throw new InvalidOperationException("Committed singleton cannot be advanced."); int used = 0;
             while (used < quota && Status == NavSolveStatus.Pending) { Step(); used++; }
             return new NavWorkResult(Status, used);

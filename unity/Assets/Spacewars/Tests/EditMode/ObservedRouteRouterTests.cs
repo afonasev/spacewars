@@ -228,6 +228,29 @@ namespace Spacewars.Tests.EditMode
             var previous=Router(a,circle,p);var changed=new NavigationProfile("changed-grid",2,.3,4,4.5,1.2,.15,3.6,.08);var changedRouter=Router(a,circle,changed);Assert.AreNotSame(previous,changedRouter);CollectionAssert.AreEqual(new SharedFlowRouter(circle,changed.ForUnit(.3,4,4.5)).FindPath(new NavPoint(-5,0),new NavPoint(5,0)),changedRouter.FindPath(new NavPoint(-5,0),new NavPoint(5,0)));
             foreach(double radius in new[]{.3,.72,.3}){var g=Geometry(new NavObstacle(-.8,-8,.8,-.5),new NavObstacle(-.8,.5,.8,8));var r=Router(a,g,p,radius);CollectionAssert.AreEqual(new SharedFlowRouter(g,p.ForUnit(radius,4,4.5)).FindPath(new NavPoint(-5,0),new NavPoint(5,0)),r.FindPath(new NavPoint(-5,0),new NavPoint(5,0)));}
         }
+        [TestCase(true)][TestCase(false)]
+        public void FriendlyHomeCandidatesRespectOtherViablePendingMoveAnchors(bool viable)
+        {
+            var domain=(PlayableDomain)New();try{
+                var p=PlayableProfile.Default;var nav=domain.Navigation;
+                int actor=(int)D.GetMethod("SpawnUnit",F).Invoke(domain,new object[]{new NavPoint(-16,0),PlayableOwner.Player,PlayableEntityKind.Tank});
+                int other=(int)D.GetMethod("SpawnUnit",F).Invoke(domain,new object[]{new NavPoint(-20,8),PlayableOwner.Player,PlayableEntityKind.Tank});
+                D.GetMethod("AddBuilding",F).Invoke(domain,new object[]{PlayableOwner.Player,PlayableBuildingKind.Headquarters,new NavPoint(16,0),true});D.GetMethod("RebuildGeometry",F).Invoke(domain,null);
+                var view=(PlayableSnapshot)D.GetMethod("PlayerSnapshot",F).Invoke(domain,new object[]{0L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7,PlayableOwner.Player});
+                var home=view.Buildings.Single(b=>b.Position.Equals(new NavPoint(16,0)));var unit=view.Entities.Single(u=>u.Id==actor);
+                var request=new PlayableRouteRequest(actor,PlayableRouteTargetKind.FriendlyAnchor,home.Id,nav.Generation,domain.Tick,unit.Position,PlayableUnitRules.Radius(p,unit.Kind),home.Position);
+                var vision=new PlayableVision(0,50,50,1,1);vision.Refresh(new[]{new VisionSource(default,100)},Array.Empty<KnownBuilding>());
+                PlayableRouteProof[] Project(PlayableEntitySnapshot[] entities)=>(PlayableRouteProof[])D.GetMethod("ProjectRoutesCore",F).Invoke(domain,new object[]{PlayableOwner.Player,new[]{request},vision,entities,view.Buildings,null,false,false});
+                var baseline=Project(view.Entities.ToArray()).Single();var second=view.Entities.Single(u=>u.Id==other);
+                var pending=new PlayableQueuedOrderSnapshot(1,1,7,24,PlayableCommandKind.Move,new NavLocation(baseline.Goal,NavLocation.FlatSurface),0,aiActionId:314);
+                var queued=new PlayableEntitySnapshot(other,second.Owner,second.Kind,second.Position,second.Health,false,0,second.HullHeading,second.TurretHeading,queue:new PlayableUnitQueueSnapshot(null,pending,Array.Empty<PlayableQueuedOrderSnapshot>(),null,viable));
+                var actual=Project(view.Entities.Select(u=>u.Id==other?queued:u).ToArray()).Single();
+                double spacing=Math.Max(p.Navigation.ArrivalSlotSpacing,4*request.Radius+2*p.Navigation.ArrivalTolerance+2*p.Navigation.LocalGridCell);
+                if(viable)Assert.GreaterOrEqual(AiPositionDevelopmentPlanner.Distance(actual.Goal,baseline.Goal),spacing,"A different pending owned Move reserves the same existing landing clearance before its effective order installs");
+                else Assert.AreEqual(baseline.Goal,actual.Goal,"A refused/stale pending route cannot reserve a destination");
+                Assert.True(domain.Geometry.IsFree(actual.Goal,request.Radius));var from=unit.Position;foreach(var point in actual.Path){Assert.True(domain.Geometry.SegmentFree(from,point,request.Radius));from=point;}
+            }finally{domain.Navigation.ReleaseCommittedHostRoot();domain.DestroyOwnedNavigation();}
+        }
         [Test]public void ActualFriendlyProjectRoutesBoundsEveryUnreachableCandidateAndKeepsColdProof()
         {
             var d=New();var p=(PlayableProfile)D.GetField("profile",F).GetValue(d);var geometryProperty=D.GetProperty("Geometry",F);var nav=(NavigationSession)D.GetProperty("Navigation",F).GetValue(d);

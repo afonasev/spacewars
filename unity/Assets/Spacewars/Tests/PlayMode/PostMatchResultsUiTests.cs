@@ -52,6 +52,56 @@ public sealed class PostMatchResultsUiTests
         Assert.AreEqual(DisplayStyle.None,ui.Root.Q<Toggle>("result-ai-log-0").style.display.value);Assert.AreEqual(DisplayStyle.Flex,ui.Root.Q<Toggle>("result-ai-log-1").style.display.value);ui.Root.Q<Toggle>("result-ai-log-1").value=true;Assert.That(ui.Root.Query<Label>().ToList().Any(l=>l.text.StartsWith("01:20")&&l.text.Contains("Стартовый план:")));Assert.IsFalse(ui.Root.Q<Toggle>("result-ai-log-0").value);
         right.index=0;Assert.AreEqual(0,ui.Root.Q<DropdownField>("result-log-player-0").index);Assert.AreEqual(0,ui.Root.Q<DropdownField>("result-log-player-1").index);Assert.AreEqual(facts,result.Facts.Count);
     }
+    [UnityTest]public IEnumerator BothAiLogsRenderAirOpeningAfterTogglingAndSwapping()
+    {
+        var profile=PlayableProfile.Default;var basis=SourceFlatFixture.Load(Resources.Load<TextAsset>("OfflineFlatFixture").text,profile);
+        var roster=new[]{new OfflineParticipant("ai-left",1,1,OfflineControl.Ai),new OfflineParticipant("ai-right",2,2,OfflineControl.Ai)};
+        var costs=new double[8,8];for(int a=0;a<8;a++)for(int b=0;b<8;b++)costs[a,b]=basis.RouteCost(a,b);
+        var config=new OfflineMatchConfiguration(profile,basis.SourceIdentity,basis.MapIdentity,basis.RouteProvenance,basis.Seed,roster,basis.Starts.ToArray(),basis.Sites.ToArray(),basis.Obstacles.ToArray(),costs);
+        var type=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.PlayableDomain",true);
+        var domain=Activator.CreateInstance(type,F,null,new object[]{profile,1L,config},null);
+        foreach(var owner in new[]{PlayableOwner.Player,PlayableOwner.Enemy}){
+            type.GetMethod("Fact",F).Invoke(domain,new object[]{owner,MatchFactKind.AiDecision,(double)PlayableAiOpening.Air,(int)MatchAiDecisionKind.Opening,"Air"});
+            type.GetMethod("Fact",F).Invoke(domain,new object[]{owner,MatchFactKind.BuildingOrdered,0d,(int)PlayableBuildingKind.Hangar,"Hangar"});
+        }
+        type.GetMethod("FinishManually",F).Invoke(domain,null);var result=(MatchResult)type.GetProperty("Result",F).GetValue(domain);
+        ui.Root.RemoveFromHierarchy();ui=new PostMatchResultsView(result,()=>{},()=>{},()=>{});host.GetComponent<UIDocument>().rootVisualElement.Add(ui.Root);ui.ShowTab(2);
+        foreach(int side in new[]{0,1}){
+            var toggle=ui.Root.Q<Toggle>("result-ai-log-"+side);toggle.value=true;
+            Assert.That(ui.Root.Query<Label>().ToList().Count(l=>l.text.Contains("Стартовый план: воздушная атака")),Is.EqualTo(side+1));
+            toggle.value=false;Assert.That(ui.Root.Query<Label>().ToList().Count(l=>l.text=="Ангар"),Is.EqualTo(2));toggle.value=true;
+        }
+        ui.Root.Q<DropdownField>("result-log-player-0").index=1;ui.Root.Q<DropdownField>("result-log-player-1").index=0;
+        Assert.AreEqual(2,ui.Root.Query<Label>().ToList().Count(l=>l.text.Contains("Стартовый план: воздушная атака")));
+        var target=new RenderTexture(1280,720,24);target.Create();panel.targetTexture=target;
+        try{for(int i=0;i<8;i++)yield return null;SaveCapture(target,"two-ai-air-logs-checked.png");ui.Root.Q<Toggle>("result-ai-log-0").value=false;for(int i=0;i<3;i++)yield return null;SaveCapture(target,"two-ai-air-logs-unchecked.png");}
+        finally{panel.targetTexture=null;target.Release();UnityEngine.Object.Destroy(target);}
+    }
+    [UnityTest]public IEnumerator MiniatureCountsUseEventTimeInLogsGraphsAndEventDetails()
+    {
+        var target=new RenderTexture(1280,720,24);target.Create();panel.targetTexture=target;
+        try{
+            ui.ShowTab(2);
+            foreach(var fact in ui.Result.Facts.Where(f=>f.Owner==PlayableOwner.Player&&(f.Kind==MatchFactKind.BuildingOrdered||f.Kind==MatchFactKind.UnitOrdered))){
+                int expected=ui.Result.InventoryAtOrder(fact);
+                Assert.AreEqual(expected.ToString(),ui.Root.Q("result-log-event-"+fact.Sequence).Q<Label>("result-current-count").text);
+            }
+            Assert.AreEqual("1",ui.Root.Query<Label>("result-current-count").ToList().First().text,"The first construction order includes itself.");
+            for(int i=0;i<8;i++)yield return null;foreach(var glyph in ui.Root.Query<OrbitalGlyph>().ToList())Assert.That(glyph.worldBound.width,Is.EqualTo(25).Within(.5),"Inventory digits must not shrink event miniatures.");SaveCapture(target,"miniature-counts-action-log.png");
+            ui.ShowTab(1);for(int i=0;i<8;i++)yield return null;
+            var markers=ui.Root.Query<VisualElement>(className:"result-event-marker").ToList().Where(e=>e.Q<Label>("result-current-count")!=null).ToArray();Assert.IsNotEmpty(markers);Assert.AreEqual("1",markers[0].Q<Label>("result-current-count").text,"Graph annotations include completed objects only, without adding the order twice.");
+            foreach(var marker in markers){var number=marker.Q<Label>("result-current-count");Assert.LessOrEqual(number.worldBound.xMax,marker.worldBound.xMax+1);Assert.GreaterOrEqual(number.worldBound.xMin,marker.worldBound.xMin);}
+            SaveCapture(target,"miniature-counts-graphs.png");((Action)markers[0].userData)();for(int i=0;i<4;i++)yield return null;
+            Assert.IsNotNull(ui.Root.Q("result-popup").Q<Label>("result-current-count"));SaveCapture(target,"miniature-counts-event-details.png");
+        }finally{panel.targetTexture=null;target.Release();UnityEngine.Object.Destroy(target);}
+    }
+    [Test]public void GraphHoverShowsNamedLivingBuildingCounts()
+    {
+        ui.ShowTab(1);ui.InspectTime(20);
+        Assert.IsNotNull(ui.Root.Q("result-building-count-0-Headquarters"));typeof(PostMatchResultsView).GetField("activeMetric",F).SetValue(ui,1);ui.InspectTime(20);Assert.IsNotNull(ui.Root.Q("result-building-count-0-Factory"));
+        Assert.That(ui.Root.Q("result-building-count-0-Factory").Q<Label>().text,Does.Contain("Фабрика ×1"));
+        ui.Root.Q<Toggle>("result-filter-0").value=false;Assert.IsNull(ui.Root.Q("result-building-count-0-Factory"));
+    }
     [Test]public void ActionLogUsesOrderTimeAndExcludesCompletionRows()
     {
         ui.ShowTab(2);
@@ -176,6 +226,7 @@ public sealed class PostMatchResultsUiTests
                     Assert.IsNull(ui.Root.Q("result-summary"));if(tab==1)AssertGraphLayoutFits();
                     if(tab==1){var hover=ui.Root.Q("result-graph-tooltip");Assert.GreaterOrEqual(hover.worldBound.yMin,ui.Root.Q("result-graph-0").worldBound.yMin,"Pre-layout inspection follows the graph after layout.");foreach(var label in hover.Query<Label>().ToList())Assert.LessOrEqual(label.worldBound.yMax,hover.worldBound.yMax+.5f,"Every visible value fits its tooltip.");}
                     SaveCapture(target,new[]{"results","graphs","action-log"}[tab]+"-"+size.x+"x"+size.y+".png");
+                    if(tab==1){typeof(PostMatchResultsView).GetField("activeMetric",F).SetValue(ui,1);ui.InspectTime(20);for(int i=0;i<3;i++)yield return null;SaveCapture(target,"graphs-army-"+size.x+"x"+size.y+".png");}
                 }
             }finally{panel.targetTexture=null;target.Release();UnityEngine.Object.Destroy(target);}
         }

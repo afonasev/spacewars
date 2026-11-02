@@ -81,6 +81,20 @@ namespace Spacewars.Tests.EditMode
                 Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),budget.PhysicalBytes);Assert.LessOrEqual(budget.PeakRetainedBytes,LayeredNavigationScheduler.MaxRetainedBytes);
             }finally{session.PhysicalHostBudget.AllocationAdmission=null;pressure?.Discard();kernel.Clear();session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);Assert.Zero(session.PhysicalHostBudget.HeldBytes);}
         }
+        [Test] public void ActorBirthStillRejectsChangedCrowdMembershipAsAnInvariant()
+        {
+            var session=new NavigationSession(1,new NavGeometry(20,Array.Empty<NavObstacle>(),1),PlayableProfile.Default.Navigation);
+            try
+            {
+                session.Crowd.Add(1,new NavPoint(-5,0));
+                session.BeforeCrowdBirthPublicationForTests=()=>{session.BeforeCrowdBirthPublicationForTests=null;Assert.True(session.Crowd.Remove(1));};
+                var error=Assert.Throws<InvalidOperationException>(()=>session.Crowd.Add(2,new NavPoint(-5,3)));
+                Assert.IsNotInstanceOf<NavigationCommandRefused>(error);StringAssert.Contains("owner or crowd source",error.Message);
+                Assert.False(session.Crowd.TryGet(2,out _));Assert.Zero(session.PhysicalHostBudget.HeldBytes);Assert.Zero(session.PhysicalHostBudget.ActiveScopes);
+                Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(session),session.PhysicalHostBudget.PhysicalBytes);
+            }
+            finally{session.BeforeCrowdBirthPublicationForTests=null;session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);}
+        }
         [Test] public void RoutePressureLeavesActualBirthAndReadyInstallationCapacity()
         {
             var geometry=new NavGeometry(20,Array.Empty<NavObstacle>(),1);var session=new NavigationSession(1,geometry,PlayableProfile.Default.Navigation);var kernel=new CertifiedRouteKernel();NavigationRetentionBudget.Scope pressure=null;

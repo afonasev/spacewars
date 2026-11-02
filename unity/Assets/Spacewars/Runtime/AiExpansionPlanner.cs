@@ -77,7 +77,7 @@ namespace Spacewars.Runtime
             IEnumerable<PlayablePublicScoutObjective> objectives,PlayableOwner owner,long generation,long tick,PlayableProfile profile)=>
             entities.Where(u=>u.Owner==owner&&u.Kind==PlayableEntityKind.Explorer&&u.Health>0).OrderBy(u=>u.Id)
             .SelectMany(u=>objectives.Where(g=>g.Role!=PlayablePublicScoutObjectiveRole.PossibleEnemyStart&&g.Reachable&&
-                sites.Any(s=>s.Site.Id==g.SiteId&&s.CenterId==0&&!s.Contested&&(!s.Owner.HasValue||s.Owner==owner)&&(!s.Claimant.HasValue||s.Claimant==owner)))
+                sites.Any(s=>s.Site.Id==g.SiteId&&s.CenterId==0&&!s.Contested&&(s.Site.Kind==PlayableBuildingKind.RelayTower?s.Owner!=owner:(!s.Owner.HasValue||s.Owner==owner)&&(!s.Claimant.HasValue||s.Claimant==owner))))
                 .OrderBy(g=>g.SiteId).Select(g=>new PlayableRouteRequest(u.Id,PlayableRouteTargetKind.PublicObjective,g.SiteId,generation,tick,u.Position,PlayableUnitRules.Radius(profile,u.Kind),g.Approach))).ToArray();
         internal static bool Safe(PlayableAiObservation o,PlayableProfile p,AiProfile ai,TerritorySiteSnapshot s,PlayableEntitySnapshot actor,PlayableRouteProof route,AiKnowledgeState knowledge=null)
         {
@@ -128,7 +128,14 @@ namespace Spacewars.Runtime
             var actor=o.Entities.FirstOrDefault(u=>u.Id==actorId&&u.Owner==o.Owner&&u.Health>0);
             var site=o.Sites.FirstOrDefault(s=>s.Site.Id==siteId);
             condition=Condition(site,actor,o,p,ai,Knowledge);
-            if(o.Tick>=expires||actor==null||site==null||site.Owner.HasValue&&site.Owner!=o.Owner||site.Claimant.HasValue&&site.Claimant!=o.Owner||!Safe(o,p,ai,site,actor,null,Knowledge))
+            if(site?.Site.Kind==PlayableBuildingKind.RelayTower&&site.Owner==o.Owner)
+            {
+                if(phase!="relay-income"){phase="relay-income";initialIncome=o.SettledIncome;progress=o.Tick;}
+                if(o.SettledIncome>initialIncome&&o.IncomePerSecond>0){ObserveCompletionForTests(o,exactCredits);Release("observed captured relay and settled owner income",false);}
+                else if(o.Tick>=expires)Release("relay income wait expired",true);
+                return;
+            }
+            if(o.Tick>=expires||actor==null||site==null||!AiIncomeSiteSelection.Available(site,o)||!Safe(o,p,ai,site,actor,null,Knowledge))
             {Release(o.Tick>=expires?"commitment expired":actor==null?"actor lost":"site lost/unknown/unsafe",true);return;}
             double current=Distance(actor.Position,site.Site.Position);
             var center=o.Buildings.FirstOrDefault(b=>b.Id==site.CenterId&&b.Owner==o.Owner&&b.Health>0);
@@ -164,11 +171,11 @@ namespace Spacewars.Runtime
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"financial-site-filter",financialSite==0||s.Site.Id==financialSite)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-admissibility",admissibleSite==null||admissibleSite(s.Site.Id))
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"known-main-territory",AiIncomeSiteSelection.TerritoryAllowed(o,p,ai,Knowledge,s))
-                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-kind-and-income",(s.Site.Kind==PlayableBuildingKind.Mine||AllowOutposts&&s.Site.Kind==PlayableBuildingKind.Outpost)&&TerritoryRules.Income(p,s.Site.Kind)>0)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-kind-and-income",(s.Site.Kind==PlayableBuildingKind.Mine||s.Site.Kind==PlayableBuildingKind.RelayTower||AllowOutposts&&s.Site.Kind==PlayableBuildingKind.Outpost)&&TerritoryRules.Income(p,s.Site.Kind)>0)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-unoccupied",s.CenterId==0)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-uncontested",!s.Contested)
-                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-owner",!s.Owner.HasValue||s.Owner==o.Owner)
-                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-claimant",!s.Claimant.HasValue||s.Claimant==o.Owner)
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-owner",AiIncomeSiteSelection.Available(s,o))
+                    where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"site-claimant",s.Site.Kind==PlayableBuildingKind.RelayTower||!s.Claimant.HasValue||s.Claimant==o.Owner)
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,0,"raw-site-cost",o.Credits>=TerritoryRules.Cost(p,s.Site.Kind))
                     from u in o.Entities
                     where Guard(o.OwnerId,o.Tick,s.Site.Id,u.Id,"actor-owner",u.Owner==o.Owner)
@@ -203,7 +210,7 @@ namespace Spacewars.Runtime
             if(site==null||actor==null||objective==null){Guard(o.OwnerId,o.Tick,siteId,actorId,"commitment-target-present",false);return null;}
             PlayableCommandKind kind;NavPoint target=default;int[] units=null;
             if(site.CenterId!=0){Guard(o.OwnerId,o.Tick,site.Site.Id,actorId,"site-unoccupied-before-command",false);return null;}
-            if(site.Progress>=1&&site.Claimant==o.Owner){kind=PlayableCommandKind.BuildAt;units=new[]{actorId};if(o.Credits<TerritoryRules.Cost(p,site.Site.Kind)){Guard(o.OwnerId,o.Tick,site.Site.Id,actorId,"build-cost-credits",false);return null;}}
+            if(site.Site.Kind!=PlayableBuildingKind.RelayTower&&site.Progress>=1&&site.Claimant==o.Owner){kind=PlayableCommandKind.BuildAt;units=new[]{actorId};if(o.Credits<TerritoryRules.Cost(p,site.Site.Kind)){Guard(o.OwnerId,o.Tick,site.Site.Id,actorId,"build-cost-credits",false);return null;}}
             else
             {
                 // Holding within capture radius is progress through gameplay, not an order to resend.
@@ -304,10 +311,10 @@ namespace Spacewars.Runtime
             pendingActionBuildingKind=WorldWire.EnumValue<PlayableBuildingKind>(r);siteId=r.ReadInt32();actorId=r.ReadInt32();created=r.ReadInt64();expires=r.ReadInt64();progress=r.ReadInt64();pendingId=r.ReadInt64();pendingGeneration=r.ReadInt64();nextId=r.ReadInt64();
             capture=WorldWire.Number(r);distance=WorldWire.Number(r);initialIncome=WorldWire.Number(r);phase=WorldWire.String(r);reason=WorldWire.String(r);condition=WorldWire.String(r);
             failed=WorldWire.Array(r,()=>new KeyValuePair<int,string>(r.ReadInt32(),WorldWire.String(r))).ToDictionary(x=>x.Key,x=>x.Value);
-            AiStateWire.Require((siteId==0||pendingActionBuildingKind==PlayableBuildingKind.Mine||pendingActionBuildingKind==PlayableBuildingKind.Outpost)&&siteId>=0&&actorId>=0&&(siteId==0)==(actorId==0)&&created>=0&&created<=tick&&progress>=created&&progress<=tick&&
+            AiStateWire.Require((siteId==0||pendingActionBuildingKind==PlayableBuildingKind.RelayTower||pendingActionBuildingKind==PlayableBuildingKind.Mine||pendingActionBuildingKind==PlayableBuildingKind.Outpost)&&siteId>=0&&actorId>=0&&(siteId==0)==(actorId==0)&&created>=0&&created<=tick&&progress>=created&&progress<=tick&&
                 (siteId==0?expires==0:expires>created)&&capture>=0&&capture<=1&&distance>=0&&initialIncome>=0&&nextId>pendingId&&pendingId>=0&&
                 (pendingId==0?pendingGeneration==0:pendingGeneration==generation)&&failed.All(x=>x.Key>0&&x.Value!=null)&&
-                (phase=="idle"||phase=="capture"||phase=="build"||phase=="construction"||phase=="income")&&reason!=null&&(siteId==0||condition!=null),"expansion state/clocks/callback");
+                (phase=="idle"||phase=="capture"||phase=="build"||phase=="construction"||phase=="income"||phase=="relay-income")&&reason!=null&&(siteId==0||condition!=null),"expansion state/clocks/callback");
         }
     }
 }

@@ -10,6 +10,11 @@ def prepare_volume_icon(install,icon):
  # Finder reads the mounted volume icon from its root and custom-icon flag.
  shutil.copy2(icon,install/'.VolumeIcon.icns')
  run(['SetFile','-a','C',install])
+def create_dmg(install, artifact, image_format='ULMO'):
+ if image_format not in ('UDZO','ULMO'):raise ValueError('unsupported DMG compression')
+ artifact.unlink(missing_ok=True)
+ run(['hdiutil','create','-volname','Spacewars','-srcfolder',install,'-ov','-format',image_format,artifact])
+
 def validate_build_identity(build_dir,platform,version,head,allow_dirty=False,channel=None):
  identity_path=build_dir/'native-build.json'
  if not identity_path.exists():raise ValueError('bound native build missing; use build.py')
@@ -92,7 +97,7 @@ def build_windows_helper(destination, flags, env, bridge=False):
    validate_windows_dpi(bridge_destination)
 
 def main():
- p=argparse.ArgumentParser();p.add_argument('--version',required=True);p.add_argument('--sequence',required=True,type=int);p.add_argument('--platform',choices=['windows-x64','macos-universal'],required=True);p.add_argument('--prepare-legacy-bridge',action='store_true');p.add_argument('--channel',choices=['production','test'],required=True);p.add_argument('--test-origin');p.add_argument('--allow-dirty',action='store_true');p.add_argument('--output',type=pathlib.Path,default=ROOT/'.local/native-distribution');a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--version',required=True);p.add_argument('--sequence',required=True,type=int);p.add_argument('--platform',choices=['windows-x64','macos-universal'],required=True);p.add_argument('--prepare-legacy-bridge',action='store_true');p.add_argument('--channel',choices=['production','test'],required=True);p.add_argument('--dmg-format',choices=['UDZO','ULMO'],default='ULMO');p.add_argument('--lzma-dict-mb',type=int,choices=[8,32,64],default=64);p.add_argument('--test-origin');p.add_argument('--allow-dirty',action='store_true');p.add_argument('--output',type=pathlib.Path,default=ROOT/'.local/native-distribution');a=p.parse_args()
  if not all(c.isdigit() or c=='.' for c in a.version) or a.sequence<1:raise ValueError('invalid release version/sequence')
  if a.test_origin and (not a.allow_dirty or not a.test_origin.startswith('http://127.0.0.1:')):raise ValueError('test origin requires dirty smoke mode and loopback')
  appname='Spacewars Test' if a.channel=='test' else 'Spacewars'
@@ -160,7 +165,7 @@ def main():
  if a.platform=='windows-x64':
   shutil.copy2(helper,resources/'Spacewars.exe');shutil.copy2(ROOT/'tools/native-release/icons/Spacewars.ico',resources/'Spacewars.ico');artifact=artifacts/f'Spacewars-{a.version}-Windows-x64.exe'
   compiler=[sys.executable,ROOT/'tools/native-release/remote_makensis.py'] if os.environ.get('SPACEWARS_REMOTE_NSIS')=='1' else ['makensis']
-  run([*compiler,f'-DPAYLOAD={install}',f'-DOUTFILE={artifact}',f'-DVERSION={a.version}',f'-DRELEASE={release}',f'-DAPPNAME={"Spacewars Test" if a.channel=="test" else "Spacewars"}',ROOT/'tools/native-release/installer.nsi'])
+  run([*compiler,f'-DPAYLOAD={install}',f'-DOUTFILE={artifact}',f'-DVERSION={a.version}',f'-DLZMA_DICT_MB={a.lzma_dict_mb}',f'-DRELEASE={release}',f'-DAPPNAME={"Spacewars Test" if a.channel=="test" else "Spacewars"}',ROOT/'tools/native-release/installer.nsi'])
  else:
   shutil.copy2(ROOT/'tools/native-release/icons/Spacewars.icns',resources/'Spacewars.icns')
   contents=install/(appname+'.app')/'Contents';(contents/'MacOS').mkdir();shutil.copy2(helper,contents/'MacOS/Spacewars')
@@ -168,11 +173,11 @@ def main():
   run(['codesign','--force','--sign','-',install/(appname+'.app')])
   (install/'Applications').symlink_to('/Applications')
   prepare_volume_icon(install,ROOT/'tools/native-release/icons/Spacewars.icns')
-  artifact=artifacts/f'Spacewars-{a.version}-macOS-Universal.dmg';artifact.unlink(missing_ok=True)
-  run(['hdiutil','create','-volname','Spacewars','-srcfolder',install,'-ov','-format','UDZO',artifact])
+  artifact=artifacts/f'Spacewars-{a.version}-macOS-Universal.dmg'
+  create_dmg(install,artifact,a.dmg_format)
  catalog=feed/'downloads.json';data=json.loads(catalog.read_text()) if catalog.exists() else {'schema':1,'artifacts':[]}
  with artifact.open('rb') as f:sha=hashlib.file_digest(f,'sha256').hexdigest()
- item={'channel':a.channel,'platform':a.platform,'version':a.version,'commit':commit,'release':release,'size':artifact.stat().st_size,'sha256':sha,'url':f'https://github.com/afonasev/spacewars/releases/download/v{a.version}/'+artifact.name,'unsigned':True,'dirty_build':identity['dirty'],'test_origin':a.test_origin,'build_identity_sha256':hashlib.sha256(identity_path.read_bytes()).hexdigest()}
+ item={'channel':a.channel,'platform':a.platform,'version':a.version,'commit':commit,'release':release,'size':artifact.stat().st_size,'sha256':sha,'url':f'https://github.com/afonasev/spacewars/releases/download/v{a.version}/'+artifact.name,'unsigned':True,'dirty_build':identity['dirty'],'test_origin':a.test_origin,'build_identity_sha256':hashlib.sha256(identity_path.read_bytes()).hexdigest(),'installer_compression':a.dmg_format if a.platform=='macos-universal' else {'method':'lzma-solid','dictionary_mb':a.lzma_dict_mb}}
  data['channel']=a.channel
  data['artifacts']=[x for x in data['artifacts'] if x['platform']!=a.platform]+[item];catalog.write_text(json.dumps(data,indent=2)+'\n');print(json.dumps(item))
 if __name__=='__main__':main()

@@ -104,7 +104,7 @@ namespace Spacewars.Tests.EditMode
             var r=Registry();Assert.True(r.TryCreate(Observation(),AiArmyRole.Attack,"attack",new[]{1,2,3},out var id));r.Observe(Observation(tanks:1));var restored=AiArmyRegistry.Restore(r.Capture(),AiProfile.Initial,AiDifficulty.Fighter,10);Assert.AreEqual(id,restored.ArmyFor(1));Assert.AreEqual(1,restored.Capture().Armies.Single().Members.Length);
         }
         private static void NativeStep(PlayableAuthorityTick a,UnityHostRouteService routes)
-        {for(int i=0;!a.TryAdvance();i++){Assert.Less(i,4096);routes.Service(a,64);}}
+        {routes.Service(a,64);for(int i=0;!a.TryAdvance();i++){Assert.Less(i,4096);routes.Service(a,64);}}
         [TestCase("transfer")][TestCase("new-assignment")][TestCase("unchanged")]
         public void Registry_AcceptedPendingRechecksAtomicOwnershipAndRestore(string change)
         {

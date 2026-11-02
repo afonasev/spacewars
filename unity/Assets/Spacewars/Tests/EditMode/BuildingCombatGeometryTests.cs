@@ -9,7 +9,7 @@ namespace Spacewars.Tests.EditMode
 {
  public sealed class BuildingCombatGeometryTests
  {
-  [TestCase(PlayableBuildingKind.Headquarters,false)][TestCase(PlayableBuildingKind.Factory,false)][TestCase(PlayableBuildingKind.Mine,false)][TestCase(PlayableBuildingKind.Outpost,false)][TestCase(PlayableBuildingKind.ScientificCenter,false)][TestCase(PlayableBuildingKind.Refinery,false)][TestCase(PlayableBuildingKind.Refinery,true)][TestCase(PlayableBuildingKind.Hangar,false)]
+  [TestCase(PlayableBuildingKind.Headquarters,false)][TestCase(PlayableBuildingKind.Factory,false)][TestCase(PlayableBuildingKind.Mine,false)][TestCase(PlayableBuildingKind.Outpost,false)][TestCase(PlayableBuildingKind.ScientificCenter,false)][TestCase(PlayableBuildingKind.ScientificCenter,true)][TestCase(PlayableBuildingKind.Refinery,false)][TestCase(PlayableBuildingKind.Refinery,true)][TestCase(PlayableBuildingKind.Hangar,false)]
   public void EveryAuthoredBuildingHasARealRoofAndStableNavigationRadius(PlayableBuildingKind kind,bool upgraded)
   {
    var p=PlayableProfile.Default;double nav=TerritoryRules.Radius(p,kind);var pose=BuildingCombatGeometry.Pose(p,kind,upgraded,default,0);

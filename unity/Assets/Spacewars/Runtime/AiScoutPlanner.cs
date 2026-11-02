@@ -66,7 +66,11 @@ namespace Spacewars.Runtime
             Binding(o,knowledge,registry);
             foreach(var a in Claims(registry).ToArray())
             {
-                var target=o.PublicScoutObjectives.SingleOrDefault(t=>Objective(t.SiteId)==a.Objective||PreparationObjective(t.SiteId)==a.Objective);
+                // A public start can also be an expansion Outpost. Site identity
+                // owns coverage/claims; the accepted rally disambiguates approaches.
+                var target=o.PublicScoutObjectives.Where(t=>Objective(t.SiteId)==a.Objective||PreparationObjective(t.SiteId)==a.Objective)
+                    .Where(t=>!IsPreparationObjective(a.Objective,t.SiteId)||t.Role!=PlayablePublicScoutObjectiveRole.PossibleEnemyStart)
+                    .OrderBy(t=>a.Rally.HasValue?Distance(t.Approach,a.Rally.Value):0).ThenBy(t=>t.Role).FirstOrDefault();
                 var u=o.Entities.SingleOrDefault(e=>e.Id==a.LeaderId&&e.Health>0&&e.Owner==o.Owner);
                 bool covered=target!=null&&knowledge.Areas.Any(x=>x.AreaId==target.SiteId&&x.ActuallyCoveredTick>=a.CreatedTick);
                 bool holdingPreparation=target!=null&&IsPreparationObjective(a.Objective,target.SiteId)&&target.Reachable&&target.SiteId==preparationSite&&covered;
@@ -113,7 +117,7 @@ namespace Spacewars.Runtime
                 let gain=Value("gain",u.Id,target.SiteId,area==null?1:Math.Min(1,(o.Tick-area.ActuallyCoveredTick)/(double)revisit))
                 where Guard("gain.accepted",u.Id,target.SiteId,target.SiteId==preparationSite||gain>=1)
                 let route=Value("route",u.Id,target.SiteId,o.RouteProofs.SingleOrDefault(r=>Guard("route.matchesUnit",u.Id,target.SiteId,r.UnitId==u.Id)&&
-                    Guard("route.publicObjective",u.Id,target.SiteId,r.Kind==PlayableRouteTargetKind.PublicObjective)&&Guard("route.matchesSite",u.Id,target.SiteId,r.TargetId==target.SiteId)))
+                    Guard("route.publicObjective",u.Id,target.SiteId,r.Kind==PlayableRouteTargetKind.PublicObjective)&&Guard("route.matchesSite",u.Id,target.SiteId,r.TargetId==target.SiteId)&&Guard("route.matchesApproach",u.Id,target.SiteId,r.Target.Equals(target.Approach))))
                 where Guard("route.exists",u.Id,target.SiteId,route!=null)&&Guard("route.path.nonempty",u.Id,target.SiteId,route.Path.Count>0)
                 let travel=Value("travel",u.Id,target.SiteId,RouteLength(route)/(RouteLength(route)+gameplay.ExplorerSpeed*(ai.Value("scouting.revisitSeconds")*RevisitScale)))
                 let danger=Value("danger",u.Id,target.SiteId,knowledge.Contacts.Where(c=>Guard("danger.contact.withinVision",u.Id,target.SiteId,Distance(c.Position,target.Approach)<=gameplay.ExplorerVision))
@@ -129,7 +133,7 @@ namespace Spacewars.Runtime
                 let area=knowledge.Areas.SingleOrDefault(a=>a.AreaId==target.SiteId)
                 let gain=area==null?1:Math.Min(1,(o.Tick-area.ActuallyCoveredTick)/(double)revisit)
                 where target.SiteId==preparationSite||gain>=1
-                let route=o.RouteProofs.SingleOrDefault(r=>r.UnitId==u.Id&&r.Kind==PlayableRouteTargetKind.PublicObjective&&r.TargetId==target.SiteId)
+                let route=o.RouteProofs.SingleOrDefault(r=>r.UnitId==u.Id&&r.Kind==PlayableRouteTargetKind.PublicObjective&&r.TargetId==target.SiteId&&r.Target.Equals(target.Approach))
                 where route!=null&&route.Path.Count>0
                 let travel=RouteLength(route)/(RouteLength(route)+gameplay.ExplorerSpeed*(ai.Value("scouting.revisitSeconds")*RevisitScale))
                 let danger=knowledge.Contacts.Where(c=>Distance(c.Position,target.Approach)<=gameplay.ExplorerVision).Select(c=>c.Confidence).DefaultIfEmpty(0).Max()

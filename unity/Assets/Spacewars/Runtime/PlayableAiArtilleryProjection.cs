@@ -40,8 +40,8 @@ namespace Spacewars.Runtime
                 (enemies.Length==0||nearest(friend.Position)<nearest(p)));
             bool useful(NavPoint p,int gunId)=>PlayableBallistics.BestTarget(p,owner,PlayableUnitRules.Range(profile,PlayableEntityKind.Shkval,units.TryGetValue(gunId,out var actor)&&UnitUpgraded(actor)),
                 profile.ShkvalLaunchHeight,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed,profile.ShkvalProjectileRadius,
-                profile.ShkvalBlastRadius,profile.ShkvalDamage,profile.ShkvalFriendlyFirePenalty,solids,profile.BallisticWallHeight,
-                bodies.Select(b=>b.Id==gunId?new BallisticBody(b.Id,b.Owner,p,default(NavPoint),b.Radius,b.Height,b.Health,b.Building):b).ToArray(),hostile:Hostile)>0;
+                PlayableUnitRules.ShkvalBlastRadius(profile,units.TryGetValue(gunId,out var blastActor)&&UnitUpgraded(blastActor)),profile.ShkvalDamage,profile.ShkvalFriendlyFirePenalty,solids,profile.BallisticWallHeight,
+                bodies.Select(b=>b.Id==gunId?new BallisticBody(b.Id,b.Owner,p,default(NavPoint),b.Radius,b.Height,b.Health,b.Building):b).ToArray(),hostile:Hostile,source:gunId)>0;
             var result=new List<PlayableArtillerySupportSnapshot>();
             foreach(var gun in guns)
             {

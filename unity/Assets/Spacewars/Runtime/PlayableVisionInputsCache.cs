@@ -36,7 +36,7 @@ namespace Spacewars.Runtime
                 var prior=visionBuildingInputs[index++];
                 if(building.Id!=prior.Id||building.Owner!=prior.Owner||building.Kind!=prior.Kind||building.Phase!=prior.Phase||
                     building.Position.X!=prior.Position.X||building.Position.Z!=prior.Position.Z||building.Heading!=prior.Heading||
-                    (building.Upgrade?.Complete==true||CenterUpgraded(building.Id))!=prior.Upgraded)return false;
+                    (building.Upgrade?.Complete==true||CenterUpgraded(building.Id)||building.ProducerUpgrade?.Complete==true)!=prior.Upgraded)return false;
             }
             return true;
         }
@@ -46,7 +46,7 @@ namespace Spacewars.Runtime
             if(visionUnitInputs==null||visionUnitInputs.Length!=units.Count)visionUnitInputs=new VisionUnitInput[units.Count];
             if(visionBuildingInputs==null||visionBuildingInputs.Length!=buildings.Count)visionBuildingInputs=new VisionBuildingInput[buildings.Count];
             int index=0;foreach(var unit in units.Values)visionUnitInputs[index++]=ReadVisionInput(unit);
-            index=0;foreach(var b in buildings.Values)visionBuildingInputs[index++]=new VisionBuildingInput{Id=b.Id,Owner=b.Owner,Kind=b.Kind,Phase=b.Phase,Position=b.Position,Heading=b.Heading,Upgraded=b.Upgrade?.Complete==true||CenterUpgraded(b.Id)};
+            index=0;foreach(var b in buildings.Values)visionBuildingInputs[index++]=new VisionBuildingInput{Id=b.Id,Owner=b.Owner,Kind=b.Kind,Phase=b.Phase,Position=b.Position,Heading=b.Heading,Upgraded=b.Upgrade?.Complete==true||CenterUpgraded(b.Id)||b.ProducerUpgrade?.Complete==true};
             visionInputProfile=profile;visionInputTeams=visions.Count;
         }
     }

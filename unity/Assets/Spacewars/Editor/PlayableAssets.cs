@@ -64,7 +64,9 @@ namespace Spacewars.Editor
                             material.SetTexture("_DetailNormalMap",detail);material.SetFloat("_DetailNormalMapScale",1);material.SetFloat("_DetailAlbedoMapScale",0);material.EnableKeyword("_DETAIL_SCALED");
                             var pixels=orm.GetPixels();for(int i=0;i<pixels.Length;i++){var p=pixels[i];pixels[i]=new Color(p.b*role.metallic,p.r,0,1-p.g*role.roughness);}
                             var packed=new Texture2D(orm.width,orm.height,TextureFormat.RGBA32,true,true);packed.SetPixels(pixels);packed.Apply();
-                            string mapPath=Output+model.name+"-"+roleKey+"-mask.png";File.WriteAllBytes(mapPath,packed.EncodeToPNG());UnityEngine.Object.DestroyImmediate(packed);
+                            var maskBytes=packed.EncodeToPNG();UnityEngine.Object.DestroyImmediate(packed);
+                            string mapPath=ExactResourceAliases.PackedMaskPath(Output+model.name+"-"+roleKey+"-mask.png",maskBytes);
+                            if(!File.Exists(mapPath)||!File.ReadAllBytes(mapPath).SequenceEqual(maskBytes))File.WriteAllBytes(mapPath,maskBytes);
                             AssetDatabase.ImportAsset(mapPath);var importer=(TextureImporter)AssetImporter.GetAtPath(mapPath);importer.sRGBTexture=false;importer.SaveAndReimport();
                             material.SetTexture("_MetallicGlossMap",AssetDatabase.LoadAssetAtPath<Texture2D>(mapPath));material.SetFloat("_Smoothness",1);material.EnableKeyword("_METALLICSPECGLOSSMAP");
                             material.SetTexture("_OcclusionMap",AssetDatabase.LoadAssetAtPath<Texture2D>(mapPath));material.SetFloat("_OcclusionStrength",1);material.EnableKeyword("_OCCLUSIONMAP");

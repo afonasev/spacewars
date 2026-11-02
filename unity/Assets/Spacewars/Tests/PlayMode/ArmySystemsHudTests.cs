@@ -36,7 +36,7 @@ public sealed class ArmySystemsHudTests
         var button=Get<OrbitalBattleRing>("battleRing").Q<Button>("radial-"+action.Sector.Id);Assert.NotNull(button);Assert.True(button.Query<Label>().ToList().Any(l=>l.text=="Бетон I"));
         Assert.AreEqual(200,action.Price);Assert.That(action.Detail,Does.Contain("30 с"));Assert.That(action.Detail,Does.Contain("25%"));
         Assert.AreEqual("reinforced-concrete",OrbitalPrecision.ResearchGlyph(PlayableResearchKind.ReinforcedConcrete));Assert.AreEqual("reinforced-concrete",OrbitalPrecision.Glyph("7:ReinforcedConcrete"));
-        var texture=OrbitalGlyph.TextureFor("reinforced-concrete");Assert.NotNull(texture);Assert.AreEqual(400,texture.width);Assert.AreEqual(300,texture.height);
+        var texture=OrbitalGlyph.TextureFor("reinforced-concrete");Assert.NotNull(texture);Assert.AreEqual(256,texture.width);Assert.AreEqual(256,texture.height);
         var b=new PlayableBuildingSnapshot(7,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,default,187,1,0,0,default,maxHealth:375);Assert.AreEqual(375,TerritoryRules.MaximumHealth(p,b));
     }
     [UnityTest] public IEnumerator ConcreteTwoChoicesUseCenterGateAndCumulativeTerms()
@@ -60,7 +60,7 @@ public sealed class ArmySystemsHudTests
         var navigation=new NativeMenuNavigation(root);
         try{
             var store=new NativeBalanceStore(p,Path.Combine(directory,"balance.json"));var lab=new NativeBalanceView(root,navigation,store,()=>{});yield return null;yield return null;
-            navigation.ActivateElement(lab.Page.Q<Button>("lab-section-Здания"));navigation.ActivateElement(lab.Page.Q<Button>("lab-object-Усиленный-бетон"));yield return null;
+            navigation.ActivateElement(lab.Page.Q<Button>("lab-section-Исследования"));navigation.ActivateElement(lab.Page.Q<Button>("lab-object-Усиленный-бетон"));yield return null;
             foreach(var name in new[]{"reinforcedConcreteCost","reinforcedConcreteSeconds","reinforcedConcreteBonusPercent","reinforcedConcreteLevel2Cost","reinforcedConcreteLevel2Seconds","reinforcedConcreteLevel2BonusPercent"})Assert.NotNull(lab.Page.Q<TextField>("lab-field-"+name));
             lab.Page.Q<TextField>("lab-field-reinforcedConcreteCost").value="220";yield return null;yield return null;
             var output=Path.GetFullPath(Path.Combine(Application.dataPath,"../../.local/qa/concrete"));Directory.CreateDirectory(output);
@@ -94,6 +94,7 @@ public sealed class ArmySystemsHudTests
         try{
             var store=new NativeBalanceStore(p,path);var lab=new NativeBalanceView(root,navigation,store,()=>{});
             yield return null;yield return null;
+            navigation.ActivateElement(lab.Page.Q<Button>("lab-section-Исследования"));
             foreach(var entity in new[]{"Оружейные системы","Защитные системы"}){
                 var button=lab.Page.Q<Button>("lab-object-"+entity.Replace(' ','-'));Assert.NotNull(button,entity);navigation.ActivateElement(button);yield return null;
                 string prefix=entity=="Оружейные системы"?"weaponSystems":"defensiveSystems";
@@ -103,7 +104,7 @@ public sealed class ArmySystemsHudTests
                 var output=Path.GetFullPath(Path.Combine(Application.dataPath,"../../.local/qa/army-systems/ui-images"));Directory.CreateDirectory(output);
                 var old=RenderTexture.active;RenderTexture.active=texture;var pixels=new Texture2D(texture.width,texture.height,TextureFormat.RGBA32,false);pixels.ReadPixels(new Rect(0,0,texture.width,texture.height),0,0);pixels.Apply();RenderTexture.active=old;File.WriteAllBytes(Path.Combine(output,"lab-"+prefix+".png"),pixels.EncodeToPNG());UnityEngine.Object.Destroy(pixels);
             }
-            navigation.ActivateElement(lab.Page.Q<Button>("lab-section-Правила"));navigation.ActivateElement(lab.Page.Q<Button>("lab-object-ИИ"));yield return null;
+            navigation.ActivateElement(lab.Page.Q<Button>("lab-section-ИИ"));navigation.ActivateElement(lab.Page.Q<Button>("lab-object-Исследования"));yield return null;
             var minimum=lab.Page.Q<TextField>("lab-field-armySystemsMinimumUnits");Assert.NotNull(minimum);minimum.value="11";
             foreach(var field in PlayableProfileMetadata.Fields.Where(f=>f.Path.StartsWith("ai.research.armySystems.")))Assert.NotNull(lab.Page.Q<TextField>("lab-field-"+field.FieldName),field.Path);
             lab.Page.Q<TextField>("lab-field-aiArmySystemsFighterCatchupSeconds").value="61";
@@ -119,19 +120,93 @@ public sealed class ArmySystemsHudTests
             Assert.AreEqual(325,reloaded.WeaponSystemsLevel1Cost);Assert.AreEqual(46,reloaded.WeaponSystemsLevel2Seconds);Assert.AreEqual(11,reloaded.ArmySystemsMinimumUnits);Assert.AreEqual(61,reloaded.ArmySystemsAiCatchupSeconds(Spacewars.Simulation.Ai.AiDifficulty.Fighter));Assert.AreEqual(4.5,reloaded.ArmySystemsAiUtilityScale(Spacewars.Simulation.Ai.AiDifficulty.Veteran));Assert.AreEqual(390,reloaded.ArmySystemsAiDelaySeconds(Spacewars.Simulation.Ai.AiDifficulty.Veteran,2));
         }finally{navigation.Dispose();panel.targetTexture=null;texture.Release();UnityEngine.Object.Destroy(texture);Directory.Delete(directory,true);}
     }
+    [UnityTest] public IEnumerator ApprovedBuildingUpgradeBadgeReview()=>UpgradeBadgeReview("Улучшения зданий · вариант Б",new[]{"factoryUpgraded","hangarUpgraded","refineryUpgraded","scientificCenterUpgraded"},new[]{"Фабрика","Ангар","Переработка","Научный центр"},"building-badges.png");
+    [UnityTest] public IEnumerator ApprovedUnitUpgradeBadgeReview()=>UpgradeBadgeReview("Улучшения юнитов · шевроны",new[]{"tankHybridUpgraded","explorerUpgraded","shkval-guidance-3","hawkUpgraded"},new[]{"Танк","Исследователь","Шквал","Ястреб"},"unit-badges.png");
+    IEnumerator UpgradeBadgeReview(string heading,string[] keys,string[] names,string filename)
+    {
+        var root=Get<VisualElement>("root");root.Clear();root.style.backgroundColor=OrbitalTheme.Background;
+        var panel=host.GetComponent<UIDocument>().panelSettings;var target=new RenderTexture(1280,440,24);target.Create();panel.targetTexture=target;
+        try{
+            yield return null;yield return null;root.style.width=1280/panel.scale;root.style.height=440/panel.scale;
+            var header=new Label(heading);header.style.fontSize=24;header.style.color=OrbitalTheme.Ink;header.style.marginLeft=header.style.marginTop=20;root.Add(header);
+            var row=new VisualElement();row.style.flexDirection=FlexDirection.Row;row.style.justifyContent=Justify.SpaceAround;row.style.marginTop=24;root.Add(row);
+            for(int i=0;i<keys.Length;i++){
+                var cell=new VisualElement();cell.style.width=Length.Percent(23);cell.style.alignItems=Align.Center;row.Add(cell);
+                var art=new RadialArtwork();art.style.width=art.style.height=90;art.Set(keys[i],true);cell.Add(art);
+                var title=new Label(names[i]);title.style.color=OrbitalTheme.Ink;title.style.fontSize=16;title.style.marginTop=12;cell.Add(title);
+                var small=new RadialArtwork();small.style.width=small.style.height=48;small.style.marginTop=18;small.Set(keys[i],true,available:false);cell.Add(small);
+                var note=new Label("Недоступно");note.style.fontSize=11;note.style.color=OrbitalTheme.Muted;cell.Add(note);
+            }
+            yield return null;yield return null;
+            foreach(var mark in root.Query<PortraitUpgradeMark>().ToList()){
+                Assert.Greater(mark.resolvedStyle.width,0);Assert.True(mark.parent.worldBound.Contains(mark.worldBound.min));Assert.True(mark.parent.worldBound.Contains(mark.worldBound.max));
+            }
+            var output=Path.GetFullPath(Path.Combine(Application.dataPath,"../../.local/qa/army-systems/ui-images"));Directory.CreateDirectory(output);
+            var previous=RenderTexture.active;RenderTexture.active=target;var pixels=new Texture2D(target.width,target.height,TextureFormat.RGBA32,false);pixels.ReadPixels(new Rect(0,0,target.width,target.height),0,0);pixels.Apply();RenderTexture.active=previous;
+            File.WriteAllBytes(Path.Combine(output,filename),pixels.EncodeToPNG());UnityEngine.Object.Destroy(pixels);
+        }finally{panel.targetTexture=null;target.Release();UnityEngine.Object.Destroy(target);}
+    }
+    [UnityTest] public IEnumerator UtilityIconsFitProducerWheel()
+    {
+        var root=Get<VisualElement>("root");var panel=host.GetComponent<UIDocument>().panelSettings;
+        var output=Path.GetFullPath(Path.Combine(Application.dataPath,"../../.local/qa/army-systems/ui-images"));Directory.CreateDirectory(output);
+        Set("battleController",true); // Rally is part of the existing controller wheel.
+        foreach(var size in new[]{new Vector2Int(1600,1000),new Vector2Int(960,620)}){
+            var target=new RenderTexture(size.x,size.y,24);target.Create();panel.targetTexture=target;root.style.backgroundColor=OrbitalTheme.Background;
+            yield return null;yield return null;root.style.width=size.x/panel.scale;root.style.height=size.y/panel.scale;
+            try{foreach(var kind in new[]{PlayableBuildingKind.Factory,PlayableBuildingKind.Hangar}){
+                var lifecycle=new PlayableBuildingLifecycleSnapshot(false,0,false,false,0,0,null,null,1,300,false);
+                var building=new PlayableBuildingSnapshot(7,PlayableOwner.Player,kind,default,100,1,0,0,default,lifecycle:lifecycle,upgrade:new PlayableRefineryUpgradeSnapshot(false,false,0,0,30,null));
+                var science=new PlayableBuildingSnapshot(9,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,default,250,1,0,0,default,lifecycle:lifecycle);
+                var view=new PlayableSnapshot(p.ProfileId,p.Revision,1,7,1,100,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,10000,null,Array.Empty<PlayableEntitySnapshot>(),new[]{building,science},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,activeProfile:p);
+                Set("view",view);Get<HashSet<int>>("selection").Clear();Get<HashSet<int>>("selection").Add(7);Call("UpdateHud");yield return null;yield return null;Call("UpdateHud");yield return null;
+                var actions=Get<OfflinePadAction[]>("battleActions");Assert.True(actions.Any(a=>a.Sector.Id=="rally"));
+                var ring=Get<OrbitalBattleRing>("battleRing");ring.Set(actions,kind==PlayableBuildingKind.Factory?"Фабрика":"Ангар","rally",contextGlyph:OrbitalPrecision.BuildingGlyph(kind));yield return null;yield return null;
+                foreach(var id in new[]{"rally","7:repair","7:sale"}){
+                    var button=ring.Q<Button>("radial-"+id);var art=button.Q<RadialArtwork>();var title=button.Q<Label>("radial-sector-title");var price=button.Q<Label>("radial-sector-count");
+                    Assert.Greater(art.resolvedStyle.width,0);
+                    foreach(var element in new VisualElement[]{art,title,price}){
+                        if(element==price&&string.IsNullOrEmpty(price.text))continue;
+                        var b=element.worldBound;
+                        for(int step=0;step<=16;step++){
+                            float t=step/16f;
+                            foreach(var point in new[]{new Vector2(Mathf.Lerp(b.xMin,b.xMax,t),b.yMin),new Vector2(Mathf.Lerp(b.xMin,b.xMax,t),b.yMax),new Vector2(b.xMin,Mathf.Lerp(b.yMin,b.yMax,t)),new Vector2(b.xMax,Mathf.Lerp(b.yMin,b.yMax,t))})Assert.True(button.ContainsPoint(button.WorldToLocal(point)),kind+" "+size+" "+id+" outside petal");
+                        }
+                    }
+                    Assert.False(art.worldBound.Overlaps(title.worldBound));if(!string.IsNullOrEmpty(price.text))Assert.False(art.worldBound.Overlaps(price.worldBound));
+                }
+                var previous=RenderTexture.active;RenderTexture.active=target;var pixels=new Texture2D(size.x,size.y,TextureFormat.RGBA32,false);pixels.ReadPixels(new Rect(0,0,size.x,size.y),0,0);pixels.Apply();RenderTexture.active=previous;
+                File.WriteAllBytes(Path.Combine(output,"utility-"+kind+"-"+size.x+".png"),pixels.EncodeToPNG());UnityEngine.Object.Destroy(pixels);
+            }}finally{panel.targetTexture=null;target.Release();UnityEngine.Object.Destroy(target);}
+        }
+    }
     [UnityTest] public IEnumerator ProducerUpgradeArtworkFitsItsPetal()
     {
         var root=Get<VisualElement>("root");var panel=host.GetComponent<UIDocument>().panelSettings;var target=new RenderTexture(1280,900,24);target.Create();panel.targetTexture=target;
         yield return null;yield return null;root.style.width=1280/panel.scale;root.style.height=900/panel.scale;
-        try{foreach(var kind in new[]{PlayableBuildingKind.Factory,PlayableBuildingKind.Hangar}){
+        try{foreach(var kind in new[]{PlayableBuildingKind.Factory,PlayableBuildingKind.Hangar,PlayableBuildingKind.Refinery}){
             var lifecycle=new PlayableBuildingLifecycleSnapshot(false,0,false,false,0,0,null,null,1,300,false);
             var building=new PlayableBuildingSnapshot(7,PlayableOwner.Player,kind,default,250,1,0,0,default,lifecycle:lifecycle,upgrade:new PlayableRefineryUpgradeSnapshot(false,false,0,0,30,null));
             var science=new PlayableBuildingSnapshot(9,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,default,250,1,0,0,default,lifecycle:lifecycle);
             var view=new PlayableSnapshot(p.ProfileId,p.Revision,1,7,1,100,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,10000,null,Array.Empty<PlayableEntitySnapshot>(),new[]{building,science},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,activeProfile:p);
             Set("view",view);Get<HashSet<int>>("selection").Clear();Get<HashSet<int>>("selection").Add(7);Call("UpdateHud");yield return null;yield return null;Call("UpdateHud");yield return null;
-            var action=Get<OfflinePadAction[]>("battleActions").Single(a=>a.Sector.Id.EndsWith(":producer-upgrade"));var button=Get<OrbitalBattleRing>("battleRing").Q<Button>("radial-"+action.Sector.Id);var artwork=button.Q<RadialArtwork>();TestContext.WriteLine(kind+" icon style="+artwork.style.width+" resolved="+artwork.worldBound+" ring="+Get<OrbitalBattleRing>("battleRing").worldBound+" fit="+button.GetType().GetField("fitKey",F).GetValue(button));Assert.Greater(artwork.resolvedStyle.width,0);
+            var action=Get<OfflinePadAction[]>("battleActions").Single(a=>a.Sector.Id.EndsWith(":producer-upgrade")||a.Sector.Id.EndsWith(":upgrade"));var button=Get<OrbitalBattleRing>("battleRing").Q<Button>("radial-"+action.Sector.Id);var artwork=button.Q<RadialArtwork>();TestContext.WriteLine(kind+" icon style="+artwork.style.width+" resolved="+artwork.worldBound+" ring="+Get<OrbitalBattleRing>("battleRing").worldBound+" fit="+button.GetType().GetField("fitKey",F).GetValue(button));Assert.Greater(artwork.resolvedStyle.width,0);
             foreach(var point in new[]{artwork.worldBound.min,artwork.worldBound.max,new Vector2(artwork.worldBound.xMin,artwork.worldBound.yMax),new Vector2(artwork.worldBound.xMax,artwork.worldBound.yMin)})Assert.True(button.ContainsPoint(button.WorldToLocal(point)),kind+" upgrade outside petal");
         }}finally{panel.targetTexture=null;target.Release();UnityEngine.Object.Destroy(target);}
+    }
+    [Test] public void ResearchOrderGroupsUnitsThenSystemsThenCenterAndUtilities()
+    {
+        Show();var actions=Get<OfflinePadAction[]>("battleActions");
+        var expected=new[]{"tank-chassis","explorer-assault-guns","shkval-guidance","HawkSalvoSystems","ImprovedWeaponSystems","ImprovedDefensiveSystems","ReinforcedConcrete","ScientificCenterUpgrade","repair","sale"};
+        CollectionAssert.AreEqual(expected,actions.Select(a=>a.Sector.Id.Split(':').Last()).ToArray());
+        var center=actions.Single(a=>a.Sector.Id.EndsWith(":ScientificCenterUpgrade"));
+        Assert.AreEqual("scientificCenterUpgraded",center.Presentation.Artwork);Assert.True(center.Presentation.Upgrade);
+        Assert.NotNull(DockArtwork.TextureFor(center.Presentation.Artwork));
+        Assert.AreNotSame(DockArtwork.TextureFor("science"),DockArtwork.TextureFor(center.Presentation.Artwork));
+        var row=Get<VisualElement>("root").Q("research-queue");
+        CollectionAssert.AreEqual(new[]{PlayableResearchKind.TankChassis,PlayableResearchKind.ExplorerAssaultGuns,PlayableResearchKind.ShkvalGuidance,PlayableResearchKind.HawkSalvoSystems,PlayableResearchKind.ImprovedWeaponSystems,PlayableResearchKind.ImprovedDefensiveSystems,PlayableResearchKind.ReinforcedConcrete,PlayableResearchKind.ScientificCenterUpgrade},row.Children().OfType<Button>().Select(b=>(PlayableResearchKind)b.userData).ToArray());
+        Show(new[]{Completed(PlayableResearchKind.ExplorerAssaultGuns),Completed(PlayableResearchKind.ImprovedWeaponSystems),Completed(PlayableResearchKind.ScientificCenterUpgrade)});
+        CollectionAssert.AreEqual(new[]{"tank-chassis","shkval-guidance","HawkSalvoSystems","AdvancedWeaponSystems","ImprovedDefensiveSystems","ReinforcedConcrete","repair","sale"},Get<OfflinePadAction[]>("battleActions").Select(a=>a.Sector.Id.Split(':').Last()).ToArray());
     }
     [Test] public void ArtworkRectanglesCannotBridgeConcavePetalEdge()
     {
@@ -160,10 +235,12 @@ public sealed class ArmySystemsHudTests
                         Assert.GreaterOrEqual(button.worldBound.xMin,0);Assert.LessOrEqual(button.worldBound.xMax,size.x/panel.scale);Assert.GreaterOrEqual(button.worldBound.yMin,0);Assert.LessOrEqual(button.worldBound.yMax,size.y/panel.scale);}
                     // Validate actual laid-out artwork and price against the painted
                     // sector, independently of the fitting rectangle calculation.
-                    foreach(var a in actions.Where(a=>a.Presentation?.Artwork!=null)){
+                    foreach(var a in actions.Where(a=>a.Presentation?.Artwork!=null||a.Sector.Id.EndsWith(":repair")||a.Sector.Id.EndsWith(":sale"))){
                         var button=Get<OrbitalBattleRing>("battleRing").Q<Button>("radial-"+a.Sector.Id);var artwork=button.Q<RadialArtwork>();var price=button.Q<Label>("radial-sector-count");
                         Assert.Greater(artwork.resolvedStyle.width,0,a.Sector.Id);
-                        foreach(var element in new VisualElement[]{artwork,price}){
+                        var title=button.Q<Label>("radial-sector-title");
+                        foreach(var element in new VisualElement[]{artwork,price,title}){
+                            if(element==title&&title.resolvedStyle.display==DisplayStyle.None)continue;
                             if(element==price&&string.IsNullOrEmpty(price.text))continue;
                             var bounds=element.worldBound;
                             for(int step=0;step<=16;step++){
@@ -172,7 +249,8 @@ public sealed class ArmySystemsHudTests
                                     Assert.True(button.ContainsPoint(button.WorldToLocal(point)),state+" "+size+" "+a.Sector.Id+" "+element.GetType().Name+" outside petal at "+point);
                             }
                         }
-                        Assert.False(artwork.worldBound.Overlaps(price.worldBound),a.Sector.Id+" price overlaps artwork");
+                        if(!string.IsNullOrEmpty(price.text))Assert.False(artwork.worldBound.Overlaps(price.worldBound),a.Sector.Id+" price overlaps artwork");
+                        if(title.resolvedStyle.display!=DisplayStyle.None)Assert.False(artwork.worldBound.Overlaps(title.worldBound),a.Sector.Id+" title overlaps artwork");
                     }
                     Assert.LessOrEqual(Get<VisualElement>("armyRegion").worldBound.yMax,size.y/panel.scale+.5f,"research context must fit the actual scaled viewport");
                     if(state=="three-order-queue"){Assert.That(root.Q<Button>("research-slot-0").text,Does.Contain("50%"));Assert.That(root.Q<Button>("research-slot-2").text,Does.Contain("ждёт"));}

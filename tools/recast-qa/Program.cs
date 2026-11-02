@@ -6,6 +6,11 @@ using Spacewars.Runtime;
 class Program{
 static int Main(string[] args){try{return Run(args);}catch(Exception error){Console.Error.WriteLine(error);return 1;}}
 static int Run(string[] args){
+if(args.Contains("--air-motion")){AirMotionChecks.Run();return 0;}
+if(args.Contains("--normal-request-captured")){FlatRecastChecks.CapturedAuthoredRequest();return 0;}
+if(args.Contains("--normal-world-cold-inspect")){FlatRecastChecks.InspectSavedWorld();return 0;}
+if(args.Contains("--motion-publication")){FlatRecastChecks.Run(true);FlatRecastChecks.Run(true,PlayableCommandKind.Attack);FlatRecastChecks.Run(true,PlayableCommandKind.Attack,true);return 0;}
+if(args.Contains("--flat-recast")){FlatRecastChecks.Run();return 0;}
 if(args.Contains("--binding-world")){S1ClosureChecks.BindingWorld();return 0;}
 if(args.Contains("--binding-audit")){S1ClosureChecks.BindingAudit();return 0;}
 if(args.Contains("--s1-closure")){S1ClosureChecks.Run();return 0;}

@@ -23,7 +23,7 @@ namespace Spacewars.Runtime
     double v=Math.Min(1,b.LaunchTime/profile.HawkPlatformSeconds);
     platform=b.LaunchPhase==2?v:b.LaunchPhase==3||b.LaunchPhase==4?1:b.LaunchPhase==5?1-v:0;
    }
-   return BuildingCombatGeometry.Pose(profile,b.Kind,b.Upgrade?.Complete==true,b.Position,GroundHeight(b.Position),heading,opening,platform,b.Ready?1:b.Build/BuildingDuration(b));
+   return BuildingCombatGeometry.Pose(profile,b.Kind,b.Upgrade?.Complete==true||CenterUpgraded(b.Id),b.Position,GroundHeight(b.Position),heading,opening,platform,b.Ready?1:b.Build/BuildingDuration(b));
   }
  }
 }

@@ -62,9 +62,9 @@ namespace Spacewars.Presentation
         private void UpdateBuildingDock(PlayableBuildingSnapshot building,PlayableEntitySnapshot entity)
         {
             buildingDockVisible=building!=null;
-            dockIdentity.tooltip=building!=null?PlayableMenuDescriptions.Building(profile,building.Kind,building.RefineryUpgraded,freeEconomy:provingGround!=null,maxHealth:TerritoryRules.MaximumHealth(profile,building)):entity!=null?PlayableMenuDescriptions.Unit(profile,entity.Kind,entity.Owner==view.Owner?view.OwnerResearch:null,entity,freeEconomy:provingGround!=null):"";
-            string glyph=building!=null?OrbitalPrecision.BuildingGlyph(building.Kind):entity==null?null:RadialActionPresentation.UnitArtwork(entity.Kind,entity.Upgraded);
-            dockPortrait.Set(building?.RefineryUpgraded==true?"refineryUpgraded":glyph);var portrait=dockPortrait.Texture;
+            dockIdentity.tooltip=building!=null?PlayableMenuDescriptions.Building(profile,building.Kind,building.RefineryUpgraded,freeEconomy:provingGround!=null,maxHealth:TerritoryRules.MaximumHealth(profile,building)):entity!=null?(selectionRosterExpanded?PlayableMenuDescriptions.Unit(profile,entity.Kind,entity.Owner==view.Owner?view.OwnerResearch:null,entity,freeEconomy:provingGround!=null):UnitName(entity.Kind)+" · "+entity.Health+" HP · "+"Развернуть подробности (RT)"):"";
+            string glyph=building!=null?OrbitalPrecision.BuildingArtwork(building):entity==null?null:RadialActionPresentation.UnitArtwork(entity.Kind,entity.Upgraded);
+            dockPortrait.Set(glyph);var portrait=dockPortrait.Texture;
             dockPortrait.style.display=portrait!=null?DisplayStyle.Flex:DisplayStyle.None;
             contextIcon.style.display=portrait==null?DisplayStyle.Flex:DisplayStyle.None;
             contextIcon.style.position=Position.Relative;contextIcon.style.left=contextIcon.style.top=0;

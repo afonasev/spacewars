@@ -61,9 +61,10 @@ namespace Spacewars.Simulation
     public sealed partial class NavIncrementalSingletonRoute : INavPhysicalBody
     {
         internal override bool IsImmutableCaptureRoot=>IsRegistered&&frozen&&reservation==null;
-        NavPhysicalTag INavPhysicalBody.PhysicalTag=>new NavPhysicalTag(queryRegion==null?NavPhysicalStorageKind.Singleton:NavPhysicalStorageKind.QuerySingletonV1);
+        NavPhysicalTag INavPhysicalBody.PhysicalTag=>IsFlat?new NavPhysicalTag(NavPhysicalStorageKind.Singleton,value:NavPhysicalValueKind.FlatGridSingletonV1):new NavPhysicalTag(queryRegion==null?NavPhysicalStorageKind.Singleton:NavPhysicalStorageKind.QuerySingletonV1);
         void INavPhysicalBody.WritePhysicalBody(NavPhysicalBodyWriter writer)
         {
+            if(IsFlat){WriteFlatBody(writer);return;}
             if(!IsImmutableCaptureRoot||StorageBytes!=NavStorageLayout.Charge(2048)||NavStorageLayout.ObjectBytesBound(GetType())>2048||!ReferenceEquals(ownedSubscription,subscription.MetadataOwner))throw new ArgumentException("Physical singleton owner/layout/callback contradiction.");
             if(queryRegion!=null){NavPhysicalMacro.WriteEdge(writer,this,queryRegionOwner);writer.Output.Write(queryCandidate);writer.Output.Write(queryChosenCandidate);}
             var w=writer.Output;w.Write(maxStates);w.Write((int)Status);w.Write((int)phase);w.Write(cursor);w.Write(arcCursor);w.Write(current);w.Write(chosen);w.Write(reconstructCursor);w.Write(reconstructLeg);w.Write(traceNode);w.Write(best);w.Write(routeCost);w.Write(startSeeded);

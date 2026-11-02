@@ -68,6 +68,40 @@ namespace Spacewars.Tests.EditMode
             Assert.False(State(producer).Orders[0].Active);Advance(.1);Assert.AreEqual(20,State(producer).Orders[0].Duration,1e-9);Roundtrip();
             Assert.AreEqual(20,State(producer).Orders[0].Duration);Assert.AreEqual(3,View().Population.Reserved);
         }
+        [TestCase(PlayableBuildingKind.Factory)][TestCase(PlayableBuildingKind.Hangar)]
+        public void CompletedVisualLevelAndResultIdentitySurviveWorldRoundtrip(PlayableBuildingKind kind)
+        {
+            int id=Build(kind,1);Build(PlayableBuildingKind.ScientificCenter,2);
+            Assert.False(Building(id).ModelUpgraded);
+            Send(PlayableCommandKind.UpgradeProducer,id);Advance(.5);
+            Assert.False(Building(id).ProducerUpgraded,"Queued/active upgrade retains original model");
+            Advance(p.ProducerUpgradeSeconds(kind));
+            Assert.True(Building(id).ProducerUpgraded);Assert.True(Building(id).ModelUpgraded);
+            Assert.False(Building(id).RefineryUpgraded,"Producer upgrade must not become refinery income state");
+            Roundtrip();Assert.True(Building(id).ProducerUpgraded);
+        }
+        [Test] public void CompletedProducerInvalidatesDomainVisionInputCache()
+        {
+            int id=Build(PlayableBuildingKind.Factory,1);Build(PlayableBuildingKind.ScientificCenter,2);
+            View();Assert.True((bool)Call("VisionInputsUnchanged"));
+            Send(PlayableCommandKind.UpgradeProducer,id);Advance(.5);View();Assert.True((bool)Call("VisionInputsUnchanged"));
+            Advance(p.ProducerUpgradeSeconds(PlayableBuildingKind.Factory));Assert.False((bool)Call("VisionInputsUnchanged"));
+            View();Assert.True((bool)Call("VisionInputsUnchanged"));
+        }
+        [Test] public void ProducerMemoryChangesOnlyWhenSeenAndSurvivesWireRoundtrip()
+        {
+            var vision=new PlayableVision(1,32,20,4,1.5);
+            KnownBuilding B(bool upgraded)=>new KnownBuilding(7,2,PlayableOwner.Enemy,PlayableBuildingKind.Hangar,new NavPoint(10,0),0,producerUpgraded:upgraded);
+            var near=new[]{new VisionSource(new NavPoint(10,0),5)};var far=new[]{new VisionSource(new NavPoint(-20,0),5)};
+            vision.Refresh(near,new[]{B(false)});vision.Refresh(far,new[]{B(true)});
+            Assert.False(vision.Snapshot().KnownBuildings.Single().ProducerUpgraded,"Hidden upgrade cannot leak");
+            vision.Refresh(near,new[]{B(true)});Assert.True(vision.Snapshot().KnownBuildings.Single().ProducerUpgraded);
+            vision.Refresh(far,Array.Empty<KnownBuilding>());
+            using var stream=new System.IO.MemoryStream();using(var writer=new System.IO.BinaryWriter(stream,System.Text.Encoding.UTF8,true))WorldWire.Write(writer,vision.CaptureState());
+            stream.Position=0;using var reader=new System.IO.BinaryReader(stream);var state=WorldWire.ReadPlayableVisionState(reader);
+            var restored=new PlayableVision(1,32,20,4,1.5);restored.RestoreState(state);
+            Assert.True(restored.Snapshot().KnownBuildings.Single().ProducerUpgraded);Assert.False(restored.IsVisible(new NavPoint(10,0)));
+        }
         [Test] public void PrerequisiteCapacityDuplicateAndCancelAreAuthoritative()
         {
             int f=Build(PlayableBuildingKind.Factory,1);double bank=View().ExactCredits;
@@ -116,7 +150,7 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(paid,State(f).Upgrade.PaidCost);Assert.AreEqual((int)Math.Floor((300+paid)*p.BuildingSaleRefundRatio),State(f).Lifecycle.Refund);
             Send(PlayableCommandKind.ToggleRepeatProduction,f);Advance(.1);Assert.AreEqual(15,State(f).Orders[0].Duration);Roundtrip();
         }
-        [Test] public void ProvingSetupKeepsProducerLevelOnBothSidesWithoutChangingModels()
+        [Test] public void ProvingSetupKeepsProducerLevelAndVisibleModelsOnBothSides()
         {
             var setup=new ProvingGroundSetup(p);
             for(int side=0;side<2;side++)
@@ -132,7 +166,7 @@ namespace Spacewars.Tests.EditMode
             var producers=all.Buildings.Where(b=>b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar).ToArray();Assert.AreEqual(4,producers.Length);
             foreach(var b in producers)
             {
-                Assert.True(b.PrivateState.Upgrade.Complete);Assert.False(b.ModelUpgraded);Assert.True(copied.BuildingUpgraded(b.SiteId,b.SlotId));
+                Assert.True(b.PrivateState.Upgrade.Complete);Assert.True(b.ModelUpgraded);Assert.True(b.ProducerUpgraded);Assert.True(copied.BuildingUpgraded(b.SiteId,b.SlotId));
             }
         }
         [Test] public void LabFieldsAreIndependentValidatedAndGamepadCarriesStableCancellationId()

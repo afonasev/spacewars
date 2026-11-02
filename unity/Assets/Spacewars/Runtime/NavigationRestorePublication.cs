@@ -24,7 +24,7 @@ namespace Spacewars.Runtime
             NavPagedList<long> sourceBank;NavigationTrafficAuthority sourceTraffic;NavigationAuthorityOwners sourceAuthority;NavigationHostRoot sourceHost;NavigationCommandAuthority sourceBacking;NavigationAdmission sourceAdmission;NavigationInstalledExecutions sourceInstalled;
             NavigationCommandSlots<NavigationAnswer,NavigationHostAnswer> sourceTracking;int trackingRevision;NavCrowd sourceCrowd;long operation,requestsRevision,answersRevision;NavigationRetentionBudget budget;
             using(EnterTransport()){
-                if(certifiedHost!=null||hostAllocationThread!=0||admissionBatchDepth!=0||commandGroup!=null||Crowd.Units.Count!=0||pending.Count!=0||orders.Count!=0||Requests.Count!=0||Answers.Count!=0||(ownedAnswerTracking?.Count??0)!=0||countedCorridorAnswers.Count!=0)throw new ArgumentException("Navigation restore destination is not detached and empty.");
+                if(motionSources!=null||certifiedHost!=null||hostAllocationThread!=0||admissionBatchDepth!=0||commandGroup!=null||Crowd.Units.Count!=0||pending.Count!=0||orders.Count!=0||Requests.Count!=0||Answers.Count!=0||(ownedAnswerTracking?.Count??0)!=0||countedCorridorAnswers.Count!=0)throw new ArgumentException("Navigation restore destination is not detached and empty.");
                 sourceBank=creditBank;sourceBank?.Retain();sourceTraffic=trafficAuthority;sourceTraffic?.Retain();sourceAuthority=authorityOwners;sourceHost=committedHostRoot;sourceBacking=groupCommandBacking;sourceAdmission=admission;sourceCrowd=Crowd;sourceInstalled=installedExecutions;sourceTracking=ownedAnswerTracking;trackingRevision=sourceTracking?.Revision??0;sourceTracking?.Retain();
                 operation=authorityOperationIdentity;requestsRevision=Requests.Revision;answersRevision=Answers.Revision;budget=physicalHostBudget;
                 sourceAuthority?.Retain();sourceHost?.Retain();sourceBacking?.Retain();sourceInstalled?.Retain();
@@ -67,7 +67,7 @@ namespace Spacewars.Runtime
         }
         private void AdoptColdStateNoThrow(NavigationSession candidate)
         {
-            trafficAuthority=candidate.trafficAuthority;candidate.trafficAuthority=null;authorityOwners=candidate.authorityOwners;terrainNameOwners=candidate.terrainNameOwners;
+            motionSources=candidate.motionSources;candidate.motionSources=null;trafficAuthority=candidate.trafficAuthority;candidate.trafficAuthority=null;authorityOwners=candidate.authorityOwners;terrainNameOwners=candidate.terrainNameOwners;
             geometry=candidate.geometry;
             navigationGeometry=candidate.navigationGeometry;
             profile=candidate.profile;

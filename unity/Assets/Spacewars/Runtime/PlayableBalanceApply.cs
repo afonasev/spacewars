@@ -38,6 +38,10 @@ namespace Spacewars.Runtime
         {if(!TryApplyBalance(candidate))throw new InvalidOperationException(BalancePreparationRefusedMessage);}
         internal bool TryApplyBalance(PlayableProfile candidate)
         {
+            navigation.AssertMotionOperational();
+            // An AI-only revision can keep the exact immutable gameplay profile.
+            // It has no navigation terms to replace or rallies to restart.
+            if(ReferenceEquals(candidate,profile))return true;
             var prepared=navigation.TryRebindBalance(this,candidate);if(prepared.HasValue)return prepared.Value;
             ApplyBalanceTerms(candidate);
             SetRallyPaused(true);navigation.Rebind(profile.Navigation);navigation.ConfigureMarch(profile.GroupMarchMaximumStretch,profile.Revision);return true;

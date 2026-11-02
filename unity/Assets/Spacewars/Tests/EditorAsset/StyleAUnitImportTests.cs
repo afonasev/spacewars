@@ -115,7 +115,7 @@ namespace Spacewars.Tests.EditorAsset
                 Assert.IsNotNull(role.GetTexture("_DetailNormalMap"), role.name + " detail normal");
                 Assert.IsNotNull(role.GetTexture("_MetallicGlossMap"), role.name + " packed mask");
                 Assert.AreEqual(Source + unit + "-detail.png", AssetDatabase.GetAssetPath(role.GetTexture("_DetailNormalMap")));
-                Assert.AreEqual(Prefabs + unit + "-" + role.name + "-mask.png", AssetDatabase.GetAssetPath(role.GetTexture("_MetallicGlossMap")));
+                Assert.AreEqual(Spacewars.Editor.ExactResourceAliases.Resolve(Prefabs + unit + "-" + role.name + "-mask.png"), AssetDatabase.GetAssetPath(role.GetTexture("_MetallicGlossMap")));
             }
             CheckTexture(Source + "style-a-painted-metal-base-color.png", true, false, false);
             CheckTexture(Source + "style-a-painted-metal-structure-base-color.png", true, false, false);
@@ -123,7 +123,7 @@ namespace Spacewars.Tests.EditorAsset
             CheckTexture(Source + unit + "-detail.png", false, true, true);
             CheckTexture(Source + "style-a-painted-metal-orm.png", false, false, false);
             foreach (var role in new[] { "neutral-metal", "structure", "team-primary" })
-                CheckTexture(Prefabs + unit + "-" + role + "-mask.png", false, false, false);
+                CheckTexture(Spacewars.Editor.ExactResourceAliases.Resolve(Prefabs + unit + "-" + role + "-mask.png"), false, false, false);
         }
 
         private static void CheckTexture(string path, bool srgb, bool normal, bool convertedHeight)

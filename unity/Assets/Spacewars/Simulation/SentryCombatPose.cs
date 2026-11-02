@@ -2,11 +2,14 @@ using System;
 namespace Spacewars.Simulation
 {
     // Exact mesh queries transform into each articulated root's local frame; meshes/BVHs are shared once.
-    internal readonly struct SentryCombatPose
+    internal readonly partial struct SentryCombatPose
     {
         static readonly CombatMesh RepairBody=CombatMesh.Decode(RepairTowerCombatData.modelRoot),RepairYaw=CombatMesh.Decode(RepairTowerCombatData.turretYaw),RepairPitch=CombatMesh.Decode(RepairTowerCombatData.weaponPitch);
         static readonly CombatMesh Body=CombatMesh.Decode(SentryCombatData.modelRoot),Yaw=CombatMesh.Decode(SentryCombatData.turretYaw),Pitch=CombatMesh.Decode(SentryCombatData.weaponPitch);
         static readonly CombatMesh GaussBody=CombatMesh.Decode(GaussCombatData.modelRoot),GaussYaw=CombatMesh.Decode(GaussCombatData.turretYaw),GaussPitch=CombatMesh.Decode(GaussCombatData.weaponPitch);
+        // Explicit type initialization removes beforefieldinit: all nine mesh
+        // initializers finish before readiness is published or any instance exists.
+        static SentryCombatPose(){BuildingCombatGeometry.SentryPrepared=true;}
         readonly double recoil;readonly bool gauss;readonly bool repair;readonly double yawHeight,pitchHeight,pitchBack;
         readonly V at;readonly double scale,yaw,pitch,height;
         internal SentryCombatPose(NavPoint position,double ground,double scale,double heading,double elevation,double progress,bool repair=false,bool gauss=false,double recoil=0)

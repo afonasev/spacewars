@@ -51,15 +51,15 @@ namespace Spacewars.Simulation
         private bool HistoricalMemberSame(int index)
         {
             var a=historicalOracle.members[index];var b=members[index];var old=historicalOracle.input.WorkingFor(a);var now=input.WorkingFor(b);
-            return a.Order==b.Order&&a.Clearance.MobilityRevision==b.Clearance.MobilityRevision&&a.EntityId==b.EntityId&&a.WorldGeneration==b.WorldGeneration&&a.GroupId==b.GroupId&&a.RootOrderRevision==b.RootOrderRevision&&a.CommandSequence==b.CommandSequence&&a.IssuedTick==b.IssuedTick&&a.ActivationRevision==b.ActivationRevision&&a.MemberOrderRevision==b.MemberOrderRevision&&a.Incarnation==b.Incarnation&&a.MobilityRevision==b.MobilityRevision&&a.HoldBinding==b.HoldBinding&&a.Origin.Equals(b.Origin)&&a.Clearance.Id==b.Clearance.Id&&a.Clearance.Revision==b.Clearance.Revision&&a.Clearance.MobilityClass==b.Clearance.MobilityClass&&a.Clearance.Radius==b.Clearance.Radius&&old.Provider.Binding==historicalOracle.input.Provider.Binding&&now.Provider.Binding==input.Provider.Binding&&old.Profile.ExactProfileBinding==now.Profile.ExactProfileBinding&&old.Profile.GridCell==now.Profile.GridCell&&old.Profile.CostId==now.Profile.CostId&&old.Profile.CostRevision==now.Profile.CostRevision;
+            return historicalOracle.input.Occupancy.PreservesRequestRebind(a,b)&&input.Occupancy.PreservesRequestRebind(a,b)&&a.Order==b.Order&&a.Clearance.MobilityRevision==b.Clearance.MobilityRevision&&a.EntityId==b.EntityId&&a.WorldGeneration==b.WorldGeneration&&a.GroupId==b.GroupId&&a.RootOrderRevision==b.RootOrderRevision&&a.CommandSequence==b.CommandSequence&&a.IssuedTick==b.IssuedTick&&a.ActivationRevision==b.ActivationRevision&&a.MemberOrderRevision==b.MemberOrderRevision&&a.Incarnation==b.Incarnation&&a.MobilityRevision==b.MobilityRevision&&a.HoldBinding==b.HoldBinding&&a.Origin.Equals(b.Origin)&&a.Clearance.Id==b.Clearance.Id&&a.Clearance.Revision==b.Clearance.Revision&&a.Clearance.MobilityClass==b.Clearance.MobilityClass&&a.Clearance.Radius==b.Clearance.Radius&&old.Provider.Binding==historicalOracle.input.Provider.Binding&&now.Provider.Binding==input.Provider.Binding&&old.Profile.ExactProfileBinding==now.Profile.ExactProfileBinding&&old.Profile.GridCell==now.Profile.GridCell&&old.Profile.CostId==now.Profile.CostId&&old.Profile.CostRevision==now.Profile.CostRevision;
         }
         private int HistoricalPartCount=>((PartitionNavigationProvider)historicalOracle.input.Provider).MonotonePartCount+(page0OccupancyMode?0:historicalOracle.input.Occupancy.Occupants.Count);
         private bool HistoricalPartSame(int index)
         {
             var old=(PartitionNavigationProvider)historicalOracle.input.Provider;int count=old.MonotonePartCount;if(index<count)return old.MonotonePartTo((PartitionNavigationProvider)input.Provider,index);
-            // The allocation predicate consumes only blocking XZ footprints.
-            // Rebind request/proof text may change without changing that domain.
-            int row=index-count;var a=historicalOracle.input.Occupancy.Occupants[row];var b=input.Occupancy.Occupants[row];return a.BlocksPlacement==b.BlocksPlacement&&(!a.BlocksPlacement||a.Location.Position.Equals(b.Location.Position)&&a.Radius==b.Radius);
+            // Eligibility consumes identity and historical request threshold as well
+            // as blocking XZ footprints. Unrelated proof text may still rebind.
+            int row=index-count;var a=historicalOracle.input.Occupancy.Occupants[row];var b=input.Occupancy.Occupants[row];return a.Kind==b.Kind&&a.ActorId==b.ActorId&&a.Incarnation==b.Incarnation&&a.HistoricalExecution==b.HistoricalExecution&&a.ReservationKind==b.ReservationKind&&a.BlocksPlacement==b.BlocksPlacement&&(!a.BlocksPlacement||a.Location.Position.Equals(b.Location.Position)&&a.Radius==b.Radius);
         }
         private NavArrivalStatus AdvanceHistorical(long epoch,int allocationQuota,NavEpochQuota quota)
         {
@@ -127,7 +127,7 @@ namespace Spacewars.Simulation
             ValidateHistoricalContinuation(true);
         }
         private bool HistoricalOccupantBlocks(NavArrivalMember member,NavLocation endpoint,NavArrivalOccupant occupant)
-            =>occupant.BlocksPlacement&&TooClose(endpoint.Position,member.Radius,occupant.Location.Position,occupant.Radius);
+            =>occupant.BlocksFor(member,input.Occupancy.Generation)&&TooClose(endpoint.Position,member.Radius,occupant.Location.Position,occupant.Radius);
         private void ValidateHistoricalContinuation(bool physical)
         {
             if(historicalOracle==null){ValidateEmptyPage0Occupancy();if(historicalLegs!=null||historicalRecipe!=null||historicalEpochBase!=0||historicalGate!=0||historicalCursor!=0||historicalMember!=0||historicalLeg!=0)throw new ArgumentException("Historical empty continuation payload.");return;}

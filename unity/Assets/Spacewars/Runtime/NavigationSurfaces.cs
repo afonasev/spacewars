@@ -6,7 +6,8 @@ namespace Spacewars.Runtime
     public sealed partial class NavigationSession
     {
         private void ValidatePhysicalRestoredRoutes(){
-            if(!(terrain is IRecastPhysicalTerrain physical))return;
+            if(!(terrain is IRecastPhysicalTerrain)&&!(terrain==null&&UsesRecastGroundRoutes))return;
+            var physical=(INavLayerSweepAuthority)Crowd;
             if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Decode,Generation,0,out var scope))throw new InvalidOperationException("Physical route restore qualification refused.");
             using(scope){var r=scope.OwnedReservation();foreach(var actor in Crowd.Units){
                 if(!actor.Moving)continue;
@@ -16,7 +17,7 @@ namespace Spacewars.Runtime
                 if(cursor<0||cursor>=route.Legs.Count||route.Legs[cursor].From.SurfaceId!=actor.Location.SurfaceId)throw new ArgumentException("Physical actor/cursor surface mismatch.");
                 var at=actor.Location;var provider=route.Legs[0].RecastAuthorityProvider;
                 using(var scratch=NavStorageScratch.Reserve(r,8192))foreach(var point in actor.localRoute.Skip(actor.localIndex).Concat(actor.route.Skip(actor.routeIndex))){
-                    if(!geometry.SegmentFree(at.Position,point,actor.Radius)||!physical.TracePhysical(at,point,actor.Radius,provider,route,cursor,r,out var end,out var trace))throw new ArgumentException($"Invalid current physical route continuation actor={actor.Id} cursor={cursor} from={at.SurfaceId}:{at.Position.X},{at.Position.Z} to={point.X},{point.Z}.");
+                    if(!geometry.SegmentFree(at.Position,point,actor.Radius)||!physical.TraceLayerSweep(provider,at,point,actor.Radius,route,cursor,r,out var end,out var trace))throw new ArgumentException($"Invalid current physical route continuation actor={actor.Id} cursor={cursor} from={at.SurfaceId}:{at.Position.X},{at.Position.Z} to={point.X},{point.Z}.");
                     try{foreach(var leg in trace)if(leg.Kind==NavTypedLegKind.Portal&&!RecastLayerTrace.MatchPortal(route,ref cursor,leg.PortalId,leg.From.SurfaceId,leg.To.SurfaceId))throw new ArgumentException("Physical route portal continuation changed.");}finally{(trace as NavOwnedStorage)?.ReleaseOwner();}at=end;
                 }
                 // A target at a zero-XZ portal can leave only its source-side
@@ -25,7 +26,7 @@ namespace Spacewars.Runtime
                 // without changing any loaded actor or saved cursor.
                 if(!at.Equals(actor.GoalLocation.Value)&&at.Position.Equals(actor.GoalLocation.Value.Position)){
                     using(var scratch=NavStorageScratch.Reserve(r,8192)){
-                        if(!geometry.SegmentFree(at.Position,actor.GoalLocation.Value.Position,actor.Radius)||!physical.TracePhysical(at,actor.GoalLocation.Value.Position,actor.Radius,provider,route,cursor,r,out var end,out var trace))throw new ArgumentException("Invalid terminal physical route continuation.");
+                        if(!geometry.SegmentFree(at.Position,actor.GoalLocation.Value.Position,actor.Radius)||!physical.TraceLayerSweep(provider,at,actor.GoalLocation.Value.Position,actor.Radius,route,cursor,r,out var end,out var trace))throw new ArgumentException("Invalid terminal physical route continuation.");
                         try{int crossed=0;foreach(var leg in trace)if(leg.Kind==NavTypedLegKind.Portal){if(!RecastLayerTrace.MatchPortal(route,ref cursor,leg.PortalId,leg.From.SurfaceId,leg.To.SurfaceId))throw new ArgumentException("Physical route terminal portal changed.");crossed++;}if(crossed>0)at=end;}finally{(trace as NavOwnedStorage)?.ReleaseOwner();}
                     }
                 }

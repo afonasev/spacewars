@@ -166,6 +166,13 @@ namespace Spacewars.Presentation
                 if(p.Name==nameof(PlayableProfileData.navigationMaxAccruedCredits)&&((double)p.Value<PlayableProfileMetadata.AccruedCreditField.Minimum||(double)p.Value>PlayableProfileMetadata.AccruedCreditField.Maximum))throw new FormatException("Недопустимый лимит накопленного бюджета навигации.");
                 defaults[p.Name]=p.Value.DeepClone();
             }
+            // The backend belongs to this application's new-match engine,
+            // not to editable Lab balance. Keep old rows exact on disk while
+            // materializing them with the current startup baseline. Invalid
+            // serialized engine values still fail instead of being normalized.
+            var backend=defaults[nameof(PlayableProfileData.groundRouteBackend)];
+            if(backend==null||(backend.Type!=JTokenType.Integer&&backend.Type!=JTokenType.Float)||((double)backend!=0&&(double)backend!=1))throw new FormatException("Неизвестный навигационный backend в сохранённом профиле.");
+            defaults[nameof(PlayableProfileData.groundRouteBackend)]=baseline.UsesRecastGroundRoutes?1:0;
             // Import old relative profiles once into explicit independent terms.
             // Saved copies include these fields, so subsequent mobile tuning is isolated.
             void TowerDefault(string field,double value){if(values.Property(field)==null&&released?.Property(field)==null)defaults[field]=value;}
@@ -248,6 +255,7 @@ namespace Spacewars.Presentation
         private void Commit(JObject doc){if(read==null)throw new InvalidOperationException(Problem);ValidateShape(doc);read=disk.Commit(read.Token,doc);Problem=null;}
         public PlayableProfile Save(PlayableProfileData draft,GameplayAudioProfile audio,AiProfileData aiDraft=null,ModelDetailProfile modelDetail=null)
         {
+            if(draft.groundRouteBackend!=(baseline.UsesRecastGroundRoutes?1:0))throw new ArgumentException("Навигационный backend не редактируется в лаборатории.");
             var p=Mutable(out var doc);var baseData=Selected.CopyData();var baseAudio=SelectedAudio;var baseDetail=SelectedModelDetail;var detail=(modelDetail??baseDetail).Copy();var detailFields=detail.Parameters().ToArray();var baseDetailFields=baseDetail.Parameters().ToArray();bool detailChanged=detailFields.Where((v,i)=>v.Read()!=baseDetailFields[i].Read()).Any();var baseAi=SelectedAiProfile;var ai=aiDraft==null?baseAi:new AiProfile(aiDraft);if(ai.Id!=AiProfileId)throw new ArgumentException("Ожидается профиль "+AiProfileId+".");bool aiChanged=NativeBalanceFields.AiOpeningFields.Any(f=>ai.Value(f.Path)!=baseAi.Value(f.Path));if(PlayableProfileMetadata.Fields.Where(NativeBalanceFields.Editable).All(f=>f.Read(draft)==f.Read(baseData))&&GameplayAudioMetadata.Fields.All(f=>f.Read(audio)==f.Read(baseAudio))&&!aiChanged&&!detailChanged)throw new ArgumentException("Нет изменений для новой версии.");var data=NativeBalanceFields.Copy(draft);data.revision=p["versions"].Max(v=>(int)v["revision"])+1;
             aiDraft=ai.CopyData();aiDraft.revision=data.revision;
             ai=new AiProfile(aiDraft);

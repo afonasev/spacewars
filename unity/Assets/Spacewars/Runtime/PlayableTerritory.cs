@@ -11,9 +11,10 @@ namespace Spacewars.Runtime
         {
             public TerritorySite Site;
             public PlayableOwner? Claimant,Locked;
-            public double Progress;
+            public double Progress,ControlledSeconds;
             public bool Contested;
             public int CenterId;
+            public readonly Dictionary<int,NavPoint> Rallies=new Dictionary<int,NavPoint>();
         }
         private readonly Dictionary<int,SiteState> sites=new Dictionary<int,SiteState>();
         private void InitializeSites()
@@ -24,6 +25,7 @@ namespace Spacewars.Runtime
         {
             message="Invalid site or ownership.";
             if(!sites.TryGetValue(siteId,out var site)||!Enum.IsDefined(typeof(PlayableBuildingKind),kind))return PlayableCommandStatus.InvalidTarget;
+            if(site.Site.Kind==PlayableBuildingKind.RelayTower||kind==PlayableBuildingKind.RelayTower)return PlayableCommandStatus.InvalidTarget;
             if(BuildingSlotCollapsing(siteId,slotId)){message="Здание разрушается. Дождитесь освобождения площадки.";return PlayableCommandStatus.OccupiedPad;}
             NavPoint position=site.Site.Position;double heading=TerritoryRules.BuildingHeading;
             if(slotId==0)
@@ -46,6 +48,7 @@ namespace Spacewars.Runtime
             if(!CanAfford(owner,cost)){message="Insufficient credits.";return PlayableCommandStatus.InsufficientCredits;}
             AddCredits(owner,-cost);
             var building=new Building{TermsRevision=profile.Revision,Id=nextId++,Owner=owner,Kind=kind,Position=position,SiteId=siteId,SlotId=slotId,ParentId=parentId,PaidCost=cost,Phase=ConstructionPhase.Pending,Heading=heading};
+            if((kind==PlayableBuildingKind.Factory||kind==PlayableBuildingKind.Hangar||TerritoryRules.Center(kind))&&site.Rallies.TryGetValue(slotId,out var rally)){building.Rally=rally;building.HasRally=true;}
             buildings.Add(building.Id,building);
             Fact(owner,MatchFactKind.BuildingOrdered,cost,(int)kind,kind.ToString());
             if(slotId==0){site.CenterId=building.Id;site.Locked=owner;}
@@ -70,6 +73,7 @@ namespace Spacewars.Runtime
         private void RemoveBuildingWithAttacker(Building b,bool cancellation,PlayableOwner? attacker)
         {
             if(!buildings.Remove(b.Id))return;
+            if(b.Ready)RecordBuildingCount(b.Owner,b.Kind);
             if(!cancellation&&b.Sale==null&&b.Phase!=ConstructionPhase.Pending)BeginBuildingDestruction(b);
             if(!cancellation&&b.Sale==null)Fact(b.Owner,MatchFactKind.BuildingLost,0,(int)b.Kind);
             RecordKill(attacker,b.Owner,b.Id,true,(int)b.Kind,TerritoryRules.Cost(profile,b.Kind));
@@ -87,6 +91,7 @@ namespace Spacewars.Runtime
         {
             foreach(var state in sites.Values)
             {
+                if(state.Site.Kind==PlayableBuildingKind.RelayTower){AdvanceRelayCapture(state,dt);continue;}
                 if(state.Locked.HasValue||state.CenterId!=0){state.Contested=false;continue;}
                 var present=new HashSet<PlayableOwner>();double radius=TerritoryRules.CaptureRadius(profile,state.Site.Kind);
                 foreach(var u in units.Values)if(!eliminated.Contains(u.Owner)&&TryActor(u.Id,out var n)&&Distance(n.Position,state.Site.Position)<=radius)present.Add(u.Owner);
@@ -155,7 +160,7 @@ namespace Spacewars.Runtime
         private TerritorySiteSnapshot[] SiteSnapshots()
         {
             var result=new List<TerritorySiteSnapshot>();
-            foreach(var s in sites.Values)result.Add(new TerritorySiteSnapshot(s.Site,s.Claimant,s.Locked,s.Progress,s.Contested,s.CenterId,buildings.TryGetValue(s.CenterId,out var center)&&center.Ready));
+            foreach(var s in sites.Values)result.Add(new TerritorySiteSnapshot(s.Site,s.Claimant,s.Locked,s.Progress,s.Contested,s.CenterId,s.Site.Kind==PlayableBuildingKind.RelayTower?s.Locked.HasValue:buildings.TryGetValue(s.CenterId,out var center)&&center.Ready,s.ControlledSeconds));
             return result.ToArray();
         }
     }

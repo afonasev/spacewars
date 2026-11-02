@@ -8,7 +8,7 @@ namespace Spacewars.Presentation
     [Serializable] public sealed class RadialCardProfile
     {
         public string id="radial-card-a-v1";
-        public int revision=9;
+        public int revision=14;
         [SurfaceSetting("Компактный HUD","Ширина консоли здания","Максимальная ширина нижней консоли здания.","px",300,520,10)] public float dockWidth=420;
         [SurfaceSetting("Компактный HUD","Портрет здания","Размер портрета в компактной шапке.","px",24,64,2)] public float dockPortraitSize=38;
         [SurfaceSetting("Компактный HUD","Высота заказа","Высота прямоугольных ячеек очереди.","px",32,64,2)] public float dockOrderHeight=44;
@@ -23,6 +23,12 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Компактный HUD","Интервал элементов","Промежуток между компактными элементами.","px",2,8,1)] public float selectionGap=3;
         [SurfaceSetting("Компактный HUD","Отступ консоли","Внутренние отступы нижней консоли.","px",6,18,1)] public float dockPadding=10;
 
+        [SurfaceSetting("Служебные иконки","Размер","Желаемый размер ремонта, продажи и точки сбора; ограничивается свободным местом лепестка.","px",24,48,2)] public float utilityIconSize=36;
+        [SurfaceSetting("Служебные иконки","Яркость","Яркость предметных значков рядом с миниатюрами юнитов и зданий.","доля",.4f,1,.02f)] public float utilityIconBrightness=.76f;
+        [SurfaceSetting("Улучшения","Миниатюры","Желаемая высота миниатюр улучшений; ограничивается свободным местом лепестка.","px",40,90,2)] public float upgradePortraitSize=70;
+        [SurfaceSetting("Улучшения","Яркость значков","Яркость цветных иконок оружия, защиты и бетона рядом с миниатюрами.","доля",.4f,1,.02f)] public float researchIconBrightness=.76f;
+        [SurfaceSetting("Улучшения","Значок улучшения","Размер двух шевронов относительно миниатюры улучшенного здания или юнита.","доля",.16f,.34f,.02f)] public float buildingUpgradeBadgeSize=.22f;
+        [SurfaceSetting("Улучшения","Номер уровня","Размер номера уровня относительно высоты значка.","доля",.18f,.4f,.02f)] public float researchRankSize=.28f;
         [SurfaceSetting("Группы","Минимум секторов","Минимальное число секторов пустого или небольшого колеса групп.","шт.",3,9,1)] public float minimumGroupSlots=3;
         [SurfaceSetting("Группы","Свободные сектора","Сколько свободных номеров добавлять к занятым группам в пределах девяти.","шт.",1,3,1)] public float spareGroupSlots=2;
         [SurfaceSetting("Оптический круг B","Светлота поверхности","Подмешивание холодного оттенка рамки в непрозрачную поверхность лепестков.","доля",0,.4f,.01f)] public float opticalSurfaceLift=.18f;
@@ -57,6 +63,9 @@ namespace Spacewars.Presentation
         [SurfaceSetting("Карточки действий","Значения","Размер значений характеристик и цены.","px",14,20,1)] public float valueSize=16;
         [SurfaceSetting("Карточки действий","Отступ от разделителя","Отступ текста и значений от вертикального разделителя таблицы.","px",4,20,1)] public float statColumnPadding=10;
         [SurfaceSetting("Портреты башен","Поворот","Ракурс спереди в три четверти; применяется при Bake defense portraits.","°",0,60,1)] public float defensePortraitYaw=25;
+        [SurfaceSetting("Портреты юнитов","Яркость","Умножение яркости при Bake unit portraits; не меняет модели на карте.","×",.5f,2,.05f)] public float unitPortraitBrightness=1.5f;
+        [SurfaceSetting("Портреты юнитов","Яркость танка","Отдельное осветление всех вариантов танка при Bake unit portraits; сохраняет тёмный корпус.","×",.5f,2,.05f)] public float tankPortraitBrightness=1.2f;
+        [SurfaceSetting("Портреты юнитов","Насыщенность","Насыщенность при Bake unit portraits; сохраняет прозрачность и контур.","×",0,1.5f,.01f)] public float unitPortraitSaturation=1.06f;
         [SurfaceSetting("Портреты башен","Высота ракурса","Наклон сверху; применяется при Bake defense portraits, не меняет камеру матча.","°",15,60,1)] public float defensePortraitElevation=35;
         [SurfaceSetting("Карточки действий","Строка характеристик","Минимальная высота строки; длинный текст переносится.","px",30,44,1)] public float statHeight=34;
         [SurfaceSetting("Карточки действий","Строка управления","Высота подсказки кнопки геймпада или мыши.","px",32,44,1)] public float actionHeight=36;

@@ -67,13 +67,22 @@ namespace Spacewars.Runtime
             if(doctrine==AiDoctrine.HawksTanks||doctrine==AiDoctrine.HawksExplorers)ground[3]=V(ai,"airCore");
             if(doctrine==AiDoctrine.BalancedSmallAir||doctrine==AiDoctrine.HeavySmallAir)ground[3]=V(ai,"smallAir");
             if(enemyAirSeen&&ground[0]>0)ground[1]=Math.Max(ground[1],ground[0]*V(ai,"antiAir.explorer")/V(ai,"antiAir.tank"));
+            // A compatible observed fortification creates a useful finite support
+            // goal in the existing production composition, without rerolling the
+            // doctrine or altering opening commitments/eligibility.
+            if(chosen&&ground[0]+ground[1]>0&&o.Buildings.Any(b=>o.IsHostile(b.Owner)&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&TerritoryRules.ArmedDefense(b.Kind)&&
+                o.RouteProofs.Any(r=>r.Kind==PlayableRouteTargetKind.VisibleEnemy&&r.TargetId==b.Id)))
+                ground[2]=Math.Max(ground[2],ai.Value("activeStrategy.siegeShare")*(ground[0]+ground[1]));
             return ground;
         }
-        internal PlayableEntityKind GroundProductionKind(PlayableAiObservation o,AiProfile ai)
+        internal PlayableEntityKind GroundProductionKind(PlayableAiObservation o,AiProfile ai,bool requireScience=true)
         {
             var kinds=new[]{PlayableEntityKind.Tank,PlayableEntityKind.Explorer,PlayableEntityKind.Shkval};var target=Targets(o,ai);
-            return Enumerable.Range(0,kinds.Length).Where(i=>target[i]>0).OrderBy(i=>(o.Entities.Count(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==kinds[i]&&(CombatCountable==null||CombatCountable(u.Id)))+o.Buildings.Where(b=>b.Owner==o.Owner&&b.PrivateState!=null).SelectMany(b=>b.PrivateState.Orders).Count(q=>q.Kind==kinds[i]))/target[i]).ThenBy(i=>i).Select(i=>kinds[i]).DefaultIfEmpty(PlayableEntityKind.Tank).First();
+            return Enumerable.Range(0,kinds.Length).Where(i=>target[i]>0&&(!requireScience||kinds[i]!=PlayableEntityKind.Shkval||o.Buildings.Any(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.ScientificCenter&&b.Health>0&&b.Phase==ConstructionPhase.Ready&&b.PrivateState?.Lifecycle?.Selling!=true))).OrderBy(i=>(o.Entities.Count(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==kinds[i]&&(CombatCountable==null||CombatCountable(u.Id)))+o.Buildings.Where(b=>b.Owner==o.Owner&&b.PrivateState!=null).SelectMany(b=>b.PrivateState.Orders).Count(q=>q.Kind==kinds[i]))/target[i]).ThenBy(i=>i).Select(i=>kinds[i]).DefaultIfEmpty(PlayableEntityKind.Tank).First();
         }
+        internal bool NeedsArtilleryScience(PlayableAiObservation o,AiProfile ai)=>chosen&&
+            AiProductionDemand.Lines(o,productionKind:PlayableEntityKind.Shkval).Any()&&
+            GroundProductionKind(o,ai,requireScience:false)==PlayableEntityKind.Shkval;
         public AiCompositionAssessment Assess(PlayableAiObservation o,PlayableProfile p,AiProfile ai,AiBudgetState ledger,int scoutBudget=0,bool usefulScouting=false)
         {
             var kinds=new[]{PlayableEntityKind.Tank,PlayableEntityKind.Explorer,PlayableEntityKind.Shkval,PlayableEntityKind.Hawk};var target=Targets(o,ai);var counts=new double[4];
@@ -92,7 +101,15 @@ namespace Spacewars.Runtime
             }
             if(candidates.Count>0)return new AiCompositionAssessment(AiGamePhase.Mid,new[]{0d,1d,0d},new double[3],(int)counts[2],counts[0]+counts[1]>0,candidates,"finish accepted typed startup cycles");
             int utilityExplorers=o.Entities.Count(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==PlayableEntityKind.Explorer&&(UtilityAvailable==null||UtilityAvailable(u.Id)))+o.Buildings.Where(b=>b.Owner==o.Owner&&b.PrivateState!=null).SelectMany(b=>b.PrivateState.Orders).Count(q=>q.Kind==PlayableEntityKind.Explorer)+(ledger?.Unpaid??Array.Empty<AiBudgetEntry>()).Count(e=>e.Action.Kind==PlayableCommandKind.QueueExplorer);
-            if(usefulScouting&&utilityExplorers<scoutBudget&&available>=PlayableUnitRules.Cost(p,PlayableEntityKind.Explorer))
+            // Preserve the existing last-Explorer replacement. Once one is alive,
+            // repeated optional scout replacements cannot spend every idle cycle
+            // ahead of a legal, ready artillery deficit (or its existing savings).
+            bool artilleryDue=GroundProductionKind(o,ai)==PlayableEntityKind.Shkval&&o.Entities.Any(u=>u.Owner==o.Owner&&u.Health>0&&u.Kind==PlayableEntityKind.Explorer)&&
+                AiProductionDemand.Lines(o,productionKind:PlayableEntityKind.Shkval).Any(b=>{
+                    var action=new PlayableAiAction(1,o.OwnerId,o.ProfileId,o.ProfileRevision,o.Generation,o.SnapshotSequence,PlayableCommandKind.QueueShkval,new[]{b.Id},unitKind:PlayableEntityKind.Shkval,seed:o.Seed,sourceIdentity:PlayableAiOpeningComposition.SourceIdentity);
+                    string reason=AiEconomyAdmission.Reject(o,p,action,true);return reason==null||reason=="insufficient credits";
+                });
+            if(usefulScouting&&utilityExplorers<scoutBudget&&!artilleryDue&&available>=PlayableUnitRules.Cost(p,PlayableEntityKind.Explorer))
             {
                 foreach(var b in AiProductionDemand.Lines(o))
                 {

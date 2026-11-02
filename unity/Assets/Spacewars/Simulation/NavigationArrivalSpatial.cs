@@ -27,9 +27,9 @@ namespace Spacewars.Simulation
             spatialHeads=NavPagedList<int>.Create(rootReservation,32);
             spatialLinks=NavPagedList<int>.Create(rootReservation,32);
         }
-        private void SpatialRow(int row,out NavPoint point,out double radius,out bool blocks)
+        private void SpatialRow(int row,out NavPoint point,out double radius,out bool blocks,bool forMember=false)
         {
-            if(row<input.Occupancy.Occupants.Count){var o=input.Occupancy.Occupants[row];point=o.Location.Position;radius=o.Radius;blocks=o.BlocksPlacement;}
+            if(row<input.Occupancy.Occupants.Count){var o=input.Occupancy.Occupants[row];point=o.Location.Position;radius=o.Radius;blocks=forMember?o.BlocksFor(members[memberIndex],input.Occupancy.Generation):o.BlocksPlacement;}
             else{var a=assignments[row-input.Occupancy.Occupants.Count];point=a.Endpoint.Position;radius=a.Member.Radius;blocks=true;}
         }
         private bool BuildSpatial()
@@ -69,7 +69,7 @@ namespace Spacewars.Simulation
             if(spatialFallback){
                 int total=input.Occupancy.Occupants.Count+assignments.Count;
                 while(occupantCursor<total){
-                    if(allocationRemaining==0)return false;SpendOccupancy();SpatialRow(occupantCursor++,out var p,out double r,out bool blocks);
+                    if(allocationRemaining==0)return false;SpendOccupancy();SpatialRow(occupantCursor++,out var p,out double r,out bool blocks,true);
                     if(blocks&&TooClose(point,member.Radius,p,r)){candidateBlocked=true;return true;}
                 }
                 spatialPhase=3;return true;
@@ -78,7 +78,7 @@ namespace Spacewars.Simulation
                 if(allocationRemaining==0)return false;SpendOccupancy();
                 if(spatialPhase==1){spatialNext=spatialHeads[SpatialBucket(spatialX,spatialZ)];spatialPhase=2;}
                 else{
-                    int row=spatialNext;SpatialRow(row,out var p,out double r,out bool blocks);spatialNext=spatialLinks[row];
+                    int row=spatialNext;SpatialRow(row,out var p,out double r,out bool blocks,true);spatialNext=spatialLinks[row];
                     if(blocks&&TooClose(point,member.Radius,p,r)){candidateBlocked=true;return true;}
                 }
                 if(spatialNext<0){

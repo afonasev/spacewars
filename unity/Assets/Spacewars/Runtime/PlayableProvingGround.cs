@@ -39,9 +39,9 @@ namespace Spacewars.Runtime
                 Research(b.Owner).Add(new ResearchOrder{Id=nextResearchSequence++,Kind=PlayableResearchKind.ScientificCenterUpgrade,CenterId=b.Id,Duration=profile.ScientificCenterUpgradeSeconds,Elapsed=profile.ScientificCenterUpgradeSeconds,Complete=true});
                 Fact(b.Owner,MatchFactKind.ResearchCompleted,profile.ScientificCenterUpgradeCost,(int)PlayableResearchKind.ScientificCenterUpgrade);
             }
-            foreach(var owner in Owners){ownerCredits[owner]=0;
+            foreach(var owner in Owners){ownerCredits[owner]=0;var previousBuildingMaximum=BuildingMaxima(owner);
                 foreach(var kind in offline.ProvingGround.Research((int)owner)){Research(owner).Add(new ResearchOrder{Id=nextResearchSequence++,Kind=kind,Complete=true});Fact(owner,MatchFactKind.ResearchCompleted,ResearchCost(kind),(int)kind);}
-                ScaleBuildingHealth(owner,BuildingHealthMultiplier(owner,profile));}
+                ScaleBuildingHealth(owner,previousBuildingMaximum);}
         }
         internal ProvingGroundSetup CaptureProvingSetup()
         {
@@ -61,12 +61,32 @@ namespace Spacewars.Runtime
             var error=recipe.PlaceUnit(side,kind,point);if(error!=null)return error;
             var owner=(PlayableOwner)side;var population=Population(owner);
             if(population.Living+population.Reserved+PlayableUnitRules.Population(profile,kind)>population.Capacity)return "Недостаточно места в армии";
-            if(!navigation.Crowd.CanPlace(point,PlayableUnitRules.Radius(profile,kind)))return "Место занято";
+            if(kind!=PlayableEntityKind.Hawk&&!navigation.Crowd.CanPlace(point,PlayableUnitRules.Radius(profile,kind)))return "Место занято";
             try{int id=SpawnUnit(point,owner,kind);if(TryActor(id,out var actor))actor.Heading=side==0?0:System.Math.PI;units[id].Turret=side==0?0:System.Math.PI;
                 Fact(owner,MatchFactKind.UnitCompleted,PlayableUnitRules.Cost(profile,kind),(int)kind);}
             catch(NavigationRetentionBudget.CapacityRefused){return "Расстановка временно недоступна";}
             return null;
         }
+        internal string SetProvingResearch(int side,PlayableResearchKind kind,bool enabled)
+        {
+            if(!FreeProvingGround||side<0||side>1||!Enum.IsDefined(typeof(PlayableResearchKind),kind)||PlayableResearchRules.Local(kind))return "Недоступное исследование";
+            var owner=(PlayableOwner)side;var orders=Research(owner);var desired=new ProvingGroundSetup(profile);
+            foreach(var order in orders.Where(o=>o.Complete&&!PlayableResearchRules.Local(o.Kind)))desired.SetResearch(side,order.Kind,true);
+            desired.SetResearch(side,kind,enabled);var selected=desired.Research(side);
+            bool Affected(PlayableResearchKind candidate){if(candidate==kind)return true;for(var prev=PlayableResearchRules.Previous(candidate);prev.HasValue;prev=PlayableResearchRules.Previous(prev.Value))if(prev.Value==kind)return true;return false;}
+            var maxima=units.Values.Where(u=>u.Owner==owner).ToDictionary(u=>u.Id,u=>UnitMaximumHealth(owner,u.Kind));
+            var previousBuildingMaximum=BuildingMaxima(owner);
+            orders.RemoveAll(o=>!PlayableResearchRules.Local(o.Kind)&&(!o.Complete&&(selected.Contains(o.Kind)||!enabled&&Affected(o.Kind))||o.Complete&&!selected.Contains(o.Kind)));
+            foreach(var chosen in selected)if(!HasResearch(owner,chosen))orders.Add(new ResearchOrder{Id=nextResearchSequence++,Kind=chosen,Complete=true});
+            foreach(var unit in units.Values.Where(u=>u.Owner==owner)){
+                unit.Health=RescaleCurrentHealth(unit.Health,maxima[unit.Id],UnitMaximumHealth(owner,unit.Kind));
+                if(unit.Air==null)navigation.Crowd.SetSpeed(unit.Id,PlayableUnitRules.Speed(profile,unit.Kind,unit.Kind==PlayableEntityKind.Tank&&UnitUpgraded(unit)));
+            }
+            ScaleBuildingHealth(owner,previousBuildingMaximum);
+            StartResearchIfPossible(owner);return null;
+        }
+        // Local building upgrades remain historical investments; global toggles track the current selection.
+        internal double CurrentProvingResearchCost(int side)=>Research((PlayableOwner)side).Where(o=>o.Complete&&!PlayableResearchRules.Local(o.Kind)).Sum(o=>ResearchCost(o.Kind))+matchFacts.Where(f=>(int)f.Owner==side&&f.Kind==MatchFactKind.ResearchCompleted&&PlayableResearchRules.Local((PlayableResearchKind)f.EntityKind)).Sum(f=>f.Value);
         internal void RemoveProvingUnits(int side,bool all)
         {
             if(!FreeProvingGround)return;
@@ -82,7 +102,7 @@ namespace Spacewars.Runtime
     public sealed partial class PlayableRuntime
     {
         private sealed class ProvingEdit
-        {internal int Side;internal PlayableEntityKind Kind;internal NavPoint Point;internal int Remove;}
+        {internal int Side;internal PlayableEntityKind Kind;internal NavPoint Point;internal int Remove;internal PlayableResearchKind? Research;internal bool Enabled;}
         private readonly Queue<ProvingEdit> provingEdits=new Queue<ProvingEdit>();
         private ProvingGroundSetup provingResetSetup;
         public ProvingGroundSetup ProvingGroundResetSetup=>Volatile.Read(ref provingResetSetup)?.Copy();
@@ -91,6 +111,7 @@ namespace Spacewars.Runtime
         public string ProvingGroundEditStatus=>Volatile.Read(ref provingEditStatus);
         public ProvingGroundCost ProvingGroundCosts(int side)=>Volatile.Read(ref provingCosts)[side];
         public bool PlaceProvingGroundUnit(int side,PlayableEntityKind kind,NavPoint point)=>EnqueueProvingEdit(new ProvingEdit{Side=side,Kind=kind,Point=point});
+        public bool SetProvingGroundResearch(int side,PlayableResearchKind kind,bool enabled)=>EnqueueProvingEdit(new ProvingEdit{Side=side,Research=kind,Enabled=enabled});
         public bool RemoveProvingGroundUnits(int side,bool all)=>EnqueueProvingEdit(new ProvingEdit{Side=side,Remove=all?2:1});
         // Trusted local sandbox editor; ordinary human ingress retains its ownership policy.
         public bool EditProvingGround(PlayableCommand command)
@@ -110,7 +131,8 @@ namespace Spacewars.Runtime
             if(isPaused)return;
             ProvingEdit[] edits;lock(gate){edits=provingEdits.ToArray();provingEdits.Clear();}
             foreach(var edit in edits){string message=null;
-                if(edit.Remove!=0)domain.RemoveProvingUnits(edit.Side,edit.Remove==2);
+                if(edit.Research.HasValue)message=domain.SetProvingResearch(edit.Side,edit.Research.Value,edit.Enabled);
+                else if(edit.Remove!=0)domain.RemoveProvingUnits(edit.Side,edit.Remove==2);
                 else message=domain.PlaceProvingUnit(edit.Side,edit.Kind,edit.Point);
                 Volatile.Write(ref provingEditStatus,message);PresentationChanged();}
         }
@@ -118,7 +140,7 @@ namespace Spacewars.Runtime
         {
             if(offlineConfiguration?.ProvingGround==null)return;
             if(provingGroundStart==0)Volatile.Write(ref provingResetSetup,domain.CaptureProvingSetup());
-            Volatile.Write(ref provingCosts,Enumerable.Range(0,2).Select(side=>new ProvingGroundCost(domain.ProvingCost(side,MatchFactKind.UnitCompleted),domain.ProvingCost(side,MatchFactKind.ResearchCompleted))).ToArray());
+            Volatile.Write(ref provingCosts,Enumerable.Range(0,2).Select(side=>new ProvingGroundCost(domain.ProvingCost(side,MatchFactKind.UnitCompleted),domain.CurrentProvingResearchCost(side))).ToArray());
         }
     }
 }

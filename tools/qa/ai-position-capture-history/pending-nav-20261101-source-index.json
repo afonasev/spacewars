@@ -1,0 +1,16 @@
+{
+  "source": "10e32879f7b75dfe7495ba795d472dbc91b84e02",
+  "reason": "Completed fixed input prestart scalar diagnostic. Environment-bound fixtures must not enter default discovery. Fullbyteexact1PASS at10e328; previous2casePASS at8b6; allresults retained in canonicalevidence. Restore only an explicitlyplanned diagnostic; no full/newgame approval.",
+  "files": [
+    {
+      "source": "unity/Assets/Spacewars/Tests/EditMode/AiPositionPendingNavigationReadbackTests.cs",
+      "retired": "tools/qa/ai-position-capture-history/AiPositionPendingNavigationReadbackTests.cs",
+      "sha256": "20bd24959ebf1429f4c89f1aa420fe217580d4d3ca2275e15ba973a8e1f3a46e"
+    },
+    {
+      "source": "unity/Assets/Spacewars/Tests/EditMode/AiPositionPendingNavigationReadbackTests.cs.meta",
+      "retired": "tools/qa/ai-position-capture-history/AiPositionPendingNavigationReadbackTests.cs.meta",
+      "sha256": "8f5d48917be4e4b2518c6c0db85c9ce29a714d269310f072c3be261a70386082"
+    }
+  ]
+}

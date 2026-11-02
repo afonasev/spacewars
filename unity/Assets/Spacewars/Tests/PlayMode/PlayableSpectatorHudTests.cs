@@ -41,6 +41,21 @@ public sealed class PlayableSpectatorHudTests
         return (PlayableSpectatorFrame)Activator.CreateInstance(typeof(PlayableSpectatorFrame),Flags,null,new object[]{players[0],players},null);
     }
     void Show(PlayableSpectatorFrame frame){Set("spectatorFrame",frame);Set("view",frame.Overview);Call("UpdateHud");Call("UpdateSpectatorHud");}
+    [Test] public void ProducerUpgradeQueueUsesBuildingPortraitAndNeverUnitRepeatBadge()
+    {
+        var players=new[]{PlayableBuildingKind.Factory,PlayableBuildingKind.Hangar}.Select((kind,i)=>{
+            var owner=(PlayableOwner)i;var unit=i==0?PlayableEntityKind.Tank:PlayableEntityKind.Hawk;
+            var orders=new[]{new PlayableProductionOrderSnapshot(1,unit,300,0,30,15,true,true),new PlayableProductionOrderSnapshot(2,unit,100,3,30,30,false)};
+            var buildings=new[]{new PlayableBuildingSnapshot(10+i,owner,PlayableBuildingKind.Headquarters,default,1000,1,0,0,default),new PlayableBuildingSnapshot(20+i,owner,kind,default,250,1,2,.5,default,orders:orders,repeat:true,repeatKind:unit)};
+            return new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,Array.Empty<PlayableEntitySnapshot>(),buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,owner:owner,ownerId:"player-"+i,population:new PlayablePopulationSnapshot(0,0,100),activeProfile:PlayableProfile.Default);
+        }).ToArray();
+        var frame=(PlayableSpectatorFrame)Activator.CreateInstance(typeof(PlayableSpectatorFrame),Flags,null,new object[]{players[0],players},null);Show(frame);
+        var rows=Get<VisualElement>("spectatorRows");
+        for(int i=0;i<2;i++){
+            var icons=rows[i][4].Query<OrbitalGlyph>().ToList();Assert.AreEqual(i==0?"factoryUpgraded":"hangarUpgraded",icons[0].Kind);Assert.AreEqual(i==0?"tank":"hawk",icons[1].Kind);
+            Assert.False(rows[i][4][0].Query<Label>().ToList().Any(l=>l.text=="∞"));Assert.True(rows[i][4][1].Query<Label>().ToList().Any(l=>l.text=="∞"));
+        }
+    }
     [Test] public void HangarQueueAndLivingHawksAppearInSpectatorSummary()
     {
         Show(Fixture(2,hawks:true));

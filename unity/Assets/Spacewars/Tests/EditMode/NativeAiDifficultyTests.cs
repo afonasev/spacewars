@@ -131,35 +131,52 @@ namespace Spacewars.Tests.EditMode
                 TestContext.WriteLine(JsonConvert.SerializeObject(new{Scenario="A3-11 invalid recipient boundary",foreign,terminal}));
             }
         }
-        [TestCase("normal")][TestCase("not-arrived")][TestCase("unsafe")][TestCase("foreign")][TestCase("held")][TestCase("human")][TestCase("already-following")][TestCase("missing-proof")]
+        [TestCase("normal")][TestCase("near-core")][TestCase("core-moved")][TestCase("aged-move")][TestCase("short-active-move")][TestCase("not-arrived")][TestCase("unsafe")][TestCase("foreign")][TestCase("held")][TestCase("human")][TestCase("already-following")][TestCase("missing-proof")]
         public void Attention_CohortFollowOnlyCompletesTriggeredSafeOwnedAssembly(string change)
         {
-            long tick=80;var goal=new NavPoint(-P.FollowDistance,0);var source=PlayableAiOpeningComposition.SourceIdentity;
+            long tick=change=="aged-move"?120:change=="short-active-move"?50:80;var goal=new NavPoint(-P.FollowDistance,0);var source=PlayableAiOpeningComposition.SourceIdentity;
             PlayableOrderStamp Stamp(int id,long sequence,PlayableOrderOrigin origin=PlayableOrderOrigin.Ai,PlayableCommandKind kind=PlayableCommandKind.Move)=>new PlayableOrderStamp(id,PlayableOwner.Player,71,sequence,sequence,sequence,origin,kind,origin==PlayableOrderOrigin.Ai?source:null,origin==PlayableOrderOrigin.Ai?sequence:0,origin==PlayableOrderOrigin.Ai?sequence:0);
-            var trigger=change=="not-arrived"?NavigationOutcome.Moving:NavigationOutcome.Arrived;
+            bool moving=change=="not-arrived"||change=="aged-move"||change=="short-active-move";
+            var trigger=moving?NavigationOutcome.Moving:NavigationOutcome.Arrived;
             var actors=new[]{new PlayableEntitySnapshot(1,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(0,0),100,false,0,0,0),
-                new PlayableEntitySnapshot(2,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(-3.6,0),100,change=="not-arrived",0,0,0,change=="not-arrived"?new PlayableTacticalOrderSnapshot(2,PlayableOwner.Player,71,10,10,PlayableTacticalOrderKind.Move,goal,0):null,navigationOutcome:trigger,orderStamp:Stamp(2,10)),
+                new PlayableEntitySnapshot(2,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(change=="core-moved"?-10:-3.6,0),100,moving,0,0,0,moving?new PlayableTacticalOrderSnapshot(2,PlayableOwner.Player,71,10,10,PlayableTacticalOrderKind.Move,goal,0):null,navigationOutcome:trigger,orderStamp:Stamp(2,10),queue:change=="aged-move"||change=="short-active-move"?new PlayableUnitQueueSnapshot(new PlayableQueuedOrderSnapshot(1,1,10,1,PlayableCommandKind.Move,new NavLocation(goal,NavLocation.FlatSurface),0,0,10),null,Array.Empty<PlayableQueuedOrderSnapshot>(),null,false):null),
                 new PlayableEntitySnapshot(3,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(-8,0),100,true,0,0,0,
                     new PlayableTacticalOrderSnapshot(3,PlayableOwner.Player,71,change=="human"?30:20,change=="human"?30:20,change=="already-following"?PlayableTacticalOrderKind.Follow:PlayableTacticalOrderKind.Move,new NavPoint(-5,0),change=="already-following"?1:0),orderStamp:Stamp(3,change=="human"?30:20,change=="human"?PlayableOrderOrigin.Human:PlayableOrderOrigin.Ai,change=="already-following"?PlayableCommandKind.Follow:PlayableCommandKind.Move)),
                 new PlayableEntitySnapshot(4,change=="foreign"?PlayableOwner.Enemy:PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(change=="foreign"?-40:-12,0),100,false,0,0,0,held:change=="held")};
+            if(change=="near-core")actors=actors.Concat(new[]{new PlayableEntitySnapshot(5,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(-3.6,3),100,false,0,-Math.PI/2,0)}).ToArray();
             var vision=new PlayableVision(0,50,50,1,1);vision.Refresh(new[]{new VisionSource(new NavPoint(0,0),50)},Array.Empty<KnownBuilding>());
-            var routes=actors.Where(u=>u.Id>1&&u.Owner==PlayableOwner.Player&&!(change=="missing-proof"&&u.Id==4)).Select(u=>new PlayableRouteProof(u.Id,u.Owner,71,tick,1,u.Position,PlayableUnitRules.Radius(P,u.Kind),PlayableRouteTargetKind.FriendlyAnchor,1,goal,goal,new[]{goal})).ToArray();
+            var routes=actors.Where(u=>u.Id>1&&u.Id!=5&&u.Owner==PlayableOwner.Player&&!(change=="missing-proof"&&u.Id==4)).Select(u=>new PlayableRouteProof(u.Id,u.Owner,71,tick,1,u.Position,PlayableUnitRules.Radius(P,u.Kind),PlayableRouteTargetKind.FriendlyAnchor,1,goal,goal,new[]{goal})).ToArray();
+            if(change=="near-core")routes=routes.Concat(actors.Where(u=>u.Id>1&&u.Id<5).Select(u=>new PlayableRouteProof(u.Id,u.Owner,71,tick,1,u.Position,PlayableUnitRules.Radius(P,u.Kind),PlayableRouteTargetKind.FriendlyAnchor,5,new NavPoint(-3.6,5),new NavPoint(-3.6,5),new[]{new NavPoint(-3.6,5)}))).ToArray();
             var entities=actors.Concat(change=="unsafe"?new[]{new PlayableEntitySnapshot(101,PlayableOwner.Enemy,PlayableEntityKind.Tank,new NavPoint(-22,0),100,false,0,0,0)}:Array.Empty<PlayableEntitySnapshot>()).ToArray();
             var o=PlayableAiObservation.From(new PlayableSnapshot(P.ProfileId,P.Revision,71,1,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,entities,Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,vision:vision.Snapshot(),routeProofs:routes,activeProfile:P));
-            var army=new AiArmyState{Id=1,OwnerId="player-1",TacticalOwner=AiArmyPlanner.Policy,Phase=AiArmyPhase.Advancing,Members=new[]{1,2,3,4},Reinforcements=new[]{2,3,4},LeaderId=1};
+            var army=new AiArmyState{Id=1,OwnerId="player-1",TacticalOwner=AiArmyPlanner.Policy,Phase=AiArmyPhase.Advancing,Members=change=="near-core"?new[]{1,2,3,4,5}:new[]{1,2,3,4},Reinforcements=new[]{2,3,4},LeaderId=1};
             var records=new[]{10L,20L}.Select(id=>new PlayableAiTraceRecord("fixture",id,id,id,id,PlayableAiDeliveryStatus.Applied,PlayableCommandStatus.Applied,"ordinary gather",ownerId:"player-1",sourceIdentity:source,receiptIdentity:new AiReceiptIdentity(71,"player-1",1,(int)id),policy:AiArmyPlanner.Policy,kind:id==20&&change=="already-following"?PlayableCommandKind.Follow:PlayableCommandKind.Move)).ToArray();
             var before=JsonConvert.SerializeObject(new{o,army,records});
-            var action=(PlayableAiAction)typeof(AiTacticalExecutor).GetMethod("ArrivalAssembly",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{o,army,P,1L,records});
+            var action=(PlayableAiAction)typeof(AiTacticalExecutor).GetMethod("ArrivalAssembly",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{o,army,P,1L,records,null,AiProfile.Initial});
             Assert.AreEqual(before,JsonConvert.SerializeObject(new{o,army,records}),"Cohort proposal must be read-only");
-            if(change=="not-arrived"){Assert.IsNull(action,"A valid in-progress Move must not be restarted without a genuine arrived correction");return;}
-            Assert.NotNull(action);Assert.AreEqual(PlayableCommandKind.Follow,action.Kind);Assert.AreEqual(1,action.TargetId);
+            if(change=="not-arrived"||change=="short-active-move"){Assert.IsNull(action,"A valid in-progress Move must not be restarted without a genuine arrived correction");return;}
+            Assert.NotNull(action);Assert.AreEqual(PlayableCommandKind.Follow,action.Kind);Assert.AreEqual(change=="near-core"?5:1,action.TargetId,"Physical assembly follows the nearest certified core, rather than the closest trailing point of a farther leader");
             var expected=change=="human"||change=="already-following"?new[]{2,4}:new[]{"unsafe","foreign","held","missing-proof"}.Contains(change)?new[]{2,3}:new[]{2,3,4};
             CollectionAssert.AreEqual(expected,action.EntityIds);
+        }
+        private static OfflineMatchConfiguration PendingQueueAttentionConfig()
+        {
+            var c=Config();var home=c.Sites.Single(s=>s.Id==1);var slot=new TerritorySlot(3,new NavPoint(-14,12),0);
+            var sites=c.Sites.Select(s=>s.Id==1?new TerritorySite(s.Id,s.Kind,s.Position,s.Slots.Concat(new[]{slot}).ToArray()):s).ToArray();
+            return new OfflineMatchConfiguration(P,c.SourceIdentity,c.MapIdentity,c.RouteProvenance,c.Seed,c.Roster.ToArray(),c.Starts.ToArray(),sites,c.Obstacles.ToArray(),new double[,]{{0,100},{100,0}},scenario:c.ScenarioUnits.Concat(new[]{new OfflineScenarioUnit(1,PlayableEntityKind.Explorer,new NavPoint(-12,-12))}).ToArray(),scenarioBuildings:c.ScenarioBuildings.Concat(new[]{new OfflineScenarioBuilding(1,PlayableBuildingKind.Refinery,1,slot.Id,slot.Position)}).ToArray());
+        }
+        [Test] public void Attention_CurrentUnityOpeningPremise()
+        {
+            var c=PendingQueueAttentionConfig();var a=new PlayableAuthorityTick(c,71);
+            using(var host=new UnityHostRouteService())for(int i=0;i<60;i++)Step(a,host);
+            var owner=Owner(a);var executor=(AiOpeningExecutor)Get(owner,"openingExecutor");
+            TestContext.WriteLine("UNITY_ATTENTION_PREMISE "+JsonConvert.SerializeObject(new{c.Seed,AiProfile.Initial.Hash,required=executor.RequiredForce,desired=executor.DesiredForce(AiProfile.Initial,executor.RequiredForce),Executor=executor.Capture(),Mission=((AiArmyPlanner)Get(owner,"armyPlanner")).Capture(),Pending=((IEnumerable)Get(owner,"pendingItems")).Cast<object>().Select(x=>new{Policy=Get(x,"PolicyName"),Action=Get(x,"Action")})}));
+            Assert.Greater(executor.RequiredForce,0);a.Stop();
         }
         [TestCase(false)][TestCase(true)]
         public void Attention_PendingNativeQueueStopRemainsUsefulAtProposalAndDelivery(bool deferred)
         {
-            var c=Config();var a=new PlayableAuthorityTick(c,71);
+            var c=PendingQueueAttentionConfig();var a=new PlayableAuthorityTick(c,71);
             using(var host=new UnityHostRouteService())
             {
                 for(int i=0;i<45;i++)Step(a,host);var owner=Owner(a);

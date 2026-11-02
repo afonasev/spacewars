@@ -49,6 +49,35 @@ public sealed class AiOpeningsMidgameTests
         o=View(mine:true);executor.Observe(o,null,null,ai);
         Assert.True(executor.MacroRequests(o,p,ai,Array.Empty<AiEconomyCandidate>()).Any(c=>c.Legal&&c.Action.Kind==PlayableCommandKind.BuildAt&&c.Action.BuildingKind==PlayableBuildingKind.Factory));
     }
+    [TestCase(false)][TestCase(true)] public void ScoutKeepsTheSelectedApproachWhenPublicSiteHasTwoRoles(bool reversed)
+    {
+        var p=PlayableProfile.Default;var ai=AiProfile.Initial;
+        var unit=new PlayableEntitySnapshot(13,PlayableOwner.Player,PlayableEntityKind.Explorer,default,p.ExplorerHealth,false,0,0,0);
+        var targets=new[]{new PlayablePublicScoutObjective(2,new NavPoint(17,0),PlayablePublicScoutObjectiveRole.PossibleEnemyStart,true),
+            new PlayablePublicScoutObjective(2,new NavPoint(20,0),PlayablePublicScoutObjectiveRole.ExpansionOutpost,true)};
+        if(reversed)Array.Reverse(targets);
+        var routes=targets.Select(t=>new PlayableRouteProof(unit.Id,unit.Owner,71,100,1,unit.Position,p.ExplorerCollisionRadius,PlayableRouteTargetKind.PublicObjective,t.SiteId,t.Approach,t.Approach,new[]{t.Approach})).ToArray();
+        var o=PlayableAiObservation.From(new PlayableSnapshot(p.ProfileId,p.Revision,71,7,100,100,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,1000,null,new[]{unit},Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,publicScoutObjectives:targets,routeProofs:routes,ownerId:"air-owner"));
+        var knowledge=new AiKnowledgeState(o.OwnerId,o.Generation,o.Tick,Array.Empty<AiKnownContact>(),Array.Empty<AiVisitedArea>());
+        var registry=new AiArmyRegistry(o.OwnerId,o.Generation,ai,AiDifficulty.Fighter);var planner=new AiScoutPlanner();
+        var action=planner.Plan(o,knowledge,registry,p,ai,2);Assert.NotNull(action);
+        Assert.AreEqual(new NavPoint(17,0),action.Target,"Use the proof for this selected approach, independent of role ordering.");
+        planner.Commit(o,action,registry);planner.Observe(o,knowledge,registry,ai,2);
+        Assert.AreEqual(action.Target,registry.Capture().Armies.Single().Rally,"The live claim keeps its accepted approach without assuming site IDs are unique objectives.");
+        var covered=new AiKnowledgeState(o.OwnerId,o.Generation,o.Tick,Array.Empty<AiKnownContact>(),new[]{new AiVisitedArea(2,o.Tick,true,false)});
+        planner.Observe(o,covered,registry,ai,2);Assert.Zero(registry.ArmyFor(unit.Id),"Genuine area coverage still releases scouting ownership.");
+    }
+    [Test] public void AirIncomeSavingsRequireTheChosenReadyHomeProducer()
+    {
+        var p=PlayableProfile.Default;var ai=AiProfile.Initial;
+        var opening=PlayableAiOpeningComposition.Initialize(771205,"air-owner",forcedOpening:PlayableAiOpening.Air);
+        var executor=new AiOpeningExecutor(opening,71){PlayableProfileForObservation=p};
+        var early=View(income:1,unitCount:0);executor.Observe(early,null,null,ai);
+        Assert.False(executor.CanFundIncomeCapture(early,ai),"One early income must not start a Mine expiry clock before the opening economy/producer is ready.");
+        var ready=View(unitCount:0);executor.Observe(ready,null,null,ai);
+        Assert.True(executor.CanFundIncomeCapture(ready,ai),"Actual Ready Hangar fulfills the Air producer gate; a ground Factory is not required.");
+        Assert.False(executor.Capture().InitialForceFulfilled,"Capture eligibility does not fabricate the first wave or impose a blanket expansion ban.");
+    }
     [Test] public void CapturerReleaseRequiresSpendableFundsAndOrdinaryQueueAdmission()
     {
         var p=PlayableProfile.Default;var o=View(factory:true);
@@ -89,7 +118,16 @@ public sealed class AiOpeningsMidgameTests
             for(int i=0;i<15;i++)Step(a,ra);
             var bytes=a.CaptureBytes();b=PlayableAuthorityTick.RestoreBytes(bytes,config);CollectionAssert.AreEqual(bytes,b.CaptureBytes());
             using(var old=PlayableWorldState.Decode(bytes)){BitConverter.GetBytes(AiStateWire.Version-1).CopyTo(old.AiAuthority,4);var rejected=Assert.Throws<ArgumentException>(()=>PlayableAuthorityTick.RestoreBytes(old.Encode(),config));StringAssert.Contains("unsupported authority schema",rejected.Message);}
-            for(int i=0;i<30;i++){Step(a,ra);Step(b,rb);CollectionAssert.AreEqual(a.CaptureBytes(),b.CaptureBytes(),"exact current continuation tick "+i);}
+            for(int i=0;i<30;i++){
+                Step(a,ra);Step(b,rb);var left=a.CaptureBytes();var right=b.CaptureBytes();
+                if(!left.SequenceEqual(right)){
+                    string output=Environment.GetEnvironmentVariable("COMBAT_MICRO_MACRO_CURRENT_OUTPUT")??Path.GetFullPath(Path.Combine(".local/ai-combat-attention/macro-current-"+DateTime.UtcNow.ToString("yyyyMMddTHHmmssfffffff")));Directory.CreateDirectory(output);
+                    File.WriteAllBytes(Path.Combine(output,"before.world"),bytes);File.WriteAllBytes(Path.Combine(output,"hot.world"),left);File.WriteAllBytes(Path.Combine(output,"cold.world"),right);
+                    object Fields(byte[] value){using var state=PlayableWorldState.Decode(value);using var hash=System.Security.Cryptography.SHA256.Create();return typeof(PlayableWorldState).GetFields().Where(f=>f.FieldType==typeof(byte[])).Select(f=>{var data=(byte[])f.GetValue(state);return new{Name=f.Name,Length=data?.Length??0,Hash=data==null?null:BitConverter.ToString(hash.ComputeHash(data)).Replace("-","")};}).ToArray();}
+                    string summary=Newtonsoft.Json.JsonConvert.SerializeObject(new{Tick=a.Tick,Index=i,Hot=Fields(left),Cold=Fields(right)});File.WriteAllText(Path.Combine(output,"difference.json"),summary);TestContext.WriteLine("CURRENT_DIVERGENCE "+summary);
+                }
+                CollectionAssert.AreEqual(left,right,"exact current continuation tick "+i);
+            }
         }
         finally{a.Stop();ra.Dispose();rb.Dispose();a.Domain.Navigation.DestroyNavigationAuthority();if(b!=null){b.Stop();b.Domain.Navigation.DestroyNavigationAuthority();}}
     }

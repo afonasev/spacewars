@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Spacewars.Simulation
 {
-    public enum PlayableCommandKind { BuildFactory, BuildRefinery, QueueTank, SetRally, Move, Attack, AttackMove, Stop, Restart, BuildAt, CancelBuilding, CancelProductionOrder, ToggleRepeatProduction, SellBuilding, StartBuildingRepair, CancelBuildingRepair, UpgradeRefinery, CancelRefineryUpgrade, QueueExplorer, QueueShkval, QueueResearch, CancelResearch, Hold, Follow, QueueHawk, SignalAttack, SignalDefend, SignalRecon, UpgradeProducer }
+    public enum PlayableCommandKind { BuildFactory, BuildRefinery, QueueTank, SetRally, Move, Attack, AttackMove, Stop, Restart, BuildAt, CancelBuilding, CancelProductionOrder, ToggleRepeatProduction, SellBuilding, StartBuildingRepair, CancelBuildingRepair, UpgradeRefinery, CancelRefineryUpgrade, QueueExplorer, QueueShkval, QueueResearch, CancelResearch, Hold, Follow, QueueHawk, SignalAttack, SignalDefend, SignalRecon, UpgradeProducer, ChooseOrbital, UseOrbital }
     public enum PlayableCommandStatus { Accepted, Applied, Rejected, Overflow, StaleGeneration, InvalidSequence, InvalidOwner, InvalidEntity, InvalidTarget, InsufficientCredits, OccupiedPad, Stopped, Cancelled }
     public enum PlayableOrderMode { Replace, Append }
     public enum PlayableOrderOrigin { Unknown,Human,Ai }
@@ -19,7 +19,7 @@ namespace Spacewars.Simulation
     }
     public sealed class PlayableCommand
     {
-        public const int CurrentSchemaVersion=10;
+        public const int CurrentSchemaVersion=11;
         private readonly int[] entityIds;
         public PlayableCommand(long generation,long sequence,string playerId,PlayableCommandKind kind,int[] entityIds,NavPoint target=default(NavPoint),int pad=0,int siteId=0,int slotId=0,PlayableBuildingKind buildingKind=PlayableBuildingKind.Headquarters,int parentId=0,int targetId=0,long productionOrderId=0,PlayableEntityKind unitKind=PlayableEntityKind.Tank,PlayableResearchKind researchKind=PlayableResearchKind.TankChassis,PlayableOrderOrigin origin=PlayableOrderOrigin.Unknown,string source=null,long jobId=0,long actionId=0,PlayableOrderMode mode=PlayableOrderMode.Replace)
         { Mode=mode;Origin=origin;Source=source;JobId=jobId;ActionId=actionId;ResearchKind=researchKind;UnitKind=unitKind;ProductionOrderId=productionOrderId; TargetId=targetId;SiteId=siteId;SlotId=slotId;BuildingKind=buildingKind;ParentId=parentId;Generation=generation;Sequence=sequence;PlayerId=playerId;Kind=kind;this.entityIds=entityIds==null?new int[0]:(int[])entityIds.Clone();Target=target;Pad=pad;SchemaVersion=CurrentSchemaVersion; }

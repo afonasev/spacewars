@@ -86,7 +86,7 @@ namespace Spacewars.Runtime
                             commit=arrivalCommitSequence;int issued=0;
                             foreach(var proposal in proposals){
                                 var intent=attempt.Intents.Single(r=>r.Request==proposal.Member.RequestSequence);
-                                using(EnterTransport()){if(operation!=authorityOperationIdentity)return false;var occupancy=CaptureArrivalOccupancySnapshot(attempt.Input.Members);if(occupancy.Occupants.Any(o=>o.BlocksPlacement&&ArrivalOverlap(proposal.Endpoint,proposal.Member.Radius,o.Location,o.Radius)))return false;}
+                                using(EnterTransport()){if(operation!=authorityOperationIdentity)return false;var occupancy=CaptureArrivalOccupancySnapshot(attempt.Input.Members);if(occupancy.Occupants.Any(o=>o.BlocksFor(proposal.Member,occupancy.Generation)&&ArrivalOverlap(proposal.Endpoint,proposal.Member.Radius,o.Location,o.Radius)))return false;}
                                 var owner=NavigationHostRequest.CreateOwned(intent.Session,intent.Request,intent.Entity,intent.Order,intent.Profile,intent.Geometry,intent.Start,proposal.Endpoint.Position,intent.BaseGeometry,intent.HeldIdentity,intent.MemberIdentity,intent.StartLocation,proposal.Endpoint,null,scope.OwnedReservation());
                                 try{
                                     var request=owner.Request;candidate.OwnIssued(issued,owner);candidate.Issued[issued++]=request;candidate.AppendMailbox(request);

@@ -1,0 +1,8 @@
+{
+  "source": "6aa50260d",
+  "original_path": "unity/Assets/Spacewars/Tests/EditMode/AiPositionCurrentCaptureReadbackTests.cs",
+  "archive_path": "tools/qa/ai-position-capture-history/AiPositionCurrentCaptureReadbackTests.cs",
+  "sha256": "a84f5c9c0b9bb0144d73f43f4940dd8f929e8baf8c210715376b498ac36a9505",
+  "result": "2prestartPASS; runtime/game tests stillFAIL; inputs in canonicalnav-reconcile-20261101 rawZIPs",
+  "reason": "environment-bound diagnostic only, preserved unchanged outside defaultUnity discovery"
+}

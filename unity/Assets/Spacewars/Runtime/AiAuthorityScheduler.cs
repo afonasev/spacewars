@@ -41,9 +41,11 @@ namespace Spacewars.Runtime
             original.ReconcileBudget(domain);
             original.ReconcileReviewClocks(domain.Tick);
             if(!candidate.MergeReviewBudget(work.Initial,original.Budget.Capture(),domain.Tick))return;
+            candidate.InheritCombatAttention(original);
             var live=domain.PlayerSnapshot(0,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,work.Snapshot.Seed,domain.OwnerFor(original.OwnerId));
             candidate.ReconcileReviewMembership(live);
             candidate.ValidateBudget(domain);
+            candidate.AdoptExecutionAuthority(original,domain);
             owners[work.Index]=candidate;candidate.BindActionAllocator(AllocateAction);
             communicationNarrator.Observe(work.Snapshot,candidate.Checkpoint,domain.RoutingProfile);
             domain.RecordAiState(candidate.Checkpoint);
@@ -73,11 +75,16 @@ namespace Spacewars.Runtime
         }
         internal IReadOnlyList<PlayableAiOwnerLoop> Owners=>Array.AsReadOnly(owners);
         internal void Deliver(PlayableDomain domain,Func<string,long> human,bool paused)
-        {CompleteReview(domain,human,paused);domain.ProtectedAiCapturer=owner=>owners.FirstOrDefault(o=>o.OwnerId==domain.FinancialOwnerId(owner))?.ProtectedCapturerId??0;using var measured=PerformanceProfile.Measure(ProfileStage.Delivery);foreach(var owner in owners){if(Reviewing(owner)){owner.ReconcileBudget(domain);continue;}bool ready=true;if(!paused){owner.InitializeOpeningProtection(domain);ready=owner.GuardDefenseReadiness(domain);}owner.DeliverReady(domain,human(owner.OwnerId),paused,ready);}}
+        {foreach(var current in owners)current.BindExecutionDomain(domain);domain.BindCombatMotionAuthority(()=>owners);CompleteReview(domain,human,paused);domain.ProtectedAiCapturer=owner=>owners.FirstOrDefault(o=>o.OwnerId==domain.FinancialOwnerId(owner))?.ProtectedCapturerId??0;using var measured=PerformanceProfile.Measure(ProfileStage.Delivery);foreach(var owner in owners){owner.BindExecutionDomain(domain);if(Reviewing(owner)){owner.ReconcileBudget(domain);continue;}bool ready=true;if(!paused){owner.InitializeOpeningProtection(domain);ready=owner.GuardDefenseReadiness(domain);}owner.DeliverReady(domain,human(owner.OwnerId),paused,ready);}domain.BindCombatMotionAuthority(()=>owners);}
         internal void Review(PlayableDomain domain,long sequence,RuntimeStatus status,bool paused,PlayableRuntimeMetrics metrics,int seed,Func<string,long> human)
         {
             using var measured=PerformanceProfile.Measure(ProfileStage.Ai);
+            bool hadReview=reviewWork!=null;
             CompleteReview(domain,human,paused);
+            // A result settling after delivery must leave the next delivery phase
+            // free. Replacing it here can keep that owner Reviewing at every
+            // delivery forever, until all of its otherwise timely intents expire.
+            if(backgroundReviews&&hadReview&&reviewWork==null)return;
             if(backgroundReviews&&owners.Length>0){for(int i=0;i<owners.Length&&!domain.Authorizes(owners[nextReviewOwner].OwnerId);i++)nextReviewOwner=(nextReviewOwner+1)%owners.Length;}
             if(backgroundReviews){ReviewBackground(domain,sequence,status,paused,metrics,seed,human);return;}
             // Freeze all owner projections/publications at the phase barrier. Review

@@ -31,6 +31,44 @@ namespace Spacewars.Tests.EditMode
         PlayableCommandStatus Research(PlayableResearchKind kind)=>(PlayableCommandStatus)Call("Apply",new PlayableCommand(1,++seq,"player-1",PlayableCommandKind.QueueResearch,new[]{center},researchKind:kind),null);
         void UpgradeCenter(){if(!View().Buildings.Single(b=>b.Id==center).ScientificCenterUpgraded)Complete(PlayableResearchKind.ScientificCenterUpgrade);}
         void Complete(PlayableResearchKind kind){if(PlayableResearchRules.NeedsUpgradedCenter(kind))UpgradeCenter();Assert.AreEqual(PlayableCommandStatus.Applied,Research(kind));Call("AdvanceResearch",PlayableResearchRules.Duration(p,kind));Assert.True(View().OwnerResearch.Single(r=>r.Kind==kind&&(!PlayableResearchRules.Local(kind)||r.CenterId==center)).Complete);}
+        [TestCase(false)] [TestCase(true)]
+        public void ChassisHealthCombinesWithDefensePreservesDamageAndSurvivesRestore(bool defenseFirst)
+        {
+            Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,1,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));
+            Call("AdvanceFoundations");Call("AdvanceBuildings",100d);
+            int tank=(int)Call("SpawnUnit",new NavPoint(-22,-9),PlayableOwner.Player,PlayableEntityKind.Tank);
+            Call("Damage",tank,40);
+            if(defenseFirst)Complete(PlayableResearchKind.ImprovedDefensiveSystems);
+            Complete(PlayableResearchKind.TankChassis);
+            if(!defenseFirst)Complete(PlayableResearchKind.ImprovedDefensiveSystems);
+            double multiplier=1.4; // 100 × 1.2 × 1.15 = 138, rounded once to 140.
+            var unit=View().Entities.Single(u=>u.Id==tank);
+            Assert.AreEqual(p.TankHealth*multiplier,unit.MaxHealth,1e-9);
+            Assert.AreEqual((p.TankHealth-40)*multiplier,unit.ExactHealth.Value,1e-9);
+            int fresh=(int)Call("SpawnUnit",new NavPoint(-20,-10),PlayableOwner.Player,PlayableEntityKind.Tank);
+            Assert.AreEqual(p.TankHealth*multiplier,View().Entities.Single(u=>u.Id==fresh).ExactHealth.Value,1e-9);
+            byte[] bytes=(byte[])Call("CaptureWorldBytes",7,"chassis-health");
+            domain=D.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{bytes,p,7,"chassis-health"});
+            Assert.AreEqual(unit.ExactHealth,View().Entities.Single(u=>u.Id==tank).ExactHealth);
+            Assert.AreEqual(unit.MaxHealth,View().Entities.Single(u=>u.Id==tank).MaxHealth);
+        }
+        [Test] public void RuntimeCombatSurfaceTracksTheCompletedCenterModelUpgrade()
+        {
+            var buildings=(IDictionary)D.GetField("buildings",F).GetValue(domain);
+            BallisticPoint Roof()
+            {
+                var snapshot=View().Buildings.Single(b=>b.Id==center);
+                var pose=(BuildingCombatPose)Call("BuildingCombat",buildings[center]);
+                var from=new BallisticPoint(snapshot.Position.X,30,snapshot.Position.Z);
+                var to=new BallisticPoint(snapshot.Position.X,-2,snapshot.Position.Z);
+                Assert.True(pose.Segment(from,to,0,out _,out var hit));return hit;
+            }
+            var original=Roof();UpgradeCenter();var upgraded=Roof();
+            Assert.AreNotEqual(original.Y,upgraded.Y,"Completed upgrade must change the authoritative surface with the visible scanner");
+            var data=(byte[])Call("CaptureWorldBytes",7,"combat-center-upgrade");
+            domain=D.GetMethod("RestoreWorldBytes",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{data,p,7,"combat-center-upgrade"});
+            Assert.AreEqual(upgraded.Y,Roof().Y,"Restored upgraded center must keep its current combat surface");
+        }
         [Test] public void VisibleUnitsRevealOnlyCompletedSystemsAndHiddenUnitsRevealNothing()
         {
             int near=(int)Call("SpawnUnit",new NavPoint(-22,-9),PlayableOwner.Enemy,PlayableEntityKind.Tank);
@@ -62,13 +100,13 @@ namespace Spacewars.Tests.EditMode
             int id=(int)Call("SpawnUnit",new NavPoint(-22,-9),PlayableOwner.Player,kind);int hp=PlayableUnitRules.Health(p,kind);
             Call("Damage",id,hp/2);double remaining=hp-hp/2;
             Complete(PlayableResearchKind.ImprovedDefensiveSystems);var unit=View().Entities.Single(u=>u.Id==id);
-            Assert.AreEqual(hp*1.15,unit.MaxHealth,1e-9);Assert.AreEqual(remaining*1.15,unit.ExactHealth.Value,1e-9);
+            Assert.AreEqual(PlayableStatRounding.MaximumHealth(p,hp*1.15),unit.MaxHealth,1e-9);Assert.AreEqual(remaining*PlayableStatRounding.MaximumHealth(p,hp*1.15)/hp,unit.ExactHealth.Value,1e-9);
             Complete(PlayableResearchKind.AdvancedDefensiveSystems);unit=View().Entities.Single(u=>u.Id==id);
-            Assert.AreEqual(hp*1.30,unit.MaxHealth,1e-9);Assert.AreEqual(remaining*1.30,unit.ExactHealth.Value,1e-9);
+            Assert.AreEqual(PlayableStatRounding.MaximumHealth(p,hp*1.30),unit.MaxHealth,1e-9);Assert.AreEqual(remaining*PlayableStatRounding.MaximumHealth(p,hp*1.30)/hp,unit.ExactHealth.Value,1e-9);
             int fresh=(int)Call("SpawnUnit",new NavPoint(-20,-10),PlayableOwner.Player,kind);
-            Assert.AreEqual(hp*1.30,View().Entities.Single(u=>u.Id==fresh).ExactHealth.Value,1e-9);
+            Assert.AreEqual(PlayableStatRounding.MaximumHealth(p,hp*1.30),View().Entities.Single(u=>u.Id==fresh).ExactHealth.Value,1e-9);
             Assert.AreEqual(p.ExplorerHealth,View(PlayableOwner.Enemy).Entities.Single(u=>u.Owner==PlayableOwner.Enemy).ExactHealth.Value);
-            Call("Damage",center,(int)p.ScienceHealth+1);Assert.AreEqual(hp*1.30,View().Entities.Single(u=>u.Id==id).MaxHealth,1e-9);
+            Call("Damage",center,(int)p.ScienceHealth+1);Assert.AreEqual(PlayableStatRounding.MaximumHealth(p,hp*1.30),View().Entities.Single(u=>u.Id==id).MaxHealth,1e-9);
         }
         [TestCase(PlayableEntityKind.Tank)][TestCase(PlayableEntityKind.Explorer)][TestCase(PlayableEntityKind.Shkval)]
         public void PhysicalShotsCarryFractionalDamageAndFreezeLaunchedTerms(PlayableEntityKind kind)
@@ -121,7 +159,7 @@ namespace Spacewars.Tests.EditMode
             double health=View().Entities.Single(u=>u.Id==id).ExactHealth.Value;
             Assert.AreEqual(4,View().OwnerResearch.Count);Assert.AreEqual(7,View().OwnerResearch.Single(r=>r.Active).Elapsed);
             var data=p.CopyData();data.revision++;var revised=PlayableProfile.Create(data);Call("ApplyBalance",revised);
-            Assert.AreEqual(health,View().Entities.Single(u=>u.Id==id).ExactHealth.Value);Assert.AreEqual(p.ExplorerHealth*1.15,View().Entities.Single().MaxHealth,1e-9);
+            Assert.AreEqual(health,View().Entities.Single(u=>u.Id==id).ExactHealth.Value);Assert.AreEqual(80,View().Entities.Single().MaxHealth,1e-9);
         }
         [Test] public void ActualDomainAiPlanOrdersNewTechnologyAndLossDoesNotCancelPaidWork()
         {

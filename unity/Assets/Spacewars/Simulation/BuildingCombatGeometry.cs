@@ -5,10 +5,11 @@ using System.Collections.Generic;
 namespace Spacewars.Simulation
 {
  // Shared authored surfaces; these queries never read navigation, Unity objects or fog.
- public static class BuildingCombatGeometry
+ public static partial class BuildingCombatGeometry
  {
   public static string Version=>BuildingCombatData.Version+"/sentry:"+SentryCombatData.SourceHash+"/repair:"+RepairTowerCombatData.SourceHash+"/gauss:"+GaussCombatData.SourceHash;
   public static double ApronLift=>BuildingCombatData.ApronLift;
+  internal static string PreparedModelKey(PlayableBuildingKind kind,bool upgraded)=>kind==PlayableBuildingKind.Headquarters?"headquarters-a":kind==PlayableBuildingKind.Factory?"factory-armored":kind==PlayableBuildingKind.Mine?"mine-armored":kind==PlayableBuildingKind.Outpost?"outpost-b":kind==PlayableBuildingKind.ScientificCenter?(upgraded?"research-scanner-upgraded":"research-scanner"):kind==PlayableBuildingKind.Refinery?(upgraded?"refineryUpgraded":"refinery"):"hangar";
   static readonly Dictionary<string,CombatMesh> Cache=new Dictionary<string,CombatMesh>();
   public static double ModelScale(PlayableProfile p,PlayableBuildingKind k)=>TerritoryRules.Defensive(k)?p.TurretModelScale:k==PlayableBuildingKind.Hangar?p.HangarModelHeightMeters/1.25*p.HangarModelScale:k==PlayableBuildingKind.ScientificCenter?p.ScienceModelHeightMeters/1.6407*p.ScienceModelScale:k==PlayableBuildingKind.Factory?p.FactoryModelHeightMeters/2.06*p.FactoryModelScale:k==PlayableBuildingKind.Refinery?p.RefineryModelHeightMeters/2.545*p.RefineryModelScale:k==PlayableBuildingKind.Outpost?p.OutpostModelHeightMeters/4.5094*p.OutpostModelScale:k==PlayableBuildingKind.Mine?p.MineModelHeightMeters/1.9945*p.MineModelScale:p.HeadquartersModelHeightMeters/4.2*p.HeadquartersModelScale;
   // The existing construction presentation grows only the vertical axis.
@@ -16,12 +17,12 @@ namespace Spacewars.Simulation
   public static BuildingCombatPose Pose(PlayableProfile p,PlayableBuildingKind kind,bool upgraded,NavPoint at,double ground,double heading=TerritoryRules.BuildingHeading,double opening=0,double platform=0,double constructionProgress=1)
   {
    if(TerritoryRules.Defensive(kind))return new BuildingCombatPose(new SentryCombatPose(at,ground+ApronLift,p.TurretModelScale,Math.PI/2,0,constructionProgress,kind==PlayableBuildingKind.RepairTower,kind==PlayableBuildingKind.GaussTower));
-   string key=kind==PlayableBuildingKind.Headquarters?"headquarters-a":kind==PlayableBuildingKind.Factory?"factory-armored":kind==PlayableBuildingKind.Mine?"mine-armored":kind==PlayableBuildingKind.Outpost?"outpost-b":kind==PlayableBuildingKind.ScientificCenter?"scientificCenter":kind==PlayableBuildingKind.Refinery?(upgraded?"refineryUpgraded":"refinery"):"hangar";
-   CombatMesh mesh;lock(Cache){if(!Cache.TryGetValue(key,out mesh)){mesh=CombatMesh.Decode(BuildingCombatData.Encoded(key));Cache.Add(key,mesh);}}
+   string key=PreparedModelKey(kind,upgraded);
+   CombatMesh mesh;lock(Cache){if(!Cache.TryGetValue(key,out mesh)){mesh=CombatMesh.Decode(BuildingCombatData.Encoded(key));mesh.PreparedKey=key;Cache.Add(key,mesh);}}
    return new BuildingCombatPose(mesh,at,ground+ApronLift,ModelScale(p,kind),Math.PI/2-heading,Math.Max(0,Math.Min(1,opening)),(HawkHangarGeometry.RaisedPlatformTop-HawkHangarGeometry.RestPlatformTop-ApronLift/ModelScale(p,kind))*Math.Max(0,Math.Min(1,platform)),ConstructionHeight(constructionProgress));
   }
  }
- public readonly struct BuildingCombatPose
+ public readonly partial struct BuildingCombatPose
  {
   readonly CombatMesh mesh;readonly V origin;readonly double scale,cos,sin,opening,platform,height;
   internal BuildingCombatPose(CombatMesh mesh,NavPoint at,double y,double scale,double yaw,double opening,double platform,double height){this.mesh=mesh;origin=new V(at.X,y,at.Z);this.scale=scale;cos=Math.Cos(yaw);sin=Math.Sin(yaw);this.opening=opening;this.platform=platform;this.height=height;sentry=null;}
@@ -125,7 +126,7 @@ namespace Spacewars.Simulation
  }
  internal sealed class CombatMesh
  {
-  internal CombatPart[] Parts;internal double Roller,Reach;
+  internal string PreparedKey;internal CombatPart[] Parts;internal double Roller,Reach;
   internal static CombatMesh Decode(string data)
   {
    using var compressed=new MemoryStream(Convert.FromBase64String(data));using var stream=new DeflateStream(compressed,CompressionMode.Decompress);using var r=new BinaryReader(stream);

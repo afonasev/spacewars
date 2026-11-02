@@ -27,6 +27,8 @@ namespace Spacewars.Simulation
             var result=new List<PlayableMapMark>();
             foreach(var site in view.DiscoveredSites)
             {
+                if(site.Kind==PlayableBuildingKind.RelayTower)
+                {var relay=view.Sites.FirstOrDefault(s=>s.Site.Id==site.Id);result.Add(new PlayableMapMark(-site.Id,site.Position,site.Kind,relay?.Owner.HasValue==true?MapMarkState.Ready:MapMarkState.Empty,relay?.Owner));continue;}
                 var live=view.Buildings.FirstOrDefault(b=>b.SiteId==site.Id&&b.SlotId==0&&b.Phase!=ConstructionPhase.Pending);
                 var memory=view.Vision?.KnownBuildings.FirstOrDefault(b=>b.Position.Equals(site.Position)&&!view.Vision.IsVisible(b.Position));
                 result.Add(new PlayableMapMark(live?.Id??memory?.Id??0,site.Position,site.Kind,live!=null?(live.Phase==ConstructionPhase.Ready?MapMarkState.Ready:MapMarkState.Construction):memory!=null?MapMarkState.Memory:MapMarkState.Empty,live?.Owner??memory?.Owner,site.Kind==PlayableBuildingKind.Headquarters?site.Id:0));

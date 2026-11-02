@@ -47,6 +47,7 @@ namespace Spacewars.Runtime
                         }
                         if(root.AccruedCredits)NavigationAccruedCredits.Validate(state.CaptureBank,root,Generation,state.RequestSequence,long.MaxValue-1);
                         NavOwnedStorage envelope=root.AccruedCredits?(NavOwnedStorage)NavigationAccruedHostEnvelope.Create(root,snapshot,state.CaptureTraffic,state.CaptureBank,state.AdmissionPublicationIdentity,scope.OwnedReservation()):NavigationHostEnvelope.CreateOwned(root,snapshot,scope.OwnedReservation(),state.AdmissionPublicationIdentity,state.CaptureTraffic);
+                    if(state.CaptureMotionSources!=null){var hostEnvelope=envelope;try{envelope=NavigationMotionEnvelope.Create(hostEnvelope,state.CaptureMotionSources,scope.OwnedReservation());}finally{hostEnvelope.ReleaseOwner();}}
                     try{output=NavigationCaptureBytes.Write(scope.OwnedReservation(),
                         writer=>NavPhysicalBodyWire.WriteTo(writer,envelope,scope.OwnedReservation()));}
                     finally{envelope.ReleaseOwner();}
@@ -60,17 +61,17 @@ namespace Spacewars.Runtime
         internal static void DecodeDetachedHostAuthority(byte[] bytes,NavigationRetentionBudget budget,out NavigationHostRoot host,out NavigationAuthorityOwners authority)
             =>DecodeDetachedHostAuthority(bytes,budget,out host,out authority,out _);
         internal static void DecodeDetachedHostAuthority(byte[] bytes,NavigationRetentionBudget budget,out NavigationHostRoot host,out NavigationAuthorityOwners authority,out long publication)
-        {DecodeDetachedHostAuthority(bytes,budget,null,out host,out authority,out publication,out var traffic,out var bank);traffic?.Release();if(bank!=null){bank.Release();host?.Release();authority?.Release();host=null;authority=null;throw new ArgumentException("Accrued decode requires a matching bank owner.");}}
+        {DecodeDetachedHostAuthority(bytes,budget,null,out host,out authority,out publication,out var traffic,out var bank,out var sources);sources?.Release();traffic?.Release();if(bank!=null||sources!=null){bank?.Release();host?.Release();authority?.Release();host=null;authority=null;throw new ArgumentException("Stateful host decode requires matching bank and Native source owners.");}}
         internal static void DecodeDetachedHostAuthority(NavigationSessionState state,NavigationDecodeTransaction transaction,out NavigationHostRoot host,out NavigationAuthorityOwners authority,out long publication)
         {
             if(state==null||transaction==null)throw new ArgumentNullException();
             if(state.HostAuthority==null&&state.DecodeHostOwner==null){DecodeDetachedHostAuthority((byte[])null,transaction.Budget,out host,out authority,out publication);return;}
             transaction.RequirePrivateBytes(state.DecodeHostOwner,state.HostAuthority);
-            DecodeDetachedHostAuthority(state.HostAuthority,transaction.Budget,state.DecodeHostOwner,out host,out authority,out publication,out var traffic,out var bank);state.PreparedTraffic=traffic;state.PreparedBank=bank;
+            DecodeDetachedHostAuthority(state.HostAuthority,transaction.Budget,state.DecodeHostOwner,out host,out authority,out publication,out var traffic,out var bank,out var sources);state.PreparedTraffic=traffic;state.PreparedBank=bank;state.PreparedMotionSources=sources;
         }
-        private static void DecodeDetachedHostAuthority(byte[] bytes,NavigationRetentionBudget budget,NavigationDecodeTransaction.PrivateValue<byte[]> privateOwner,out NavigationHostRoot host,out NavigationAuthorityOwners authority,out long publication,out NavigationTrafficAuthority traffic,out NavPagedList<long> bank)
+        private static void DecodeDetachedHostAuthority(byte[] bytes,NavigationRetentionBudget budget,NavigationDecodeTransaction.PrivateValue<byte[]> privateOwner,out NavigationHostRoot host,out NavigationAuthorityOwners authority,out long publication,out NavigationTrafficAuthority traffic,out NavPagedList<long> bank,out NavigationMotionSources sources)
         {
-            host=null;authority=null;traffic=null;bank=null;publication=0;if(bytes==null)return;
+            host=null;authority=null;traffic=null;bank=null;sources=null;publication=0;if(bytes==null)return;
             if(bytes.Length<1||bytes.Length>32*1024*1024)throw new ArgumentException("Invalid private host BODY input.");
             if(budget==null||!budget.TryOpenScope(NavigationPreparationKind.Decode,0,0,out var scope))throw new InvalidOperationException("Host decode admission refused.");
             NavOwnedStorage decoded=null;
@@ -82,14 +83,15 @@ namespace Spacewars.Runtime
                         var input=privateOwner==null?(byte[])bytes.Clone():bytes;
                         using(var reader=new BinaryReader(new MemoryStream(input,false))){
                             decoded=NavPhysicalBodyWire.ReadFrom(reader,scope.OwnedReservation(),NavigationHostBodyExtension.Instance);
-                            if(!(decoded is NavigationHostRoot)&&!(decoded is NavigationHostEnvelope)&&!(decoded is NavigationAccruedHostEnvelope)||reader.BaseStream.Position!=reader.BaseStream.Length)throw new ArgumentException("Invalid host BODY tail.");
+                            if(!(decoded is NavigationHostRoot)&&!(decoded is NavigationHostEnvelope)&&!(decoded is NavigationAccruedHostEnvelope)&&!(decoded is NavigationMotionEnvelope)||reader.BaseStream.Position!=reader.BaseStream.Length)throw new ArgumentException("Invalid host BODY tail.");
                         }
                     }
                     scope.Attach(decoded);scope.Commit(decoded,_=>{});
+                    if(decoded is NavigationMotionEnvelope motion){sources=motion.Sources;sources.Retain();var inner=motion.Host;inner.Retain();motion.Release();decoded=inner;}
                     if(decoded is NavigationAccruedHostEnvelope accrued){publication=accrued.PublicationIdentity;host=accrued.Host;authority=accrued.Authority;traffic=accrued.Traffic;bank=accrued.Bank;bank.Retain();traffic?.Retain();host.Retain();authority.Retain();accrued.ReleaseStorage();}
                     else if(decoded is NavigationHostEnvelope envelope){publication=envelope.PublicationIdentity;host=envelope.Host;authority=envelope.Authority;traffic=envelope.Traffic;traffic?.Retain();host.Retain();authority.Retain();envelope.ReleaseStorage();}
                     else{host=(NavigationHostRoot)decoded;if(host.AccruedCredits)throw new ArgumentException("Accrued host requires its envelope and bank.");}
-                }catch{decoded?.ReleaseOwner();throw;}
+                }catch{sources?.Release();sources=null;decoded?.ReleaseOwner();throw;}
                 finally{if(retained)privateOwner.Release();}
             }
         }

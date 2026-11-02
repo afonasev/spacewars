@@ -13,10 +13,11 @@ namespace Spacewars.Presentation
         private Material towerRangeMaterial;
         private MaterialPropertyBlock towerRangeBlock;
         public int RangeTowerId {get;private set;}
+        public int RangeRelaySiteId {get;private set;}
         public GameObject TowerRangeVisual=>towerRangeObject;
         public static double TowerActionRange(PlayableProfile current,PlayableBuildingKind kind)
         {return kind==PlayableBuildingKind.GaussTower?current.GaussRange:TerritoryRules.Defensive(kind)?current.TurretRange:0;}
-        public void RenderTowerRange(PlayableSnapshot view,ISet<int> selected,int preferred=0,bool visible=true)
+        public void RenderTowerRange(PlayableSnapshot view,ISet<int> selected,int preferred=0,bool visible=true,int relaySiteId=0)
         {
             PlayableBuildingSnapshot chosen=null;
             if(visible&&view!=null&&selected!=null)foreach(var building in view.Buildings)
@@ -24,12 +25,18 @@ namespace Spacewars.Presentation
                 if(building.Owner!=view.Owner||building.Phase!=ConstructionPhase.Ready||building.Health<=0||!TerritoryRules.Defensive(building.Kind)||!selected.Contains(building.Id))continue;
                 if(chosen==null||building.Id==preferred||chosen.Id!=preferred&&building.Id<chosen.Id)chosen=building;
             }
-            RangeTowerId=chosen?.Id??0;
-            if(chosen==null){if(towerRangeObject)towerRangeObject.SetActive(false);return;}
+            // Only visible site snapshots drive the selected relay radius.
+            TerritorySiteSnapshot relay=null;
+            if(visible&&view!=null&&relaySiteId>0)foreach(var site in view.Sites)
+                if(site.Site.Id==relaySiteId&&site.Site.Kind==PlayableBuildingKind.RelayTower){relay=site;break;}
+            RangeTowerId=relay==null?chosen?.Id??0:0;RangeRelaySiteId=relay?.Site.Id??0;
+            if(chosen==null&&relay==null){if(towerRangeObject)towerRangeObject.SetActive(false);return;}
             if(!towerRangeObject)CreateTowerRange();
             var current=view.ActiveProfile??profile;
-            var color=Color.HSVToRGB((float)(chosen.Kind==PlayableBuildingKind.RepairTower?current.TowerRangeRepairHue:current.TowerRangeCombatHue),(float)current.TowerRangeSaturation,(float)current.TowerRangeBrightness);
-            towerRangeBlock.SetVector("_Zone",new Vector4((float)chosen.Position.X,(float)chosen.Position.Z,0,(float)TowerActionRange(current,chosen.Kind)));
+            var color=Color.HSVToRGB((float)(relay==null&&chosen.Kind==PlayableBuildingKind.RepairTower?current.TowerRangeRepairHue:current.TowerRangeCombatHue),(float)current.TowerRangeSaturation,(float)current.TowerRangeBrightness);
+            var position=relay!=null?relay.Site.Position:chosen.Position;
+            double radius=relay!=null?current.RelayCaptureRadius:TowerActionRange(current,chosen.Kind);
+            towerRangeBlock.SetVector("_Zone",new Vector4((float)position.X,(float)position.Z,0,(float)radius));
             towerRangeBlock.SetColor("_Color",color);
             towerRangeBlock.SetVector("_Appearance",new Vector4((float)current.TowerRangeFillOpacity,(float)current.TowerRangeBorderOpacity,(float)current.TowerRangeBorderWidth,(float)current.TowerRangeEdgeFeather));
             towerRangeBlock.SetFloat("_Lift",(float)current.TowerRangeLift);towerRangeBlock.SetFloat("_InnerFade",(float)current.TowerRangeInnerFade);
@@ -76,7 +83,7 @@ namespace Spacewars.Presentation
         private void ClearTowerRange()
         {
             if(towerRangeObject){towerRangeObject.SetActive(false);ReleaseWorldObject(towerRangeObject);}if(towerRangeMesh)ReleaseWorldObject(towerRangeMesh);if(towerRangeMaterial)ReleaseWorldObject(towerRangeMaterial);
-            towerRangeObject=null;towerRangeMesh=null;towerRangeMaterial=null;towerRangeBlock=null;RangeTowerId=0;
+            towerRangeObject=null;towerRangeMesh=null;towerRangeMaterial=null;towerRangeBlock=null;RangeTowerId=RangeRelaySiteId=0;
         }
     }
 }

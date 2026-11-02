@@ -31,6 +31,14 @@ namespace Spacewars.Tests.EditMode
         [TestCase(PlayableEntityKind.Shkval,PlayableCommandKind.QueueShkval)]
         public void FullClearanceCreatesControllableDamageableUnitAtOneBoundary(PlayableEntityKind kind,PlayableCommandKind command)
         {
+            if(kind==PlayableEntityKind.Shkval)
+            {
+                Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,2,PlayableBuildingKind.ScientificCenter,1,PlayableOwner.Player,null));
+                Call("AdvanceFoundations");Call("AdvanceBuildings",100d);int center=View.Buildings.Single(b=>b.Kind==PlayableBuildingKind.ScientificCenter).Id;
+                Assert.AreEqual(PlayableCommandStatus.Applied,domain.Apply(new PlayableCommand(1,++sequence,"player-1",PlayableCommandKind.QueueResearch,new[]{center},researchKind:PlayableResearchKind.ScientificCenterUpgrade),out _));
+                Call("AdvanceResearch",PlayableResearchRules.Duration(profile,PlayableResearchKind.ScientificCenterUpgrade));
+                Assert.True(View.Buildings.Single(b=>b.Id==center).ScientificCenterUpgraded,"Stock Shkval prerequisite must be actually complete before queue admission");
+            }
             var initial=View.Entities.Select(e=>e.Id).ToArray();int crowd=domain.Navigation.Crowd.Units.Count;
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(command,factory));Until(FactoryReleaseRules.Opening);
             CollectionAssert.AreEqual(initial,View.Entities.Select(e=>e.Id));Until(FactoryReleaseRules.Driving);
@@ -46,6 +54,27 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.Move,born.Id));
             Call("Damage",born.Id,10);Assert.AreEqual(born.Health-10,View.Entities.Single(e=>e.Id==born.Id).Health);
             Assert.AreEqual(crowd+1,domain.Navigation.Crowd.Units.Count);Assert.IsEmpty(Factory.PrivateState.Orders);
+        }
+        [Test] public void StaleBirthReadsetRetriesSamePaidReleaseWithoutPartialActorOrLostIdentity()
+        {
+            Send(PlayableCommandKind.QueueTank,factory);Until(FactoryReleaseRules.Driving);
+            double duration=FactoryReleaseRules.Duration(profile,PlayableEntityKind.Tank);
+            while(Factory.LaunchTime+1d/30<duration)Advance();
+            int next=(int)typeof(PlayableDomain).GetField("nextId",Hidden).GetValue(domain);
+            int count=View.Entities.Count,credits=View.Credits;var mover=View.Entities.First(u=>u.Owner==PlayableOwner.Player);
+            int changes=0;domain.Navigation.BeforeCrowdBirthPublicationForTests=()=>{
+                domain.Navigation.BeforeCrowdBirthPublicationForTests=null;changes++;
+                Assert.True(domain.Navigation.Move(mover.Id,mover.Position),"Publish a real competing movement readset before birth transfer");
+            };
+            try{Advance();}finally{domain.Navigation.BeforeCrowdBirthPublicationForTests=null;}
+            Assert.AreEqual(1,changes);Assert.AreEqual(count,View.Entities.Count);Assert.AreEqual(next,typeof(PlayableDomain).GetField("nextId",Hidden).GetValue(domain));
+            Assert.AreEqual(FactoryReleaseRules.Driving,Factory.LaunchPhase);Assert.AreEqual(duration,Factory.LaunchTime);Assert.AreEqual(credits,View.Credits);
+            Assert.AreEqual(1,Factory.PrivateState.Orders.Count);Assert.Zero(Factory.PrivateState.Orders.Single().Remaining);
+            Assert.Zero(domain.Navigation.PhysicalHostBudget.HeldBytes);Assert.Zero(domain.Navigation.PhysicalHostBudget.ActiveScopes);
+            Assert.AreEqual(NavigationStorageOwnershipTests.UniqueWithSession(domain.Navigation),domain.Navigation.PhysicalHostBudget.PhysicalBytes,"Rejected birth leaves no retained actor/spatial/name payload");
+            Advance();Assert.AreEqual(FactoryReleaseRules.Closing,Factory.LaunchPhase);Assert.AreEqual(count+1,View.Entities.Count);
+            Assert.True(View.Entities.Any(u=>u.Id==next&&u.Kind==PlayableEntityKind.Tank));Assert.AreEqual(next+1,typeof(PlayableDomain).GetField("nextId",Hidden).GetValue(domain));
+            Assert.AreEqual(credits,View.Credits);Assert.IsEmpty(Factory.PrivateState.Orders);
         }
         [Test] public void OccupiedStraightExitWaitsWithoutTeleportingOrSpendingAgain()
         {

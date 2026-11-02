@@ -98,6 +98,7 @@ namespace Spacewars.Simulation
     {
         internal static NavOwnedStorage Read(NavPhysicalTag tag,NavPhysicalBodyReader reader)
         {
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalWork,value:NavPhysicalValueKind.FlatIndependentGroupArrivalV1)))return NavigationArrivalWork.ReadPhysicalBody(reader,flatGroups:true);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalWork)))return NavigationArrivalWork.ReadPhysicalBody(reader);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalPreparedClearance)))return NavigationArrivalWork.PreparedClearance.ReadPhysicalBody(reader);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalRouteRow)))return NavigationArrivalWork.RouteRow.ReadPhysicalBody(reader);
@@ -120,9 +121,12 @@ namespace Spacewars.Simulation
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.TypedRoute,value:NavPhysicalValueKind.RecastSpineV2)))return NavRecastSpine.Read(reader);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.TypedRoute,value:NavPhysicalValueKind.RecastMemberPlanV1)))throw new ArgumentException("Historical Recast v1 semantics are not current.");
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.TypedRoute,value:NavPhysicalValueKind.RecastMemberPlanV2)))return NavRecastMemberPlan.Read(reader);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.TypedRoute,value:NavPhysicalValueKind.MotionReceiverV1)))return NavMotionReceiver.ReadPhysicalBody(reader);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.TypedRoute,value:NavPhysicalValueKind.MotionTranscriptV1)))return NavMotionTranscript.ReadPhysicalBody(reader);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.TypedRoute,value:NavPhysicalValueKind.RecastRouteV1)))throw new ArgumentException("Historical Recast v1 semantics are not current.");
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.TypedRoute,value:NavPhysicalValueKind.RecastRouteV2)))return NavTypedRoute.ReadPhysicalBody(reader,true);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.TypedRoute)))return NavTypedRoute.ReadPhysicalBody(reader);
+            if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.Singleton,value:NavPhysicalValueKind.FlatGridSingletonV1)))return NavIncrementalSingletonRoute.ReadFlatBody(reader);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.Singleton)))return NavIncrementalSingletonRoute.ReadPhysicalBody(reader);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.Field)))return NavSharedTerminalField.ReadPhysicalBody(reader);
             if(tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.SharedConnector)))return NavIncrementalSharedRoute.ReadPhysicalBody(reader);
@@ -355,6 +359,9 @@ namespace Spacewars.Simulation
             if(tag.Key==NavPhysicalValueKind.Long&&tag.Value==NavPhysicalValueKind.GraphArc)return ReadMap<long,NavGraphArc>(tag,reader);
             if(tag.Key==NavPhysicalValueKind.ExactQueueEntry&&tag.Value==NavPhysicalValueKind.Boolean)return ReadMap<NavExactQueueEntry,bool>(tag,reader);
             if(tag.Key==NavPhysicalValueKind.QueueEntry&&tag.Value==NavPhysicalValueKind.Boolean)return ReadMap<NavQueueEntry,bool>(tag,reader);
+            if(tag.Storage==NavPhysicalStorageKind.HostEnvelopePublication&&tag.Key==NavPhysicalValueKind.None&&reader.Extension!=null&&
+                (tag.Value==NavPhysicalValueKind.MotionSourceV1||tag.Value==NavPhysicalValueKind.MotionRecordV1||tag.Value==NavPhysicalValueKind.MotionSourcesV1||tag.Value==NavPhysicalValueKind.MotionEnvelopeV1))
+                return reader.Extension.Read(tag,reader)??throw new ArgumentException("Host BODY extension rejected Native motion tag.");
             if(tag.Value==NavPhysicalValueKind.AccruedAuthorityCreditsV1&&tag.Key==NavPhysicalValueKind.None&&
                 (tag.Storage==NavPhysicalStorageKind.HostRootFairArrivalV1||tag.Storage==NavPhysicalStorageKind.HostEnvelopePublication)&&reader.Extension!=null)
                 return reader.Extension.Read(tag,reader)??throw new ArgumentException("Host BODY extension rejected accrued credit tag.");

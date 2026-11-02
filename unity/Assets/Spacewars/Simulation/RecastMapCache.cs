@@ -61,22 +61,23 @@ namespace Spacewars.Simulation
         internal long FoundationBuilds{get;private set;}internal long FoundationReuses{get;private set;}
         internal long PrepareCount{get;private set;}internal long GeometryDigests{get;private set;}
         private void Check(){if(disposed)throw new ObjectDisposedException(nameof(RecastMapCache));}
-        private void EnsureFoundation(IPlayableTerrain terrain,NavigationProfile profile,INavStorageReservation r,Func<bool> cancelled){
-            Check();if(foundationPayload!=null)NavStorageAdmission.RequireOwned(r,foundationPayload);if(ReferenceEquals(foundationTerrain,terrain))return;
+        private void EnsureFoundation(IPlayableTerrain terrain,NavGeometry geometry,NavigationProfile profile,INavStorageReservation r,Func<bool> cancelled){
+            double halfExtent=terrain?.HalfExtent??geometry?.HalfExtent??throw new ArgumentNullException(nameof(geometry));
+            Check();if(foundationPayload!=null)NavStorageAdmission.RequireOwned(r,foundationPayload);if(foundation!=null&&ReferenceEquals(foundationTerrain,terrain)&&foundation.SupportHalfExtent==halfExtent)return;
             RecastPayload payload=null;NavGeometry nextPublic=null;
             try{
                 // Empty input is public support only. Every overlay later reuses
                 // this exact precedence-clipped authored triangle foundation.
                 using(var input=NavStorageScratch.Reserve(r,8192)){
-                    var empty=new NavGeometry(terrain.HalfExtent,null,terrain.Revision);
+                    var empty=new NavGeometry(halfExtent,null,terrain?.Revision??1);
                     using(var scratch=NavStorageScratch.Reserve(r,RecastAuthorityGeometry.ScratchBound(terrain,empty,true))){
                         var value=RecastAuthorityGeometry.Prepare(terrain,empty,profile,cancelled);GeometryDigests++;
                         payload=RecastPayload.Allocate(r,value.PayloadBytes);payload.Value=value;
                     }
                 }
-                long count=terrain.MovementBlockers.Count();
+                long count=terrain?.MovementBlockers.Count()??geometry.Obstacles.Count;
                 using(var scratch=NavStorageScratch.Reserve(r,checked(4096+512L*count*256))){
-                    var source=new NavGeometry(terrain.HalfExtent,terrain.MovementBlockers.ToArray(),terrain.Revision);
+                    var source=terrain==null?geometry:new NavGeometry(terrain.HalfExtent,terrain.MovementBlockers.ToArray(),terrain.Revision);
                     nextPublic=NavGeometry.CopyOwned(source,r);
                 }
                 foundationPayload?.Dispose();publicGeometry?.StorageRoot.ReleaseOwner();
@@ -85,7 +86,11 @@ namespace Spacewars.Simulation
             }finally{payload?.Dispose();nextPublic?.StorageRoot.ReleaseOwner();}
         }
         internal void PreparePublic(IPlayableTerrain terrain,NavigationProfile profile,INavStorageReservation r,Func<bool> cancelled=null){
-            EnsureFoundation(terrain,profile,r,cancelled);
+            if(terrain==null)throw new ArgumentNullException(nameof(terrain));
+            PreparePublic(terrain,null,profile,r,cancelled);
+        }
+        internal void PreparePublic(IPlayableTerrain terrain,NavGeometry geometry,NavigationProfile profile,INavStorageReservation r,Func<bool> cancelled=null){
+            EnsureFoundation(terrain,geometry,profile,r,cancelled);
             using var pin=Acquire(terrain,publicGeometry,profile,null,r,cancelled);
         }
         private bool PublicEquivalent(NavGeometry geometry){
@@ -99,7 +104,7 @@ namespace Spacewars.Simulation
             if(cancelled?.Invoke()==true)throw new OperationCanceledException();
             // The cheap owner key precedes foundation work, clipping and digest.
             for(var entry=first;entry!=null;entry=entry.Next)if(entry.Matches(terrain,geometry,profile,held)){WarmHits++;return Pin.Acquire(entry);}
-            EnsureFoundation(terrain,profile,r,cancelled);
+            EnsureFoundation(terrain,geometry,profile,r,cancelled);
             if(PublicEquivalent(geometry)){geometry=publicGeometry;held=null;
                 for(var entry=first;entry!=null;entry=entry.Next)if(entry.Matches(terrain,geometry,profile,held)){WarmHits++;return Pin.Acquire(entry);}}
             Entry next=null;RecastPayload payload=null;

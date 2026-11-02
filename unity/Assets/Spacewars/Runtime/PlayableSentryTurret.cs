@@ -91,7 +91,7 @@ namespace Spacewars.Runtime
             var lateral=new BallisticPoint(Math.Sin(s.Heading),0,-Math.Cos(s.Heading));
             var direction=HawkRocketFlight.Add(HawkRocketFlight.Scale(forward,Math.Cos(deviation)),HawkRocketFlight.Scale(lateral,Math.Sin(deviation)));
             projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=b.Id,Target=s.Target,Faction=b.Owner,Kind=PlayableEntityKind.Explorer,
-                Damage=profile.TurretDamage*WeaponMultiplier(b.Owner),Radius=0,Speed=profile.TurretProjectileSpeed,Position=start.Ground,Height=start.Y,Spatial=true,
+                Damage=WeaponDamage(b.Owner,profile.TurretDamage),Radius=0,Speed=profile.TurretProjectileSpeed,Position=start.Ground,Height=start.Y,Spatial=true,
                 DirectionX=direction.X,DirectionY=direction.Y,DirectionZ=direction.Z,Remaining=Math.Max(0,TurretRange*(1+profile.ProjectileExtraRangePercent/100)-Distance(b.Position,start.Ground))});
             s.ShotSequence++;
             Sound(PlayableSoundKind.Shot,b.Position,PlayableEntityKind.Explorer,b.Owner,unitId:b.Id,altitude:start.Y,shotSide:side);

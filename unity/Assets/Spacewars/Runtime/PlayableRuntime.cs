@@ -182,7 +182,7 @@ namespace Spacewars.Runtime
         public static PlayableRuntime CreateLobbyMatch(PlayableProfile profile,long generation,NativeLobbyConfiguration setup,bool startPaused=false,AiProfile aiProfile=null)
         {
             if(setup==null)throw new ArgumentNullException(nameof(setup));setup=setup.Copy();
-            if(profile.AuthoredMap is CrimsonGroveMap||profile.AuthoredMap is WhiteMeridianMap||profile.AuthoredMap is BasaltCrownMap||profile.AuthoredMap is MossHighlandMap)setup.InitializeParticipants();
+            if(profile.AuthoredMap is AntennaCityMap||profile.AuthoredMap is CrimsonGroveMap||profile.AuthoredMap is WhiteMeridianMap||profile.AuthoredMap is BasaltCrownMap||profile.AuthoredMap is MossHighlandMap)setup.InitializeParticipants();
             var error=setup.Validate(profile,true,true);
             if(error!=null)throw new ArgumentException(error,nameof(setup));
             if(profile.AuthoredMap is ThreeCrossingsMap){
@@ -257,6 +257,7 @@ namespace Spacewars.Runtime
             PublishPerformanceQueues();
 #endif
             PublishProvingGroundCosts();
+            Volatile.Write(ref botCameraActivities,domain.BotCameraActivities);
             bool framePaused=publicationPaused??(Volatile.Read(ref paused)!=0);
             PublishSpectatorFrame(status,failure,framePaused);
             if(offlineConfiguration==null)return;var frameMetrics=Metrics(lastCpu,0);var views=new Dictionary<string,PlayableSnapshot>();foreach(var p in offlineConfiguration.Roster)views.Add(p.Id,spectatorFrame!=null?spectatorFrame.Perspective(domain.OwnerFor(p.Id)).WithTeamSignals(domain.ProjectTeamSignals(domain.OwnerFor(p.Id))):domain.PlayerSnapshot(snapshotSequence,status,framePaused,frameMetrics,failure,seed,domain.OwnerFor(p.Id)));OfflineReceipt[] history;long ordinal;lock(gate){history=offlineReceipts.ToArray();ordinal=receiptOrdinal;}Volatile.Write(ref offlineFrame,new OfflinePresentationFrame(views,history,ordinal,offlineFrame));
@@ -403,6 +404,7 @@ namespace Spacewars.Runtime
                 }}
                 try{
                     NavMotionExecutor.Current=null;TerminalAttempt(()=>motionExecutor?.Dispose());
+                    TerminalAttempt(domain.StopCombatMotionAuthority);
                     TerminalAttempt(domain.StopObservedPaths);
                     TerminalAttempt(()=>NavigationBinding?.RoutePort?.CancelCommandPreparation());
                     TerminalAttempt(domain.CancelAllRally);TerminalAttempt(()=>{foreach(var receipt in domain.DrainRallyReceipts())RecordReceipt(receipt);});

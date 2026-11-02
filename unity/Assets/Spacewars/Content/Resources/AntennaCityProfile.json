@@ -1,0 +1,16 @@
+{
+  "id": "antenna-city-greybox-v1",
+  "revision": 3,
+  "scale": 1,
+  "plazaHeight": 4,
+  "blockHeight": 6,
+  "mainStreetWidth": 16,
+  "sideStreetWidth": 12,
+  "baseYardRadius": 18,
+  "outpostYardRadius": 14,
+  "mineYardRadius": 6,
+  "blockGap": 6,
+  "districtPassageWidth": 16,
+  "keyPointPadScale": 0.85,
+  "keyPointPadBorder": 0.8
+}

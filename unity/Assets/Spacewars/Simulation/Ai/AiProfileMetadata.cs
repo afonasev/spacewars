@@ -18,6 +18,23 @@ namespace Spacewars.Simulation.Ai
     public static class AiProfileMetadata
     {
         public static IReadOnlyList<AiProfileField> Fields {get;}=Array.AsReadOnly(new AiProfileField[] {
+            new AiProfileField("safeReinforcements.coreHealthShare","ИИ / Подкрепления","Здоровье боеспособного ядра","Минимальная сумма долей HP ядра относительно обязательного состава армии.","ratio",0.1d,1d,0.05d,0.65d,false),
+            new AiProfileField("safeReinforcements.coreRadius","ИИ / Подкрепления","Радиус живого ядра","Максимальное расстояние бойцов от выбранного центра принимающей группы; рассеянные одиночки не образуют ядро.","m",2d,80d,1d,16d,false),
+            new AiProfileField("safeReinforcements.maximumThreatRatio","ИИ / Подкрепления","Угроза принимающему ядру","Предельное отношение совместимой известной локальной угрозы к боевой силе ядра.","ratio",0.1d,3d,0.05d,1.2d,false),
+            new AiProfileField("activeStrategy.materialCredits","ИИ / Активная стратегия","Существенное вложение","Минимальная оплаченная стоимость полезной стройки, улучшения дохода или активного исследования для ограниченного ожидания основной армии.","credits",1d,2000d,10d,200d,false),
+            new AiProfileField("activeStrategy.developmentSeconds","ИИ / Активная стратегия","Окно полезного развития","Предельное ожидание основной армии; новые покупки не продлевают окно. Разведка и разрешённые фланговые группы продолжают действовать.","s",1d,120d,1d,30d,false),
+            new AiProfileField("activeStrategy.maximumEncounterRatio","ИИ / Активная стратегия","Риск боя с укреплениями","Допустимая известная локальная сила противника относительно силы атакующей группы; совместимость и реальное покрытие башен обязательны.","ratio",0.1d,3d,0.05d,1.2d,false),
+            new AiProfileField("activeStrategy.fortificationWeight","ИИ / Активная стратегия","Цена огневого покрытия","Штраф цели за совместимый локальный огонь известных укреплений; дальние башни не влияют.","weight",0d,10d,0.1d,2d,false),
+            new AiProfileField("activeStrategy.siegeShare","ИИ / Активная стратегия","Дальнобойная поддержка","Минимальная относительная доля Шквалов в наземном составе при доступной известной вооружённой башне после выполнения первых обязательств дебюта.","ratio",0d,1d,0.05d,0.25d,false),
+            new AiProfileField("positionDevelopment.airGroundThreat","ИИ / Развитие позиций","Наземная угроза воздуху","Минимальное число замеченных наземных бойцов для ранней турели воздушного дебюта.","units",1d,30d,1d,4d,true),
+            new AiProfileField("positionDevelopment.localThreatRange","ИИ / Развитие позиций","Локальная угроза позиции","Дальность известных врагов от базы для оценки устойчивости и совместимого покрытия.","m",5d,200d,1d,40d,false),
+            new AiProfileField("positionDevelopment.maximumThreatRatio","ИИ / Развитие позиций","Устойчивость позиции","Максимальное отношение наблюдаемой вражеской силы к своей локальной опоре для новых вложений.","ratio",0.1d,10d,0.1d,2d,false),
+            new AiProfileField("positionDevelopment.towerValue","ИИ / Развитие позиций","Полезность обороны","Множитель ценности полезной оборонительной позиции в общем бюджете.","ratio",0d,10d,0.05d,1.2d,false),
+            new AiProfileField("positionDevelopment.concreteValue","ИИ / Развитие позиций","Ценность бетона","Множитель отдачи здоровья собственной инфраструктуры без военного порога юнитов.","ratio",0d,10d,0.05d,1d,false),
+            new AiProfileField("positionDevelopment.repairHealth","ИИ / Развитие позиций","Порог ухода на ремонт","Доля HP, ниже которой юнит рассматривает доступную незанятую вышку.","ratio",0.05d,0.95d,0.05d,0.55d,false),
+            new AiProfileField("positionDevelopment.repairReturnHealth","ИИ / Развитие позиций","Порог возвращения","Доля HP для возвращения после ремонта, без ожидания идеального полного здоровья.","ratio",0.1d,1d,0.05d,0.85d,false),
+            new AiProfileField("positionDevelopment.repairWaitSeconds","ИИ / Развитие позиций","Предел восстановления","Максимальное время восстановления у вышки до возврата к задачам.","s",1d,120d,1d,20d,false),
+            new AiProfileField("positionDevelopment.investmentHorizonSeconds","ИИ / Развитие позиций","Окупаемость улучшений","Горизонт оценки дохода от улучшения завода после его готовности.","s",10d,600d,5d,180d,false),
             new AiProfileField("openingsMidgame.opening.doubleIncome","ИИ / Дебюты и мидгейм","Активный экономический дебют","Вес открытия с двумя готовыми источниками дохода перед производством; характер не меняет этот вес.","weight",0d,100d,1d,40d,true),
             new AiProfileField("openingsMidgame.opening.greedy","ИИ / Дебюты и мидгейм","Жадный наземный дебют","Вес открытия с тремя готовыми источниками дохода перед Factory.","weight",0d,100d,1d,20d,true),
             new AiProfileField("openingsMidgame.opening.aggressive","ИИ / Дебюты и мидгейм","Агрессивный дебют","Вес открытия с одним доходом и ранним выходом первых двух бойцов.","weight",0d,100d,1d,20d,true),
@@ -76,19 +93,19 @@ namespace Spacewars.Simulation.Ai
             new AiProfileField("openingsMidgame.personality.harassingRetreatRatio","ИИ / Дебюты и мидгейм","Отход харассера","Соотношение наблюдаемой силы противника к собственной для выхода из невыгодного боя.","ratio",0.5d,3d,0.05d,1d,false),
             new AiProfileField("difficulty.recruit.majorArmies","ИИ / Сложность","Максимум основных армий","Потолок major armies; увеличение сверх утверждённого cap запрещено.","groups",1d,2d,1d,2d,true),
             new AiProfileField("difficulty.recruit.decisionSeconds","ИИ / Сложность","Интервал решений","Интервал owner strategic decisions.","s",0.25d,6d,0.05d,3d,false),
-            new AiProfileField("difficulty.recruit.reactionSeconds","ИИ / Сложность","Задержка реакции","Минимальная задержка реакции на новый observed fact.","s",0.1d,5d,0.05d,2d,false),
+            new AiProfileField("difficulty.recruit.reactionSeconds","ИИ / Контроль / Новичок","Нижняя граница реакции","Минимальная задержка реакции на новые наблюдаемые события.","s",0.1d,5d,0.05d,2d,false),
             new AiProfileField("difficulty.recruit.actionsPerDecision","ИИ / Сложность","Команд за решение","Максимум принятых действий за решение; budget независим от игрового дохода.","commands",1d,8d,1d,2d,true),
             new AiProfileField("difficulty.recruit.estimateNoise","ИИ / Сложность","Ошибка оценки","Ограниченный seeded шум оценки полезности, не игровой урон.","ratio",0d,0.5d,0.01d,0.25d,false),
             new AiProfileField("difficulty.recruit.scoutAssignments","ИИ / Сложность","Разведывательных назначений","Число отдельных разведывательных миссий; combat raid требует major army.","assignments",1d,3d,1d,1d,true),
             new AiProfileField("difficulty.fighter.majorArmies","ИИ / Сложность","Максимум основных армий","Потолок major armies; увеличение сверх утверждённого cap запрещено.","groups",1d,3d,1d,3d,true),
             new AiProfileField("difficulty.fighter.decisionSeconds","ИИ / Сложность","Интервал решений","Интервал owner strategic decisions.","s",0.25d,6d,0.05d,1.5d,false),
-            new AiProfileField("difficulty.fighter.reactionSeconds","ИИ / Сложность","Задержка реакции","Минимальная задержка реакции на новый observed fact.","s",0.1d,5d,0.05d,1d,false),
+            new AiProfileField("difficulty.fighter.reactionSeconds","ИИ / Контроль / Боец","Нижняя граница реакции","Минимальная задержка реакции на новые наблюдаемые события.","s",0.1d,5d,0.05d,1d,false),
             new AiProfileField("difficulty.fighter.actionsPerDecision","ИИ / Сложность","Команд за решение","Максимум принятых действий за решение; budget независим от игрового дохода.","commands",1d,8d,1d,3d,true),
             new AiProfileField("difficulty.fighter.estimateNoise","ИИ / Сложность","Ошибка оценки","Ограниченный seeded шум оценки полезности, не игровой урон.","ratio",0d,0.5d,0.01d,0.12d,false),
             new AiProfileField("difficulty.fighter.scoutAssignments","ИИ / Сложность","Разведывательных назначений","Число отдельных разведывательных миссий; combat raid требует major army.","assignments",1d,3d,1d,2d,true),
             new AiProfileField("difficulty.veteran.majorArmies","ИИ / Сложность","Максимум основных армий","Потолок major armies; увеличение сверх утверждённого cap запрещено.","groups",1d,4d,1d,4d,true),
             new AiProfileField("difficulty.veteran.decisionSeconds","ИИ / Сложность","Интервал решений","Интервал owner strategic decisions.","s",0.25d,6d,0.05d,0.5d,false),
-            new AiProfileField("difficulty.veteran.reactionSeconds","ИИ / Сложность","Задержка реакции","Минимальная задержка реакции на новый observed fact.","s",0.1d,5d,0.05d,0.3d,false),
+            new AiProfileField("difficulty.veteran.reactionSeconds","ИИ / Контроль / Ветеран","Нижняя граница реакции","Минимальная задержка реакции на новые наблюдаемые события.","s",0.1d,5d,0.05d,0.4d,false),
             new AiProfileField("difficulty.veteran.actionsPerDecision","ИИ / Сложность","Команд за решение","Максимум принятых действий за решение; budget независим от игрового дохода.","commands",1d,8d,1d,4d,true),
             new AiProfileField("difficulty.veteran.estimateNoise","ИИ / Сложность","Ошибка оценки","Ограниченный seeded шум оценки полезности, не игровой урон.","ratio",0d,0.5d,0.01d,0.04d,false),
             new AiProfileField("difficulty.veteran.scoutAssignments","ИИ / Сложность","Разведывательных назначений","Число отдельных разведывательных миссий; combat raid требует major army.","assignments",1d,3d,1d,3d,true),
@@ -167,7 +184,7 @@ namespace Spacewars.Simulation.Ai
             new AiProfileField("utility.scout.travelCost","ИИ / Оценка целей","Цена пути","Вес нормализованного признака из algorithm-recipes.md.","weight",0d,1d,0.05d,0.2d,false),
             new AiProfileField("utility.scout.riskCost","ИИ / Оценка целей","Цена разведывательного риска","Вес нормализованного признака из algorithm-recipes.md.","weight",0d,1d,0.05d,0.3d,false),
             new AiProfileField("utility.forceHorizonSeconds","ИИ / Оценка силы","Общий горизонт оценки урона","Один горизонт DPS для всех unit kinds/сторон; не собственный reload.","s",1d,30d,1d,5d,false),
-        });
+        }.Concat(AiCombatMicroMetadata.Fields()).ToArray());
         public static AiProfileField Field(string path)=>Fields.Single(f=>f.Path==path);
     }
 }

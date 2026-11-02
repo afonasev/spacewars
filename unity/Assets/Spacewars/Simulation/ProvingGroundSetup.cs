@@ -37,7 +37,8 @@ namespace Spacewars.Simulation
             if(side<0||side>1)return "Неизвестная сторона.";
             double radius=PlayableUnitRules.Radius(Profile,kind);
             if(!PlayableUnitRules.Supported(kind)||double.IsNaN(point.X)||double.IsNaN(point.Z)||Math.Abs(point.X)+radius>=Profile.ArenaHalfExtent||Math.Abs(point.Z)+radius>=Profile.ArenaHalfExtent||(side==0?point.X+radius>0:point.X-radius<0))return "Выберите свободную точку на своей половине.";
-            if(Units.Any(u=>Distance(u.Position,point)<radius+PlayableUnitRules.Radius(Profile,u.Kind)))return "Здесь уже стоит юнит.";
+            if(Units.Any(u=>(u.Kind==PlayableEntityKind.Hawk)==(kind==PlayableEntityKind.Hawk)&&Distance(u.Position,point)<radius+PlayableUnitRules.Radius(Profile,u.Kind)))return "Здесь уже стоит юнит.";
+            if(kind==PlayableEntityKind.Hawk){Units.Add(new OfflineScenarioUnit(side+1,kind,point,side==0?0:Math.PI));return null;}
             foreach(var b in AllBuildings()) {double br=TerritoryRules.Radius(Profile,b.Kind);if(Math.Abs(point.X-b.Position.X)<br+radius&&Math.Abs(point.Z-b.Position.Z)<br+radius)return "Место занято зданием.";}
             double slotRadius=Math.Max(Profile.ScienceFootprintRadius,Math.Max(Profile.FactoryFootprintRadius,Profile.RefineryFootprintRadius));
             if(Profile.AuthoredMap.Sites(Profile).Any(s=>s.Slots.Any(slot=>Distance(slot.Position,point)<slotRadius+radius)))return "Оставьте строительный слот свободным.";
@@ -52,7 +53,7 @@ namespace Spacewars.Simulation
             var pick=options.FirstOrDefault();if(pick==null||Distance(pick.Slot.Position,point)>TerritoryRules.Radius(Profile,kind)+Profile.BuildingPickRadius)return "Выберите строительный слот своей базы.";
             if(Buildings.Any(b=>b.SiteId==pick.Site.Id&&b.SlotId==pick.Slot.Id))return "Слот занят.";
             double br=TerritoryRules.Radius(Profile,kind);
-            if(Units.Any(u=>Math.Abs(u.Position.X-pick.Slot.Position.X)<br+PlayableUnitRules.Radius(Profile,u.Kind)&&Math.Abs(u.Position.Z-pick.Slot.Position.Z)<br+PlayableUnitRules.Radius(Profile,u.Kind)))return "Освободите слот от юнитов.";
+            if(Units.Any(u=>u.Kind!=PlayableEntityKind.Hawk&&Math.Abs(u.Position.X-pick.Slot.Position.X)<br+PlayableUnitRules.Radius(Profile,u.Kind)&&Math.Abs(u.Position.Z-pick.Slot.Position.Z)<br+PlayableUnitRules.Radius(Profile,u.Kind)))return "Освободите слот от юнитов.";
             Buildings.Add(new OfflineScenarioBuilding(side+1,kind,pick.Site.Id,pick.Slot.Id,pick.Slot.Position,pick.Slot.Heading));return null;
         }
         public static readonly PlayableBuildingKind[] Buildable={PlayableBuildingKind.Factory,PlayableBuildingKind.Refinery,PlayableBuildingKind.ScientificCenter,PlayableBuildingKind.Hangar,PlayableBuildingKind.SentryTurret,PlayableBuildingKind.RepairTower,PlayableBuildingKind.GaussTower};

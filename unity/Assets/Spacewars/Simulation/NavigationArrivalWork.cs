@@ -46,6 +46,12 @@ namespace Spacewars.Simulation
             internal KeyValuePair<long,NavArrivalStatus>[] Outcomes;
         }
         private bool boundedCorridorMode;
+        private bool flatIndependentGroupMode;
+        private static bool CertifiedFlat(ILayeredNavigationProvider provider)=>provider is LayeredNavigationProvider flat&&flat.Id=="flat"&&flat.SemanticsVersion==1&&flat.Surfaces.Count==1&&flat.Surfaces[0].Id==NavLocation.FlatSurface&&flat.Portals.Count==0;
+        private static bool FlatIndependentGroup(NavArrivalInput value)=>value.IndependentMembers&&value.Members.Count>0&&value.Members.All(m=>CertifiedFlat(value.WorkingFor(m).Provider));
+        // Unary flat24 is a new input domain of the existing flat policy. Its
+        // preparation member is always zero; existing multi24 keeps its old ordering.
+        private bool flatSingletonPagePolicy=>flatIndependentGroupMode&&members?.Length==1;
         private bool paidPagePolicy;
         private int preparationMember;
         private bool page0OccupancyMode=>historicalState?.Page0Occupancy??false;
@@ -117,7 +123,7 @@ namespace Spacewars.Simulation
         private bool QueryMember=>queryMode&&input.IndependentMembers&&(members.Length==1||groupQueryMode)&&input.WorkingFor(members[memberIndex]).Provider is PartitionNavigationProvider;
         private bool SingletonRequest(ILayeredNavigationProvider provider)
         {
-            if(members.Length!=1)return false;
+            if(members.Length!=1&&!flatIndependentGroupMode)return false;
             if(provider is PartitionNavigationProvider)return !input.IndependentMembers;
             // Each independent N1 subscription already fixes one endpoint. A
             // certified flat request can use the ordinary exact N1 solver
@@ -156,14 +162,15 @@ namespace Spacewars.Simulation
         // ARR1 versions 1..3 reconstruct historical work by its original grants.
         // They must not opt an old saved search into the new query policy.
         internal static NavigationArrivalWork RestoreLegacyJournal(NavArrivalInput input,ReadyCheckpoint ready=null)
-        {var work=ready==null?new NavigationArrivalWork(input):RestoreReady(input,ready);work.queryMode=false;work.groupQueryMode=false;work.demandQueryMode=false;work.SetContinuationPolicy(false);return work;}
+        {var work=ready==null?new NavigationArrivalWork(input):RestoreReady(input,ready);work.flatIndependentGroupMode=false;work.paidPagePolicy=false;work.queryMode=false;work.groupQueryMode=false;work.demandQueryMode=false;work.SetContinuationPolicy(false);return work;}
         private NavigationArrivalWork(NavArrivalInput input, Func<long,bool> reserve, bool birthOnly=false) : base(LayoutBytes)
         {
             this.input = input ?? throw new ArgumentNullException(nameof(input));rootReservation=reserve;physicalLifetime=reserve!=null;
 
+            flatIndependentGroupMode=FlatIndependentGroup(input);
             groupQueryMode=input.IndependentMembers&&input.Members.Count>1&&input.Provider is PartitionNavigationProvider;
             queryMode=groupQueryMode||input.IndependentMembers&&input.Members.Count==1&&input.WorkingFor(input.Members[0]).Provider is PartitionNavigationProvider;
-            paidPagePolicy=reserve!=null&&queryMode;spatialPolicy=reserve!=null&&queryMode;demandQueryMode=queryMode;boundedCorridorMode=groupQueryMode&&input.ArrivalProfile.GroupCorridorMaximumExcessPercent==15;
+            paidPagePolicy=reserve!=null&&queryMode||flatIndependentGroupMode&&input.Members.Count==1;spatialPolicy=reserve!=null&&queryMode;demandQueryMode=queryMode;boundedCorridorMode=groupQueryMode&&input.ArrivalProfile.GroupCorridorMaximumExcessPercent==15;
             using(var allocation=new NavStorageAllocation(reserve)){allocation.Reserve(LayoutBytes);allocation.Register(this);if(!birthOnly)Retain();}
             if(birthOnly)return;
             try{
@@ -186,13 +193,16 @@ namespace Spacewars.Simulation
         }
         private NavigationArrivalWork(NavArrivalInput input, Checkpoint saved) : this(input)
         {
-            paidPagePolicy=saved?.Version==23;spatialPolicy=saved?.Version>=22;
+            try{
+            flatIndependentGroupMode=saved?.Version==24;
+            paidPagePolicy=saved?.Version==23||flatSingletonPagePolicy;spatialPolicy=saved?.Version>=22&&saved?.Version!=24;
             boundedCorridorMode=saved?.BoundedCorridor??false;if(boundedCorridorMode&&input.ArrivalProfile.GroupCorridorMaximumExcessPercent!=15)throw new ArgumentException("Bounded logical profile mismatch.");queryMode=saved?.Version>=3&&saved.QueryMode;groupQueryMode=saved?.Version>=4&&saved.GroupQueryMode;demandQueryMode=saved?.Version>=5&&saved.DemandQueryMode;SetContinuationPolicy(saved?.Version>=6&&saved.DemandContinuationMode,saved?.Version>=7,saved?.Version>=8);if(historicalState!=null){historicalState.Page0Occupancy=saved?.Version>=22?saved.Page0Policy:saved?.Version>=21;historicalState.RectangleOrigins=saved?.Version>=15;historicalState.TerminalRectangle=saved?.Version>=16;historicalState.TerminalCorner=saved?.Version>=17;historicalState.OriginShadow=saved?.Version>=18;historicalState.OwnedArrivalAnchor=saved?.Version>=19;historicalState.TerminalCost=saved?.Version>=20;historicalState.Certified=saved?.Version>=14;historicalState.Lazy=saved?.Version>=13;historicalState.Astar=saved?.Version>=12;historicalState.Exact=saved?.Version>=11;historicalState.SeamBound=saved?.Version>=9&&saved?.Version<11;historicalState.Removal=saved?.Version>=10;}
-            if (saved == null || (saved.Version != 2&&saved.Version!=3&&saved.Version!=4&&saved.Version!=5&&saved.Version!=6&&saved.Version!=7&&saved.Version!=8&&saved.Version!=9&&saved.Version!=10&&saved.Version!=11&&saved.Version!=12&&saved.Version!=13&&saved.Version!=14&&saved.Version!=15&&saved.Version!=16&&saved.Version!=17&&saved.Version!=18&&saved.Version!=19&&saved.Version!=20&&saved.Version!=21&&saved.Version!=22&&saved.Version!=23) || saved.Version>=6&&(!saved.DemandContinuationMode||!saved.DemandQueryMode) || saved.Version<6&&saved.DemandContinuationMode || saved.Version>=5&&!saved.DemandQueryMode || saved.Version<5&&saved.DemandQueryMode || saved.Version==4&&(!saved.GroupQueryMode||!saved.QueryMode) || saved.Version<4&&saved.GroupQueryMode || saved.InputKey != input.StableKey ||
+            if (saved == null || (saved.Version != 2&&saved.Version!=3&&saved.Version!=4&&saved.Version!=5&&saved.Version!=6&&saved.Version!=7&&saved.Version!=8&&saved.Version!=9&&saved.Version!=10&&saved.Version!=11&&saved.Version!=12&&saved.Version!=13&&saved.Version!=14&&saved.Version!=15&&saved.Version!=16&&saved.Version!=17&&saved.Version!=18&&saved.Version!=19&&saved.Version!=20&&saved.Version!=21&&saved.Version!=22&&saved.Version!=23&&saved.Version!=24) || saved.Version>=6&&saved.Version!=24&&(!saved.DemandContinuationMode||!saved.DemandQueryMode) || saved.Version<6&&saved.DemandContinuationMode || saved.Version>=5&&saved.Version!=24&&!saved.DemandQueryMode || saved.Version<5&&saved.DemandQueryMode || saved.Version==4&&(!saved.GroupQueryMode||!saved.QueryMode) || saved.Version<4&&saved.GroupQueryMode || saved.InputKey != input.StableKey ||
                 saved.PageStarts == null || saved.PageCounts == null || !saved.PageStarts.SequenceEqual(pageStarts) ||
                 !saved.PageCounts.SequenceEqual(pageCounts) || saved.Phase < 0 || saved.Phase > (int)Phase.Finished ||
                 saved.MemberIndex < 0 || saved.MemberIndex > members.Length || saved.PageIndex < 0 || saved.PageIndex > pageStarts.Length)
                 throw new ArgumentException("Invalid or stale arrival checkpoint.");
+            if(flatIndependentGroupMode&&(!FlatIndependentGroup(input)||queryMode||groupQueryMode||demandQueryMode||saved.DemandContinuationMode||boundedCorridorMode||saved.Page0Policy))throw new ArgumentException("Ineligible flat independent group checkpoint.");
             if(saved.Version==21&&(!queryMode||!demandQueryMode||!input.IndependentMembers||groupQueryMode!=(input.Members.Count>1)||!(input.Provider is PartitionNavigationProvider)))throw new ArgumentException("Ineligible page0 occupancy checkpoint.");
             lastEpoch = saved.LastEpoch; allocationRemaining = saved.AllocationRemaining;
             AllocationWorkConsumed = saved.AllocationWorkConsumed; CandidateWorkConsumed = saved.CandidateWorkConsumed;
@@ -230,9 +240,10 @@ namespace Spacewars.Simulation
                 if (row == null) throw new ArgumentException("Unknown arrival route checkpoint.");
                 AcceptCompletion(row,result.Status,result.Route);
             }
-            scheduler.ReleaseOwner();scheduler = LayeredNavigationScheduler.Restore(saved.Scheduler, pageRequests.Select(x => x.Request),input.WorkingBindings.Select(b=>b.Provider).Concat(new[]{input.Provider}));
+            var previousScheduler=scheduler;scheduler=null;previousScheduler.ReleaseOwner();scheduler = LayeredNavigationScheduler.Restore(saved.Scheduler, pageRequests.Select(x => x.Request),input.WorkingBindings.Select(b=>b.Provider).Concat(new[]{input.Provider}));
             scheduler.SessionOwnsProviders=saved.SessionProviders;authorityReservationBase=saved.AuthorityBase;RestoreHistorical(saved);RestoreSpatial(saved.Spatial);
             if(scheduler.AttemptBinding!=(input.IndependentMembers?input.StableKey:null))throw new ArgumentException("Stale allocation attempt artifact owner.");
+            }catch{ReleaseOwner();throw;}
         }
 
         public NavArrivalStatus Status { get; private set; }
@@ -348,7 +359,7 @@ namespace Spacewars.Simulation
                         SpendOccupancy();
                         if (occupantCursor < input.Occupancy.Occupants.Count) {
                             var occupant = input.Occupancy.Occupants[occupantCursor];
-                            if (occupant.BlocksPlacement && TooClose(candidate.Position, members[memberIndex].Radius,
+                            if (occupant.BlocksFor(members[memberIndex],input.Occupancy.Generation) && TooClose(candidate.Position, members[memberIndex].Radius,
                                 occupant.Location.Position, occupant.Radius)) candidateBlocked = true;
                         } else {
                             var assigned = assignments[occupantCursor - input.Occupancy.Occupants.Count];
@@ -375,7 +386,7 @@ namespace Spacewars.Simulation
                     AddRequestRow(candidateIndex,request);
                     memberRouteCount++;
                     AdvanceCandidate();
-                    if(QueryMember)phase=Phase.SolvePage;
+                    if(QueryMember||flatIndependentGroupMode)phase=Phase.SolvePage;
                     continue;
                     }finally{request.StorageRoot?.Release();}
                 }
@@ -424,7 +435,7 @@ namespace Spacewars.Simulation
                             NextMember(); continue;
                         }
                         ClearPageRows();
-                        if(QueryMember&&candidateCursor<preparedClearances[WorkingKey(members[memberIndex])].CandidateIndices[pageIndex].Count){phase=Phase.ScanCandidates;continue;}
+                        if((QueryMember||flatIndependentGroupMode)&&candidateCursor<preparedClearances[WorkingKey(members[memberIndex])].CandidateIndices[pageIndex].Count){phase=Phase.ScanCandidates;continue;}
                         if(page0Only){page0Boundary=true;Status=NavArrivalStatus.BudgetExhausted;break;}NextPage(); continue;
                     }
                     if (allocationRemaining == 0) { Status = NavArrivalStatus.BudgetExhausted; break; }
@@ -521,7 +532,7 @@ namespace Spacewars.Simulation
 
         public Checkpoint Save()
         {
-            var checkpoint = new Checkpoint { BoundedCorridor=boundedCorridorMode,Page0Policy=page0OccupancyMode, Spatial=SaveSpatial(),Version = paidPagePolicy?23:spatialPolicy?22:page0OccupancyMode?21:terminalCostMode?20:ownedArrivalAnchorMode?19:originShadowMode?18:terminalCornerMode?17:terminalRectangleMode?16:rectangleOriginsMode?15:certifiedMode?14:lazyMode?13:astarMode?12:exactCostMode?11:removalMode?10:seamBoundMode?9:occupancyPrefixMode?8:demandV3Mode?7:demandContinuationMode?6:demandQueryMode?5:groupQueryMode?4:queryMode?3:2, DemandQueryMode=demandQueryMode,DemandContinuationMode=demandContinuationMode, QueryMode=queryMode,GroupQueryMode=groupQueryMode, InputKey = input.StableKey,SessionProviders=scheduler.SessionOwnsProviders,AuthorityBase=authorityReservationBase, LastEpoch = lastEpoch,
+            var checkpoint = new Checkpoint { BoundedCorridor=boundedCorridorMode,Page0Policy=page0OccupancyMode, Spatial=SaveSpatial(),Version = flatIndependentGroupMode?24:paidPagePolicy?23:spatialPolicy?22:page0OccupancyMode?21:terminalCostMode?20:ownedArrivalAnchorMode?19:originShadowMode?18:terminalCornerMode?17:terminalRectangleMode?16:rectangleOriginsMode?15:certifiedMode?14:lazyMode?13:astarMode?12:exactCostMode?11:removalMode?10:seamBoundMode?9:occupancyPrefixMode?8:demandV3Mode?7:demandContinuationMode?6:demandQueryMode?5:groupQueryMode?4:queryMode?3:2, DemandQueryMode=demandQueryMode,DemandContinuationMode=demandContinuationMode, QueryMode=queryMode,GroupQueryMode=groupQueryMode, InputKey = input.StableKey,SessionProviders=scheduler.SessionOwnsProviders,AuthorityBase=authorityReservationBase, LastEpoch = lastEpoch,
                 AllocationWorkConsumed = AllocationWorkConsumed, CandidateWorkConsumed = CandidateWorkConsumed,
                 OccupancyWorkConsumed = OccupancyWorkConsumed, DirectWorkConsumed=DirectWorkConsumed,
                 AllocationRemaining = allocationRemaining, MemberIndex = memberIndex, PageIndex = pageIndex,
@@ -546,6 +557,7 @@ namespace Spacewars.Simulation
             => new NavigationArrivalWork(exactInputs, RebindLogical(exactInputs,checkpoint));
 
         internal string LogicalContinuationBinding => restoredReady?.Continuation??NavContract.StreamingDigest(w=>{
+            if(flatIndependentGroupMode)w.Write("flat-independent-group-v1");
             if(paidPagePolicy){w.Write("paid-candidate-pages-v1");w.Write(preparationMember);foreach(var entry in preparedClearances.OrderBy(e=>e.Key.Value,StringComparer.Ordinal)){w.Write(entry.Key.Value);for(int page=0;page<pageStarts.Length;page++){var row=entry.Value.CandidateIndices[page];w.Write(row!=null);if(row!=null){w.Write(row.Count);foreach(int raw in row)w.Write(raw);w.Write(entry.Value.Regions[page]?.StableKey??"");}}}}
             if(spatialPolicy){w.Write("paid-spatial-arrival-v1");WriteSpatialScalars(w);foreach(int v in spatialHeads)w.Write(v);foreach(int v in spatialLinks)w.Write(v);}
             if(boundedCorridorMode)w.Write("certified-group-arrival115-v1");

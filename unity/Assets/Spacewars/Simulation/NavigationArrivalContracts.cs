@@ -74,6 +74,12 @@ namespace Spacewars.Simulation
         public string Identity { get; } public NavArrivalReservationKind? ReservationKind { get; }
         public long RequestSequence { get; } public long HistoricalExecution { get; } public NavLocation? ActorTarget { get; private set; }
         public string StableKey { get; }
+        // The old installed target stays reserved for every other actor. Only
+        // this exact incarnation's strictly newer request supersedes it locally.
+        internal bool BlocksFor(NavArrivalMember member,long generation)
+            => BlocksPlacement && !(member!=null && member.WorldGeneration==generation &&
+                Kind==NavArrivalOccupantKind.InstalledReservation && ReservationKind==NavArrivalReservationKind.InstalledExecution &&
+                ActorId==member.EntityId && Incarnation==member.Incarnation && HistoricalExecution<member.RequestSequence);
     }
 
     public sealed partial class NavArrivalOccupancySnapshot
@@ -92,6 +98,19 @@ namespace Spacewars.Simulation
         }
         public long Generation { get; } public IReadOnlyList<NavArrivalOccupant> Occupants { get; }
         public string StableKey { get; }
+        // Existing paid historical-member guard: bounded binary lookup in the
+        // canonical ActorId/Kind ordering, never an uncharged occupancy scan.
+        internal bool PreservesRequestRebind(NavArrivalMember before,NavArrivalMember after)
+        {
+            if(before.RequestSequence==after.RequestSequence)return true;
+            int lo=0,hi=rows.Length;
+            while(lo<hi){int mid=lo+(hi-lo)/2;var row=rows[mid];
+                if(row.ActorId<before.EntityId || row.ActorId==before.EntityId && row.Kind<NavArrivalOccupantKind.InstalledReservation)lo=mid+1;else hi=mid;
+            }
+            if(lo==rows.Length || rows[lo].ActorId!=before.EntityId || rows[lo].Kind!=NavArrivalOccupantKind.InstalledReservation)return true;
+            if(lo+1<rows.Length && rows[lo+1].ActorId==before.EntityId && rows[lo+1].Kind==NavArrivalOccupantKind.InstalledReservation)return false;
+            return rows[lo].BlocksFor(before,Generation)==rows[lo].BlocksFor(after,Generation);
+        }
     }
 
     public sealed partial class NavArrivalCandidateSource

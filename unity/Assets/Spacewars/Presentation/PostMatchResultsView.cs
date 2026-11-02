@@ -69,11 +69,11 @@ namespace Spacewars.Presentation
             var column=new VisualElement();column.style.flexGrow=1;column.style.flexBasis=Length.Percent(48);column.style.minWidth=270;column.style.minHeight=0;column.style.marginRight=8;parent.Add(column);
             var selector=new DropdownField("Игрок",Result.Players.Select(playerName).ToList(),logSlots[side]){name="result-log-player-"+side};column.Add(selector);
             var player=Result.Players[logSlots[side]];selector.style.color=playerColor(player);
-            var toggle=new Toggle("Решения ИИ"){value=aiLogs[side],name="result-ai-log-"+side};toggle.style.display=player.IsAi?DisplayStyle.Flex:DisplayStyle.None;column.Add(toggle);
+            var toggle=new Toggle("Решения ИИ"){value=aiLogs[side],name="result-ai-log-"+side};ConfigureFilterToggle(toggle,OrbitalTheme.Ink);toggle.style.display=player.IsAi?DisplayStyle.Flex:DisplayStyle.None;column.Add(toggle);
             var scroll=OrbitalTheme.Scroll();scroll.style.flexGrow=1;scroll.style.minHeight=0;column.Add(scroll);
             void Render(){scroll.Clear();foreach(var f in Result.Facts.Where(f=>f.Owner==player.Owner&&(f.Kind==MatchFactKind.UnitOrdered||f.Kind==MatchFactKind.BuildingOrdered||f.Kind==MatchFactKind.RefineryUpgradeOrdered||f.Kind==MatchFactKind.ResearchOrdered||player.IsAi&&aiLogs[side]&&f.Kind==MatchFactKind.AiDecision)).OrderBy(f=>f.Tick).ThenBy(f=>f.Sequence)){var entry=Row();entry.name="result-log-event-"+f.Sequence;entry.style.alignItems=Align.Center;
                 entry.Add(Text(TimeLabel(f.Seconds)+"   ",14,OrbitalTheme.Muted));
-                if(f.Kind==MatchFactKind.AiDecision)entry.Add(Text(factIcon(f)+"   ",14,OrbitalTheme.Cyan));else{var icon=MakeEventIcon(f,25);icon.style.marginRight=4;entry.Add(icon);}
+                if(f.Kind==MatchFactKind.AiDecision)entry.Add(Text(factIcon(f)+"   ",14,OrbitalTheme.Cyan));else{var icon=MakeEventIcon(f,25,true,includeOrders:true);icon.style.marginRight=4;entry.Add(icon);}
                 var description=Text(factName(f),14,f.Kind==MatchFactKind.AiDecision?OrbitalTheme.Cyan:OrbitalTheme.Ink);description.style.whiteSpace=WhiteSpace.Normal;description.style.flexShrink=1;entry.Add(description);entry.style.paddingTop=8;entry.style.paddingBottom=8;entry.style.borderBottomWidth=1;entry.style.borderBottomColor=OrbitalTheme.Line;scroll.Add(entry);}if(scroll.childCount==0)scroll.Add(Text("Нет заказанных действий",13,OrbitalTheme.Muted));}
             toggle.RegisterValueChangedCallback(e=>{aiLogs[side]=e.newValue;Render();});selector.RegisterValueChangedCallback(_=>{logSlots[side]=selector.index;ShowTab(2);});Render();
         }
@@ -85,7 +85,11 @@ namespace Spacewars.Presentation
             if(fact.Kind==MatchFactKind.BuildingCompleted||fact.Kind==MatchFactKind.BuildingOrdered||fact.Kind==MatchFactKind.BuildingLost||fact.Kind==MatchFactKind.BuildingSold)return OfflinePadWorldActions.Name((PlayableBuildingKind)fact.EntityKind);
             if(fact.Kind!=MatchFactKind.AiDecision)return fact.Name;
             switch((MatchAiDecisionKind)fact.EntityKind){
-                case MatchAiDecisionKind.Opening:return "Стартовый план: "+new[]{"безопасное развитие","экономическое развитие","захват шахты","танковая атака","атака исследователями","две шахты и исследователи"}[(int)fact.Value];
+                case MatchAiDecisionKind.Opening:return "Стартовый план: "+((PlayableAiOpening)(int)fact.Value switch {
+                    PlayableAiOpening.Safe=>"безопасное развитие",PlayableAiOpening.GreedySafe=>"экономическое развитие",
+                    PlayableAiOpening.GreedyMine=>"захват шахты",PlayableAiOpening.BlindRush=>"танковая атака",
+                    PlayableAiOpening.ExplorerAllIn=>"атака исследователями",PlayableAiOpening.DoubleMineExplorerRush=>"две шахты и исследователи",
+                    PlayableAiOpening.Air=>"воздушная атака",_=>"неизвестный план ("+fact.Value.ToString("0")+")"});
                 case MatchAiDecisionKind.OpeningCompleted:return "Стартовый план завершён";
                 case MatchAiDecisionKind.OpeningAborted:return "Стартовый план прерван";
                 case MatchAiDecisionKind.Strategy:return "Стратегия: "+new[]{"массовый штурм","контроль карты","рейды"}[(int)fact.Value];

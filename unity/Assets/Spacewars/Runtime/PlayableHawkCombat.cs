@@ -6,7 +6,7 @@ namespace Spacewars.Runtime
     internal sealed partial class PlayableDomain
     {
         // Authored model extent from design/hawk/model-manifest.json; not a balance knob.
-        private double HawkBodyHeight=>1.8145018368959427*profile.HawkModelScale;
+        private double HawkBodyHeight=>PlayableUnitRules.HawkBodyHeight(profile);
         private bool AirTarget(int id)=>units.TryGetValue(id,out var u)&&u.Air!=null;
         private double TargetHeight(int id,NavPoint point)=>units.TryGetValue(id,out var u)&&u.Air!=null?u.Air.Height+HawkBodyHeight/2:GroundHeight(point)+DirectFireHeight;
         private double ExplorerPitch(Unit u)
@@ -100,7 +100,7 @@ namespace Spacewars.Runtime
             double muzzleOffset=HawkRocketFlight.Length(HawkRocketFlight.Sub(start,origin));
             double lifetime=Math.Max(0,profile.HawkRange*(1+profile.ProjectileExtraRangePercent/100)-muzzleOffset)/profile.HawkMissileSpeed;
             if(lifetime<=0)return;
-            projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=u.Id,Target=target,Faction=u.Owner,Kind=PlayableEntityKind.Hawk,Damage=profile.HawkDamage*WeaponMultiplier(u.Owner),Radius=profile.HawkMissileRadius,Speed=profile.HawkMissileSpeed,Position=start.Ground,Height=start.Y,Spatial=true,DirectionX=normalized.X,DirectionY=normalized.Y,DirectionZ=normalized.Z,
+            projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=u.Id,Target=target,Faction=u.Owner,Kind=PlayableEntityKind.Hawk,Damage=WeaponDamage(u.Owner,profile.HawkDamage),Radius=profile.HawkMissileRadius,Speed=profile.HawkMissileSpeed,Position=start.Ground,Height=start.Y,Spatial=true,DirectionX=normalized.X,DirectionY=normalized.Y,DirectionZ=normalized.Z,
                 Hawk=new HawkRocketFlight(target,start,direction,profile.HawkMissileSpeed,HawkSalvo(u.Owner)?profile.HawkMissileTurn:0,lifetime)});
             RememberDefaultShot(u);Sound(PlayableSoundKind.Shot,n.Position,u.Kind,u.Owner,unitId:u.Id,altitude:u.Air.Height,shotSide:side);
         }
@@ -117,7 +117,7 @@ namespace Spacewars.Runtime
             var tangent=HawkRocketFlight.Normal(HawkRocketFlight.Sub(axis,HawkRocketFlight.Scale(direction,HawkRocketFlight.Dot(axis,direction))));
             direction=HawkRocketFlight.Add(HawkRocketFlight.Scale(direction,Math.Cos(spread)),HawkRocketFlight.Scale(tangent,Math.Sin(spread)));
             double offset=profile.ExplorerMuzzleOffset;start=HawkRocketFlight.Add(start,HawkRocketFlight.Scale(direction,offset));
-            projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=u.Id,Target=u.Target,Faction=u.Owner,Kind=u.Kind,Damage=profile.ExplorerDamage*WeaponMultiplier(u.Owner),Radius=0,Speed=profile.ExplorerProjectileSpeed,Position=start.Ground,Height=start.Y,Spatial=true,DirectionX=direction.X,DirectionY=direction.Y,DirectionZ=direction.Z,
+            projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=u.Id,Target=u.Target,Faction=u.Owner,Kind=u.Kind,Damage=WeaponDamage(u.Owner,profile.ExplorerDamage),Radius=0,Speed=profile.ExplorerProjectileSpeed,Position=start.Ground,Height=start.Y,Spatial=true,DirectionX=direction.X,DirectionY=direction.Y,DirectionZ=direction.Z,
                 Remaining=Math.Max(0,profile.ExplorerRange*(1+profile.ProjectileExtraRangePercent/100)-offset)});
             Sound(PlayableSoundKind.Shot,from,u.Kind,u.Owner);
         }

@@ -19,6 +19,9 @@ namespace Spacewars.Runtime
     }
     public sealed partial class NavigationSession : INavCrowdStorageSource
     {
+#if UNITY_INCLUDE_TESTS
+        internal Action BeforeCrowdBirthPublicationForTests;
+#endif
         internal static long BirthHeadroom(int actors)
         {
             int count=checked(actors+1);
@@ -47,6 +50,9 @@ namespace Spacewars.Runtime
                         candidate.Spatial=NavCrowdSpatialStorage.Create(checked(count+1),reservation.TryReserve);
                         if(backing!=null)candidate.Names=CaptureCrowdNameReferences(reservation,prospective:candidate.Actor.Unit);
                         scope.Attach(candidate);var actor=candidate.Actor.Unit;
+#if UNITY_INCLUDE_TESTS
+                        BeforeCrowdBirthPublicationForTests?.Invoke();
+#endif
                         scope.Publish(candidate,_=>{using(EnterTransport()){
                             scope.AssertOwnerLive();ValidateSource();
                             if(scope.IsCancelled||scope.Owner!=Generation||scope.Publication!=publication||authorityOperationIdentity==long.MaxValue)throw new InvalidOperationException("Actor birth scope changed.");
@@ -63,7 +69,19 @@ namespace Spacewars.Runtime
                         }});
                         scope.ResolveCommitted();return actor;
                     }finally{retiredSpatial?.Release();retiredNames?.Release();candidate?.ReleaseStorage();}
-                    void ValidateSource(){if(!ReferenceEquals(budget,physicalHostBudget)||generation!=Generation||publication!=admissionPublicationIdentity||operation!=authorityOperationIdentity||!ReferenceEquals(source,Crowd)||membership!=source.MotionMembership||!ReferenceEquals(observedProfile,source.Profile)||!ReferenceEquals(observedGeometry,source.Geometry)||!ReferenceEquals(oldSpatial,source.SpatialStorage)||!ReferenceEquals(backing,groupCommandBacking)||!ReferenceEquals(oldNames,groupCommandBacking?.CrowdNames)||!ReferenceEquals(authority,authorityOwners)||!ReferenceEquals(admission,admissionOwner)||!ReferenceEquals(worker,certifiedHost)||attachment!=certifiedHostAttachmentIdentity||source.TryGet(id,out _))throw new InvalidOperationException("Actor birth authoritative source changed.");}
+                    void ValidateSource()
+                    {
+                        if(!ReferenceEquals(budget,physicalHostBudget)||generation!=Generation||!ReferenceEquals(source,Crowd)||membership!=source.MotionMembership||
+                            !ReferenceEquals(observedProfile,source.Profile)||!ReferenceEquals(observedGeometry,source.Geometry)||!ReferenceEquals(oldSpatial,source.SpatialStorage)||
+                            !ReferenceEquals(worker,certifiedHost)||attachment!=certifiedHostAttachmentIdentity||source.TryGet(id,out _))
+                            throw new InvalidOperationException("Actor birth owner or crowd source changed.");
+                        // The route host can legitimately publish between birth preparation
+                        // and its atomic transfer. Refuse the complete stale candidate;
+                        // production retries the same paid release on a later owner tick.
+                        if(publication!=admissionPublicationIdentity||operation!=authorityOperationIdentity||!ReferenceEquals(backing,groupCommandBacking)||
+                            !ReferenceEquals(oldNames,groupCommandBacking?.CrowdNames)||!ReferenceEquals(authority,authorityOwners)||!ReferenceEquals(admission,admissionOwner))
+                            throw new NavigationCommandRefused("Actor birth authoritative source changed.",NavigationCommandRefused.Cause.ReadsetChanged);
+                    }
                 }
             }finally{backing?.Release();oldNames?.Release();authority?.Release();admission?.Release();oldSpatial?.Release();location.NameReference.Owner?.Release();}
         }

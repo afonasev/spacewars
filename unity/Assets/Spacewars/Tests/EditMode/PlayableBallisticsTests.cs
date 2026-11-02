@@ -53,7 +53,7 @@ namespace Spacewars.Tests.EditMode
         [Test]public void TargetingUsesLexicalTiePositiveScoreAndMovingFriendlyForecast()
         {
             var own=Body(1,0,0,PlayableOwner.Player);var a=Body(10,10,3);var b=Body(2,10,-3);
-            int Pick(BallisticBody[] bodies)=>PlayableBallistics.BestTarget(default,PlayableOwner.Player,13,1.15,4,12,.09,1.4,10,2,Array.Empty<NavObstacle>(),1.74,bodies);
+            int Pick(BallisticBody[] bodies)=>PlayableBallistics.BestTarget(default,PlayableOwner.Player,13,1.15,4,12,.09,1.4,10,2,Array.Empty<NavObstacle>(),1.74,bodies,source:own.Id);
             Assert.AreEqual(10,Pick(new[]{own,b,a}));Assert.AreEqual(10,Pick(new[]{own,a,b}));
             var ally=Body(7,10,3,PlayableOwner.Player);Assert.AreEqual(2,Pick(new[]{own,a,b,ally}));Assert.Zero(Pick(new[]{own,a,ally}));
             double duration=new BallisticFlight(new BallisticPoint(0,1.15,0),new BallisticPoint(10,0,0),4,12).Duration;

@@ -1,0 +1,1255 @@
+{
+  "aliases": [
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorerUpgraded/far/mesh-000.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorer/far/mesh-000.asset",
+      "sha256": "452b8298524323e87b5ab1ff555f5020bf627442bd888235ef578281ed1bbc74",
+      "bytes": 261966,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "8aa9f261164224d68925b74e4d88c32d",
+      "target_guid": "f78b887576fa84ed29c7b36ca732560f"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorerUpgraded/far/mesh-001.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorer/far/mesh-001.asset",
+      "sha256": "c88f854ed7b95044ecf9f2141ce3b1b6eeced8cb1822cc92158066dc6580d296",
+      "bytes": 520751,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "4ca17d762ec364e548b1a40fd28492a0",
+      "target_guid": "7c828b16238fd4b66bb362abf452c811"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorerUpgraded/far/mesh-002.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorer/far/mesh-002.asset",
+      "sha256": "3c877fc4b443821146d6350f833d2cf2cfa45d3934148e930e704ea9e8878c81",
+      "bytes": 15423,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "0a76b9b39df9d4fcab0b085a8a6c8905",
+      "target_guid": "bc1ae0bf1e8c041729263523fd0fbbc3"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorerUpgraded/far/mesh-003.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorer/far/mesh-003.asset",
+      "sha256": "4c318b62facfc99d5fee7b1b7a8048cde0b00292370d2fdcf13900d36f9e091e",
+      "bytes": 65592,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "211ee5c211ac64c6a9b0932b8ece61df",
+      "target_guid": "03c00e141a82d44f79fa41fc10ec364c"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorerUpgraded/normal/mesh-000.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorer/normal/mesh-000.asset",
+      "sha256": "25a8ec1fad57b29a97d562ce1afce98354db3a0156e24ecd2ef3a4fc22144f10",
+      "bytes": 312584,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "651f9c21de614474daefe8d5d9a83f12",
+      "target_guid": "7319a6e7b3c7b4856bdaa0fea4285655"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorerUpgraded/normal/mesh-001.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorer/normal/mesh-001.asset",
+      "sha256": "2ca736d83f36d9c1f8cb45ed1d891200f13876d3233d60cb2f7dbbf29bcdf982",
+      "bytes": 458194,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "a472d5345a21b4785960d9f64ff49e46",
+      "target_guid": "5a822bc3f24b340608180bac5b912c6e"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorerUpgraded/normal/mesh-002.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorer/normal/mesh-002.asset",
+      "sha256": "b3cc093b6ccdb1172a7f8a1f035c7e250feb43706eb5f51c2870bae5a02df7bb",
+      "bytes": 18614,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "b9a77a63b1c2c45249db4109965d7df3",
+      "target_guid": "2f75d5befc7bd46cebde7fc980db9c13"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorerUpgraded/normal/mesh-003.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/explorer/normal/mesh-003.asset",
+      "sha256": "e3613dba013d928363c8adbe049af2cf06adae6f2aa9e410bd4385a81aa9b1cc",
+      "bytes": 122899,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "3ed79b1331cc442f0a9aafa68f47d62f",
+      "target_guid": "f5d535c8c504c4da5ab8368f3b6914ab"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/gauss-tower/normal/mesh-000.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/gauss-tower/far/mesh-000.asset",
+      "sha256": "556cb35db61d722de02cb778dd95b538c6814247c96209958b5de073d930afde",
+      "bytes": 6836,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "33df28c841f1f4976ac083743c776108",
+      "target_guid": "50559ac926b284ef6ab3a506ed62a1d2"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/gauss-tower/normal/mesh-001.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/gauss-tower/far/mesh-001.asset",
+      "sha256": "18be9a2417ed209b7f3ad00d91e4162e8f74f85680fff478e9e0168786ba28d0",
+      "bytes": 16872,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "11aa851a0345441ec890bac8c76d0251",
+      "target_guid": "9e53444a0159e44bdb5ff082733731de"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/gauss-tower/normal/mesh-003.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/gauss-tower/far/mesh-003.asset",
+      "sha256": "38f5c97a9c71076433e6aa37433f441609151fdd4aaec1aa3c3e27dcd6295d0b",
+      "bytes": 13556,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "4e3b7d445d76a4546a90c4c4104716c4",
+      "target_guid": "b1407711106334b3b90f7e1be810598f"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/gauss-tower/normal/mesh-004.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/gauss-tower/far/mesh-004.asset",
+      "sha256": "f46e452c33b5962c75331b91a02f5adff295fc2c21946a78956422745e3566ff",
+      "bytes": 6819,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "e9fe6570b6cad43cfbe9296fee98ed30",
+      "target_guid": "8f44aa7df2b1d46d2bd30c572643d9fe"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/gauss-tower/normal/mesh-005.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/gauss-tower/far/mesh-005.asset",
+      "sha256": "0203b6e1d1f22ed09fdb01c87700e594fe1fe4a1abb0dae4f2ab16428d376a47",
+      "bytes": 11860,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "082b721deab714916af1df94d8753c0c",
+      "target_guid": "b1b250068d4f64058805982ce6e6911b"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/gauss-tower/normal/mesh-011.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/gauss-tower/far/mesh-011.asset",
+      "sha256": "f78679e45249dff859d06ba36dfd763aaa0c6ce364a767082b9ef8f9d0c4c24d",
+      "bytes": 6819,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "91073871d8cb94399bb60611909b0262",
+      "target_guid": "8c963f1f462a947fd857e20c334e9753"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/gauss-tower/normal/mesh-012.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/gauss-tower/far/mesh-012.asset",
+      "sha256": "f4633a02b1ac391b6d8759d66ba5e1900b0752cdce98cb0078f6e16c54692b24",
+      "bytes": 16868,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "85e8480bbb92a4883976ef3942308312",
+      "target_guid": "c868d1b4894534b289ec7d4d06a8a192"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/normal/mesh-000.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/far/mesh-000.asset",
+      "sha256": "3331cd29c72c87681e703a07dac7ebc202e1ff5bafa47ae1f45c5b639b1419eb",
+      "bytes": 349138,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "1eb7eb80b89e44794b04a557f47ee397",
+      "target_guid": "0e4985d81f07c443a973426204ab1652"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/normal/mesh-002.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/far/mesh-002.asset",
+      "sha256": "f9ba4c7edbe46499e1474eee57d5698aac64c81bf720a141cd943ac858f536c6",
+      "bytes": 104279,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "00a6e55e766974da09b1bd4d8ba61ec4",
+      "target_guid": "66a3bc72a96b34126be3524c30c3cf64"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/normal/mesh-005.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/far/mesh-005.asset",
+      "sha256": "3c475b6044bd54d14675f14b2a69a014886aeb113fd9ed408368283d90039011",
+      "bytes": 15489,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "61ec18c496f0e4078802d0a667d70a92",
+      "target_guid": "4b5cc8d0719c74cda80495b5e47a45eb"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/normal/mesh-006.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/far/mesh-006.asset",
+      "sha256": "efed6cf5f80affcac7ebfc1e38c81d70a349d1653170652df68b19449cd27dda",
+      "bytes": 15489,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "10a329777b9784e9882f8ae3624537c1",
+      "target_guid": "f11b9288c29df46a6b79b0b81a63fd0f"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/normal/mesh-007.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/far/mesh-007.asset",
+      "sha256": "f114a67093faad2d43516cd80e1b54d325691256ce1e173b5a2b1d1aeb5e4a3d",
+      "bytes": 15489,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "1db94324a67ea481d8b4b33e3d3dba14",
+      "target_guid": "1e3dddad23c544415be1aea1c058a938"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/normal/mesh-008.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/far/mesh-008.asset",
+      "sha256": "5391af8e8c7b880f65c6bcbb30c11136208894794cd6b999e0bb8984d721ac01",
+      "bytes": 15491,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "70779ac266030484a8d7f2f4e67326df",
+      "target_guid": "f86b3a17a21074e5f8b9c81c649e0e14"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/normal/mesh-009.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/far/mesh-009.asset",
+      "sha256": "8340a40695befdeec961b97b78d2550f1e5a2b680f0a00bdd22212a2f71de31b",
+      "bytes": 15491,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "6c60182ee6a4947d9a8cc1fb855e747b",
+      "target_guid": "2ace4ade28c1b43efa652765db72cb33"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/normal/mesh-010.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/far/mesh-010.asset",
+      "sha256": "c6ac0655c0f5343e9fcde6b7a4e5fce0e2e403645ba71c7039cbdb8809735a3c",
+      "bytes": 15485,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "00d0dd519e3ee462ebbc9c7f3379784e",
+      "target_guid": "419aa2b9af9e54b089b655f1fa1cb004"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/normal/mesh-011.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/far/mesh-011.asset",
+      "sha256": "f7cd5cd25010f1014ab6db4ab9c41d60db22b0550d448e80c9c0a74688435947",
+      "bytes": 15491,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "d31f1a7f41bd8406aad399279937334d",
+      "target_guid": "3f9bd551c1c4d41ea85916eb347d5dad"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/normal/mesh-012.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/hangar/far/mesh-012.asset",
+      "sha256": "68b36b535a7b3c008b86c2a086cdc2f3f3b4f22bb81a9c6cb563cb662f5a6a31",
+      "bytes": 15491,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "c5946197087d2444e979542da44189be",
+      "target_guid": "b1384da1657a3423b8a2c3d987948295"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/refinery/normal/mesh-006.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/refinery/far/mesh-006.asset",
+      "sha256": "9cd3b72ed0c6b9e17916919e768ff2a4742cba59ebc2dc2442c32d43ca070560",
+      "bytes": 245058,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "adb953cf9d7a74a01abe9f94d5dda4d5",
+      "target_guid": "bb06f4bccd0cc4b6cbdd9d5356fac9d7"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/refineryUpgraded/normal/mesh-001.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/refinery/normal/mesh-001.asset",
+      "sha256": "b1e7587e42d151e1d01b498baa9b2144680015f79370e1daccbcd8c1cee1ddd7",
+      "bytes": 9835,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "5921fa36fcb624cc3839f6352bfea7d1",
+      "target_guid": "109eac3ac401643bb87a55660e143eba"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/refineryUpgraded/normal/mesh-004.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/refinery/normal/mesh-004.asset",
+      "sha256": "a04eac73a771ad7a44201a3bc625931cc41afba461011cd184fa5015c633e032",
+      "bytes": 61397,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "3e852573f511b48ad911453b8ebcad8f",
+      "target_guid": "b8287efb5eedb4b7eaf5569c4671f505"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/refineryUpgraded/normal/mesh-005.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/refinery/normal/mesh-005.asset",
+      "sha256": "4507b5025c9c6dd8a2cf54ac6a1500b1343d1abe3c9c74bb22971024cc065b16",
+      "bytes": 32962,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "724e4e9360b644e1885ce5ecc7a35cb8",
+      "target_guid": "094d712245aa945c3acba506256c426a"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/refineryUpgraded/normal/mesh-006.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/refineryUpgraded/far/mesh-006.asset",
+      "sha256": "a64ce14e43841648f7f4592f37d16d5b20c82688c99d25d186b20c14e177f2f5",
+      "bytes": 297026,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "4ca490ee5bbf74f3ebbbc9e801d0367e",
+      "target_guid": "41556a32154154b138038381460e71bd"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/repair-tower/normal/mesh-000.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/repair-tower/far/mesh-000.asset",
+      "sha256": "d9f315b2837c0c5bc8a2d4d8ae85380d01da7341a4e67ab626b4f93bc4cce075",
+      "bytes": 5103,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "d6e41f5595f1047ed9007da325887392",
+      "target_guid": "0fac93f554ac3462184eb19e278065ef"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/repair-tower/normal/mesh-010.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/repair-tower/far/mesh-010.asset",
+      "sha256": "dd3c19fb8ad0e288572374744ea3242186eae5aea2a1f3160141ba1695c3d385",
+      "bytes": 32189,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "f88a96e7a1e044483a6487dde571f75b",
+      "target_guid": "9f7fd3d76f00f41de9e567122838bd38"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/repair-tower/normal/mesh-011.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/repair-tower/far/mesh-011.asset",
+      "sha256": "48c835b6cea26f9cf9376f4378d3160e3240abcd09217d8fede4987439cbdc06",
+      "bytes": 13608,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "7f2a3c20e794a4cdbb9a728417ac2566",
+      "target_guid": "74d8be00c33e6434f85661d48765363d"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/repair-tower/normal/mesh-012.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/repair-tower/far/mesh-012.asset",
+      "sha256": "6742afeeda226f4bda1d17b296263e3782692f4a32ee418952f5515036749b40",
+      "bytes": 10246,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "3abe2ff814f3b46329d682f848fbd5f1",
+      "target_guid": "bf065325289ee4d3abc020edd1031516"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-000.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-000.asset",
+      "sha256": "8d77071f70d8daf3494b13c0145960639628a337115fee573e67bb940b109c47",
+      "bytes": 8388,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "a550c1c64651a4ee7b1d3650444bfede",
+      "target_guid": "6eabc8d7a6031486897334a105ca48ea"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-004.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-004.asset",
+      "sha256": "c1071635926805429dd6388ebb2650bb8942e9ec1fcbcc27a995f475197b98fa",
+      "bytes": 22130,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "0df00d58b389c4c4bb675b3adebd8fd4",
+      "target_guid": "d1f4d9b15054746ffbb5ec089e7b351b"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-005.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-005.asset",
+      "sha256": "0f2ad51f0f0dd30bbe87dbd35d62040852b67065744546ce4e003aa814ffab8a",
+      "bytes": 5904,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "6d698cf5b68284d1dba715aeded1a10f",
+      "target_guid": "5400dc53ea83f42f79ffa710ba47f715"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-006.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-006.asset",
+      "sha256": "3231f8e6eafa2ce6c97c8408069815bcf4ce5991284c0677e3132227419e719f",
+      "bytes": 5898,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "26a08d47e21d9487ca08dd2bdcd84404",
+      "target_guid": "4075ddaa56bb3459d8b3b31def1cbcf1"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-007.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-007.asset",
+      "sha256": "2e345742dda035795f8ecd68d4a4fa57315a059a61d9fa95a83f79ce5b4af05b",
+      "bytes": 5899,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "884977bb199c14ed7845da3b938a7de6",
+      "target_guid": "f2fcf0a7f271d40ffbb2c3675afb56c0"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-008.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-008.asset",
+      "sha256": "89bd32e7bdb203b8d4ebb8c42329173a7fae62a05f3e4cacc5e4157efe77e04b",
+      "bytes": 5904,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "a27b35b0f94ea4e65b1f796d507ba6bb",
+      "target_guid": "b6c7ecb2070cf49a093f5f9a8ab1bb65"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-009.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-009.asset",
+      "sha256": "c0fb3de715384a9e4ff912d0ac3122891ae73cc69791e033b30e1686e976a486",
+      "bytes": 5898,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "21b1f6f68ecec4a22841924c69476acc",
+      "target_guid": "fea93ee9e47bc44cf9fd62dc4492ce31"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-010.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-010.asset",
+      "sha256": "ff7d88840220d2fd6b4f5243eb5d8bc33e7c88a339c812129ce6b197fa17cd00",
+      "bytes": 5899,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "bb80d7f06072a4a7db9a459939ac9ce9",
+      "target_guid": "89fc2d0c1e10a44d29156a8d100815e7"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-012.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-012.asset",
+      "sha256": "46dd8369a7dec19fb0879bd63a2c65ad61ef3eeebaa9296c961cda93e5255e6d",
+      "bytes": 7922,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "7df716b75f8ca4c08be90cd16ea8608c",
+      "target_guid": "e61933f98f42f4e2ca3fcf68368f2f00"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-015.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-015.asset",
+      "sha256": "ca9e73a2f5da2d7c7ba142ec2e7ceaf941493d9cb3113011c5ee4a3852dc4df6",
+      "bytes": 8405,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "117518ac319b04669b6b8a56ce8c689a",
+      "target_guid": "f8ec28c888b5a4562b06587dd0e58053"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-016.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-016.asset",
+      "sha256": "7e787990a99b11f6d2d8b7044032e7006af38c868ce9d8af53f20e432bb5b731",
+      "bytes": 25622,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "0eb72841ad8354b6f836747312f36739",
+      "target_guid": "4f8a285fcc3a7471b9eb1c85657d1f72"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-017.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-017.asset",
+      "sha256": "2574970253519055ed20f76b0d566935ae495844d5136e9c3b0bd8dddb6572a9",
+      "bytes": 16460,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "9f4426b71b59b4462832329135d1e195",
+      "target_guid": "1f06a681b488141f0b50e344ecfa500e"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-018.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-018.asset",
+      "sha256": "8576ebd7b3ba425edb795142e62ea0bbca10629b0b3c0bb4f7b32af0c8c72480",
+      "bytes": 18359,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "fc10507f6ef2247d4bb25d72d849b850",
+      "target_guid": "96854a3c34b30438a88a5856bf666617"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-019.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-019.asset",
+      "sha256": "b0630987eb8bf9db934e13a2df548c7c0cd567914253a399b7da914b0c155f9d",
+      "bytes": 36867,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "926d16ae623ee4eeba27afdf58b2c014",
+      "target_guid": "5b220975cab3a485985506271ccee83f"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-020.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-020.asset",
+      "sha256": "33ddb9a9d3e1393e9019831742a601cb0fe4a7def3f2207cfdc3c9e14f16f9d8",
+      "bytes": 4762,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "752919332804a4cfbb88ea4fa585e72b",
+      "target_guid": "cab110bd375004396b6d774ebaf2c1fa"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-021.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-021.asset",
+      "sha256": "3a91b4415a0630b845397cbc117d24131a4626f60654776c03ffaf73c1fe84e8",
+      "bytes": 5343,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "cabdf5ab5b5e5414692ed5f3313d4216",
+      "target_guid": "f74b408688e2349fc80656a790e4a233"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-022.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-022.asset",
+      "sha256": "e28b79e15992517819d5f9883ae3c08af98d0a1023225ee8500ddb0f750ebad9",
+      "bytes": 18359,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "9f18a1ded832c4f36943b139affe1108",
+      "target_guid": "911e12203cfb14149b8ca57a684756fb"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-023.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-023.asset",
+      "sha256": "d4ddf983756e90a6e0544e111d93f666e09bb354d7f28d3b5818bbc3cbb15d53",
+      "bytes": 36848,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "d8101b2ed601142a2b8681298c2b6b23",
+      "target_guid": "4b46938b302134a8b80e7597e3c57707"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-024.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-024.asset",
+      "sha256": "003b3de7280ac68b90e98534a527e545b904ccd81e328c8dc3ee8218c6d35240",
+      "bytes": 4762,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "4e4261ddbf9f745fb8d96a65755ea051",
+      "target_guid": "45140834a165a4d559af8ce377002f8f"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-025.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-025.asset",
+      "sha256": "01673476b3b81041844878ca271e8adc6966f4e2b2d56b3933137709a73e48f1",
+      "bytes": 5343,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "5246ec82a8e1f4f578f595d73a28e999",
+      "target_guid": "9b02b1783fa2840efada2ceba95f9ca0"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-026.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-026.asset",
+      "sha256": "32bb21dbed92a540970390a6f40208d4e5d0fa66dccdb189f04f3a8d35b7e72e",
+      "bytes": 18359,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "64f09ebb610d9420cba607f9b6f923cb",
+      "target_guid": "87230a8d83daf48c28be0840815e3323"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-027.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-027.asset",
+      "sha256": "651242ace6b0536e41840b4154b57e27614fefe25f95b03ed3b8b7188f5fab47",
+      "bytes": 36829,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "4b85b5edbe66c43b7a1505343ed08414",
+      "target_guid": "07b31455979d845b0acae33d5c34945d"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-028.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-028.asset",
+      "sha256": "b31492192024322a847e5457624244094afa910d485c1c788c96515fe1c72ee6",
+      "bytes": 4762,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "28a9b6941ab044ccab67f11e616302af",
+      "target_guid": "2397c3bbfc38b4d498d3294abc9d12c1"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-029.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-029.asset",
+      "sha256": "8998eff38d4f70b90800380336c777eb028268617a38e4b26738e65aea9c08bd",
+      "bytes": 5343,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "9d65b0547691c4ab98a7e1137b098b9a",
+      "target_guid": "cb3a2feb6bb684df0bd8db5038e0c18d"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-030.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-030.asset",
+      "sha256": "fdda11b637a8636eef754c60bb5c7f29d7aa7d3e1c0ab43ffce3f35c0fb68c14",
+      "bytes": 18359,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "ec960f252c6574793beb963add669eb0",
+      "target_guid": "dd2cc93085f8a4115b56a90645077fef"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-031.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-031.asset",
+      "sha256": "5bdf21bf4c47fc22f87aba5cb2ab665544d69e64465a24432a77d304c0a8f32e",
+      "bytes": 36866,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "72d349107483f4facbdb8e6a0dfffd6f",
+      "target_guid": "8bf5aeb669417488f8000c2e2fbc3aec"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-032.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-032.asset",
+      "sha256": "a9b4d43b93f7600952dbe1449fb96bb3fe121f4f05a9ac3f091abd6652a186c5",
+      "bytes": 4762,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "2b2de0a1dd0484f6f8fe87bfcd6c1278",
+      "target_guid": "6bc23b9bd695d44e187e020d840f7c4b"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-033.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-033.asset",
+      "sha256": "ad98e5c6e5f38dfe79c3c845f2fc860fb7ad63b9674b52e0020a014dc9611bb5",
+      "bytes": 5343,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "7aa9b2199199c4dbbba2b916889fca33",
+      "target_guid": "3b8d0afe9fea74a48aba25af580dabcb"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-034.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-034.asset",
+      "sha256": "daf6b8659045146a2678179eb0351444530b65c1a26f59eb657bfed709c6b244",
+      "bytes": 18487,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "32223b473788546ada951204b7d7b17e",
+      "target_guid": "0f50c869d7046436cb828ac12da6c031"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-035.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-035.asset",
+      "sha256": "811fa525ba703b7470622a4ae5db2ffa38c718e150bf601e560b2e09195eb9b6",
+      "bytes": 36829,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "4e1f6ae1046a94521a5ec144bdc3d4a1",
+      "target_guid": "453637e2e930a4036a4628c5f8e40fc3"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-036.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-036.asset",
+      "sha256": "128c7e49a4ff03cadac0132e7ad3f78879a0b51a996775518ed0d021a2154464",
+      "bytes": 4762,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "7075947f784f64a1899de8cb4927b329",
+      "target_guid": "9911cb92216e84919985d7f324a6a50b"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-037.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-037.asset",
+      "sha256": "2f7e1a7e1fc5f37e04f92327df3e78e73d9d0d69f1886765a5e8d7884bd274fc",
+      "bytes": 5343,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "e70e08eaf6fae484197de298f7f672ac",
+      "target_guid": "d10c951ff09b04859aec6dad4306645a"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-038.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-038.asset",
+      "sha256": "c62fcec0c7735e1a54d6a8d8824a83361f3c0a626f7697286c8916326e7ea61b",
+      "bytes": 18359,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "424580615a2754352aeceb4663c5ea3f",
+      "target_guid": "37f6115395eb544e284d6e08818282a3"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-039.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-039.asset",
+      "sha256": "a96f03d37dba13c42d0b8cef28197cf3e9a2fdeeddd15dbc30c088c46a61a4ef",
+      "bytes": 36830,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "eab508a170e6448b4b9fd77a3111413d",
+      "target_guid": "a6dff7d74f248420a8c1bafe31a2ec9b"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-040.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-040.asset",
+      "sha256": "8791d3967a03a456f0fbf865854fc1eadec61c78d6c8af01a8127036a70cdf27",
+      "bytes": 4762,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "593425540d77945508c1c9174556c2d9",
+      "target_guid": "15a60f05cc6944478876a7aaaabd1d24"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/far/mesh-041.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/far/mesh-041.asset",
+      "sha256": "e4fdc14cf4a5f84457d8de761894ff0ef75ec5ee7457145b5392074f3ef4efb3",
+      "bytes": 5343,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "3754f7247ab9d43e290d9e0844b89d35",
+      "target_guid": "b7dd2d04f5b6542ccb15d6362550e4d6"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-000.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-000.asset",
+      "sha256": "fe33b471c9ffa2db570a1ae8c5cd84136c4b6be73675bd41744c12e704693bc1",
+      "bytes": 35654,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "f0d6803a393a446f7a90c7ab74542fd9",
+      "target_guid": "2dd13d6513b2c4e7da3325c6d71d8417"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-004.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-004.asset",
+      "sha256": "da713bf2969931e3aab708944a6a06868ece1e15d8ee0f199cb35bb3e3600dbe",
+      "bytes": 122811,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "03598a37420984774b0f97430a0ca414",
+      "target_guid": "979c4697c51b14c5a8d7e885fb513895"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-005.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-005.asset",
+      "sha256": "62eb3d9859487fc79c95d3e6d40b9ca47b6e2a6ef78063fbf1329837bdf5ac0e",
+      "bytes": 21455,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "a7f47c3ad64664ef5b7a3c65e6927a10",
+      "target_guid": "7dd268521643d4c9e87e3ba1516b388d"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-006.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-006.asset",
+      "sha256": "96d424c55f9083eb7314fc0c928aebac863b57d90bc1f3dd3d88941ab8e0e09f",
+      "bytes": 21195,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "fbf9f3bd09cdb4a66a59da7c1172689b",
+      "target_guid": "a926be6209b864dfd83e8666e83e37ec"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-007.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-007.asset",
+      "sha256": "653f1a700e53f082b00d1af9ed21f29f94d2bd685611a756bbcb4954ea7cfdfe",
+      "bytes": 21585,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "9ab53bfa55cec433fb7a2a7767097350",
+      "target_guid": "bd4c6f39800754d5f9a02aed0146e961"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-008.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-008.asset",
+      "sha256": "1ab0b06b546d60f8c7520d09d4f9f65392e1f615ff7893c0e02788b642ea3404",
+      "bytes": 21455,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "c31cd6972d0954fd2b0ee1bb42752f94",
+      "target_guid": "25580c33749164c5eb655ffad5494927"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-009.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-009.asset",
+      "sha256": "7e5b50fff52903480cde4457040844849d37a415c232deb4be859e261f79bc07",
+      "bytes": 21195,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "b295d6d039ab14f8e91244181e5e6802",
+      "target_guid": "beaa33cb9c523404a8b29e744dbf0e3e"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-010.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-010.asset",
+      "sha256": "a5c4910f229b0d0edbcbde9c413f3a373e043aca03f4515db59df02b8de52968",
+      "bytes": 21585,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "636b98623fb4742cca644730b3c8ada2",
+      "target_guid": "fce3ac2eb8d15456d990568945eeeeea"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-015.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-015.asset",
+      "sha256": "15e1e4ebc02c0704af74925815a28ff6537c0872c24c5788414c95f4ddb464cb",
+      "bytes": 40552,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "1ddf372a23d0d4effbafc900e33463a8",
+      "target_guid": "412f1b67a42c2439fb2c6d0aa8902979"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-016.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-016.asset",
+      "sha256": "8d2d667b1444de4704253534784eccc109b70da298a9faff8139a3cab10fb802",
+      "bytes": 173425,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "5f2a7c025055443ca8f559f30c23e498",
+      "target_guid": "bf64d6cfdb4ee4374bf769e1ca05fe9d"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-017.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-017.asset",
+      "sha256": "f4e0b586e3ce8c2ab0610f4c5e003e41cd055b864959de06a688e36adb747331",
+      "bytes": 102333,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "8ea0dcc2ae55e46a18598b7d628a556e",
+      "target_guid": "e002990ffe12e45f3990b460e099caaa"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-018.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-018.asset",
+      "sha256": "de813ed96fe6368edf6c38337c3860f4653f83409f8fc6897e35f5731694ca23",
+      "bytes": 25666,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "a87e78bc2e026402c9ffe24a97635710",
+      "target_guid": "096dcee80d9f24396b830efed9471e80"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-019.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-019.asset",
+      "sha256": "8a86078d0386461f5051f5dbbe5d94363b4e80db55edfb0ea30fe8f473f7c3a8",
+      "bytes": 220666,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "d2a02673afa79456aa83c9350645bf82",
+      "target_guid": "dc741bb299b664c82a508f53092d58c6"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-020.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-020.asset",
+      "sha256": "7294336c3e589c2650e0277480b73dc67aa8cb25502a7c9631f66b3afc9190ca",
+      "bytes": 20433,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "e9998ab572f454204899009d717f48ed",
+      "target_guid": "47699e5e7ba484b9a9fdc3eb7a1df5c7"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-021.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-021.asset",
+      "sha256": "59232018f1a5d9a50ba6d43efb54ad19ae9b2476fa17c5615f87d68cee798846",
+      "bytes": 21205,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "bd3c767ee7cb0468d904b3885c7a6a5d",
+      "target_guid": "dd71eae4b41fd49178e20764a7b57b2b"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-022.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-022.asset",
+      "sha256": "a514086af5ffd6c0854441b2e34c2913fe43aac6933d3f2d0461989289162b66",
+      "bytes": 25666,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "91a287adbd1fa48db9dad17a3f1d7b9d",
+      "target_guid": "d27189d6dca454bf2afbf679f4fb5264"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-023.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-023.asset",
+      "sha256": "ac2bd9e2ba622d253ec51d65c17da2daed14b84ea685073f4fa16588ebbfa81b",
+      "bytes": 220322,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "ef6237bbd04614459bcb948843e5d092",
+      "target_guid": "fa4dc5fecefe449ef9aa78a1bfef0521"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-024.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-024.asset",
+      "sha256": "c4212155eba26bd57ce4c50c676f30b0b800b9353b6f2618a039ba90cd597a6c",
+      "bytes": 20433,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "00d86daaff8184795a95392d9a30936c",
+      "target_guid": "883f91ae7b39f4edab76999f1723f5c2"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-025.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-025.asset",
+      "sha256": "1ce5eaba673ad966ff3c5e0c7abcd5ee180fa92ac16e27833455d829c2452694",
+      "bytes": 21205,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "9b59cb5336fc148679532696bf9da852",
+      "target_guid": "8b7fd0fab3c264055a027358c14ad58f"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-026.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-026.asset",
+      "sha256": "46269a8106f6bd7cc52e8d6ddb251daae2f0b6905b1ece7b2b17ac8710e543cb",
+      "bytes": 25666,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "c7f6daa02e62c439b98db7f9441f17ae",
+      "target_guid": "8f121b191dee343db8559bd47a35ecb2"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-027.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-027.asset",
+      "sha256": "dc888b5ff16d8cc28443e93e394678fd1639df6c74ec1171a5e2279a7a21b23a",
+      "bytes": 220496,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "26d2e4dc981734e3f9e7f5200e610cb5",
+      "target_guid": "f2a53c4a4f58440be86d243902f74ca2"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-028.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-028.asset",
+      "sha256": "50e94960237d01e2052ecf95bde1ecde19d08a651fddf768ac6dce75651fb7d9",
+      "bytes": 20433,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "6b4bc5b9067e54ef1835c28150e92bca",
+      "target_guid": "06666be06d9be427696337e54fc1a1a8"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-029.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-029.asset",
+      "sha256": "fe5b7b15edc8ba28abbe645a650a81bad820533a87b3d1a4317a55dd8eefd799",
+      "bytes": 21205,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "cb5e2c431413a4de2a7ac45c0de6918b",
+      "target_guid": "fc4b0f2b604df4f5fbd59d9c4b888cce"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-030.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-030.asset",
+      "sha256": "032134db3356b9acb72165af5f5045671574eb2b34ae052cd3c5c1575ed05058",
+      "bytes": 25666,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "d7f93db3f7f06459ebfc5d7549fa4152",
+      "target_guid": "be2da0457fbde47aaa6a74382ae222ce"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-031.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-031.asset",
+      "sha256": "9083ef92fb8db9b831824154a0346f7b10710d9a3c232c5b560ea0fb94060265",
+      "bytes": 220746,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "786a8d9310e0e454cbad428771f79841",
+      "target_guid": "0ac234459cf8d4ce286ee0570e2e43c5"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-032.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-032.asset",
+      "sha256": "1294c3b66f276a026ba3cf8eb72356740e4cc195b2e589ca18b243a6374b8986",
+      "bytes": 20433,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "3bc833dd791344d69b5158422dbdfa12",
+      "target_guid": "6cdf2131492c64366bad78979d1abd20"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-033.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-033.asset",
+      "sha256": "c40a2b03e60fa66afa2bbcb20e3ac3b9e5b5ac1993d2816dc031f7b4b559ce96",
+      "bytes": 21205,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "15c5e2b927c774acc99c12a9494f7e18",
+      "target_guid": "d786d83985b974698a8970f7845478f1"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-034.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-034.asset",
+      "sha256": "f9c6418135548982237d808178c32246345d16a7da70dffd83b4f79680b3c75f",
+      "bytes": 25666,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "e9f894da003e041309d14b0fc73527c5",
+      "target_guid": "dbd1a428939294ab686ff312b0322d0b"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-035.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-035.asset",
+      "sha256": "c908c55cf87b38c9d6a6bd6e026b473cfbe756e988a0471a70eeab2bfd0f32a8",
+      "bytes": 220206,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "a605a1045e5dd490087f31999319da08",
+      "target_guid": "90cf6daf48de6427c9ea98954426f304"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-036.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-036.asset",
+      "sha256": "44632e46c403d9765d5b962cee3fb5326997c2a2b257337fa2b9199eacb5d991",
+      "bytes": 20433,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "b5fbfba0887bf45f6be4f164f500e09b",
+      "target_guid": "78b5b46b3d7ea4fee877509d60c003a7"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-037.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-037.asset",
+      "sha256": "cc717d0c1ca86ab2152dfaf0f3c5f783f2c73d6292d0453711c91b2368203792",
+      "bytes": 21205,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "9a55fe449de3d42ea845e914d2f9dbc1",
+      "target_guid": "3cc25050149144dd1b8d2635047e9e44"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-038.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-038.asset",
+      "sha256": "2aa43247ea9ea53e491e2542b5cb0a768c3deb16b9fb0a247434b15a380f8336",
+      "bytes": 25666,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "85b9ab1a7c26a4fe3983d1f1287158dc",
+      "target_guid": "073f458a30d88417b8933bb39293f5d1"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-039.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-039.asset",
+      "sha256": "4a7f600636680bb3a354452c33042a2044366914594d4bd193ce544ee6a43554",
+      "bytes": 220448,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "68485b76abbc947efa18c7c44e1fe05d",
+      "target_guid": "c3fa8ce76cf564e0e8e70b60a4d9a818"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-040.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-040.asset",
+      "sha256": "0a370d065d1ed43f3fb9af349c0c2e69ad4ca6164b3feacfd32837491e50f6db",
+      "bytes": 20433,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "de9ade04cae564acc871901c65fcaedd",
+      "target_guid": "752ab8740d7ec451ea08e5c6d2910004"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval-guidance-3/normal/mesh-041.asset",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/Lod/shkval/normal/mesh-041.asset",
+      "sha256": "53b533df0f74e19b1a2cbce43818377a21e3b753eead65b5b3d46d6ecbb7282b",
+      "bytes": 21205,
+      "importer_sha256": "964f9426d962365e48473acb0f6fd73b69e022fc07bbbd1f112b010b2b0d44e6",
+      "source_guid": "beed694de6e434fb6942c85483f119f6",
+      "target_guid": "52f492f1b53b947a48e4b2006c0ce5b7"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/explorerUpgraded-neutral-metal-0-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/explorer-neutral-metal-mask.png",
+      "sha256": "2290bb759f1f96bcbba1248ae63f0da747f25fa3234a23ecb2819c08961ad4b4",
+      "bytes": 1145911,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "59d1a18d553bb446583be3d701dc1a1b",
+      "target_guid": "7b8ccf5f540b54b0ba92502fed5fb77b"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/explorerUpgraded-structure-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/explorer-structure-mask.png",
+      "sha256": "354885918d2ddef02e58ae81b7db9c5e95102ef309af0a6617801a2314e5f89c",
+      "bytes": 1373117,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "6465bc754e2df46a48351d676d99684f",
+      "target_guid": "99ebc80406c904a35af7c7017f30ef89"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/explorerUpgraded-team-primary-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/explorer-team-primary-mask.png",
+      "sha256": "450f665f4405b744b0715320f6e93627a8a7567674600a4e1ed50d5c26ebdac2",
+      "bytes": 1276601,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "a7430e2c7b4ae4e6a8c14cf6ad35438f",
+      "target_guid": "3834dd42836164bb3919fbf1f10e1509"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/factory-team-primary-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/explorer-team-primary-mask.png",
+      "sha256": "450f665f4405b744b0715320f6e93627a8a7567674600a4e1ed50d5c26ebdac2",
+      "bytes": 1276601,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "9c61214cb51d944f689d55ea6f9d89a0",
+      "target_guid": "3834dd42836164bb3919fbf1f10e1509"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/headquarters-team-primary-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/explorer-team-primary-mask.png",
+      "sha256": "450f665f4405b744b0715320f6e93627a8a7567674600a4e1ed50d5c26ebdac2",
+      "bytes": 1276601,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "e3efd57895b0149f790c7ff3a5ec078b",
+      "target_guid": "3834dd42836164bb3919fbf1f10e1509"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/mine-team-primary-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/explorer-team-primary-mask.png",
+      "sha256": "450f665f4405b744b0715320f6e93627a8a7567674600a4e1ed50d5c26ebdac2",
+      "bytes": 1276601,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "6056081ddbe7245c3993fcc72e94b196",
+      "target_guid": "3834dd42836164bb3919fbf1f10e1509"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/outpost-team-primary-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/explorer-team-primary-mask.png",
+      "sha256": "450f665f4405b744b0715320f6e93627a8a7567674600a4e1ed50d5c26ebdac2",
+      "bytes": 1276601,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "668f5394946a54130adb61852245706b",
+      "target_guid": "3834dd42836164bb3919fbf1f10e1509"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/refinery-team-primary-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/explorer-team-primary-mask.png",
+      "sha256": "450f665f4405b744b0715320f6e93627a8a7567674600a4e1ed50d5c26ebdac2",
+      "bytes": 1276601,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "bc68874a09fda4ecb93d33c020242223",
+      "target_guid": "3834dd42836164bb3919fbf1f10e1509"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/refineryUpgraded-team-primary-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/explorer-team-primary-mask.png",
+      "sha256": "450f665f4405b744b0715320f6e93627a8a7567674600a4e1ed50d5c26ebdac2",
+      "bytes": 1276601,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "8e5274dd7432e4c72bd2867a82437698",
+      "target_guid": "3834dd42836164bb3919fbf1f10e1509"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/scientificCenter-team-primary-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/explorer-team-primary-mask.png",
+      "sha256": "450f665f4405b744b0715320f6e93627a8a7567674600a4e1ed50d5c26ebdac2",
+      "bytes": 1276601,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "fe2ed78a5facb4e99bb525dd5047570e",
+      "target_guid": "3834dd42836164bb3919fbf1f10e1509"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/shkval-guidance-3-team-primary-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/explorer-team-primary-mask.png",
+      "sha256": "450f665f4405b744b0715320f6e93627a8a7567674600a4e1ed50d5c26ebdac2",
+      "bytes": 1276601,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "e52a6124037a847049af38c6ffdd85b5",
+      "target_guid": "3834dd42836164bb3919fbf1f10e1509"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/shkval-team-primary-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/explorer-team-primary-mask.png",
+      "sha256": "450f665f4405b744b0715320f6e93627a8a7567674600a4e1ed50d5c26ebdac2",
+      "bytes": 1276601,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "3cc858c4330e3430c9cb01b93b4f10f2",
+      "target_guid": "3834dd42836164bb3919fbf1f10e1509"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/tank-team-primary-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/explorer-team-primary-mask.png",
+      "sha256": "450f665f4405b744b0715320f6e93627a8a7567674600a4e1ed50d5c26ebdac2",
+      "bytes": 1276601,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "e1eb5b5e5c6504f41a9ad64d517b668a",
+      "target_guid": "3834dd42836164bb3919fbf1f10e1509"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/tankUpgraded-team-primary-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/explorer-team-primary-mask.png",
+      "sha256": "450f665f4405b744b0715320f6e93627a8a7567674600a4e1ed50d5c26ebdac2",
+      "bytes": 1276601,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "2169cf3b9b2aa4aeea61469117e1fa1b",
+      "target_guid": "3834dd42836164bb3919fbf1f10e1509"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/headquarters-neutral-metal-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-neutral-metal-mask.png",
+      "sha256": "40002eaa39b2d32b2c6eb75283b59e9643171936224662c7d7150233fb5b98ef",
+      "bytes": 1302338,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "9ff278edd33a74496950c2fe1f877f6f",
+      "target_guid": "d60f5473801ab44048f6af697d2327f5"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/mine-neutral-metal-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-neutral-metal-mask.png",
+      "sha256": "40002eaa39b2d32b2c6eb75283b59e9643171936224662c7d7150233fb5b98ef",
+      "bytes": 1302338,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "f1100abc13e234dbe94d7ffbccafb999",
+      "target_guid": "d60f5473801ab44048f6af697d2327f5"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/outpost-neutral-metal-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-neutral-metal-mask.png",
+      "sha256": "40002eaa39b2d32b2c6eb75283b59e9643171936224662c7d7150233fb5b98ef",
+      "bytes": 1302338,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "b82b688d47138454a8346ba7a4f75e68",
+      "target_guid": "d60f5473801ab44048f6af697d2327f5"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/refinery-neutral-metal-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-neutral-metal-mask.png",
+      "sha256": "40002eaa39b2d32b2c6eb75283b59e9643171936224662c7d7150233fb5b98ef",
+      "bytes": 1302338,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "e65a324560259463fbd5c2583ddaeb3d",
+      "target_guid": "d60f5473801ab44048f6af697d2327f5"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/refineryUpgraded-neutral-metal-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-neutral-metal-mask.png",
+      "sha256": "40002eaa39b2d32b2c6eb75283b59e9643171936224662c7d7150233fb5b98ef",
+      "bytes": 1302338,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "b7b1ea2fea0a9452993d89686a0eff26",
+      "target_guid": "d60f5473801ab44048f6af697d2327f5"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/scientificCenter-neutral-metal-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-neutral-metal-mask.png",
+      "sha256": "40002eaa39b2d32b2c6eb75283b59e9643171936224662c7d7150233fb5b98ef",
+      "bytes": 1302338,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "45c61bea0c2e941f499c7ee5527da433",
+      "target_guid": "d60f5473801ab44048f6af697d2327f5"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/shkval-guidance-3-neutral-metal-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-neutral-metal-mask.png",
+      "sha256": "40002eaa39b2d32b2c6eb75283b59e9643171936224662c7d7150233fb5b98ef",
+      "bytes": 1302338,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "884d274f4682c49f5bd35bd26a55d113",
+      "target_guid": "d60f5473801ab44048f6af697d2327f5"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/shkval-neutral-metal-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-neutral-metal-mask.png",
+      "sha256": "40002eaa39b2d32b2c6eb75283b59e9643171936224662c7d7150233fb5b98ef",
+      "bytes": 1302338,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "4857b636279494d3f9aadf100c17bb33",
+      "target_guid": "d60f5473801ab44048f6af697d2327f5"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/tank-neutral-metal-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-neutral-metal-mask.png",
+      "sha256": "40002eaa39b2d32b2c6eb75283b59e9643171936224662c7d7150233fb5b98ef",
+      "bytes": 1302338,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "b7dd4fff3b38a4959b7f4f07f28dd77a",
+      "target_guid": "d60f5473801ab44048f6af697d2327f5"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/tankUpgraded-neutral-metal-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-neutral-metal-mask.png",
+      "sha256": "40002eaa39b2d32b2c6eb75283b59e9643171936224662c7d7150233fb5b98ef",
+      "bytes": 1302338,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "d0afa135d6ee7479ebaa6f48e9e3db33",
+      "target_guid": "d60f5473801ab44048f6af697d2327f5"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/headquarters-structure-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-structure-mask.png",
+      "sha256": "2bf09c49925caff5d6ab29e041c31a3dfab5d13097735efa6dccc70fe0f0ad51",
+      "bytes": 1350087,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "b8c8176940c5044ff80f08b5974beb17",
+      "target_guid": "e2d1df5041e5a4ae09ad79278ad0ad83"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/mine-structure-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-structure-mask.png",
+      "sha256": "2bf09c49925caff5d6ab29e041c31a3dfab5d13097735efa6dccc70fe0f0ad51",
+      "bytes": 1350087,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "7b7e140fe06894c83a7aac8cafb028c3",
+      "target_guid": "e2d1df5041e5a4ae09ad79278ad0ad83"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/outpost-structure-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-structure-mask.png",
+      "sha256": "2bf09c49925caff5d6ab29e041c31a3dfab5d13097735efa6dccc70fe0f0ad51",
+      "bytes": 1350087,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "94b6df9c9e44f42ddbb64ea06a412841",
+      "target_guid": "e2d1df5041e5a4ae09ad79278ad0ad83"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/refinery-structure-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-structure-mask.png",
+      "sha256": "2bf09c49925caff5d6ab29e041c31a3dfab5d13097735efa6dccc70fe0f0ad51",
+      "bytes": 1350087,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "4027e5219183f44f98092a63097caad5",
+      "target_guid": "e2d1df5041e5a4ae09ad79278ad0ad83"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/refineryUpgraded-structure-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-structure-mask.png",
+      "sha256": "2bf09c49925caff5d6ab29e041c31a3dfab5d13097735efa6dccc70fe0f0ad51",
+      "bytes": 1350087,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "824c77069c63c4f3fa8486c1ef044597",
+      "target_guid": "e2d1df5041e5a4ae09ad79278ad0ad83"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/scientificCenter-structure-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-structure-mask.png",
+      "sha256": "2bf09c49925caff5d6ab29e041c31a3dfab5d13097735efa6dccc70fe0f0ad51",
+      "bytes": 1350087,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "3d7ce13a35e4647a9a3ea0401bfadc70",
+      "target_guid": "e2d1df5041e5a4ae09ad79278ad0ad83"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/shkval-guidance-3-structure-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-structure-mask.png",
+      "sha256": "2bf09c49925caff5d6ab29e041c31a3dfab5d13097735efa6dccc70fe0f0ad51",
+      "bytes": 1350087,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "ab34dfe52498d43cf88dd0a0b8de1f03",
+      "target_guid": "e2d1df5041e5a4ae09ad79278ad0ad83"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/shkval-structure-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-structure-mask.png",
+      "sha256": "2bf09c49925caff5d6ab29e041c31a3dfab5d13097735efa6dccc70fe0f0ad51",
+      "bytes": 1350087,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "ffaa7337e52c74b07afc793ef5c4bc65",
+      "target_guid": "e2d1df5041e5a4ae09ad79278ad0ad83"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/tank-structure-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-structure-mask.png",
+      "sha256": "2bf09c49925caff5d6ab29e041c31a3dfab5d13097735efa6dccc70fe0f0ad51",
+      "bytes": 1350087,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "3e720e946edaa4d22bd34c857d3d6e59",
+      "target_guid": "e2d1df5041e5a4ae09ad79278ad0ad83"
+    },
+    {
+      "source": "Assets/Spacewars/Content/Resources/StyleA/tankUpgraded-structure-mask.png",
+      "target": "Assets/Spacewars/Content/Resources/StyleA/factory-structure-mask.png",
+      "sha256": "2bf09c49925caff5d6ab29e041c31a3dfab5d13097735efa6dccc70fe0f0ad51",
+      "bytes": 1350087,
+      "importer_sha256": "0aed93cd40dae4c22e1fe47ca0396e203122e761a22f5a3eab040e0b89435775",
+      "source_guid": "893b45ad2489c477a99bb2d4b0cbdaa8",
+      "target_guid": "e2d1df5041e5a4ae09ad79278ad0ad83"
+    }
+  ]
+}

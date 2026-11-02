@@ -16,7 +16,7 @@ public sealed class PreparedMapSceneTests
     const BindingFlags Flags=BindingFlags.NonPublic|BindingFlags.Instance;
     static Type Authoring=>AppDomain.CurrentDomain.GetAssemblies().Select(a=>a.GetType("Spacewars.Editor.PreparedMapsAuthoring")).First(t=>t!=null);
     static void Author(string method)=>Authoring.GetMethod(method).Invoke(null,null);
-    static readonly string[] Maps={"ThreeCrossings","Foundry","MossHighland","BasaltCrown","WhiteMeridian","CrimsonGrove","NullDock","AiTest","Campaign","ProvingGround","Diagnostic","Nereida"};
+    static readonly string[] Maps={"ThreeCrossings","Foundry","MossHighland","BasaltCrown","WhiteMeridian","CrimsonGrove","AntennaCity","NullDock","AiTest","Campaign","ProvingGround","Diagnostic","Nereida"};
     static IPlayableTerrain Map(string key)=>(IPlayableTerrain)Authoring.GetMethod("Map").Invoke(null,new object[]{key});
     static PlayableProfile Profile(string key)=>(PlayableProfile)Authoring.GetMethod("Profile").Invoke(null,new object[]{key});
     static string Output=>Environment.GetEnvironmentVariable("SPACEWARS_PREPARED_MAP_QA")??Path.GetFullPath("../.local/prepared-map-cache/qa");

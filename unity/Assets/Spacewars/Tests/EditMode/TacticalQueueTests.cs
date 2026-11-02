@@ -574,6 +574,44 @@ namespace Spacewars.Tests.EditMode
             Assert.True((bool)D.GetMethod("TerminalProofMatches",F).Invoke(domain,new object[]{InternalExecution(id,"Pending"),actor}));Assert.True((bool)Call("CombatMove",id,new NavPoint(-14,-24)));Assert.True(nav.Requests.TryDequeue(out var retry));Assert.AreEqual(Queue(id).Active.GroupId,retry.MemberIdentity.GroupId);Assert.AreEqual(Queue(id).Active.ActivationRevision,retry.MemberIdentity.OrderRevision);Assert.False((bool)InternalExecution(id,"Active").GetType().GetField("Interrupted",F).GetValue(InternalExecution(id,"Active")));nav.Answers.TryEnqueue(new NavigationAnswer(retry,Array.Empty<NavPoint>()));nav.ApplyResults();Assert.True(actor.Moving);Assert.AreEqual(installed,actor.InstalledRequest);Assert.AreEqual(PlayableCommandKind.Attack,Queue(id).Active.Kind);Assert.NotNull(InternalExecution(id,"Active").GetType().GetField("TerminalFailure",F).GetValue(InternalExecution(id,"Active")));
             Restore();Assert.True(nav.Crowd.Units.Single(u=>u.Id==id).Moving);Assert.AreEqual(installed,nav.Crowd.Units.Single(u=>u.Id==id).InstalledRequest);Assert.AreEqual(PlayableCommandKind.Attack,Queue(id).Active.Kind);Assert.NotNull(Queue(id).Pending);
         }
+        [TestCase(PlayableCommandKind.AttackMove)] [TestCase(PlayableCommandKind.Stop)] [TestCase(PlayableCommandKind.Hold)]
+        public void TargetlessSuspendedAttackMoveResumesAfterRestoreUnlessSuperseded(PlayableCommandKind next)
+        {
+            UseActualRoutes();int id=Spawn(-14,-14);var goal=new NavPoint(-4,-14);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(new[]{id},goal,PlayableCommandKind.AttackMove));Deliver();
+            Call("CombatStop",id);Assert.False(nav.Crowd.Units.Single(u=>u.Id==id).Moving);Restore();
+            long requests=nav.CaptureState().RequestSequence;
+            if(next!=PlayableCommandKind.AttackMove)Assert.AreEqual(PlayableCommandStatus.Applied,Send(new[]{id},default,next));
+            Step();var actor=nav.Crowd.Units.Single(u=>u.Id==id);
+            Assert.AreEqual(next==PlayableCommandKind.AttackMove,actor.Moving,"No combat target remains: resume retained intent unless Stop/HOLD supersedes it");
+            if(next==PlayableCommandKind.AttackMove){Assert.AreEqual(requests,nav.CaptureState().RequestSequence,"Resume the accepted route without another search/order");Assert.AreEqual(PlayableCommandKind.AttackMove,Queue(id).Active.Kind);Assert.Null(Queue(id).Completion);}
+        }
+        [Test]public void LateSameGoalRouteKeepsCombatSuspensionThroughCurrentRestore()
+        {
+            UseActualRoutes();int id=Spawn(-14,-14);var goal=new NavPoint(-4,-14);
+            Assert.AreEqual(PlayableCommandStatus.Applied,SendAiAttackMove(id,goal));Deliver();
+            var before=Queue(id).Active;Call("CombatStop",id);
+            Assert.True(nav.Move(id,goal),"Reissue the same active goal through ordinary navigation");
+            Assert.True(nav.IsPending(id),"The reissued route must remain pending until delivery");
+            Deliver();var actor=nav.Crowd.Units.Single(u=>u.Id==id);
+            Assert.AreEqual(before.CommandSequence,Queue(id).Active.CommandSequence);
+            Assert.AreEqual(before.GroupId,Queue(id).Active.GroupId);
+            Assert.False(actor.Moving,"Late route installation must retain combat suspension");
+            var bytes=(byte[])Call("CaptureWorldBytes",7,"queue-test");Restore();
+            CollectionAssert.AreEqual(bytes,(byte[])Call("CaptureWorldBytes",7,"queue-test"));
+            long requests=nav.CaptureState().RequestSequence;Step();
+            Assert.True(nav.Crowd.Units.Single(u=>u.Id==id).Moving,"Targetless combat resumes the installed route normally");
+            Assert.AreEqual(requests,nav.CaptureState().RequestSequence,"Resume must not create a new route or issuance");
+        }
+        [Test]public void TargetlessFailedAttackMoveDoesNotRestartConsumedOrder()
+        {
+            UseActualRoutes();int id=Spawn(-14,-14);Assert.AreEqual(PlayableCommandStatus.Applied,Send(new[]{id},new NavPoint(-4,-14),PlayableCommandKind.AttackMove));Deliver();
+            var actor=nav.Crowd.Units.Single(u=>u.Id==id);actor.Moving=false;actor.Outcome=NavigationOutcome.Blocked;
+            // The world tick retires CurrentOrder after terminal movement, before
+            // combat. Isolate that phase from navigation's independent repair work.
+            var table=(System.Collections.IDictionary)D.GetField("units",F).GetValue(domain);var unit=table[id];unit.GetType().GetField("CurrentOrder").SetValue(unit,null);
+            long requests=nav.CaptureState().RequestSequence;Call("AdvanceCombat",1d/30);Assert.False(actor.Moving,"Terminal failure must not be turned into a fresh attack-move by targetless combat");Assert.AreEqual(requests,nav.CaptureState().RequestSequence);
+        }
         [Test]public void NonAnchorAttackMoveMemberResumesInstalledRouteAfterContactLossAndRestore()
         {
             UseActualRoutes();

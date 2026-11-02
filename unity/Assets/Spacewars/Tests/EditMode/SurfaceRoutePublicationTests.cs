@@ -3,6 +3,7 @@ using System.Linq;
 using NUnit.Framework;
 using Spacewars.Runtime;
 using Spacewars.Simulation;
+using Spacewars.Presentation;
 namespace Spacewars.Tests.EditMode
 {
     public sealed class SurfaceRoutePublicationTests
@@ -38,6 +39,53 @@ namespace Spacewars.Tests.EditMode
         {
             var map=Map();var geometry=new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision);var crowd=new NavCrowd(geometry,PlayableProfile.Default.Navigation,terrainEnabled?map:null);var actor=crowd.Add(51,Start,.58,7,7.5);Assert.True(crowd.SetRoute(51,Route.Last(),Route));actor.Moving=moving;
             Assert.True(((INavMotionClearance)crowd).ClearMotion(0,Drift));
+        }
+        [TestCase(true,true,false,false)][TestCase(false,true,false,true)]
+        [TestCase(true,false,false,true)][TestCase(true,true,true,true)]
+        public void FlatNativeTypedAvoidancePreservesPublishedCorner(bool typed,bool moving,bool held,bool allowed)
+        {
+            var p=PlayableProfile.Default;
+            var geometry=new NavGeometry(32,new[]{new NavObstacle(-21.7,13.3,-18.3,16.7)},1);
+            var start=new NavPoint(-17.700832757298905,12.6);
+            var drift=new NavPoint(-17.700832757298905,13.384031993465866);
+            var goal=new NavPoint(-27.102009311457817,12.303274062411466);
+            var nav=new NavigationSession(107,geometry,p.Navigation){UsesRecastGroundRoutes=true};
+            try{
+                var actor=nav.Crowd.Add(22,start,.58,7,7.5);
+                Assert.True(nav.MoveGroup(new[]{22},new[]{goal}));
+                using(var host=new UnityHostRouteService()){
+                    var binding=new PlayableRouteBinding(geometry,p,nav.Admission,nav.RoutePort);
+                    for(int i=0;i<200&&nav.AppliedResults<1;i++){host.Service(binding,8);nav.ApplyResults();}
+                }
+                Assert.AreEqual(1,nav.AppliedResults);
+                var route=((NavigationInstalledExecutionOwner)actor.StorageOwner.InstalledExecution).Corridor.TypedRoute;Assert.NotNull(route);
+                Assert.True(geometry.SegmentFree(start,goal,actor.Radius));
+                Assert.True(geometry.SegmentFree(start,drift,actor.Radius));
+                Assert.False(geometry.SegmentFree(drift,goal,actor.Radius),"The legal avoidance step disconnects the next published steering corner.");
+                // Freeze the legal forward target that ordinary selection can choose.
+                actor.routeIndex=actor.route.Length-1;actor.Moving=moving;actor.Held=held;
+                Assert.True(nav.PhysicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,107,0,out var scope));
+                using(scope){
+                    var frame=NavPreparedCrowdStep.Create(nav.Crowd,1,scope.OwnedReservation());
+                    try{
+                        frame.Observe();if(typed)frame.BindRecast(0,route,NavRecastIntervals.Initial(route));
+                        Assert.AreEqual(allowed,((INavMotionClearance)frame.Working).ClearMotion(0,drift));
+                        Assert.AreEqual(start,actor.Position,"Clearance is a query, not motion or a replacement route.");
+                    }finally{frame.Release();}scope.Discard();
+                }
+                if(typed&&moving&&!held){
+                    actor.Heading=Math.PI/2;
+                    void Valid(){var at=actor.Position;foreach(var point in actor.localRoute.Skip(actor.localIndex).Concat(actor.route.Skip(actor.routeIndex))){Assert.True(geometry.SegmentFree(at,point,actor.Radius),"Actual warm avoidance keeps every published remaining segment valid.");at=point;}}
+                    for(int tick=0;tick<4;tick++){nav.Step(1d/30);Valid();}
+                    var bytes=Bytes(nav);NavigationSession cold=null;
+                    try{
+                        cold=new NavigationSession(107,geometry,p.Navigation){UsesRecastGroundRoutes=true};
+                        using(var state=WorldWire.Unpack(bytes,WorldWire.ReadNavigationSessionState))cold.RestoreState(state);
+                        CollectionAssert.AreEqual(bytes,Bytes(cold),"Strict current physical restore remains unchanged.");
+                        for(int tick=0;tick<3;tick++){nav.Step(1d/30);cold.Step(1d/30);Valid();CollectionAssert.AreEqual(Bytes(nav),Bytes(cold),"Exact warm/cold continuation "+tick);}
+                    }finally{if(cold!=null){cold.ReleaseCommittedHostRoot();cold.DestroyNavigationAuthority();}}
+                }
+            }finally{nav.ReleaseCommittedHostRoot();nav.DestroyNavigationAuthority();}
         }
     }
 }

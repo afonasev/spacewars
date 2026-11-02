@@ -53,11 +53,20 @@ namespace Spacewars.Simulation
         {foreach(var row in productionCommands)if(row.Value==command)return row.Key;return null;}
         public static bool Supported(PlayableEntityKind k)=>productionCommands.ContainsKey(k);
         public static double Radius(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Hawk?p.HawkRadius:k==PlayableEntityKind.Shkval?p.ShkvalCollisionRadius:k==PlayableEntityKind.Explorer?p.ExplorerCollisionRadius:p.TankCollisionRadius;
+        public static double AirBuildingHeight(PlayableProfile profile,PlayableBuildingKind k)
+        {
+            if(k==PlayableBuildingKind.Hangar)return profile.HangarModelHeightMeters*profile.HangarModelScale;
+            double visual=k==PlayableBuildingKind.Headquarters?profile.HeadquartersModelHeightMeters*profile.HeadquartersModelScale:k==PlayableBuildingKind.Factory?profile.FactoryModelHeightMeters*profile.FactoryModelScale:k==PlayableBuildingKind.Refinery?profile.RefineryModelHeightMeters*profile.RefineryModelScale:k==PlayableBuildingKind.Outpost?profile.OutpostModelHeightMeters*profile.OutpostModelScale:k==PlayableBuildingKind.Mine?profile.MineModelHeightMeters*profile.MineModelScale:profile.ScienceModelHeightMeters*profile.ScienceModelScale;
+            return Math.Max(profile.ShkvalBuildingCollisionHeight,visual);
+        }
+        // Authored Hawk body bounds; center offset is geometry, not a balance setting.
+        public static double HawkBodyHeight(PlayableProfile profile)=>1.8145018368959427*profile.HawkModelScale;
         public static double Speed(PlayableProfile p,PlayableEntityKind k,bool chassis=false)=>k==PlayableEntityKind.Hawk?p.HawkSpeed:k==PlayableEntityKind.Shkval?p.ShkvalSpeed:k==PlayableEntityKind.Explorer?p.ExplorerSpeed:chassis?p.TankChassisSpeed:p.TankSpeed;
         public static double Turn(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Hawk?p.HawkYawSpeed:k==PlayableEntityKind.Shkval?p.ShkvalTurnSpeed:k==PlayableEntityKind.Explorer?p.ExplorerTurnSpeed:p.TankTurnSpeed;
         public static double Range(PlayableProfile p,PlayableEntityKind k,bool guidance=false)=>k==PlayableEntityKind.Hawk?p.HawkRange:k==PlayableEntityKind.Shkval?(guidance?p.ShkvalGuidanceRange:p.ShkvalBaseRange):k==PlayableEntityKind.Explorer?p.ExplorerRange:p.TankRange;
+        public static double ShkvalBlastRadius(PlayableProfile p,bool guidance)=>p.ShkvalBlastRadius*(guidance?1:p.ShkvalBaseBlastRadiusMultiplier);
         public static double Vision(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Hawk?p.ExplorerVision:k==PlayableEntityKind.Shkval?p.ShkvalVision:k==PlayableEntityKind.Explorer?p.ExplorerVision:p.TankVisionRange;
-        public static double MaximumHealth(PlayableProfile p,PlayableEntitySnapshot u)=>u.MaxHealth>0?u.MaxHealth:Health(p,u.Kind);
+        public static double MaximumHealth(PlayableProfile p,PlayableEntitySnapshot u)=>u.MaxHealth>0?u.MaxHealth:PlayableStatRounding.MaximumHealth(p,Health(p,u.Kind));
         public static double HealthRatio(PlayableProfile p,PlayableEntitySnapshot u)=>(u.ExactHealth??u.Health)/MaximumHealth(p,u);
         public static int Health(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Hawk?(int)p.HawkHealth:k==PlayableEntityKind.Shkval?p.ShkvalHealth:k==PlayableEntityKind.Explorer?p.ExplorerHealth:p.TankHealth;
         public static int Cost(PlayableProfile p,PlayableEntityKind k)=>k==PlayableEntityKind.Hawk?(int)p.HawkCreditCost:k==PlayableEntityKind.Shkval?p.ShkvalCreditCost:k==PlayableEntityKind.Explorer?p.ExplorerCreditCost:p.TankCreditCost;

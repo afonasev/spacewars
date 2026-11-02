@@ -7,7 +7,7 @@ using Spacewars.Simulation;
 namespace Spacewars.Runtime
 {
     public enum MatchAiDecisionKind { Opening, OpeningCompleted, OpeningAborted, Strategy }
-    public enum MatchFactKind { Income, UnitCompleted, BuildingCompleted, UnitDestroyed, BuildingDestroyed, Army, HumanAction, AiDecision, UnitOrdered, BuildingOrdered, RefineryUpgradeOrdered, ResearchOrdered, ResearchCompleted, RefineryUpgradeCompleted, BuildingLost, BuildingSold, PlayerDefeated, PlayerLeft }
+    public enum MatchFactKind { Income, UnitCompleted, BuildingCompleted, UnitDestroyed, BuildingDestroyed, Army, HumanAction, AiDecision, UnitOrdered, BuildingOrdered, RefineryUpgradeOrdered, ResearchOrdered, ResearchCompleted, RefineryUpgradeCompleted, BuildingLost, BuildingSold, PlayerDefeated, PlayerLeft, BuildingCount, UnitCount, BuildingInventoryAtOrder, UnitInventoryAtOrder, RelayCaptured, RelayNeutralized }
     public sealed class MatchFact
     {
         public long Tick{get;} public long Sequence{get;} public double Seconds{get;} public PlayableOwner Owner{get;}
@@ -27,16 +27,28 @@ namespace Spacewars.Runtime
     {
         private readonly Dictionary<PlayableOwner,Dictionary<int,double>> income=new Dictionary<PlayableOwner,Dictionary<int,double>>();
         private readonly Dictionary<PlayableOwner,MatchFact[]> army=new Dictionary<PlayableOwner,MatchFact[]>();
+        private readonly Dictionary<(PlayableOwner,MatchFactKind,int),MatchFact[]> entityCounts=new();
         private readonly Dictionary<PlayableOwner,double[]> actions=new Dictionary<PlayableOwner,double[]>();
         public long Tick{get;} public double Duration{get;} public int Seed{get;} public string Profile{get;} public string ProfileLabel{get;} public int? WinnerTeam{get;} public bool Manual{get;}
         public IReadOnlyList<MatchResultPlayer> Players{get;} public IReadOnlyList<MatchFact> Facts{get;}
         internal MatchResult(long tick,double duration,int seed,string profile,int? winner,bool manual,MatchResultPlayer[] players,MatchFact[] facts,string profileLabel=null)
-        {Tick=tick;Duration=duration;Seed=seed;Profile=profile;ProfileLabel=profileLabel??profile;WinnerTeam=winner;Manual=manual;Players=Array.AsReadOnly(players);Facts=Array.AsReadOnly(facts);foreach(var player in players){var owned=facts.Where(f=>f.Owner==player.Owner).ToArray();income[player.Owner]=owned.Where(f=>f.Kind==MatchFactKind.Income).GroupBy(f=>(int)Math.Floor(f.Seconds+1e-8)).ToDictionary(g=>g.Key,g=>g.Sum(f=>f.Value));army[player.Owner]=owned.Where(f=>f.Kind==MatchFactKind.Army).ToArray();actions[player.Owner]=owned.Where(f=>f.Kind==MatchFactKind.HumanAction).Select(f=>f.Seconds).ToArray();}}
+        {Tick=tick;Duration=duration;Seed=seed;Profile=profile;ProfileLabel=profileLabel??profile;WinnerTeam=winner;Manual=manual;Players=Array.AsReadOnly(players);Facts=Array.AsReadOnly(facts);foreach(var g in facts.Where(f=>f.Kind==MatchFactKind.BuildingCount||f.Kind==MatchFactKind.UnitCount||f.Kind==MatchFactKind.BuildingInventoryAtOrder||f.Kind==MatchFactKind.UnitInventoryAtOrder).GroupBy(f=>(f.Owner,f.Kind,f.EntityKind)))entityCounts[g.Key]=g.ToArray();foreach(var player in players){var owned=facts.Where(f=>f.Owner==player.Owner).ToArray();income[player.Owner]=owned.Where(f=>f.Kind==MatchFactKind.Income).GroupBy(f=>(int)Math.Floor(f.Seconds+1e-8)).ToDictionary(g=>g.Key,g=>g.Sum(f=>f.Value));army[player.Owner]=owned.Where(f=>f.Kind==MatchFactKind.Army).ToArray();actions[player.Owner]=owned.Where(f=>f.Kind==MatchFactKind.HumanAction).Select(f=>f.Seconds).ToArray();}}
         public IEnumerable<MatchResultPlayer> Ranked=>Players.OrderByDescending(x=>x.Score).ThenBy(x=>x.Slot);
         public bool TeamsVisible=>Players.GroupBy(x=>x.Team).Any(x=>x.Count()>1);
         public bool IsMaximum(MatchResultPlayer player,int column)=>player.Column(column)>0&&player.Column(column)==Players.Max(x=>x.Column(column));
         public double Income(PlayableOwner owner,int second)=>income.TryGetValue(owner,out var series)&&series.TryGetValue(second,out var value)?value:0;
         public double Army(PlayableOwner owner,double seconds){if(!army.TryGetValue(owner,out var series))return 0;int lo=0,hi=series.Length;while(lo<hi){int mid=(lo+hi)/2;if(series[mid].Seconds<=seconds+1e-8)lo=mid+1;else hi=mid;}return lo==0?0:series[lo-1].Value;}
+        public int BuildingCount(PlayableOwner owner,PlayableBuildingKind kind,double seconds)=>EntityCount(owner,MatchFactKind.BuildingCount,(int)kind,seconds);
+        public int UnitCount(PlayableOwner owner,PlayableEntityKind kind,double seconds)=>EntityCount(owner,MatchFactKind.UnitCount,(int)kind,seconds);
+        private int EntityCount(PlayableOwner owner,MatchFactKind factKind,int kind,double seconds)
+        {if(!entityCounts.TryGetValue((owner,factKind,kind),out var series))return 0;int lo=0,hi=series.Length;while(lo<hi){int mid=(lo+hi)/2;if(series[mid].Seconds<=seconds+1e-8)lo=mid+1;else hi=mid;}return lo==0?0:(int)series[lo-1].Value;}
+        public int InventoryAtOrder(MatchFact order)
+        {
+            if(order.Kind!=MatchFactKind.BuildingOrdered&&order.Kind!=MatchFactKind.UnitOrdered)throw new ArgumentException("Expected an admitted entity order.",nameof(order));
+            var kind=order.Kind==MatchFactKind.UnitOrdered?MatchFactKind.UnitInventoryAtOrder:MatchFactKind.BuildingInventoryAtOrder;
+            if(!entityCounts.TryGetValue((order.Owner,kind,order.EntityKind),out var series))return 0;
+            int lo=0,hi=series.Length;while(lo<hi){int mid=(lo+hi)/2;if(series[mid].Sequence<=order.Sequence)lo=mid+1;else hi=mid;}return lo==0?0:(int)series[lo-1].Value;
+        }
         public int ResearchCount(PlayableOwner owner,double seconds)=>Facts.Count(f=>f.Owner==owner&&f.Kind==MatchFactKind.ResearchCompleted&&f.Seconds<=seconds+1e-8);
         private static int Upper(double[] series,double time){int lo=0,hi=series.Length;while(lo<hi){int mid=(lo+hi)/2;if(series[mid]<=time+1e-8)lo=mid+1;else hi=mid;}return lo;}
         // Raw actions stay available independently of the product's chosen APM window.
@@ -52,7 +64,19 @@ namespace Spacewars.Runtime
         internal MatchResult Result=>frozenResult;
         internal void BindMatchSeed(int seed){matchSeed=seed;}
         private void Fact(PlayableOwner owner,MatchFactKind kind,double value,int entityKind=0,string name="")
-        {if(frozenResult==null)matchFacts.Add(new MatchFact(Tick,++matchFactSequence,elapsed,owner,kind,value,entityKind,name));}
+        {
+            if(frozenResult!=null)return;
+            if(kind==MatchFactKind.BuildingOrdered||kind==MatchFactKind.UnitOrdered){
+                // Admission has already added this order. Snapshot live authority state,
+                // so cancelled orders and queues removed with their producer never accumulate.
+                int count=kind==MatchFactKind.BuildingOrdered?
+                    buildings.Values.Count(b=>b.Owner==owner&&b.Sale==null&&(int)b.Kind==entityKind):
+                    units.Values.Count(u=>u.Owner==owner&&(int)u.Kind==entityKind)+buildings.Values.Where(b=>b.Owner==owner&&b.Sale==null).Sum(b=>b.Orders.Count(o=>!o.IsUpgrade&&(int)o.Kind==entityKind));
+                var inventoryKind=kind==MatchFactKind.UnitOrdered?MatchFactKind.UnitInventoryAtOrder:MatchFactKind.BuildingInventoryAtOrder;
+                matchFacts.Add(new MatchFact(Tick,++matchFactSequence,elapsed,owner,inventoryKind,count,entityKind));
+            }
+            matchFacts.Add(new MatchFact(Tick,++matchFactSequence,elapsed,owner,kind,value,entityKind,name));
+        }
         // Called only on the simulation authority, with an explicit reason; menu/device state is not a departure.
         internal void RecordPlayerExit(PlayableOwner owner,bool left)
         {
@@ -61,8 +85,13 @@ namespace Spacewars.Runtime
         }
         internal void RecordHumanAction(string id)
         {if(Outcome==PlayableMatchOutcome.Playing&&TryOwner(id,out var owner)&&!eliminated.Contains(owner)&&(offline==null||offline.Roster[(int)owner].Control==OfflineControl.Human))Fact(owner,MatchFactKind.HumanAction,1);}
-        private void RecordArmy(PlayableOwner owner)=>Fact(owner,MatchFactKind.Army,units.Values.Where(x=>x.Owner==owner).Sum(x=>PlayableUnitRules.Population(profile,x.Kind)));
-        private void RecordBuildingComplete(Building b)=>Fact(b.Owner,MatchFactKind.BuildingCompleted,TerritoryRules.Cost(profile,b.Kind),(int)b.Kind,b.Kind.ToString());
+        private void RecordArmy(PlayableOwner owner)
+        {
+            Fact(owner,MatchFactKind.Army,units.Values.Where(x=>x.Owner==owner).Sum(x=>PlayableUnitRules.Population(profile,x.Kind)));
+            foreach(PlayableEntityKind kind in Enum.GetValues(typeof(PlayableEntityKind)))Fact(owner,MatchFactKind.UnitCount,units.Values.Count(x=>x.Owner==owner&&x.Kind==kind),(int)kind);
+        }
+        private void RecordBuildingCount(PlayableOwner owner,PlayableBuildingKind kind)=>Fact(owner,MatchFactKind.BuildingCount,buildings.Values.Count(b=>b.Owner==owner&&b.Kind==kind&&b.Ready&&b.Sale==null),(int)kind);
+        private void RecordBuildingComplete(Building b){Fact(b.Owner,MatchFactKind.BuildingCompleted,TerritoryRules.Cost(profile,b.Kind),(int)b.Kind,b.Kind.ToString());RecordBuildingCount(b.Owner,b.Kind);}
         private void RecordKill(PlayableOwner? attacker,PlayableOwner victim,int id,bool building,int kind,double fallback)
         {if(attacker.HasValue&&Hostile(attacker.Value,victim))Fact(attacker.Value,building?MatchFactKind.BuildingDestroyed:MatchFactKind.UnitDestroyed,fallback,kind);}
         internal void RecordAiState(PlayableAiOwnerCheckpoint state)
@@ -99,7 +128,7 @@ namespace Spacewars.Runtime
             matchSeed=r.ReadInt32();matchManual=WorldWire.Boolean(r);matchFactSequence=r.ReadInt64();
             int Count(){int count=r.ReadInt32();if(count<0||count>2000000)throw new ArgumentException("Invalid match history count.");return count;}
             if(matchFactSequence<0)throw new ArgumentException("Invalid match sequence.");
-            int n=Count();long previous=0,previousTick=0;double previousSeconds=0;for(int i=0;i<n;i++){var f=new MatchFact(r.ReadInt64(),r.ReadInt64(),r.ReadDouble(),(PlayableOwner)r.ReadInt32(),(MatchFactKind)r.ReadInt32(),r.ReadDouble(),r.ReadInt32(),r.ReadString());if(f.Tick<previousTick||f.Tick>Tick||f.Sequence<=previous||f.Sequence>matchFactSequence||!HasOwner(f.Owner)||!Enum.IsDefined(typeof(MatchFactKind),f.Kind)||double.IsNaN(f.Value)||double.IsInfinity(f.Value)||double.IsNaN(f.Seconds)||double.IsInfinity(f.Seconds)||f.Seconds<previousSeconds||f.Seconds>elapsed+1e-8||f.Value<0||((f.Kind==MatchFactKind.UnitCompleted||f.Kind==MatchFactKind.UnitDestroyed||f.Kind==MatchFactKind.UnitOrdered)&&!Enum.IsDefined(typeof(PlayableEntityKind),f.EntityKind))||((f.Kind==MatchFactKind.BuildingCompleted||f.Kind==MatchFactKind.BuildingDestroyed||f.Kind==MatchFactKind.BuildingOrdered||f.Kind==MatchFactKind.RefineryUpgradeOrdered||f.Kind==MatchFactKind.RefineryUpgradeCompleted||f.Kind==MatchFactKind.BuildingLost||f.Kind==MatchFactKind.BuildingSold)&&!Enum.IsDefined(typeof(PlayableBuildingKind),f.EntityKind)))throw new ArgumentException("Invalid match history fact.");if((f.Kind==MatchFactKind.ResearchOrdered||f.Kind==MatchFactKind.ResearchCompleted)&&!Enum.IsDefined(typeof(PlayableResearchKind),f.EntityKind)||(f.Kind==MatchFactKind.RefineryUpgradeOrdered||f.Kind==MatchFactKind.RefineryUpgradeCompleted)&&f.EntityKind!=(int)PlayableBuildingKind.Refinery)throw new ArgumentException("Invalid ordered upgrade fact.");if(f.Kind==MatchFactKind.AiDecision&&(!Enum.IsDefined(typeof(MatchAiDecisionKind),f.EntityKind)||f.Value!=Math.Truncate(f.Value)||(f.EntityKind==(int)MatchAiDecisionKind.Opening&&!Enum.IsDefined(typeof(PlayableAiOpening),(int)f.Value))||(f.EntityKind==(int)MatchAiDecisionKind.Strategy&&!Enum.IsDefined(typeof(PlayableAiMidgameStrategy),(int)f.Value))))throw new ArgumentException("Invalid strategic fact.");
+            int n=Count();long previous=0,previousTick=0;double previousSeconds=0;for(int i=0;i<n;i++){var f=new MatchFact(r.ReadInt64(),r.ReadInt64(),r.ReadDouble(),(PlayableOwner)r.ReadInt32(),(MatchFactKind)r.ReadInt32(),r.ReadDouble(),r.ReadInt32(),r.ReadString());if((f.Kind==MatchFactKind.BuildingCount||f.Kind==MatchFactKind.UnitCount||f.Kind==MatchFactKind.BuildingInventoryAtOrder||f.Kind==MatchFactKind.UnitInventoryAtOrder)&&(f.Value!=Math.Truncate(f.Value)||f.Value>int.MaxValue))throw new ArgumentException("Invalid match history fact.");if(f.Tick<previousTick||f.Tick>Tick||f.Sequence<=previous||f.Sequence>matchFactSequence||!HasOwner(f.Owner)||!Enum.IsDefined(typeof(MatchFactKind),f.Kind)||double.IsNaN(f.Value)||double.IsInfinity(f.Value)||double.IsNaN(f.Seconds)||double.IsInfinity(f.Seconds)||f.Seconds<previousSeconds||f.Seconds>elapsed+1e-8||f.Value<0||((f.Kind==MatchFactKind.UnitCompleted||f.Kind==MatchFactKind.UnitDestroyed||f.Kind==MatchFactKind.UnitOrdered||f.Kind==MatchFactKind.UnitCount||f.Kind==MatchFactKind.UnitInventoryAtOrder)&&!Enum.IsDefined(typeof(PlayableEntityKind),f.EntityKind))||((f.Kind==MatchFactKind.BuildingCompleted||f.Kind==MatchFactKind.BuildingDestroyed||f.Kind==MatchFactKind.BuildingOrdered||f.Kind==MatchFactKind.RefineryUpgradeOrdered||f.Kind==MatchFactKind.RefineryUpgradeCompleted||f.Kind==MatchFactKind.BuildingLost||f.Kind==MatchFactKind.BuildingSold||f.Kind==MatchFactKind.BuildingCount||f.Kind==MatchFactKind.BuildingInventoryAtOrder)&&!Enum.IsDefined(typeof(PlayableBuildingKind),f.EntityKind)))throw new ArgumentException("Invalid match history fact.");if((f.Kind==MatchFactKind.ResearchOrdered||f.Kind==MatchFactKind.ResearchCompleted)&&!Enum.IsDefined(typeof(PlayableResearchKind),f.EntityKind)||(f.Kind==MatchFactKind.RefineryUpgradeOrdered||f.Kind==MatchFactKind.RefineryUpgradeCompleted)&&f.EntityKind!=(int)PlayableBuildingKind.Refinery&&f.EntityKind!=(int)PlayableBuildingKind.Factory&&f.EntityKind!=(int)PlayableBuildingKind.Hangar)throw new ArgumentException("Invalid ordered upgrade fact.");if(f.Kind==MatchFactKind.AiDecision&&(!Enum.IsDefined(typeof(MatchAiDecisionKind),f.EntityKind)||f.Value!=Math.Truncate(f.Value)||(f.EntityKind==(int)MatchAiDecisionKind.Opening&&!Enum.IsDefined(typeof(PlayableAiOpening),(int)f.Value))||(f.EntityKind==(int)MatchAiDecisionKind.Strategy&&!Enum.IsDefined(typeof(PlayableAiMidgameStrategy),(int)f.Value))))throw new ArgumentException("Invalid strategic fact.");
                 previous=f.Sequence;previousTick=f.Tick;previousSeconds=f.Seconds;matchFacts.Add(f);}
             foreach(var map in new[]{matchAiIdentities,matchAiStrategies}){n=Count();for(int i=0;i<n;i++){var owner=(PlayableOwner)r.ReadInt32();if(!HasOwner(owner))throw new ArgumentException("Invalid match AI owner.");map.Add(owner,r.ReadString());}}
             if(matchFactSequence!=previous||matchManual!=(Outcome==PlayableMatchOutcome.ManuallyFinished))throw new ArgumentException("Invalid match terminal/sequence binding.");
