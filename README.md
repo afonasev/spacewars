@@ -1,5 +1,17 @@
 # Spacewars
 
+<!-- desktop-downloads:start -->
+**Скачать / Download**
+
+| Windows | macOS |
+| --- | --- |
+| **[Download EXE](https://github.com/afonasev/spacewars/releases/download/v0.6.16/Spacewars-0.6.16-Windows-x64.exe)** | **[Download DMG](https://github.com/afonasev/spacewars/releases/download/v0.6.16/Spacewars-0.6.16-macOS-Universal.dmg)** |
+
+[Только установщики / Installer releases](https://github.com/afonasev/spacewars/releases?q=tag%3Av0%20prerelease%3Afalse)
+
+Installer version: **0.6.16**.
+<!-- desktop-downloads:end -->
+
 Native Unity RTS prototype. [Download Windows / macOS](https://github.com/afonasev/spacewars/releases) · [Website](https://spacewars.afonasev.tech/)
 
 Open `unity/` with Unity **6000.3.23f1**. Let Unity resolve its pinned packages, then choose **Spacewars → Build Playable macOS** to create a Development Player. The project contains native gameplay, local lobby, AI, multilevel maps and tests. See [current capabilities](docs/NATIVE_PROTOTYPE.md).
