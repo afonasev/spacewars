@@ -338,6 +338,7 @@ namespace Spacewars.Runtime
             string failure=null;Exception primaryFailure=null;
             try
             {
+                domain.PrepareStartingCombatGeometry(()=>IsStopRequested);
                 // Crossings' first public route raster is pure derived work. Prepare it
                 // before the match clock and keep the lobby loading until it is ready.
                 if(domain.Tick==0&&domain.RoutingProfile.AuthoredMap is ThreeCrossingsMap){
@@ -364,6 +365,9 @@ namespace Spacewars.Runtime
                     bool isPaused=Volatile.Read(ref paused)!=0;
                     double wait=pacing.WaitSeconds(now,Volatile.Read(ref spectatorSpeed),isPaused);
                     if(wait>0){wake.WaitOne((int)Math.Min(20,Math.Ceiling(wait*1000)));continue;}
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    PerformanceProfile.BeginBattleTick();
+#endif
                     var timer=Stopwatch.StartNew();
                     if(!authorityTick.AwaitingRoutes){ApplyProvingGroundEdits(isPaused);ApplyRequestedBalance(isPaused);domain.SetRallyPaused(isPaused);ApplyCommands(isPaused);}
                     ApplyMatchActions(isPaused);isPaused=Volatile.Read(ref paused)!=0;
@@ -391,6 +395,9 @@ namespace Spacewars.Runtime
                     if(ownerAi!=null)Volatile.Write(ref aiCheckpoint,aiScheduler.CheckpointFor(ownerAi.OwnerId));
                     if(enemyAi!=null)Volatile.Write(ref enemyAiCheckpoint,aiScheduler.CheckpointFor(enemyAi.OwnerId));
                     PublishParticipantViews(snapshot.Status,null,isPaused);lastPublishedRevision=revision;lastPublishedPause=isPaused;PublishNavigationBinding();Volatile.Write(ref latest,snapshot);if(completedBalanceStatus!=null){lock(gate){balanceApplyStatus=completedBalanceStatus;requestedBalance=null;requestedAiProfile=null;completedBalanceStatus=null;}}lastCpu=timer.Elapsed.TotalMilliseconds;maxCpu=Math.Max(maxCpu,lastCpu);if(lastCpu>TickSeconds*1000)missedDeadlines++;lastAt=now;MaintainCampaignCheckpoint();CompleteCapture();
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    PerformanceProfile.EndBattleTick(Generation,snapshot.Tick,DiagnosticGlobalUnits);
+#endif
                     pacing.Complete(clock.Elapsed.TotalSeconds);
                 }
             }

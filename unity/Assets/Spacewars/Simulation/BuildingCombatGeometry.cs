@@ -29,6 +29,15 @@ namespace Spacewars.Simulation
   readonly SentryCombatPose? sentry;
   internal BuildingCombatPose(SentryCombatPose pose){mesh=null;origin=default;scale=cos=sin=opening=platform=height=0;sentry=pose;}
   public double Reach=>sentry.HasValue?sentry.Value.Reach:mesh.Reach*scale;
+  // A conservative horizontal bound for blast scoring, including animated parts.
+  // Keep the established Reach used by flight interception independent.
+  internal bool OutsideBlastSquare(NavPoint center,double halfWidth)
+  {
+   if(sentry.HasValue)return sentry.Value.OutsideBlastSquare(center,halfWidth);
+   double shift=mesh.HorizontalShift*Math.Max(BuildingCombatData.DoorTravel,Math.Abs(platform));
+   double bound=halfWidth+(mesh.BlastReach+shift)*scale;
+   return Math.Abs(center.X-origin.X)>bound||Math.Abs(center.Z-origin.Z)>bound;
+  }
   V Local(BallisticPoint p){var d=new V(p.X,p.Y,p.Z)-origin;return new V(cos*d.X-sin*d.Z,d.Y,sin*d.X+cos*d.Z)/scale;}
   BallisticPoint World(V p){p=p*scale;return new BallisticPoint(origin.X+cos*p.X+sin*p.Z,origin.Y+p.Y,origin.Z-sin*p.X+cos*p.Z);}
   public bool Overlaps(BallisticPoint p,double radius)=>sentry.HasValue?sentry.Value.Overlaps(p,radius):mesh.Overlaps(Local(p),radius/scale,opening,platform,height);
@@ -127,6 +136,7 @@ namespace Spacewars.Simulation
  internal sealed class CombatMesh
  {
   internal string PreparedKey;internal CombatPart[] Parts;internal double Roller,Reach;
+  internal double BlastReach,HorizontalShift;
   internal static CombatMesh Decode(string data)
   {
    using var compressed=new MemoryStream(Convert.FromBase64String(data));using var stream=new DeflateStream(compressed,CompressionMode.Decompress);using var r=new BinaryReader(stream);
@@ -138,6 +148,11 @@ namespace Spacewars.Simulation
     var vertices=new V[vc];for(int i=0;i<vc;i++){vertices[i]=Read();mesh.Reach=Math.Max(mesh.Reach,Math.Sqrt(vertices[i].X*vertices[i].X+vertices[i].Z*vertices[i].Z));}
     p.Triangles=new CombatTriangle[ic/3];p.Order=new int[ic/3];for(int i=0;i<ic/3;i++){int a=r.ReadInt32(),b=r.ReadInt32(),c=r.ReadInt32();if(a<0||b<0||c<0||a>=vc||b>=vc||c>=vc)throw new ArgumentException("Invalid combat triangle index");p.Triangles[i]=new CombatTriangle(vertices[a],vertices[b],vertices[c]);p.Order[i]=i;}
     p.Tree=CombatNode.Build(p.Triangles,p.Order,0,p.Triangles.Length);mesh.Parts[k]=p;
+    var lo=p.Tree.Min;var hi=p.Tree.Max;
+    var corner=new V(Math.Max(Math.Abs(lo.X),Math.Abs(hi.X)),Math.Max(Math.Abs(lo.Y),Math.Abs(hi.Y)),Math.Max(Math.Abs(lo.Z),Math.Abs(hi.Z)));
+    // Petal clamps its displaced vertices to .965 horizontal radius.
+    mesh.BlastReach=Math.Max(mesh.BlastReach,Math.Sqrt(corner.Length2)+(p.Motion==2?.965:0));
+    if(p.Motion==1||p.Motion==4)mesh.HorizontalShift=Math.Max(mesh.HorizontalShift,Math.Sqrt(p.Move.X*p.Move.X+p.Move.Z*p.Move.Z));
    }
    return mesh;
   }

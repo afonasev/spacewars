@@ -31,17 +31,18 @@ namespace Spacewars.Runtime
             var observed=Geometry.Obstacles.Where(o=>vision.IsVisible(new NavPoint(o.MinX,o.MinZ))&&vision.IsVisible(new NavPoint(o.MaxX,o.MinZ))&&
                 vision.IsVisible(new NavPoint(o.MinX,o.MaxZ))&&vision.IsVisible(new NavPoint(o.MaxX,o.MaxZ))).ToArray();
             var safeGeometry=new NavGeometry(Geometry.HalfExtent,observed,1);
-            var bodies=BallisticBodies(owner);
-            var solids=PlayableMap.StaticObstacles(profile);
+            var groundTargets=entities.Where(e=>Hostile(e.Owner,owner)&&e.Health>0&&e.Kind!=PlayableEntityKind.Hawk&&vision.IsVisible(e.Position)).Select(e=>e.Position)
+                .Concat(projectedBuildings.Where(b=>Hostile(b.Owner,owner)&&b.Health>0&&b.Phase!=ConstructionPhase.Pending&&vision.IsVisible(b.Position)).Select(b=>b.Position)).ToArray();
             double distance(NavPoint a,NavPoint b)=>Distance(a,b);
             double nearest(NavPoint p)=>enemies.Length==0?Double.PositiveInfinity:enemies.Min(e=>distance(p,e));
             PlayableEntitySnapshot[] cover=allCover;
             bool supported(NavPoint p)=>cover.Any(friend=>distance(p,friend.Position)<=12&&
                 (enemies.Length==0||nearest(friend.Position)<nearest(p)));
-            bool useful(NavPoint p,int gunId)=>PlayableBallistics.BestTarget(p,owner,PlayableUnitRules.Range(profile,PlayableEntityKind.Shkval,units.TryGetValue(gunId,out var actor)&&UnitUpgraded(actor)),
-                profile.ShkvalLaunchHeight,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed,profile.ShkvalProjectileRadius,
-                PlayableUnitRules.ShkvalBlastRadius(profile,units.TryGetValue(gunId,out var blastActor)&&UnitUpgraded(blastActor)),profile.ShkvalDamage,profile.ShkvalFriendlyFirePenalty,solids,profile.BallisticWallHeight,
-                bodies.Select(b=>b.Id==gunId?new BallisticBody(b.Id,b.Owner,p,default(NavPoint),b.Radius,b.Height,b.Health,b.Building):b).ToArray(),hostile:Hostile,source:gunId)>0;
+            bool useful(NavPoint position,int gunId)
+            {
+                double range=PlayableUnitRules.Range(profile,PlayableEntityKind.Shkval,units.TryGetValue(gunId,out var gun)&&UnitUpgraded(gun));
+                return groundTargets.Any(target=>distance(position,target)<=range);
+            }
             var result=new List<PlayableArtillerySupportSnapshot>();
             foreach(var gun in guns)
             {

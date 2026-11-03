@@ -10,7 +10,7 @@ namespace Spacewars.Simulation
     // Inclusive timings: children must never be added to their parent. CPU excludes waits/GC on other threads.
     public enum ProfileStage { Authority, Delivery, Domain, PlayerView, Ai, AiProjection, TeamBoard, TeamPublish,
         AiBudget, AiReview, AiRecord, Observation, Knowledge, Coverage, Vision, Snapshot, Routes, ObservedPath,
-        Artillery, Contacts, GroundFire, Movement, Firing, Projectiles, Queues, Economy, RosterAccess, RosterBuild, RouteWorker, ValueLayout, ObjectLayout, HostFork, HostSeal, HostPublish, PhysicalSolve, PhysicalArrival, PhysicalProjection, VisionRefresh, VisionReuse, SnapshotUnits, SnapshotBuildings, SnapshotPublic, SnapshotRequests, SnapshotEnvelope, ContactDetect, ContactPublish, SchedulerAdvance, ArrivalFork, ArrivalAdvance, ArrivalSeal, ArrivalFrontier, DemandBookkeeping, DemandGraph, DemandConnector, RetentionReserve, RetentionRegister, RetentionRelease, TreeMutation, ExactAdd, ExactSubtract, ExactCompare, GeometrySweep, GeometryTrace, ArrivalSchedulerAdvance, AiReviewGuard, AiReviewFinance, AiReviewArmies, AiReviewFunding, AiReviewExpansion, AiReviewOpening, AiReviewDecision, SnapshotPayload, CrowdNeighbors, CrowdScale, CrowdSelect, CrowdYield, CrowdJoint, Presentation, WorldFog, WorldMemories, WorldSites, UnitMotion, WorldAnimation, WorldUnits, WorldBuildings, WorldContacts, WorldDestruction, WorldRemoval, WorldWrecks, WorldTrails, WorldRally, WorldProjectiles, ContactOwnedTotal, ContactSource, ContactScopeAdmission, ContactScopeLifetime, ContactPrepareEnvelope, ContactDtoAndGuards, ContactMemberCopy, ContactGroupCow, ContactWriteCarrier, ContactAdmissionCheck, ContactAdmissionPrepare, ContactPublishEnvelope, ContactFinalGuards, ContactApply, ContactResolveRetire, ContactOwnerCleanup, ContactSourceRelease, Count }
+        Artillery, Contacts, GroundFire, Movement, Firing, Projectiles, Queues, Economy, RosterAccess, RosterBuild, RouteWorker, ValueLayout, ObjectLayout, HostFork, HostSeal, HostPublish, PhysicalSolve, PhysicalArrival, PhysicalProjection, VisionRefresh, VisionReuse, SnapshotUnits, SnapshotBuildings, SnapshotPublic, SnapshotRequests, SnapshotEnvelope, ContactDetect, ContactPublish, SchedulerAdvance, ArrivalFork, ArrivalAdvance, ArrivalSeal, ArrivalFrontier, DemandBookkeeping, DemandGraph, DemandConnector, RetentionReserve, RetentionRegister, RetentionRelease, TreeMutation, ExactAdd, ExactSubtract, ExactCompare, GeometrySweep, GeometryTrace, ArrivalSchedulerAdvance, AiReviewGuard, AiReviewFinance, AiReviewArmies, AiReviewFunding, AiReviewExpansion, AiReviewOpening, AiReviewDecision, SnapshotPayload, CrowdNeighbors, CrowdScale, CrowdSelect, CrowdYield, CrowdJoint, Presentation, WorldFog, WorldMemories, WorldSites, UnitMotion, WorldAnimation, WorldUnits, WorldBuildings, WorldContacts, WorldDestruction, WorldRemoval, WorldWrecks, WorldTrails, WorldRally, WorldProjectiles, ContactOwnedTotal, ContactSource, ContactScopeAdmission, ContactScopeLifetime, ContactPrepareEnvelope, ContactDtoAndGuards, ContactMemberCopy, ContactGroupCow, ContactWriteCarrier, ContactAdmissionCheck, ContactAdmissionPrepare, ContactPublishEnvelope, ContactFinalGuards, ContactApply, ContactResolveRetire, ContactOwnerCleanup, ContactSourceRelease, FormationGuide, CrowdPreparation, CrowdExecution, CrowdCertificates, Count }
     public enum ProfileWork { OrdinaryConsumed, ArrivalConsumed, ArrivalCandidate, ArrivalOccupancy, ArrivalDirect, SnapshotUnits, SnapshotBuildings, ContactMembers, ArrivalRouteConsumed, Count }
     public static class PerformanceProfile
     {
@@ -50,6 +50,31 @@ namespace Spacewars.Simulation
                 a.Count[stage]++;a.Wall[stage]+=elapsed;if(cpu>=0)a.Cpu[stage]+=cpuEnd-cpu;a.Max[stage]=Math.Max(a.Max[stage],elapsed);
                 if((stage==(int)ProfileStage.Authority||stage==(int)ProfileStage.RouteWorker||stage==(int)ProfileStage.Presentation)&&Stopwatch.GetTimestamp()>=a.NextDump)Flush();}
         }
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private static readonly bool BattleTickTiming=Enabled&&Environment.GetEnvironmentVariable("SPACEWARS_BATTLE_TICK_TIMING")=="1";
+        [ThreadStatic] private static long[] beforeTick;
+        [ThreadStatic] private static long tickStart;
+        internal static void BeginBattleTick()
+        {
+            if(!BattleTickTiming)return;
+            if(current==null)current=new Accumulator();
+            if(beforeTick==null)beforeTick=new long[(int)ProfileStage.Count];
+            Array.Copy(current.Wall,beforeTick,beforeTick.Length);
+            tickStart=Stopwatch.GetTimestamp();
+        }
+        internal static void EndBattleTick(long generation,long tick,int units)
+        {
+            if(!BattleTickTiming)return;
+            long end=Stopwatch.GetTimestamp();double scale=1000d/Stopwatch.Frequency;
+            double Ms(ProfileStage stage)=>(current.Wall[(int)stage]-beforeTick[(int)stage])*scale;
+            Console.WriteLine(string.Format(CultureInfo.InvariantCulture,
+                "BATTLE_TICK generation={0} tick={1} units={2} start={3} end={4} wall={5:F3} authority={6:F3} domain={7:F3} "+
+                "movement={8:F3} contacts={9:F3} contactPublish={10:F3} detect={11:F3} projectiles={12:F3} firing={13:F3} view={14:F3}",
+                generation,tick,units,tickStart,end,(end-tickStart)*scale,Ms(ProfileStage.Authority),Ms(ProfileStage.Domain),
+                Ms(ProfileStage.Movement),Ms(ProfileStage.Contacts),Ms(ProfileStage.ContactPublish),Ms(ProfileStage.ContactDetect),
+                Ms(ProfileStage.Projectiles),Ms(ProfileStage.Firing),Ms(ProfileStage.PlayerView)));
+        }
+#endif
         public static Scope Measure(ProfileStage stage)=>new Scope(stage);
         // First and every 1024th invocation per stage/thread. Report attempts
         // separately: measured CPU is sampled, never an all-call total.

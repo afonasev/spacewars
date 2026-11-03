@@ -5,8 +5,8 @@ namespace Spacewars.Runtime
 {
     public sealed partial class NavigationSession
     {
-        private void ValidatePhysicalRestoredRoutes(){
-            if(!(terrain is IRecastPhysicalTerrain)&&!(terrain==null&&UsesRecastGroundRoutes))return;
+        private void ValidatePhysicalRestoredRoutes(bool currentRecastSaved){
+            if(!(terrain is IRecastPhysicalTerrain)&&!(terrain==null&&UsesRecastGroundRoutes)){if(currentRecastSaved)ValidateAuthoredRecastRestoredRoutes();return;}
             var physical=(INavLayerSweepAuthority)Crowd;
             if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Decode,Generation,0,out var scope))throw new InvalidOperationException("Physical route restore qualification refused.");
             using(scope){var r=scope.OwnedReservation();foreach(var actor in Crowd.Units){
@@ -33,6 +33,23 @@ namespace Spacewars.Runtime
                 if(!at.Equals(actor.GoalLocation.Value))throw new ArgumentException("Current physical route endpoint changed.");
             }}
         }
+        private void ValidateAuthoredRecastRestoredRoutes(){
+            if(!UsesRecastGroundRoutes||!Crowd.Units.Any(a=>a.Moving&&a.InstalledRequest>0))return;
+            if(!physicalHostBudget.TryOpenScope(NavigationPreparationKind.Decode,Generation,0,out var scope))throw new InvalidOperationException("Authored Recast restore qualification refused.");
+            using(scope){var r=scope.OwnedReservation();foreach(var actor in Crowd.Units){
+                if(!actor.Moving||actor.InstalledRequest==0)continue;
+                if(!installedExecutions.TryGetValue(actor.Id,out var installed)||installed.StorageOwner?.Corridor?.TypedRoute?.RecastPlan==null||!actor.GoalLocation.HasValue)throw new ArgumentException("Moving authored Recast actor lost its accepted typed route.");
+                var route=installed.StorageOwner.Corridor.TypedRoute;var state=NavRecastIntervals.Initial(route);
+                if(memberGroups.TryGetValue(actor.Id,out var groupId)){
+                    var member=groups[groupId].Members.Single(m=>m.Entity==actor.Id);
+                    if(member.Recast.Request!=actor.InstalledRequest)throw new ArgumentException("Authored Recast member/request mismatch.");
+                    state=new NavRecastStepState((int)member.Recast.Phase,member.Recast.Cursor,member.Recast.Station,member.Recast.HighWater);
+                }
+                if(state.Cursor<0||state.Cursor>=route.Legs.Count||route.Legs[state.Cursor].From.SurfaceId!=actor.Location.SurfaceId||
+                    !NavRecastIntervals.TryContinuationRejoin(route,state,actor.Location,actor.localRoute,actor.localIndex,actor.route,actor.routeIndex,actor.GoalLocation.Value,r,out _,Crowd,actor.Id))
+                    throw new ArgumentException($"Invalid current authored Recast continuation actor={actor.Id} cursor={state.Cursor} routeIndex={actor.routeIndex}.");
+            }}
+        }
         private void ValidateSurfaceState(NavigationSessionState state)
         {
             if(state.Crowd?.Units==null||state.Crowd.Units.Any(u=>u==null)||state.Requests.Any(r=>r==null)||state.Groups!=null&&state.Groups.Any(g=>g==null||g.Members==null||g.Members.Any(m=>m==null)))throw new ArgumentException("Invalid surface checkpoint collections.");
@@ -55,7 +72,13 @@ namespace Spacewars.Runtime
                 Check(unit.Location,unit.Position,unit.Radius,true);Check(unit.GoalLocation,unit.Goal,0,unit.Moving);
                 // Physical layered routes are checked after their paid typed BODY
                 // and current member cursor have been restored, below.
-                if(terrain!=null&&!(terrain is IRecastPhysicalTerrain)&&unit.Moving){var location=unit.Location.Value;
+                // Current authored Recast motors are reselected from the actual
+                // typed interval before execution. A saved raw preference can
+                // therefore need another accepted index. Defer ONLY declared
+                // current installed bodies to the mandatory post-BODY owned
+                // continuation guard; retain all pose/goal checks above.
+                bool deferOwnedRecast=UsesRecastGroundRoutes&&state.RecastCoordinationVersion==2&&unit.InstalledRequest>0&&state.InstalledExecutions!=null&&state.InstalledExecutions.Any(row=>row.Entity==unit.Id);
+                if(terrain!=null&&!(terrain is IRecastPhysicalTerrain)&&unit.Moving&&!deferOwnedRecast){var location=unit.Location.Value;
                     foreach(var point in unit.LocalRoute.Skip(unit.LocalIndex).Concat(unit.Route.Skip(unit.RouteIndex)))if(!Crowd.Traverse(location,point,unit.Radius,out location))throw new ArgumentException("Invalid saved surface route.");
                     if(!unit.GoalLocation.HasValue||!Crowd.CompatibleArrival(location,unit.GoalLocation.Value,unit.Radius))throw new ArgumentException("Saved surface route endpoint mismatch.");
                 }

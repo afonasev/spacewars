@@ -12,6 +12,9 @@ namespace Spacewars.Simulation
         // Zero is the legacy/default sentinel. A zero voluntary cap already
         // makes Active false; receiver reach remains Speed until actual yield.
         internal double OwnPaceCap;
+        // A certified local prefix ends here; forecasting straight beyond its
+        // motor invents motion through the obstacle that prefix bends around.
+        internal double LocalLookaheadSeconds;
         internal double OwnSpeed=>!Yielding&&OwnPaceCap>0?Math.Min(Speed,OwnPaceCap):Speed;
         internal double ReverseDistance,ReverseSpeedRatio,ReverseConeRadians;
         internal bool Active,Potential,Yielding,TerminalSeed;
@@ -22,8 +25,12 @@ namespace Spacewars.Simulation
         internal double Heading;
         internal bool Blocked,Overflow,Refuse,StaticNoWinner;
         internal bool JointRefused; // Derived frame provenance, never saved authority.
+        internal bool HasJointRefuser;
+        internal int JointFirstRefuser; // Entity identity of the first actual cancellation in this frame.
         // Consumed before the second Joint; never wire or persistent state.
         internal bool IndependentTurn;
+        internal bool RoleCapWait; // A physically qualified choice denied only by the frame's row cap.
+        internal bool CurrentProgressExhausted; // No qualified eventual current-objective translation for this stationary turn.
     }
     internal interface INavMotionClearance { bool ClearMotion(int actor,NavPoint end); }
 
@@ -31,6 +38,49 @@ namespace Spacewars.Simulation
     // executed dt sweeps decide peer safety. No previous velocity is authority.
     internal static class NavCrowdMotion
     {
+        // Disabled-by-default, owner-thread scalar evidence read/reset by existing QA callback.
+        // No proposal/body/wire/storage layout changes and no gameplay consumer.
+        internal struct CausalConflict
+        {
+            public int Pass,Actor,Peer;public NavPoint Position,PeerPosition,Velocity,PeerVelocity;
+            public double ClosestSquared,RadiusSquared;
+        }
+        internal struct CausalFrame
+        {
+            public long ComputeSerial;public bool SelectedSeen,FinalSeen;public int JointPasses,ConflictCount,HintFlags;
+            public bool PolicyRefused,TypedRefused;public NavPoint GuideTarget;public double ForwardLimit;
+            public NavMotionBody Body;public NavMotionProposal Selected,PreFilter,Final;
+            public CausalConflict First,Last;
+            public CausalPeer FocusContext,Peer;
+            public bool RetryAttempted,RetryAccepted,RetryPeerInitiallyZero,RetryPeerMatchedRefuser;
+            public bool RetryGoalTurn;
+            public int RetryPeerId,RetryPeerHintFlags;
+            public NavMotionBody RetryPeerBody;public NavMotionProposal RetrySelected;
+        }
+        // Detached values only; populated at the existing joined capture sites.
+        internal struct CausalPeer
+        {
+            public bool SelectedSeen,PreFilterSeen,FinalSeen,PreparedSeen,TypedSeen,NeighborMembershipKnown,HasOtherNeighbor,PolicyRefused,TypedRefused,Held;
+            public int HintFlags,FinalHintFlags,TargetLeg,LocalLength,GlobalLength,NeighborCount,ConflictCount;
+            public long World,Request,Group,Root,Activation,Entity,Incarnation,MemberOrder,Mobility;
+            public NavPoint GuideTarget;public double ForwardLimit;
+            public NavRecastStepState TypedState;
+            public NavMotionBody Body,PreFilterBody,FinalBody;public NavMotionProposal Selected,PreFilter,Final;
+            public CausalConflict First,Last;
+        }
+        [ThreadStatic] internal static long CausalSerial;
+        [ThreadStatic] internal static int CausalActor;
+        [ThreadStatic] internal static int CausalPeerActor;
+        [ThreadStatic] internal static CausalFrame Causal;
+        private static void ObserveCausalConflict(int actor,int peer,NavMotionBody[] bodies,NavMotionProposal[] proposals,double dt)
+        {
+            if(CausalActor==0||(bodies[actor].Id!=CausalActor&&(CausalPeerActor==0||bodies[actor].Id!=CausalPeerActor))||proposals[actor].Velocity.Equals(default(NavPoint)))return;
+            var a=bodies[actor];var b=bodies[peer];var v=proposals[actor].Velocity;var w=proposals[peer].Velocity;double radius=a.Radius+b.Radius;
+            var item=new CausalConflict{Pass=Causal.JointPasses,Actor=a.Id,Peer=b.Id,Position=a.Position,PeerPosition=b.Position,Velocity=v,PeerVelocity=w,ClosestSquared=ClosestSquared(Sub(a.Position,b.Position),Sub(v,w),dt),RadiusSquared=radius*radius};
+            if(a.Id==CausalActor){if(Causal.ConflictCount++==0)Causal.First=item;Causal.Last=item;}
+            else{if(Causal.Peer.ConflictCount++==0)Causal.Peer.First=item;Causal.Peer.Last=item;}
+        }
+
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         // Owner-thread causal control only. No authority state or gameplay setting.
         [ThreadStatic] internal static bool ForceAllOverflowComponentsEvidence;
@@ -183,6 +233,85 @@ namespace Spacewars.Simulation
                 restored=true;
             }
             if(restored)Neighbors(bodies,neighbors,counts,profile,dt);
+            if(!safe)return;
+            // The uniform component bound is the conservative baseline. Reclaim
+            // only existing profile speed bands whose exact incident pairs fit.
+            // Complete original caps get first choice; then the existing lower
+            // bands reclaim remaining capacity in stable entity/index order.
+            bool reclaimed=false;
+            for(int band=profile.CrowdSpeedBands;band>=1;band--){
+            int previousId=int.MinValue,previousRow=-1;
+            for(int order=0;order<bodies.Length;order++){
+                int row=-1;for(int i=0;i<bodies.Length;i++)if((bodies[i].Id>previousId||bodies[i].Id==previousId&&i>previousRow)&&(row<0||bodies[i].Id<bodies[row].Id||bodies[i].Id==bodies[row].Id&&i<row))row=i;
+                if(row<0)break;previousId=bodies[row].Id;previousRow=row;
+                if(!(bodies[row].Active||bodies[row].Potential)||counts[row]<0||originalSpeeds[row]<=bodies[row].Speed)continue;
+                var candidate=bodies[row];candidate.Speed=band==profile.CrowdSpeedBands?originalSpeeds[row]:originalSpeeds[row]*band/profile.CrowdSpeedBands;
+                if(!Finite(candidate.Speed)||candidate.Speed<=bodies[row].Speed||candidate.Speed>originalSpeeds[row])continue;
+                int count=0;bool fits=true;
+                for(int peer=0;peer<bodies.Length;peer++)if(peer!=row&&NeighborRelevant(in candidate,in bodies[peer],profile,dt)){
+                    if(++count>profile.CrowdNeighborCap){fits=false;break;}
+                    if(!NeighborRelevant(in bodies[row],in bodies[peer],profile,dt)&&(bodies[peer].Active||bodies[peer].Potential)&&(counts[peer]<0||counts[peer]>=profile.CrowdNeighborCap)){fits=false;break;}
+                }
+                if(!fits)continue;
+                for(int peer=0;peer<bodies.Length;peer++)if(peer!=row&&NeighborRelevant(in candidate,in bodies[peer],profile,dt)&&!NeighborRelevant(in bodies[row],in bodies[peer],profile,dt)&&counts[peer]>=0)counts[peer]=counts[peer]==profile.CrowdNeighborCap?-1:counts[peer]+1;
+                bodies[row].Speed=candidate.Speed;counts[row]=count;reclaimed=true;
+            }
+            }
+            // Preserve the ENTIRE full/band result as a floor before reclaiming
+            // the remaining incident capacity with every other current speed fixed.
+            reclaimed|=ReclaimIncidentCapacity(bodies,counts,originalSpeeds,profile,dt);
+            if(reclaimed)Neighbors(bodies,neighbors,counts,profile,dt);
+        }
+        private static bool ReclaimIncidentCapacity(NavMotionBody[] bodies,int[] counts,double[] originalSpeeds,NavigationProfile profile,double dt)
+        {
+            bool reclaimed=false;int cap=profile.CrowdNeighborCap,previousId=int.MinValue,previousRow=-1;
+            // Retain at most cap smallest new-edge boundaries; the next boundary
+            // stays scalar. Scratch is private, so a no-gain row cannot corrupt rows.
+            Span<double> smallest=stackalloc double[NeighborCapacity];
+            for(int order=0;order<bodies.Length;order++){
+                int row=-1;for(int i=0;i<bodies.Length;i++)if((bodies[i].Id>previousId||bodies[i].Id==previousId&&i>previousRow)&&(row<0||bodies[i].Id<bodies[row].Id||bodies[i].Id==bodies[row].Id&&i<row))row=i;
+                if(row<0)break;previousId=bodies[row].Id;previousRow=row;
+                var origin=bodies[row];double original=originalSpeeds[row];
+                if(!(origin.Active||origin.Potential)||counts[row]<0||counts[row]>cap||original<=origin.Speed)continue;
+                int slack=cap-counts[row],kept=0;double limit=original;
+                for(int peer=0;peer<bodies.Length;peer++)if(peer!=row&&!NeighborRelevant(in origin,in bodies[peer],profile,dt)){
+                    double boundary=FixedPeerBoundary(in origin,in bodies[peer],original,profile,dt);
+                    // The (slack+1)th new edge would overflow the candidate row.
+                    if(kept<slack){int at=kept++;while(at>0&&boundary<smallest[at-1]){smallest[at]=smallest[at-1];at--;}smallest[at]=boundary;}
+                    else if(slack>0&&boundary<smallest[kept-1]){limit=Math.Min(limit,smallest[kept-1]);int at=kept-1;while(at>0&&boundary<smallest[at-1]){smallest[at]=smallest[at-1];at--;}smallest[at]=boundary;}
+                    else limit=Math.Min(limit,boundary);
+                    if((bodies[peer].Active||bodies[peer].Potential)&&(counts[peer]<0||counts[peer]>=cap))limit=Math.Min(limit,boundary);
+                }
+                if(!Finite(limit)||limit<=origin.Speed||limit>original)continue;
+                var candidate=origin;candidate.Speed=limit;int count=0;bool fits=true;
+                // Exact certificate includes every incident pair, even those
+                // outside the current capped neighbor rows.
+                for(int peer=0;peer<bodies.Length;peer++)if(peer!=row&&NeighborRelevant(in candidate,in bodies[peer],profile,dt)){
+                    if(++count>cap){fits=false;break;}
+                    if(!NeighborRelevant(in origin,in bodies[peer],profile,dt)&&(bodies[peer].Active||bodies[peer].Potential)&&(counts[peer]<0||counts[peer]>=cap)){fits=false;break;}
+                }
+                if(!fits)continue;
+                for(int peer=0;peer<bodies.Length;peer++)if(peer!=row&&NeighborRelevant(in candidate,in bodies[peer],profile,dt)&&!NeighborRelevant(in origin,in bodies[peer],profile,dt)&&counts[peer]>=0)counts[peer]=counts[peer]==cap?-1:counts[peer]+1;
+                bodies[row].Speed=limit;counts[row]=count;reclaimed=true;
+            }
+            return reclaimed;
+        }
+        private static double FixedPeerBoundary(in NavMotionBody origin,in NavMotionBody peer,double original,NavigationProfile profile,double dt)
+        {
+            var full=origin;full.Speed=original;
+            if(!NeighborRelevant(in full,in peer,profile,dt))return original;
+            // Caller proved absence at the current floor. Reuse the verified
+            // lower-distance arithmetic of TryNonPermanentPairBoundary, then
+            // subtract the peer's fixed CURRENT speed instead of scaling it.
+            var separation=Sub(origin.Position,peer.Position);double d2=separation.X*separation.X+separation.Z*separation.Z;
+            double radius=origin.Radius+peer.Radius,horizon=Math.Max(dt,profile.CrowdLookaheadSeconds);
+            double lowerDistance=Math.Max(0,NextDown(Math.Sqrt(Math.Max(0,NextDown(d2)))));
+            double lowerGap=Math.Max(0,NextDown(lowerDistance-radius));
+            double lowerReachSpeed=Math.Max(0,NextDown(lowerGap/horizon));
+            double fixedPeerSpeed=peer.Active||peer.Potential?peer.Speed:0;
+            double boundary=Math.Max(origin.Speed,Math.Min(original,Math.Max(0,NextDown(lowerReachSpeed-fixedPeerSpeed))));
+            var candidate=origin;candidate.Speed=boundary;
+            return Finite(boundary)&&!NeighborRelevant(in candidate,in peer,profile,dt)?boundary:origin.Speed;
         }
         private static bool ComponentHasActive(NavMotionBody[] bodies,int[] labels,int root)
         {for(int row=0;row<bodies.Length;row++)if(labels[row]==root&&bodies[row].Active)return true;return false;}
@@ -327,7 +456,7 @@ namespace Spacewars.Simulation
         {int root=row;while(labels[root]!=root)root=labels[root];while(labels[row]!=row){int next=labels[row];labels[row]=root;row=next;}return root;}
         private static double Risk(NavMotionBody[] bodies,int row,NavPoint velocity,int[] neighbors,int count,double horizon)
         {
-            double risk=0;ref readonly var a=ref bodies[row];for(int k=0;k<count;k++){
+            double risk=0;ref readonly var a=ref bodies[row];horizon=MotorLookahead(in a,horizon);for(int k=0;k<count;k++){
                 ref readonly var b=ref bodies[neighbors[row*NeighborCapacity+k]];double r=a.Radius+b.Radius;
                 double gap=ClosestSquared(Sub(a.Position,b.Position),Sub(velocity,Preferred(in b)),horizon);
                 risk=Math.Max(risk,Math.Max(0,1-gap/(r*r)));
@@ -358,6 +487,7 @@ namespace Spacewars.Simulation
                 }
                 prepared=true;
             }
+            horizon=MotorLookahead(in bodies[row],horizon);
             double risk=0;for(int k=0;k<count;k++){
                 ref readonly var input=ref inputs[k];
                 double gap=ClosestSquared(input.Separation,Sub(velocity,input.Preferred),horizon);
@@ -365,11 +495,18 @@ namespace Spacewars.Simulation
             }return risk;
         }
         internal static NavMotionProposal Select(NavMotionBody[] bodies,int row,int[] neighbors,int count,NavigationProfile profile,double dt,INavMotionClearance clearance,NavPoint? assignedGoal)
+            =>Select(bodies,row,neighbors,count,profile,dt,clearance,assignedGoal,false);
+        internal static NavMotionProposal Select(NavMotionBody[] bodies,int row,int[] neighbors,int count,NavigationProfile profile,double dt,INavMotionClearance clearance,NavPoint? assignedGoal,bool allowStaticGoalTurn,NavPoint? currentGoal=null)
         {
+            // The installed endpoint owns arrival/reverse. Recast movement ranks
+            // every turn and avoidance against its ONE selected current target.
+            var objective=currentGoal??assignedGoal;
+            bool StepAllowed(NavPoint end)=>!currentGoal.HasValue||!(clearance is NavCrowd owner)||owner.AllowsCurrentMotion(row,end);
             var a=bodies[row];a.Speed=a.OwnSpeed;var result=new NavMotionProposal{Position=a.Position,Heading=a.Heading};
             if(!a.Active||a.Speed<=0)return result;
             if(count<0){result.Overflow=true;return result;}
-            bool stable=clearance is NavCrowd production&&production.StableSelectClearance;
+            bool pure=clearance is NavCrowd production&&production.StableSelectClearance;
+            bool stable=pure;
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             stable&=!DisableSelectClearanceReuseForQa;
 #endif
@@ -409,7 +546,17 @@ namespace Spacewars.Simulation
             // Squared-velocity errors need a scale-relative comparison at tiny
             // composed speeds; retain the existing tolerance at normal speeds.
             double errorEpsilon=Math.Min(1e-12,a.Speed*a.Speed*1e-12);
-            bool futureStaticMove=false,won=false;double bestSteering=aim,bestSpeed=0;
+            bool staticTurnThreat=objective.HasValue&&OnlyStaticPreferredThreat(bodies,row,neighbors,count,preferred,profile.CrowdLookaheadSeconds);
+            bool futureStaticMove=false,won=false,roleCapWait=false;double bestSteering=aim,bestSpeed=0;
+            bool hasStaticGoalEscape=false;double escapeError=double.PositiveInfinity;NavMotionProposal staticGoalEscape=default;
+            // With no explicit current motor, this opt-in escape is owned by
+            // the assigned endpoint. Ranking it against an opposing temporary
+            // target can certify a turn that ultimately drives away from goal.
+            // Recast retries supply currentGoal and retain their current intent,
+            // including necessary avoidance legs initially away from that motor.
+            bool endpointEscape=allowStaticGoalTurn&&!currentGoal.HasValue&&assignedGoal.HasValue;
+            var escapePreferred=preferred;
+            if(endpointEscape){var escapeBody=a;escapeBody.Target=assignedGoal.Value;escapePreferred=Preferred(in escapeBody);}
             // Steering aims include an explicit turn-in-place path to an
             // avoidance direction. Its eventual velocity is only a heuristic;
             // the proposal still executes bounded turn, then aligned forward.
@@ -428,6 +575,21 @@ namespace Spacewars.Simulation
                     var eventual=Velocity(steering,speed);var velocity=aligned?Velocity(heading,speed):default;
                     var end=new NavPoint(a.Position.X+velocity.X*dt,a.Position.Z+velocity.Z*dt);
                     var futureEnd=new NavPoint(a.Position.X+eventual.X*dt,a.Position.Z+eventual.Z*dt);
+                    // A physically necessary avoidance leg may initially move away
+                    // from the current target. Rank the same bounded zero-risk
+                    // choices by that target's preferred velocity, not by a second
+                    // final endpoint. Full forecast/dt safety still qualifies it;
+                    // it replaces only an exhausted normal winner on stalled retry.
+                    double escapeEx=eventual.X-escapePreferred.X,escapeEz=eventual.Z-escapePreferred.Z;
+                    double candidateEscapeError=escapeEx*escapeEx+escapeEz*escapeEz;
+                    if(allowStaticGoalTurn&&staticTurnThreat&&(aligned||!heading.Equals(a.Heading))&&objective.HasValue&&(!assignedGoal.HasValue||!a.Position.Equals(assignedGoal.Value))&&candidateEscapeError<escapeError-errorEpsilon&&
+                        (!endpointEscape||ImprovesGoal(a.Position,futureEnd,assignedGoal.Value)&&(end.Equals(a.Position)||ImprovesGoal(a.Position,end,assignedGoal.Value)))&&StepAllowed(end)&&StepAllowed(futureEnd)&&
+                        Risk(bodies,row,eventual,neighbors,count,profile.CrowdLookaheadSeconds,riskInputs,ref riskPrepared)<=1e-12&&
+                        StaticPeersClear(bodies,row,neighbors,count,eventual,dt)&&StaticPeersClear(bodies,row,neighbors,count,velocity,dt)&&
+                        SelectClear(row,end,clearance,clearEntries,ref clearUsed,ref clearNext)&&SelectClear(row,futureEnd,clearance,clearEntries,ref clearUsed,ref clearNext)&&
+                        SelectClear(row,StaticTurnForecastEnd(a.Position,steering,speed,distance,Math.Max(dt,profile.CrowdLookaheadSeconds)),clearance,clearEntries,ref clearUsed,ref clearNext)){
+                        staticGoalEscape=new NavMotionProposal{Position=end,Velocity=velocity,Heading=heading,IndependentTurn=!aligned};hasStaticGoalEscape=true;escapeError=candidateEscapeError;
+                    }
                     // Once an eventual translation is already known available,
                     // a losing candidate cannot change Blocked or the winner.
                     // Only audited pure clearance may omit these queries. Until
@@ -443,6 +605,22 @@ namespace Spacewars.Simulation
                     if(!aligned||!futureStaticMove)futureAvailable=SelectClear(row,futureEnd,clearance,clearEntries,ref clearUsed,ref clearNext)&&StaticPeersClear(bodies,row,neighbors,count,eventual,dt)&&StaticPeersClear(bodies,row,neighbors,count,velocity,dt);
                     if(futureAvailable)futureStaticMove=true;
                     if(!aligned&&!futureAvailable)continue;
+                    if(!StepAllowed(end)||!StepAllowed(futureEnd)){
+                        // Preserve the reason lost by screening before selection.
+                        // A cap denial alone is insufficient: the same improving
+                        // choice must pass physical, peer and ranking predicates.
+                        if(!roleCapWait&&pure&&clearance is NavCrowd capOwner&&capOwner.AllowsCurrentMotionWithoutRowCap(row,end,futureEnd)){
+                            double deniedRisk=ranked?risk:Risk(bodies,row,eventual,neighbors,count,profile.CrowdLookaheadSeconds,riskInputs,ref riskPrepared);
+                            double dx=eventual.X-preferred.X,dz=eventual.Z-preferred.Z,deniedError=ranked?error:dx*dx+dz*dz;
+                            if(deniedError<a.Speed*a.Speed-errorEpsilon&&deniedRisk<=bestRisk+1e-12&&
+                                (Math.Abs(deniedRisk-bestRisk)>1e-12||deniedError<bestError-errorEpsilon)&&
+                                SelectClear(row,end,clearance,clearEntries,ref clearUsed,ref clearNext)&&SelectClear(row,futureEnd,clearance,clearEntries,ref clearUsed,ref clearNext)&&
+                                StaticPeersClear(bodies,row,neighbors,count,eventual,dt)&&StaticPeersClear(bodies,row,neighbors,count,velocity,dt)&&
+                                (!staticTurnThreat||aligned||heading.Equals(a.Heading)||!objective.HasValue||!ImprovesGoal(a.Position,futureEnd,objective.Value)||
+                                    SelectClear(row,StaticTurnForecastEnd(a.Position,steering,speed,distance,Math.Max(dt,profile.CrowdLookaheadSeconds)),clearance,clearEntries,ref clearUsed,ref clearNext)))roleCapWait=true;
+                        }
+                        continue;
+                    }
                     if(!SelectClear(row,end,clearance,clearEntries,ref clearUsed,ref clearNext))continue;
                     // The executed heading may differ from the forecast steering.
                     // A known stationary footprint must clear the actual dt sweep;
@@ -455,28 +633,44 @@ namespace Spacewars.Simulation
                     if(pass==1&&error>=a.Speed*a.Speed-errorEpsilon)continue;
                     // Stable clockwise enumeration breaks an exact reciprocal tie.
                     if(risk>bestRisk+1e-12||Math.Abs(risk-bestRisk)<=1e-12&&error>=bestError-errorEpsilon)continue;
+                    // A reachable dt turn may still aim into a physical dead end.
+                    // This qualifies only selection; futureStaticMove above remains
+                    // the original dt witness for Blocked/local-repair semantics.
+                    bool voluntaryTurn=objective.HasValue&&!aligned&&futureAvailable&&velocity.Equals(default(NavPoint))&&!heading.Equals(a.Heading)&&ImprovesGoal(a.Position,futureEnd,objective.Value);
+                    if(staticTurnThreat&&voluntaryTurn){
+                        var forecast=StaticTurnForecastEnd(a.Position,steering,speed,distance,Math.Max(dt,profile.CrowdLookaheadSeconds));
+                        if(!SelectClear(row,forecast,clearance,clearEntries,ref clearUsed,ref clearNext))continue;
+                    }
                     bestRisk=risk;bestError=error;bestSteering=steering;bestSpeed=speed;result.Position=end;result.Velocity=velocity;result.Heading=heading;won=true;
                     // Set on EVERY winner replacement, using this winner's own
                     // futureAvailable, not the accumulated futureStaticMove.
-                    result.IndependentTurn=assignedGoal.HasValue&&!aligned&&futureAvailable&&velocity.Equals(default(NavPoint))&&!heading.Equals(a.Heading)&&ImprovesGoal(a.Position,futureEnd,assignedGoal.Value);
+                    result.IndependentTurn=voluntaryTurn;
                 }
             }
             }
             // A turn is a voluntary wait only when some eventual translated
             // endpoint is physically available. Enclosure keeps the old timeout.
-            if(won&&result.IndependentTurn&&OnlyStaticPreferredThreat(bodies,row,neighbors,count,preferred,profile.CrowdLookaheadSeconds)){
+            if(won&&result.IndependentTurn&&staticTurnThreat){
                 bool reuseRefinement=stable;
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 reuseRefinement&=!DisableRefinementReuseForQa;
 #endif
-                if(reuseRefinement)RefineStaticAvoidanceTurn(bodies,row,neighbors,count,profile,dt,clearance,assignedGoal,aim,limit,bestSteering,bestSpeed,bestRisk,bestError,errorEpsilon,ref result,clearEntries,ref clearUsed,ref clearNext,riskInputs,ref riskPrepared);
-                else RefineStaticAvoidanceTurn(bodies,row,neighbors,count,profile,dt,clearance,assignedGoal,aim,limit,bestSteering,bestSpeed,bestRisk,bestError,errorEpsilon,ref result);
+                if(reuseRefinement)RefineStaticAvoidanceTurn(bodies,row,neighbors,count,profile,dt,clearance,objective,aim,limit,bestSteering,bestSpeed,bestRisk,bestError,errorEpsilon,ref result,clearEntries,ref clearUsed,ref clearNext,riskInputs,ref riskPrepared,currentGoal.HasValue);
+                else RefineStaticAvoidanceTurn(bodies,row,neighbors,count,profile,dt,clearance,objective,aim,limit,bestSteering,bestSpeed,bestRisk,bestError,errorEpsilon,ref result,currentGoal.HasValue);
             }
+            if(!won&&hasStaticGoalEscape){result=staticGoalEscape;won=true;futureStaticMove=true;if(CausalActor!=0&&a.Id==CausalActor)Causal.RetryGoalTurn=result.IndependentTurn;}
             result.Blocked=!futureStaticMove;
             // An active neighbor is a forecast input, not evidence that this
             // stationary no-winner will recover. Keep actual turns voluntary;
             // an aligned exhausted choice must reach the existing bounded detour.
             result.StaticNoWinner=!won&&turning.Equals(a.Heading)&&!result.Blocked;
+            result.RoleCapWait=!won&&roleCapWait;
+            // A reachable retreat is not a certificate that a stationary turn
+            // will advance the ONE current executable objective. If all such
+            // controls were exhausted, expose that outcome to existing bounded
+            // recovery. A qualified role-cap wait and useful avoidance turn keep
+            // their original treatment; no timer or progress credit changes.
+            result.CurrentProgressExhausted=currentGoal.HasValue&&!roleCapWait&&result.Position.Equals(a.Position)&&!result.IndependentTurn&&bestError>=a.Speed*a.Speed-errorEpsilon;
             return result;
         }
 #if UNITY_INCLUDE_TESTS
@@ -508,6 +702,7 @@ namespace Spacewars.Simulation
             // Squared-velocity errors need a scale-relative comparison at tiny
             // composed speeds; retain the existing tolerance at normal speeds.
             double errorEpsilon=Math.Min(1e-12,a.Speed*a.Speed*1e-12);
+            bool staticTurnThreat=assignedGoal.HasValue&&OnlyStaticPreferredThreat(bodies,row,neighbors,count,preferred,profile.CrowdLookaheadSeconds);
             bool futureStaticMove=false,won=false;double bestSteering=aim,bestSpeed=0;
             // Steering aims include an explicit turn-in-place path to an
             // avoidance direction. Its eventual velocity is only a heuristic;
@@ -538,16 +733,18 @@ namespace Spacewars.Simulation
                     if(pass==1&&error>=a.Speed*a.Speed-errorEpsilon)continue;
                     // Stable clockwise enumeration breaks an exact reciprocal tie.
                     if(risk>bestRisk+1e-12||Math.Abs(risk-bestRisk)<=1e-12&&error>=bestError-errorEpsilon)continue;
+                    bool voluntaryTurn=assignedGoal.HasValue&&!aligned&&futureAvailable&&velocity.Equals(default(NavPoint))&&!heading.Equals(a.Heading)&&ImprovesGoal(a.Position,futureEnd,assignedGoal.Value);
+                    if(staticTurnThreat&&voluntaryTurn&&!clearance.ClearMotion(row,StaticTurnForecastEnd(a.Position,steering,speed,distance,Math.Max(dt,profile.CrowdLookaheadSeconds))))continue;
                     bestRisk=risk;bestError=error;bestSteering=steering;bestSpeed=speed;result.Position=end;result.Velocity=velocity;result.Heading=heading;won=true;
                     // Set on EVERY winner replacement, using this winner's own
                     // futureAvailable, not the accumulated futureStaticMove.
-                    result.IndependentTurn=assignedGoal.HasValue&&!aligned&&futureAvailable&&velocity.Equals(default(NavPoint))&&!heading.Equals(a.Heading)&&ImprovesGoal(a.Position,futureEnd,assignedGoal.Value);
+                    result.IndependentTurn=voluntaryTurn;
                 }
             }
             }
             // A turn is a voluntary wait only when some eventual translated
             // endpoint is physically available. Enclosure keeps the old timeout.
-            if(won&&result.IndependentTurn&&OnlyStaticPreferredThreat(bodies,row,neighbors,count,preferred,profile.CrowdLookaheadSeconds))
+            if(won&&result.IndependentTurn&&staticTurnThreat)
                 RefineStaticAvoidanceTurn(bodies,row,neighbors,count,profile,dt,clearance,assignedGoal,aim,limit,bestSteering,bestSpeed,bestRisk,bestError,errorEpsilon,ref result);
             result.Blocked=!futureStaticMove;
             // An active neighbor is a forecast input, not evidence that this
@@ -563,9 +760,13 @@ namespace Spacewars.Simulation
             double bx=goal.X-from.X,bz=goal.Z-from.Z,ax=goal.X-to.X,az=goal.Z-to.Z,before=bx*bx+bz*bz,after=ax*ax+az*az;
             return Finite(before)&&Finite(after)&&after<before;
         }
+        private static NavPoint StaticTurnForecastEnd(NavPoint position,double steering,double speed,double distance,double horizon)
+        {var reach=Velocity(steering,Math.Min(distance,speed*horizon));return new NavPoint(position.X+reach.X,position.Z+reach.Z);}
+        private static double MotorLookahead(in NavMotionBody body,double horizon)
+            =>!body.Yielding&&body.LocalLookaheadSeconds>0?Math.Min(horizon,body.LocalLookaheadSeconds):horizon;
         private static bool OnlyStaticPreferredThreat(NavMotionBody[] bodies,int row,int[] neighbors,int count,NavPoint preferred,double horizon)
         {
-            bool staticThreat=false;ref readonly var a=ref bodies[row];
+            bool staticThreat=false;ref readonly var a=ref bodies[row];horizon=MotorLookahead(in a,horizon);
             for(int k=0;k<count;k++){
                 ref readonly var b=ref bodies[neighbors[row*NeighborCapacity+k]];double radius=a.Radius+b.Radius;
                 double risk=Math.Max(0,1-ClosestSquared(Sub(a.Position,b.Position),Sub(preferred,Preferred(in b)),horizon)/(radius*radius));
@@ -576,14 +777,14 @@ namespace Spacewars.Simulation
             }
             return staticThreat;
         }
-        private static void RefineStaticAvoidanceTurn(NavMotionBody[] bodies,int row,int[] neighbors,int count,NavigationProfile profile,double dt,INavMotionClearance clearance,NavPoint? assignedGoal,double aim,double limit,double steering,double speed,double risk,double error,double errorEpsilon,ref NavMotionProposal result)
+        private static void RefineStaticAvoidanceTurn(NavMotionBody[] bodies,int row,int[] neighbors,int count,NavigationProfile profile,double dt,INavMotionClearance clearance,NavPoint? assignedGoal,double aim,double limit,double steering,double speed,double risk,double error,double errorEpsilon,ref NavMotionProposal result,bool currentIntent=false)
         {
             // Independent predecessor and arbitrary callbacks keep every original
             // query. Empty spans make both reuse helpers follow their scalar path.
             int used=0,next=0;bool prepared=false;
-            RefineStaticAvoidanceTurn(bodies,row,neighbors,count,profile,dt,clearance,assignedGoal,aim,limit,steering,speed,risk,error,errorEpsilon,ref result,default,ref used,ref next,default,ref prepared);
+            RefineStaticAvoidanceTurn(bodies,row,neighbors,count,profile,dt,clearance,assignedGoal,aim,limit,steering,speed,risk,error,errorEpsilon,ref result,default,ref used,ref next,default,ref prepared,currentIntent);
         }
-        private static void RefineStaticAvoidanceTurn(NavMotionBody[] bodies,int row,int[] neighbors,int count,NavigationProfile profile,double dt,INavMotionClearance clearance,NavPoint? assignedGoal,double aim,double limit,double steering,double speed,double risk,double error,double errorEpsilon,ref NavMotionProposal result,Span<ClearanceEntry> clearEntries,ref int clearUsed,ref int clearNext,Span<RiskInput> riskInputs,ref bool riskPrepared)
+        private static void RefineStaticAvoidanceTurn(NavMotionBody[] bodies,int row,int[] neighbors,int count,NavigationProfile profile,double dt,INavMotionClearance clearance,NavPoint? assignedGoal,double aim,double limit,double steering,double speed,double risk,double error,double errorEpsilon,ref NavMotionProposal result,Span<ClearanceEntry> clearEntries,ref int clearUsed,ref int clearNext,Span<RiskInput> riskInputs,ref bool riskPrepared,bool currentIntent=false)
         {
             if(risk>1e-12||error<=errorEpsilon)return;
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -607,7 +808,9 @@ namespace Spacewars.Simulation
                 var eventual=Velocity(candidate,speed);var velocity=aligned?Velocity(heading,speed):default;
                 var end=new NavPoint(a.Position.X+velocity.X*dt,a.Position.Z+velocity.Z*dt);
                 var future=new NavPoint(a.Position.X+eventual.X*dt,a.Position.Z+eventual.Z*dt);
-                bool available=SelectClear(row,end,clearance,clearEntries,ref clearUsed,ref clearNext)&&SelectClear(row,future,clearance,clearEntries,ref clearUsed,ref clearNext)&&StaticPeersClear(bodies,row,neighbors,count,eventual,dt)&&StaticPeersClear(bodies,row,neighbors,count,velocity,dt);
+                bool available=(!currentIntent||!(clearance is NavCrowd owner)||owner.AllowsCurrentMotion(row,end)&&owner.AllowsCurrentMotion(row,future))&&SelectClear(row,end,clearance,clearEntries,ref clearUsed,ref clearNext)&&SelectClear(row,future,clearance,clearEntries,ref clearUsed,ref clearNext)&&StaticPeersClear(bodies,row,neighbors,count,eventual,dt)&&StaticPeersClear(bodies,row,neighbors,count,velocity,dt);
+                bool voluntaryTurn=assignedGoal.HasValue&&!aligned&&velocity.Equals(default(NavPoint))&&!heading.Equals(a.Heading)&&ImprovesGoal(a.Position,future,assignedGoal.Value);
+                if(available&&voluntaryTurn)available=SelectClear(row,StaticTurnForecastEnd(a.Position,candidate,speed,Length(Sub(a.Target,a.Position)),Math.Max(dt,profile.CrowdLookaheadSeconds)),clearance,clearEntries,ref clearUsed,ref clearNext);
                 if(available){
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                     if(CountRefinementForQa&&riskInputs.Length==count)RefinementRiskReuseCallsForQa++;
@@ -616,7 +819,7 @@ namespace Spacewars.Simulation
                 }
                 if(available){
                     safe=middle;result.Position=end;result.Velocity=velocity;result.Heading=heading;
-                    result.IndependentTurn=assignedGoal.HasValue&&!aligned&&velocity.Equals(default(NavPoint))&&!heading.Equals(a.Heading)&&ImprovesGoal(a.Position,future,assignedGoal.Value);
+                    result.IndependentTurn=voluntaryTurn;
                 }else unsafeAngle=middle;
             }
         }
@@ -624,12 +827,22 @@ namespace Spacewars.Simulation
         {
             ref readonly var a=ref bodies[row];for(int k=0;k<count;k++){ref readonly var b=ref bodies[neighbors[row*NeighborCapacity+k]];if(b.Active)continue;double r=a.Radius+b.Radius;if(ClosestSquared(Sub(a.Position,b.Position),velocity,dt)<r*r-1e-9)return false;}return true;
         }
+        private static void RefuseJoint(int actor,int peer,NavMotionBody[] bodies,NavMotionProposal[] proposals,double dt)
+        {
+            ObserveCausalConflict(actor,peer,bodies,proposals,dt);
+            // Record only an executed candidate's real sweep conflict. The
+            // first cause survives subsequent fixed-point/owner passes of this
+            // frame; no contact guess or persistent dependency graph is added.
+            if(!proposals[actor].HasJointRefuser){proposals[actor].HasJointRefuser=true;proposals[actor].JointFirstRefuser=bodies[peer].Id;}
+            proposals[actor].Refuse=true;
+        }
         internal static void ResolveJoint(NavMotionBody[] bodies,NavMotionProposal[] proposals,double dt)
         {
             // Keep actual rejected translation as frame provenance. A forecast
             // wait or a turn alone still supplies no physical refusal evidence.
             // Refusal changes a moving hazard into a stationary one. At most N
             // trajectories can be refused, so the fixed point is finite.
+            if(CausalActor!=0)Causal.JointPasses++;
             bool changed;do{changed=false;for(int i=0;i<bodies.Length;i++){
                 // Velocities change only in the final refusal sweep, not while
                 // pairs are inspected. Reuse this row's frozen proposal.
@@ -649,11 +862,11 @@ namespace Spacewars.Simulation
                         // Keep an already terrain-validated proposal only when the
                         // other footprint can wait safely. Stable entity identity
                         // resolves a reciprocal tie, never the frame row order.
-                        if(aloneI&&(!aloneJ||bodies[i].Id<bodies[j].Id)){proposals[j].Refuse=true;continue;}
-                        if(aloneJ){proposals[i].Refuse=true;continue;}
+                        if(aloneI&&(!aloneJ||bodies[i].Id<bodies[j].Id)){RefuseJoint(j,i,bodies,proposals,dt);continue;}
+                        if(aloneJ){RefuseJoint(i,j,bodies,proposals,dt);continue;}
                     }
-                    if(movingI)proposals[i].Refuse=true;
-                    if(movingJ)proposals[j].Refuse=true;
+                    if(movingI){RefuseJoint(i,j,bodies,proposals,dt);}
+                    if(movingJ){RefuseJoint(j,i,bodies,proposals,dt);}
                 }
             }
             for(int i=0;i<bodies.Length;i++)if(proposals[i].Refuse){proposals[i].Refuse=false;if(!proposals[i].Velocity.Equals(default(NavPoint))&&!proposals[i].Position.Equals(bodies[i].Position))proposals[i].JointRefused=true;proposals[i].Position=bodies[i].Position;proposals[i].Velocity=default;changed=true;}

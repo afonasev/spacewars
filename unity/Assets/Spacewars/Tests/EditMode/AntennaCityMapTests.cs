@@ -15,7 +15,7 @@ namespace Spacewars.Tests.EditMode
         [Test] public void StreetBasesSitesAndConstructionExitsMatchV02()
         {
             var map=new AntennaCityMap();var p=PlayableProfile.Create(PlayableProfile.Default.CopyData(),map);var sites=map.Sites(p);
-            Assert.AreEqual(27,sites.Length);Assert.AreEqual(6,sites.Count(s=>s.Kind==PlayableBuildingKind.Headquarters));Assert.AreEqual(6,sites.Count(s=>s.Kind==PlayableBuildingKind.Outpost));Assert.AreEqual(15,sites.Count(s=>s.Kind==PlayableBuildingKind.Mine));
+            Assert.AreEqual(27,sites.Length);Assert.AreEqual(6,sites.Count(s=>s.Kind==PlayableBuildingKind.Headquarters));Assert.AreEqual(6,sites.Count(s=>s.Kind==PlayableBuildingKind.Outpost));Assert.AreEqual(12,sites.Count(s=>s.Kind==PlayableBuildingKind.Mine));Assert.AreEqual(3,sites.Count(s=>s.Kind==PlayableBuildingKind.RelayTower));
             Assert.AreEqual(48,sites.Sum(s=>s.Slots.Count));Assert.GreaterOrEqual(map.Blocks.Count,60,"Dense authored city blocks");Assert.AreEqual(6,map.Supports.Count(s=>s.Id.Contains("ramp")));Assert.True(PartitionNavigationProvider.SupportsTerrain(map));
             double ordinary=Math.Max(p.HangarFootprintRadius,Math.Max(p.FactoryFootprintRadius,Math.Max(p.ScienceFootprintRadius,p.RefineryFootprintRadius)));
             foreach(var site in sites){Assert.True(map.SupportsFootprint(site.Position,site.Kind==PlayableBuildingKind.Mine?p.MineFootprintRadius:p.HeadquartersFootprintRadius),"site "+site.Id);Assert.AreEqual(site.Id>=25?4:0,map.SurfaceHeight(site.Position),1e-8);

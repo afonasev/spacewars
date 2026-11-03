@@ -1,1 +1,1 @@
-{"id":"hawk-visual-v2","revision":2,"nozzleAngle":18,"nozzleResponse":1.1,"reloadTravel":0.12,"mechanismSeconds":0.45,"launchSeconds":0.09,"launchSize":0.15,"exhaustLength":0.75,"exhaustWidth":0.8,"exhaustOpacity":0.3}
+{"id":"hawk-visual-v2","revision":3,"nozzleAngle":18,"nozzleResponse":1.1,"reloadTravel":0.12,"mechanismSeconds":0.45,"launchSeconds":0.09,"launchSize":0.15,"exhaustLength":0.75,"exhaustWidth":0.8,"exhaustOpacity":0.15,"missileBodyBrightness":0.55,"missileRoughness":0.8}

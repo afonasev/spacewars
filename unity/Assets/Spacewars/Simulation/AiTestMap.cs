@@ -9,7 +9,7 @@ namespace Spacewars.Simulation
     {
         public const int Capacity = 8;
         public string Id => "ai-eight-player-test-map-v1";
-        public int Revision => 1;
+        public int Revision => 2;
         public double HalfExtent => 144;
         public double DirectFireHeight => 1;
         public int SurfaceSemanticsVersion => 1;
@@ -45,7 +45,7 @@ namespace Spacewars.Simulation
             for (int i = 0; i < Capacity; i++) sites.Add(new TerritorySite(i + 1, PlayableBuildingKind.Headquarters, Headquarters((PlayableOwner)i), profile));
             for (int i = 0; i < Capacity; i++) sites.Add(new TerritorySite(i + 9, PlayableBuildingKind.Mine, Ring(i, 76), profile));
             for (int i = 0; i < 4; i++) sites.Add(new TerritorySite(i + 17, PlayableBuildingKind.Outpost, Ring(i * 2, 38), profile));
-            for (int i = 0; i < 4; i++) sites.Add(new TerritorySite(i + 21, PlayableBuildingKind.Mine, Ring(i * 2, 32, Math.PI / 4), profile));
+            for (int i = 0; i < 4; i++) sites.Add(new TerritorySite(i + 21, PlayableBuildingKind.RelayTower, Ring(i * 2, 32, Math.PI / 4), profile));
             return sites.ToArray();
         }
         public OfflineMatchConfiguration Configuration(PlayableProfile profile, int seed, OfflineParticipant[] roster)

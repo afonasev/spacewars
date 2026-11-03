@@ -21,7 +21,8 @@ namespace Spacewars.Input.Tests
             var domain=typeof(PlayableRuntime).GetField("domain",F).GetValue(Runtime);
             var nav=(NavigationSession)domain.GetType().GetProperty("Navigation",F).GetValue(domain);
             var corridor=typeof(NavigationSession).GetProperty("LastCorridorFailure",F).GetValue(nav);
-            return " tick="+Runtime.Latest.Tick+" pending="+nav.PendingCount+" requests="+nav.Requests.Count+" rejected="+nav.RejectedResults+" corridor="+corridor+" scheduler="+string.Join(",",typeof(NavSchedulerCounters).GetProperties().Select(prop=>prop.Name+":"+prop.GetValue(Get<UnityHostRouteService>(app,"routeService").CertifiedCounters)))+" projection="+Get<UnityHostRouteService>(app,"routeService")?.LastProjectionFailure+" points="+string.Join(";",Runtime.Latest.Buildings.Where(b=>b.PrivateState?.PendingRally!=null).Select(b=>b.Id+":"+b.PrivateState.PendingRally+":"+b.PrivateState.HasRally));
+            return " tick="+Runtime.Latest.Tick+" pending="+nav.PendingCount+" requests="+nav.Requests.Count+" rejected="+nav.RejectedResults+" corridor="+corridor+" admission="+string.Join(";",Runtime.NavigationBinding.Admission.Requests.Select(r=>r.Entity+":"+r.Request+":"+r.Order))+
+                " worker="+string.Join(",",typeof(CertifiedRoutePublication).GetProperties().Where(p=>p.PropertyType.IsPrimitive||p.PropertyType==typeof(string)).Select(p=>p.Name+":"+p.GetValue(Get<UnityHostRouteService>(app,"routeService").CertifiedPublication)))+" scheduler="+string.Join(",",typeof(NavSchedulerCounters).GetProperties().Select(prop=>prop.Name+":"+prop.GetValue(Get<UnityHostRouteService>(app,"routeService").CertifiedCounters)))+" projection="+Get<UnityHostRouteService>(app,"routeService")?.LastProjectionFailure+" points="+string.Join(";",Runtime.Latest.Buildings.Where(b=>b.PrivateState?.PendingRally!=null).Select(b=>b.Id+":"+b.PrivateState.PendingRally+":"+b.PrivateState.HasRally));
         }
         private Vector2 RallyMapScreen(PlayableBootstrap seat,int kind,NavPoint point)
         {
@@ -123,6 +124,35 @@ namespace Spacewars.Input.Tests
             Call(seat,"ExecuteBattleAction","rally",false,true);Call(app,"UpdateFrame");Tap(pads[1],pads[1].selectButton);Tap(pads[1],pads[1].buttonEast);Call(app,"UpdateFrame");
             Assert.IsFalse(Get<bool>(seat,"battleRally"));Assert.IsFalse(Get<bool>(seat,"mapOpen"));Assert.AreEqual(sequence,Get<long>(seat,"sequence"));
             var unchanged=Get<PlayableSnapshot>(seat,"view").Buildings.Single(b=>b.Id==own.Id);Assert.AreEqual(point.X,unchanged.Rally.X,.01);Assert.AreEqual(point.Z,unchanged.Rally.Z,.01);
+            Runtime.RequestStop();yield return Wait(()=>Runtime.IsStopped,"stop");
+        }
+        [UnityTest] public IEnumerator PadRallySendsNewTankToFlag()
+        {
+            yield return StartOrdinary(1);yield return BuildRallyFactory(app);var seat=Seats[0];var pad=pads[0];
+            Put(seat,"battleController",true);var view=Get<PlayableSnapshot>(seat,"view");var own=view.Buildings.First(b=>b.Owner==view.Owner&&b.Kind==PlayableBuildingKind.Factory);
+            Call(seat,"SetPadSelection",new[]{own.Id},false);PadCursor(seat,own.Position);Call(app,"UpdateFrame");
+            void AimAtAction(Func<OfflinePadAction,bool> match)
+            {
+                var actions=(OfflinePadAction[])Call(seat,"OrdinaryPadActions",0);int index=Array.FindIndex(actions,a=>match(a));Assert.GreaterOrEqual(index,0);
+                float angle=index*Mathf.PI*2/actions.Length;Set(pad.leftStick,new Vector2(Mathf.Sin(angle),Mathf.Cos(angle)));InputSystem.Update();Call(app,"UpdateFrame");
+            }
+            AimAtAction(a=>a.Sector.Id=="rally");Tap(pad,pad.buttonSouth);Assert.True(Get<bool>(seat,"battleRally"),"Actual rally petal must enter placement.");
+            Set(pad.leftStick,Vector2.zero);InputSystem.Update();Tap(pad,pad.selectButton);PadCursor(seat,RallyTestTarget(seat,own));Call(app,"UpdateFrame");
+            // Release the menu stick before targeting so the tactical flag stays
+            // on the verified free test point during A confirmation.
+            Set(pad.leftStick,Vector2.zero);InputSystem.Update();Tap(pad,pad.buttonSouth);
+            Assert.False(Get<bool>(seat,"battleRally"),"A confirmation must return to the producer menu.");
+            long rallySequence=Get<long>(seat,"sequence");
+            yield return Wait(()=>Runtime.OfflineFrame.Receipts.Any(r=>r.Receipt.Sequence==rallySequence&&r.Receipt.OwnerId==view.OwnerId&&r.Receipt.Status==PlayableCommandStatus.Applied),"rally admission");Call(app,"UpdateFrame");
+            var applied=Get<PlayableSnapshot>(seat,"view").Buildings.Single(b=>b.Id==own.Id);Assert.True(applied.PrivateState.HasRally);var flag=applied.Rally;
+            var oldIds=Runtime.Latest.Entities.Select(e=>e.Id).ToHashSet();AimAtAction(a=>a.Command?.Kind==PlayableCommandKind.QueueTank);Tap(pad,pad.buttonSouth);Set(pad.leftStick,Vector2.zero);InputSystem.Update();
+            float deadline=Time.realtimeSinceStartup+(float)Get<PlayableProfile>(seat,"profile").TankProductionSeconds+20;
+            PlayableEntitySnapshot tank=null;
+            while(Time.realtimeSinceStartup<deadline&&tank==null){Call(app,"OnApplicationFocus",true);Call(app,"UpdateFrame");tank=Get<PlayableSnapshot>(seat,"view").Entities.FirstOrDefault(e=>e.Owner==view.Owner&&e.Kind==PlayableEntityKind.Tank&&!oldIds.Contains(e.Id));yield return null;}
+            Assert.NotNull(tank,"A real queued tank must leave the producer.");var first=tank.Position;int id=tank.Id;bool moved=false,arrived=false;deadline=Time.realtimeSinceStartup+20;
+            while(Time.realtimeSinceStartup<deadline&&!arrived){Call(app,"OnApplicationFocus",true);Call(app,"UpdateFrame");tank=Get<PlayableSnapshot>(seat,"view").Entities.Single(e=>e.Id==id);double dx=tank.Position.X-first.X,dz=tank.Position.Z-first.Z;moved|=dx*dx+dz*dz>.25;dx=tank.Position.X-flag.X;dz=tank.Position.Z-flag.Z;arrived=moved&&dx*dx+dz*dz<2.25;yield return null;}
+            TestContext.WriteLine("rally ordinary witness: tank="+id+" first="+first.X+","+first.Z+" final="+tank.Position.X+","+tank.Position.Z+" flag="+flag.X+","+flag.Z+" moved="+moved+" arrived="+arrived);
+            Assert.True(moved,"Threaded host must move the produced tank.");Assert.True(arrived,"Produced tank must reach within 1.5m of the accepted flag within 20s.");yield return Capture("pad-rally-produced-tank-arrived");
             Runtime.RequestStop();yield return Wait(()=>Runtime.IsStopped,"stop");
         }
         private static void AssertFlagColor(Transform flag,Color expected)

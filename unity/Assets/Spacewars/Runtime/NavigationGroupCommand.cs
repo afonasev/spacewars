@@ -119,7 +119,7 @@ namespace Spacewars.Runtime
                 try{using(EnterTransport()){if(operation!=authorityOperationIdentity)throw new NavigationCommandRefused("Map source operation changed.");}result.CopyLayoutFrom(map,owner);return result;}catch{result.ReleaseStorage();throw;}
             }
         }
-        private static NavigationLiveGroup CopyCommandGroup(GroupOrderState record,NavigationRetentionBudget.Scope scope)
+        private static NavigationLiveGroup CopyCommandGroup(GroupOrderState record,NavigationRetentionBudget.Scope scope,bool collectFormation=false)
         {
             var reservation=scope.OwnedReservation();NavOwnedStorage[] members=null;NavRetainedArray<NavOwnedStorage> memberArray=null;NavigationAuthorityGroup version=null;
             using(NavStorageScratch.Reserve(reservation,32L+8L*record.Members.Length)){
@@ -127,6 +127,7 @@ namespace Spacewars.Runtime
                     for(int i=0;i<members.Length;i++)members[i]=NavigationAuthorityMember.CopyOwned(record.Members[i],reservation);
                     memberArray=NavRetainedArray<NavOwnedStorage>.Copy(members,reservation.TryReserve);
                     version=NavigationAuthorityGroup.CopyNamesOwned(record,memberArray,reservation);
+                    if(collectFormation){var plan=RecastFormationPlan.Collect(version.Data,version.Members,reservation);try{var next=NavigationAuthorityGroup.CopyWithFormationOwned(version,plan,reservation);version.ReleaseStorage();version=next;}finally{plan.Release();}}
                     var live=NavigationLiveGroup.CreateOwned(version,scope);live.SealForInstall(scope);return live;
                 }finally{version?.ReleaseStorage();memberArray?.Release();foreach(var member in members)member?.ReleaseOwner();}
             }
@@ -267,7 +268,9 @@ namespace Spacewars.Runtime
                             foreach(var member in next.Members){member.ProgressVersion=next.MarchVersion==2?2:0;if(next.MarchVersion==2)member.Progress=member.ProgressOffset=Math.Max(0,remaining.MarchAnchor);}
                             next.Members=remaining.Members.Concat(next.Members).OrderBy(m=>m.Entity).ToArray();next.MembershipRevision=remaining.MembershipRevision+1;
                         }else {int slot=0;foreach(var member in SpatialSlotOrder(next.Members,next.OriginalGoal))member.Slot=slot++;}
-                        var live=CopyCommandGroup(next,scope);liveBirths.Add(live);next=live.PreparedRecord(scope);nextGroups.SetPreparing(groupId,next,live);
+                        bool compatible=UsesRecastGroundRoutes&&marchConfigured&&!legacySingle&&ids.Length>=2;
+                        if(compatible){Crowd.TryGet(ids[0],out var first);foreach(int id in ids){Crowd.TryGet(id,out var a);if(a.Radius!=first.Radius||a.MobilityRevision!=first.MobilityRevision)compatible=false;}}
+                        var live=CopyCommandGroup(next,scope,compatible);liveBirths.Add(live);next=live.PreparedRecord(scope);nextGroups.SetPreparing(groupId,next,live);
                         foreach(int id in ids)nextMembers.SetPreparing(id,groupId);
                         candidate=NavigationGroupCommand.CreateOwned(Requests.InstanceCapacity,ids.Length,scope.OwnedReservation());
                         candidate.Groups=nextGroups;candidate.MemberGroups=nextMembers;candidate.Orders=nextOrders;candidate.Pending=nextPending;candidate.Allocating=nextAllocating;candidate.Reservations=nextReservations;candidate.Goals=nextGoals;candidate.Identities=nextIdentities;candidate.Failures=nextFailures;candidate.Ledger=nextLedger;candidate.OwnMaps();

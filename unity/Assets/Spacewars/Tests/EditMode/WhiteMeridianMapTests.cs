@@ -10,7 +10,7 @@ namespace Spacewars.Tests.EditMode
         private static PlayableProfile Profile()=>PlayableProfile.Create(PlayableProfile.Default.CopyData(),new WhiteMeridianMap());
         [Test] public void OriginalTopologySupportsEverySiteAndCompleteFactoryExit(){
             var p=Profile();var map=(WhiteMeridianMap)p.AuthoredMap;var sites=map.Sites(p);
-            Assert.AreEqual(18,sites.Length);Assert.AreEqual(4,sites.Count(s=>s.Kind==PlayableBuildingKind.Headquarters));Assert.AreEqual(6,sites.Count(s=>s.Kind==PlayableBuildingKind.Outpost));Assert.AreEqual(8,sites.Count(s=>s.Kind==PlayableBuildingKind.Mine));
+            Assert.AreEqual(20,sites.Length);Assert.AreEqual(2,sites.Count(s=>s.Kind==PlayableBuildingKind.RelayTower));Assert.AreEqual(4,sites.Count(s=>s.Kind==PlayableBuildingKind.Headquarters));Assert.AreEqual(6,sites.Count(s=>s.Kind==PlayableBuildingKind.Outpost));Assert.AreEqual(8,sites.Count(s=>s.Kind==PlayableBuildingKind.Mine));
             var blockers=map.MovementBlockers.ToList();
             foreach(var site in sites){
                 double r=TerritoryRules.Radius(p,site.Kind);Assert.True(map.SupportsFootprint(site.Position,r*Math.Sqrt(2)),"center "+site.Id);blockers.Add(new NavObstacle(site.Position.X-r,site.Position.Z-r,site.Position.X+r,site.Position.Z+r));

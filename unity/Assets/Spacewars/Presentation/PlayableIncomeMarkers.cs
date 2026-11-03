@@ -32,19 +32,25 @@ namespace Spacewars.Presentation
             {
                 double age=(view.Tick-e.Tick)/30d;
                 if(e.Owner!=view.Owner||age<0||age>=profile.IncomeMarkerDurationSeconds)continue;
-                activeIncomeMarkers.Add(e.BuildingId);
-                if(!incomeMarkers.TryGetValue(e.BuildingId,out var label))
+                bool relay=e.Kind==PlayableBuildingKind.RelayTower;
+                Vector3 anchor;
+                if(relay){if(!world.TryRelayIncomeAnchor(e.BuildingId,out anchor))continue;}
+                else anchor=world.Point(e.Position)+Vector3.up*(float)BuildingVisualHeight(e.Kind);
+                // Relay site IDs and building IDs are separate positive namespaces in saved facts.
+                int markerId=relay?-e.BuildingId:e.BuildingId;
+                activeIncomeMarkers.Add(markerId);
+                if(!incomeMarkers.TryGetValue(markerId,out var label))
                 {
-                    label=new Label{name="income-"+e.BuildingId,pickingMode=PickingMode.Ignore};
+                    label=new Label{name="income-"+markerId,pickingMode=PickingMode.Ignore};
                     label.style.position=Position.Absolute;label.style.unityFontStyleAndWeight=FontStyle.Bold;
                     label.style.unityTextAlign=TextAnchor.MiddleCenter;
                     label.style.textShadow=new TextShadow{color=Color.black,offset=new Vector2(0,2),blurRadius=3};
-                    incomeMarkerLayer.Add(label);incomeMarkers.Add(e.BuildingId,label);
+                    incomeMarkerLayer.Add(label);incomeMarkers.Add(markerId,label);
                 }
                 label.text="+"+e.Amount.ToString("0.##",CultureInfo.InvariantCulture);label.style.color=LobbyPaint(e.Owner);
                 float font=(float)profile.IncomeMarkerFontPixels,width=font*(label.text.Length+1),height=font*2;
                 label.style.fontSize=font;label.style.width=width;label.style.height=height;
-                var point=cameraView.WorldToScreenPoint(world.Point(e.Position)+Vector3.up*(float)(BuildingVisualHeight(e.Kind)+profile.LifecycleMarkerOffsetMeters));
+                var point=cameraView.WorldToScreenPoint(anchor+Vector3.up*(float)profile.LifecycleMarkerOffsetMeters);
                 var panel=RuntimePanelUtils.ScreenToPanel(root.panel,new Vector2(point.x,Screen.height-point.y));
                 var local=root.WorldToLocal(panel);
                 float progress=(float)(age/profile.IncomeMarkerDurationSeconds),eased=1-(1-progress)*(1-progress);

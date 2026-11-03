@@ -302,15 +302,15 @@ namespace Spacewars.Input.Tests
         [UnityTest] public IEnumerator OrdinaryPadCommandsMapAndNeutralFocusUseTheSameOwnerSequence()
         {
             yield return StartOrdinary(1);var seat=app;var v=Get<PlayableSnapshot>(seat,"view");var own=v.Entities.First(e=>e.Owner==v.Owner);PadCursor(seat,own.Position);Call(app,"UpdateFrame");Tap(pads[0],pads[0].buttonSouth);CollectionAssert.AreEqual(new[]{own.Id},Selection(seat));
-            var point=new NavPoint(own.Position.X+4,own.Position.Z+4);PadCursor(seat,point);Tap(pads[0],pads[0].buttonEast);long moved=Get<long>(seat,"sequence");Assert.Greater(moved,0);
-            yield return Wait(()=>Runtime.OfflineFrame.Receipts.Any(r=>r.Receipt.OwnerId=="player-1"&&r.Receipt.Sequence==moved&&r.Receipt.Status==PlayableCommandStatus.Applied),"pad B move");
-            Tap(pads[0],pads[0].buttonWest);Assert.AreEqual(moved+1,Get<long>(seat,"sequence"));
-            ButtonFrame(pads[0],pads[0].buttonWest,true);yield return new WaitForSecondsRealtime(.35f);Call(app,"UpdateFrame");ButtonFrame(pads[0],pads[0].buttonWest,false);long held=Get<long>(seat,"sequence");Assert.AreEqual(moved+2,held);
-            yield return Wait(()=>Runtime.OfflineFrame.Receipts.Any(r=>r.Receipt.Sequence==held&&r.Receipt.Status==PlayableCommandStatus.Applied),"pad X hold");
+            var point=new NavPoint(own.Position.X+4,own.Position.Z+4);PadCursor(seat,point);Tap(pads[0],pads[0].buttonWest);long moved=Get<long>(seat,"sequence");Assert.Greater(moved,0);
+            yield return Wait(()=>Runtime.OfflineFrame.Receipts.Any(r=>r.Receipt.OwnerId=="player-1"&&r.Receipt.Sequence==moved&&r.Receipt.Status==PlayableCommandStatus.Applied),"pad X move");
+            Tap(pads[0],pads[0].buttonEast);Assert.AreEqual(moved+1,Get<long>(seat,"sequence"));
+            ButtonFrame(pads[0],pads[0].buttonEast,true);yield return new WaitForSecondsRealtime(.35f);Call(app,"UpdateFrame");ButtonFrame(pads[0],pads[0].buttonEast,false);long held=Get<long>(seat,"sequence");Assert.AreEqual(moved+2,held);
+            yield return Wait(()=>Runtime.OfflineFrame.Receipts.Any(r=>r.Receipt.Sequence==held&&r.Receipt.Status==PlayableCommandStatus.Applied),"pad B hold");
             Call(app,"UpdateFrame");Assert.True(Get<PlayableSnapshot>(seat,"view").Entities.First(e=>e.Id==own.Id).Held);
             Tap(pads[0],pads[0].selectButton);Assert.True(Get<bool>(seat,"mapOpen"));Call(app,"UpdateFrame");Tap(pads[0],pads[0].buttonSouth);Assert.False(Get<bool>(seat,"mapOpen"));
             Call(app,"UpdateFrame");Tap(pads[0],pads[0].rightShoulder);yield return new WaitForSecondsRealtime(.1f);Tap(pads[0],pads[0].rightShoulder);CollectionAssert.AreEquivalent(Get<PlayableSnapshot>(seat,"view").Entities.Where(e=>e.Owner==v.Owner).Select(e=>e.Id),Selection(seat));
-            Call(app,"OnApplicationFocus",false);Assert.True(Get<bool>(app,"paused"));ButtonFrame(pads[0],pads[0].buttonWest,true);Call(app,"OnApplicationFocus",true);Call(app,"Pause",false);Call(app,"UpdateFrame");Assert.AreEqual(held,Get<long>(seat,"sequence"));ButtonFrame(pads[0],pads[0].buttonWest,false);Assert.AreEqual(held,Get<long>(seat,"sequence"));Call(app,"UpdateFrame");Tap(pads[0],pads[0].buttonWest);Assert.AreEqual(held+1,Get<long>(seat,"sequence"));
+            Call(app,"OnApplicationFocus",false);Assert.True(Get<bool>(app,"paused"));ButtonFrame(pads[0],pads[0].buttonEast,true);Call(app,"OnApplicationFocus",true);Call(app,"Pause",false);Call(app,"UpdateFrame");Assert.AreEqual(held,Get<long>(seat,"sequence"));ButtonFrame(pads[0],pads[0].buttonEast,false);Assert.AreEqual(held,Get<long>(seat,"sequence"));Call(app,"UpdateFrame");Tap(pads[0],pads[0].buttonEast);Assert.AreEqual(held+1,Get<long>(seat,"sequence"));
             Runtime.RequestStop();yield return Wait(()=>Runtime.IsStopped,"stop");
         }
         [UnityTest] public IEnumerator LocalPauseSettingsRestartResultAndReturnStayWithOrdinaryCoordinator()

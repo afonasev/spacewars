@@ -17,7 +17,7 @@ namespace Spacewars.Tests.EditMode
             var roster = Enumerable.Range(0, 8).Select(i => new OfflineParticipant("ai-" + i, i + 1, i + 1, OfflineControl.Ai)).ToArray();
             var c = map.Configuration(p, 7108, roster); // Executes the production envelope/anchor/binding validator.
             Assert.AreEqual(8, c.Starts.Count); Assert.AreEqual(24, c.Sites.Count);
-            Assert.AreEqual(12, c.Sites.Count(s => s.Kind == PlayableBuildingKind.Mine));
+            Assert.AreEqual(8, c.Sites.Count(s => s.Kind == PlayableBuildingKind.Mine));Assert.AreEqual(4,c.Sites.Count(s=>s.Kind==PlayableBuildingKind.RelayTower));
             Assert.AreEqual(4, c.Sites.Count(s => s.Kind == PlayableBuildingKind.Outpost));
             Assert.IsEmpty(c.Obstacles); Assert.IsEmpty(map.Solids); Assert.AreEqual(1, map.Supports.Count);
             Assert.IsEmpty(map.SurfaceTransitions);

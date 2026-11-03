@@ -46,24 +46,6 @@ namespace Spacewars.Simulation
             double Primitive(double v)=>h<Eps?v*Math.Abs(v)/2:(v*Math.Sqrt(h*h+v*v)+h*h*Math.Log(v/h+Math.Sqrt(v*v/(h*h)+1)))/2;
             return Math.Max(Eps,(Primitive(a)-Primitive(a-b))/b);
         }
-        public static BallisticFlight Aim(NavPoint from,NavPoint target,NavPoint velocity,double height,double arc,double speed,bool guided,double threshold,double falloff,double maxTime,Func<NavPoint,double> terrain=null)
-        {
-            var start=new BallisticPoint(from.X,(terrain?.Invoke(from)??0)+height,from.Z);
-            double magnitude=Math.Sqrt(velocity.X*velocity.X+velocity.Z*velocity.Z);
-            double u=Math.Max(0,Math.Min(1,(magnitude-(threshold-falloff))/(2*falloff)));
-            double lead=guided?1-u*u*(3-2*u):0;
-            BallisticPoint End(double t)=>new BallisticPoint(target.X+velocity.X*lead*t,terrain?.Invoke(new NavPoint(target.X+velocity.X*lead*t,target.Z+velocity.Z*lead*t))??0,target.Z+velocity.Z*lead*t);
-            double Time(double t)=>Length(start,End(t),arc)/speed;
-            double aimTime=0;
-            if(magnitude*lead>=Eps)
-            {
-                double high=Math.Min(Time(0),maxTime);bool found=false;
-                // Exact reference solver iteration limits are numerical invariants.
-                for(int i=0;i<24;i++){if(Time(high)<=high){found=true;break;}if(high>=maxTime)break;high=Math.Min(high*2,maxTime);}
-                if(found){double low=0;for(int i=0;i<48;i++){double mid=(low+high)/2;if(Time(mid)>mid)low=mid;else high=mid;}aimTime=high;}
-            }
-            return new BallisticFlight(start,End(aimTime),arc,speed);
-        }
         private static bool Overlap(NavObstacle s,BallisticPoint p,double radius)
         {return p.X+radius>=s.MinX&&p.X-radius<=s.MaxX&&p.Z+radius>=s.MinZ&&p.Z-radius<=s.MaxZ&&s.DistanceSquared(p.Ground)<=radius*radius;}
         private static int Cover(BallisticPoint p,double radius,IReadOnlyList<NavObstacle> solids,double wallHeight,IReadOnlyList<BallisticBody> bodies,int ignored,bool includeUnits=false)
@@ -77,12 +59,12 @@ namespace Spacewars.Simulation
 
             return 0;
         }
-        public static BallisticContact? FirstContact(BallisticFlight f,double radius,IReadOnlyList<NavObstacle> solids,double wallHeight,IReadOnlyList<BallisticBody> bodies,int source,double from=0,double to=1,Func<NavPoint,double> terrain=null)
+        public static BallisticContact? FirstContact(BallisticFlight f,double radius,IReadOnlyList<NavObstacle> solids,double wallHeight,IReadOnlyList<BallisticBody> bodies,int source,double from=0,double to=1,Func<NavPoint,double> terrain=null,Func<PlayableOwner,bool> canContact=null)
         {
             var middle=new BallisticPoint((f.Start.X+f.End.X)/2,0,(f.Start.Z+f.End.Z)/2);
             double reach=Math.Sqrt((f.End.X-f.Start.X)*(f.End.X-f.Start.X)+(f.End.Z-f.Start.Z)*(f.End.Z-f.Start.Z))/2+radius;
             solids=solids.Where(s=>Overlap(s,middle,reach)).ToArray();
-            bodies=bodies.Where(b=>b.Id!=source&&Math.Sqrt((b.Position.X-middle.X)*(b.Position.X-middle.X)+(b.Position.Z-middle.Z)*(b.Position.Z-middle.Z))<=reach+(b.Combat?.Reach??b.Radius)).ToArray();
+            bodies=bodies.Where(b=>b.Id!=source&&(canContact==null||canContact(b.Owner))&&Math.Sqrt((b.Position.X-middle.X)*(b.Position.X-middle.X)+(b.Position.Z-middle.Z)*(b.Position.Z-middle.Z))<=reach+(b.Combat?.Reach??b.Radius)).ToArray();
             if(solids.Count==0&&bodies.Count==0&&terrain==null)
             {
                 BallisticContact? first=null;double a=-4*f.ArcHeight,b=f.End.Y-f.Start.Y+4*f.ArcHeight;
@@ -133,6 +115,9 @@ namespace Spacewars.Simulation
         public static bool BlastHits(BallisticPoint impact,double radius,BallisticBody target,IReadOnlyList<NavObstacle> solids,double wallHeight,IReadOnlyList<BallisticBody> bodies,Func<NavPoint,double> terrain=null)
         {
             double x=target.Position.X-impact.X,z=target.Position.Z-impact.Z,y=Math.Max(target.BaseHeight,Math.Min(target.BaseHeight+target.Height,impact.Y));
+            // A salvo checks every building for splash. Its articulated bounds can rule out
+            // distant buildings without asking for a nearest point on every mesh triangle.
+            if(target.Combat.HasValue&&target.Combat.Value.OutsideBlastSquare(impact.Ground,radius+2*Eps))return false;
             if(target.Combat.HasValue){var nearest=target.Combat.Value.Closest(impact);double dx=nearest.X-impact.X,dy0=nearest.Y-impact.Y,dz=nearest.Z-impact.Z;if(dx*dx+dy0*dy0+dz*dz>(radius+Eps)*(radius+Eps))return false;}
             double horizontal=Math.Max(0,Math.Sqrt(x*x+z*z)-target.Radius);
             if(!target.Combat.HasValue&&Math.Sqrt(horizontal*horizontal+(y-impact.Y)*(y-impact.Y))>radius+Eps)return false;
@@ -140,21 +125,6 @@ namespace Spacewars.Simulation
             int steps=Math.Max(1,(int)Math.Ceiling(Math.Sqrt(x*x+z*z+dy*dy)/.025));
             for(int i=1;i<steps;i++){double u=(double)i/steps;var p=new BallisticPoint(impact.X+x*u,impact.Y+Eps+dy*u,impact.Z+z*u);if(Cover(p,0,solids,wallHeight,bodies,target.Id)!=0||(terrain!=null&&p.Y<terrain(p.Ground)-Eps))return false;}
             return true;
-        }
-        public static int BestTarget(NavPoint from,PlayableOwner owner,double range,double launchHeight,double arc,double speed,double radius,double blast,double damage,double penalty,IReadOnlyList<NavObstacle> solids,double wallHeight,IReadOnlyList<BallisticBody> observed,Func<NavPoint,double> terrain=null,bool guided=false,double leadThreshold=0,double leadFalloff=1,double maxLeadTime=0,Func<PlayableOwner,PlayableOwner,bool> hostile=null,int source=0)
-        {
-            int best=0;double bestScore=0,bestDistance=double.PositiveInfinity;BallisticBody[] predicted=null;
-            foreach(var target in observed)
-            {
-                if(hostile==null?target.Owner==owner:!hostile(target.Owner,owner))continue;double x=target.Position.X-from.X,z=target.Position.Z-from.Z,d=Math.Sqrt(x*x+z*z);if(d>range)continue;
-                var flight=guided?Aim(from,target.Position,target.Velocity,launchHeight,arc,speed,true,leadThreshold,leadFalloff,maxLeadTime,terrain):new BallisticFlight(new BallisticPoint(from.X,(terrain?.Invoke(from)??0)+launchHeight,from.Z),new BallisticPoint(target.Position.X,target.BaseHeight,target.Position.Z),arc,speed);
-                var impact=FirstContact(flight,radius,solids,wallHeight,observed,source,terrain:terrain).Value;
-                if(predicted==null)predicted=new BallisticBody[observed.Count];for(int i=0;i<predicted.Length;i++)predicted[i]=observed[i].Predict(flight.Duration*impact.Progress,terrain);
-                double score=0;foreach(var t in predicted)if(BlastHits(impact.Point,blast,t,solids,wallHeight,predicted,terrain))score+=Math.Min(t.Health,damage)*((hostile==null?t.Owner==owner:!hostile(t.Owner,owner))?-penalty:1);
-                // IDs have stable decimal wire keys; retain reference lexical rather than numeric tie order.
-                if(score>bestScore||(score>0&&score==bestScore&&(d<bestDistance||(d==bestDistance&&string.CompareOrdinal(target.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),best.ToString(System.Globalization.CultureInfo.InvariantCulture))<0)))){best=target.Id;bestScore=score;bestDistance=d;}
-            }
-            return best;
         }
     }
 }

@@ -102,9 +102,12 @@ namespace Spacewars.Runtime
         private IEnumerable<VisionSource> VisionSources(PlayableOwner owner)
         {
             if(offline?.ProvingGround!=null){yield return new VisionSource(default(NavPoint),profile.ArenaHalfExtent*2);yield break;}
+            foreach(var source in lingeringVision)if(source.Team==TeamOf(owner))yield return new VisionSource(source.Point,source.Radius*source.Remaining/source.Duration);
             foreach(var mine in mines)if(!Hostile(mine.Owner,owner))yield return new VisionSource(mine.Point,mine.Vision);
             foreach(var scan in scans)if(!Hostile(scan.Owner,owner))yield return new VisionSource(scan.Point,scan.Radius);
             foreach(var u in units.Values)if(!Hostile(u.Owner,owner)&&u.Health>0&&TryActor(u.Id,out var n))yield return new VisionSource(n.Position,PlayableUnitRules.Vision(profile,u.Kind));
+            foreach(var s in sites.Values)if(s.Site.Kind==PlayableBuildingKind.RelayTower&&s.Locked.HasValue&&!Hostile(s.Locked.Value,owner))
+                yield return new VisionSource(s.Site.Position,profile.RelayVisionRange);
             foreach(var b in buildings.Values)if(!Hostile(b.Owner,owner))
             {
                 double radius=PlayableVision.BuildingRadius(profile,b.Kind,b.Phase);
@@ -114,10 +117,15 @@ namespace Spacewars.Runtime
         private void RefreshVision()
         {
             using var measured=PerformanceProfile.Measure(ProfileStage.Vision);
-            if(VisionInputsUnchanged())return;
+            if(!VisionInputsUnchanged())
+            {
             var actual=buildings.Values.Where(b=>b.Phase!=ConstructionPhase.Pending).Select(b=>new KnownBuilding(b.Id,TeamOf(b.Owner),b.Owner,b.Kind,b.Position,b.Heading,b.Upgrade?.Complete==true,CenterUpgraded(b.Id),b.ProducerUpgrade?.Complete==true)).ToArray();
             foreach(PlayableOwner owner in Owners)Vision(owner).Refresh(VisionSources(owner),actual);
             RememberVisionInputs();
+            }
+            // Ownership observations update even while units stand still during capture.
+            var relays=SiteSnapshots().Where(s=>s.Site.Kind==PlayableBuildingKind.RelayTower).ToArray();
+            foreach(PlayableOwner owner in Owners)Vision(owner).ObserveRelays(relays);
         }
         private bool VisibleTarget(PlayableOwner observer,int id)
         {
@@ -229,14 +237,14 @@ namespace Spacewars.Runtime
                 Income(owner)/profile.IncomePeriodSeconds,information,discovered,SnapshotValueForTests("Population",()=>Population(owner)),impacts.Where(p=>(fullOverview||(p.VisibleMask&(1<<(int)owner))!=0)&&v.IsVisible(p.Point.Ground)).Select(p=>new PlayableImpactSnapshot(p.Id,p.Owner,p.Point,p.Radius,p.Tick,fullOverview?255:1<<(int)owner)).ToArray(),researchAvailability:SnapshotValueForTests("ResearchAvailability",()=>ResearchAvailability(owner)),ownerResearch:SnapshotValueForTests("ResearchSnapshot",()=>ResearchSnapshot(owner)),publicScoutObjectives:objectives,
                 ownCenterDamage:centerDamage.Values.Where(d=>d.Owner==owner&&bs.Any(b=>b.Id==d.CenterId&&b.Health>0)&&es.Any(e=>e.Id==d.AttackerId&&e.Owner!=owner)).OrderBy(d=>d.CenterId).ThenBy(d=>d.AttackerId).Select(d=>d.Copy()).ToArray(),
                 routeProofs:SnapshotValueForTests("Routes",()=>ProjectRoutesCore(owner,routeRequests,v,es,bs,armyState,expansionRoutes||readyRoutesOnly,readyRoutesOnly)),
-                artillerySupport:ProjectArtillery(owner,v,es,bs,armyState),owner:owner,exactCredits:Balance(owner),ownerId:offline==null?null:offline.Roster[(int)owner].Id,team:TeamOf(owner),participants:offline?.Roster.ToArray(),activeProfile:profile,homeSiteId:HomeSite(owner),ownerEliminated:eliminated.Contains(owner),settledIncome:SettledIncome(owner),mission:owner==PlayableOwner.Player?CampaignProjection():null,intelEnvelopes:PublicIntelEnvelopes(),groundTrails:expansionRoutes?null:groundTrails.Visible(Tick,fullOverview?null:information,profile.GroundTrailLifetimeTicks),sounds:expansionRoutes?null:Sounds(fullOverview?(PlayableOwner?)null:owner),incomeEvents:expansionRoutes||fullOverview?null:IncomeEvents(owner),wrecks:WreckSnapshots(fullOverview?(PlayableOwner?)null:owner),buildingDestructions:BuildingDestructions(fullOverview?(PlayableOwner?)null:owner)).WithMines(MineSnapshots(fullOverview?null:information),expansionRoutes?Array.Empty<OrbitalMineBlastSnapshot>():MineBlastSnapshots(fullOverview?null:information)).WithOrbital(OrbitalView(owner)).WithOrbitalScans(TeamOrbitalScans(owner)).WithScanLines(expansionRoutes?Array.Empty<OrbitalScanLine>():ScanLines(information),expansionRoutes?null:ScanTriangles(information)).WithTeamSignals(teamSignals&&!expansionRoutes&&!fullOverview?ProjectTeamSignals(owner):null).WithMatchEvents(expansionRoutes?null:MatchEvents(fullOverview?(PlayableOwner?)null:owner));
+                artillerySupport:ProjectArtillery(owner,v,es,bs,armyState),owner:owner,exactCredits:Balance(owner),ownerId:offline==null?null:offline.Roster[(int)owner].Id,team:TeamOf(owner),participants:offline?.Roster.ToArray(),activeProfile:profile,publicSites:sites.Values.Select(s=>s.Site).ToArray(),homeSiteId:HomeSite(owner),ownerEliminated:eliminated.Contains(owner),settledIncome:SettledIncome(owner),mission:owner==PlayableOwner.Player?CampaignProjection():null,intelEnvelopes:PublicIntelEnvelopes(),groundTrails:expansionRoutes?null:groundTrails.Visible(Tick,fullOverview?null:information,profile.GroundTrailLifetimeTicks),sounds:expansionRoutes?null:Sounds(fullOverview?(PlayableOwner?)null:owner),incomeEvents:expansionRoutes||fullOverview?null:IncomeEvents(owner),wrecks:WreckSnapshots(fullOverview?(PlayableOwner?)null:owner),buildingDestructions:BuildingDestructions(fullOverview?(PlayableOwner?)null:owner)).WithMines(MineSnapshots(fullOverview?null:information),expansionRoutes?Array.Empty<OrbitalMineBlastSnapshot>():MineBlastSnapshots(fullOverview?null:information)).WithOrbital(OrbitalView(owner)).WithOrbitalScans(TeamOrbitalScans(owner)).WithScanLines(expansionRoutes?Array.Empty<OrbitalScanLine>():ScanLines(information),expansionRoutes?null:ScanTriangles(information)).WithTeamSignals(teamSignals&&!expansionRoutes&&!fullOverview?ProjectTeamSignals(owner):null).WithMatchEvents(expansionRoutes?null:MatchEvents(fullOverview?(PlayableOwner?)null:owner));
 #else
             return new PlayableSnapshot(profile.ProfileId,profile.Revision,navigation.Generation,seed,sequence,Tick,status,paused,Outcome,
                 (int)Math.Floor(Balance(owner)),projectileGeometry,es.ToArray(),bs.ToArray(),ps.ToArray(),metrics,failure,liveSites,
                 Income(owner)/profile.IncomePeriodSeconds,information,discovered,Population(owner),impacts.Where(p=>(fullOverview||(p.VisibleMask&(1<<(int)owner))!=0)&&v.IsVisible(p.Point.Ground)).Select(p=>new PlayableImpactSnapshot(p.Id,p.Owner,p.Point,p.Radius,p.Tick,fullOverview?255:1<<(int)owner)).ToArray(),researchAvailability:ResearchAvailability(owner),ownerResearch:ResearchSnapshot(owner),publicScoutObjectives:objectives,
                 ownCenterDamage:centerDamage.Values.Where(d=>d.Owner==owner&&bs.Any(b=>b.Id==d.CenterId&&b.Health>0)&&es.Any(e=>e.Id==d.AttackerId&&e.Owner!=owner)).OrderBy(d=>d.CenterId).ThenBy(d=>d.AttackerId).Select(d=>d.Copy()).ToArray(),
                 routeProofs:ProjectRoutesCore(owner,routeRequests,v,es,bs,armyState,expansionRoutes||readyRoutesOnly,readyRoutesOnly),
-                artillerySupport:ProjectArtillery(owner,v,es,bs,armyState),owner:owner,exactCredits:Balance(owner),ownerId:offline==null?null:offline.Roster[(int)owner].Id,team:TeamOf(owner),participants:offline?.Roster.ToArray(),activeProfile:profile,homeSiteId:HomeSite(owner),ownerEliminated:eliminated.Contains(owner),settledIncome:SettledIncome(owner),mission:owner==PlayableOwner.Player?CampaignProjection():null,intelEnvelopes:PublicIntelEnvelopes(),groundTrails:expansionRoutes?null:groundTrails.Visible(Tick,fullOverview?null:information,profile.GroundTrailLifetimeTicks),sounds:expansionRoutes?null:Sounds(fullOverview?(PlayableOwner?)null:owner),incomeEvents:expansionRoutes||fullOverview?null:IncomeEvents(owner),wrecks:WreckSnapshots(fullOverview?(PlayableOwner?)null:owner),buildingDestructions:BuildingDestructions(fullOverview?(PlayableOwner?)null:owner)).WithMines(MineSnapshots(fullOverview?null:information),expansionRoutes?Array.Empty<OrbitalMineBlastSnapshot>():MineBlastSnapshots(fullOverview?null:information)).WithOrbital(OrbitalView(owner)).WithOrbitalScans(TeamOrbitalScans(owner)).WithScanLines(expansionRoutes?Array.Empty<OrbitalScanLine>():ScanLines(information),expansionRoutes?null:ScanTriangles(information)).WithTeamSignals(teamSignals&&!expansionRoutes&&!fullOverview?ProjectTeamSignals(owner):null).WithMatchEvents(expansionRoutes?null:MatchEvents(fullOverview?(PlayableOwner?)null:owner));
+                artillerySupport:ProjectArtillery(owner,v,es,bs,armyState),owner:owner,exactCredits:Balance(owner),ownerId:offline==null?null:offline.Roster[(int)owner].Id,team:TeamOf(owner),participants:offline?.Roster.ToArray(),activeProfile:profile,publicSites:sites.Values.Select(s=>s.Site).ToArray(),homeSiteId:HomeSite(owner),ownerEliminated:eliminated.Contains(owner),settledIncome:SettledIncome(owner),mission:owner==PlayableOwner.Player?CampaignProjection():null,intelEnvelopes:PublicIntelEnvelopes(),groundTrails:expansionRoutes?null:groundTrails.Visible(Tick,fullOverview?null:information,profile.GroundTrailLifetimeTicks),sounds:expansionRoutes?null:Sounds(fullOverview?(PlayableOwner?)null:owner),incomeEvents:expansionRoutes||fullOverview?null:IncomeEvents(owner),wrecks:WreckSnapshots(fullOverview?(PlayableOwner?)null:owner),buildingDestructions:BuildingDestructions(fullOverview?(PlayableOwner?)null:owner)).WithMines(MineSnapshots(fullOverview?null:information),expansionRoutes?Array.Empty<OrbitalMineBlastSnapshot>():MineBlastSnapshots(fullOverview?null:information)).WithOrbital(OrbitalView(owner)).WithOrbitalScans(TeamOrbitalScans(owner)).WithScanLines(expansionRoutes?Array.Empty<OrbitalScanLine>():ScanLines(information),expansionRoutes?null:ScanTriangles(information)).WithTeamSignals(teamSignals&&!expansionRoutes&&!fullOverview?ProjectTeamSignals(owner):null).WithMatchEvents(expansionRoutes?null:MatchEvents(fullOverview?(PlayableOwner?)null:owner));
 #endif
         }
         private AiIntelEnvelope[] publicIntelEnvelopes;
@@ -253,7 +261,7 @@ namespace Spacewars.Runtime
         }
         internal PlayableSpectatorFrame SpectatorSnapshot(long sequence,RuntimeStatus status,bool paused,PlayableRuntimeMetrics metrics,string failure,int seed)
         {
-            var perspectives=Owners.Select(owner=>ProjectPlayerSnapshot(sequence,status,paused,metrics,failure,seed,owner,null,false,teamSignals:false)).ToArray();
+            var perspectives=Owners.Select(owner=>ProjectPlayerSnapshot(sequence,status,paused,metrics,failure,seed,owner,null,false)).ToArray();
             var overview=ProjectPlayerSnapshot(sequence,status,paused,metrics,failure,seed,PlayableOwner.Player,null,false,fullOverview:true);
             return new PlayableSpectatorFrame(overview,perspectives);
         }

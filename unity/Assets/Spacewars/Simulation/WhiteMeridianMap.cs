@@ -5,7 +5,7 @@ namespace Spacewars.Simulation
 {
     [Serializable] public sealed class WhiteMeridianProfileData
     {
-        public string id="white-meridian-astra-v1"; public int revision=4;
+        public string id="white-meridian-astra-v1"; public int revision=5;
         public double scale=1, terraceHeight=5, ridgeHeight=7, secondaryRampWidth=8, wreckSpread=10.5, middleWreckExtension=5.5, middleWreckWidth=1.6;
     }
     public sealed class WhiteMeridianField
@@ -101,6 +101,7 @@ namespace Spacewars.Simulation
             foreach(int sz in new[]{1,-1})sites.Add(new TerritorySite(sites.Count+1,PlayableBuildingKind.Outpost,Point(0,sz*58),p,sz*Math.PI/2));
             foreach(int sx in new[]{-1,1})foreach(int sz in new[]{1,-1})sites.Add(new TerritorySite(sites.Count+1,PlayableBuildingKind.Mine,Point(sx*64,sz*20),p));
             foreach(int sx in new[]{-1,1})foreach(int sz in new[]{1,-1})sites.Add(new TerritorySite(sites.Count+1,PlayableBuildingKind.Mine,Point(sx*17,sz*26),p));
+            foreach(int sz in new[]{1,-1})sites.Add(new TerritorySite(sites.Count+1,PlayableBuildingKind.RelayTower,Point(0,sz*40),p));
             return sites.ToArray();
         }
         public OfflineMatchConfiguration Configuration(PlayableProfile p,int seed,OfflineParticipant[] roster){

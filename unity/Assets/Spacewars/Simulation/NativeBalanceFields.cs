@@ -48,6 +48,8 @@ namespace Spacewars.Simulation
         {
             if(ReferenceEquals(field,PlayableProfileMetadata.AccruedCreditField))return true;
             string name=field.FieldName??"";
+            // Retain retired fields in profile bindings and saves, but omit their controls from the lab.
+            if(name=="shkvalLeadSpeedThreshold"||name=="shkvalLeadFalloff"||name=="shkvalMaxLeadTimeSec"||name=="shkvalFriendlyFirePenalty")return false;
             if(name.StartsWith("orbitalMine",StringComparison.Ordinal))return true; // New placements capture independent mine terms.
             // Maneuver capability is bound at genesis/current capture; changes require a new match.
             if(name.StartsWith("tankReverse",StringComparison.Ordinal))return false;

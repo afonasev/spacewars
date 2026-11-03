@@ -37,7 +37,7 @@ namespace Spacewars.Runtime
         {
             if(!Target(target,out var point,out _))return false;
             var a=new BallisticPoint(from.X,height,from.Z);var b=new BallisticPoint(point.X,TargetHeight(target,point),point.Z);
-            return !AirContact(a,b,radius,u.Id,u.Owner,false,out int hit,out _,out _)||hit==target;
+            return !AirContact(a,b,radius,u.Id,u.Owner,false,out int hit,out _,out _,firingOwner:u.Owner)||hit==target;
         }
         private bool HawkApproach(Unit u,int target,out NavPoint goal)
         {
@@ -119,7 +119,7 @@ namespace Spacewars.Runtime
             double offset=profile.ExplorerMuzzleOffset;start=HawkRocketFlight.Add(start,HawkRocketFlight.Scale(direction,offset));
             projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=u.Id,Target=u.Target,Faction=u.Owner,Kind=u.Kind,Damage=WeaponDamage(u.Owner,profile.ExplorerDamage),Radius=0,Speed=profile.ExplorerProjectileSpeed,Position=start.Ground,Height=start.Y,Spatial=true,DirectionX=direction.X,DirectionY=direction.Y,DirectionZ=direction.Z,
                 Remaining=Math.Max(0,profile.ExplorerRange*(1+profile.ProjectileExtraRangePercent/100)-offset)});
-            Sound(PlayableSoundKind.Shot,from,u.Kind,u.Owner);
+            Sound(PlayableSoundKind.Shot,from,u.Kind,u.Owner,unitId:u.Id);
         }
         private bool AdvanceAirProjectile(Projectile p,double dt)
         {
@@ -138,7 +138,7 @@ namespace Spacewars.Runtime
                 before.Advance(dt,target,velocity);to=before.Position;
             }
             else{move=Math.Min(p.Speed*dt,p.Remaining);to=new BallisticPoint(from.X+p.DirectionX*move,from.Y+p.DirectionY*move,from.Z+p.DirectionZ*move);}
-            if(AirContact(from,to,p.Radius,p.Owner,null,true,out int hit,out var contact,out _,p.Target))
+            if(AirContact(from,to,p.Radius,p.Owner,null,true,out int hit,out var contact,out _,p.Target,p.Faction))
             {
                 bool hostile=hit!=0&&(units.TryGetValue(hit,out var unit)?Hostile(unit.Owner,p.Faction):buildings.TryGetValue(hit,out var building)&&Hostile(building.Owner,p.Faction));
                 if((hostile||wrecks.ContainsKey(hit))&&!TryDamageWithOwner(hit,p.Damage,p.Owner,p.Faction))
@@ -152,7 +152,7 @@ namespace Spacewars.Runtime
         }
         // Earliest contact wins: a wall behind a unit cannot consume its hit. Motion is
         // relative to the same authority step, never a renderer collider or target teleport.
-        private bool AirContact(BallisticPoint from,BallisticPoint to,double radius,int source,PlayableOwner? observer,bool moving,out int hit,out BallisticPoint point,out double fraction,int explicitWreck=0)
+        private bool AirContact(BallisticPoint from,BallisticPoint to,double radius,int source,PlayableOwner? observer,bool moving,out int hit,out BallisticPoint point,out double fraction,int explicitWreck=0,PlayableOwner? firingOwner=null)
         {
             hit=0;fraction=double.PositiveInfinity;point=to;
             bool TerrainClear(BallisticPoint end)=>PlayableBallistics.TerrainLineClear(from,end,radius,SolidObstacles(),profile.BallisticWallHeight,AirSurface);
@@ -165,7 +165,7 @@ namespace Spacewars.Runtime
             }
             foreach(var u in units.Values)
             {
-                if(u.Id==source||!TryActor(u.Id,out var n)||observer.HasValue&&u.Owner!=observer&&!Vision(observer.Value).IsVisible(n.Position))continue;
+                if(u.Id==source||firingOwner.HasValue&&!Hostile(u.Owner,firingOwner.Value)||!TryActor(u.Id,out var n)||observer.HasValue&&u.Owner!=observer&&!Vision(observer.Value).IsVisible(n.Position))continue;
                 double bodyHeight=u.Air!=null?HawkBodyHeight:2*PlayableUnitRules.Radius(profile,u.Kind);
                 double y=u.Air?.Height??GroundHeight(n.Position),oldY=moving?(u.Air?.PreviousHeight??GroundHeight(u.PreviousPosition)):y;
                 var previous=moving?u.PreviousPosition:n.Position;double r=PlayableUnitRules.Radius(profile,u.Kind)+radius,vertical=bodyHeight/2+radius,scale=r/vertical;
@@ -175,7 +175,7 @@ namespace Spacewars.Runtime
             }
             foreach(var b in buildings.Values)
             {
-                if(b.Id==source||b.Phase==ConstructionPhase.Pending||observer.HasValue&&b.Owner!=observer&&!Vision(observer.Value).IsVisible(b.Position))continue;
+                if(b.Id==source||b.Phase==ConstructionPhase.Pending||firingOwner.HasValue&&!Hostile(b.Owner,firingOwner.Value)||observer.HasValue&&b.Owner!=observer&&!Vision(observer.Value).IsVisible(b.Position))continue;
                 BuildingCombat(b).Segment(from,to,radius,out double t,out _);
                 if(t<fraction){fraction=t;hit=b.Id;}
             }

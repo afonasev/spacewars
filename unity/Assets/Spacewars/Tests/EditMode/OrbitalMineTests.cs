@@ -42,6 +42,22 @@ namespace Spacewars.Tests.EditMode
             Assert.Zero(view.Mines.Count);Assert.AreEqual(1,view.MineBlasts.Count);Assert.AreEqual(1.4,view.MineBlasts[0].Radius);
             Assert.AreEqual(remaining,view.Entities.SingleOrDefault(e=>e.Id==enemy)?.Health??0);Assert.AreEqual(50,view.Entities.Single(e=>e.Id==friendly).Health);
         }
+        [Test] public void LethalBlastNotifiesVictimAndMineOwnerWithoutGrantingVisionOrLeakingTargets()
+        {
+            Spawn(new NavPoint(-10,0));int enemy=Spawn(new NavPoint(-8,0),PlayableOwner.Enemy,PlayableEntityKind.Explorer);
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.UseOrbital,new NavPoint(-8,0)));
+            Call("AdvanceMines");Call("RefreshVision");
+            var own=View();var victim=View(PlayableOwner.Enemy);
+            Assert.False(victim.Entities.Any(u=>u.Id==enemy));
+            var hit=victim.MatchEvents.Single(e=>e.Kind==MatchEventKind.MineHit);var trigger=own.MatchEvents.Single(e=>e.Kind==MatchEventKind.MineTriggered);
+            Assert.Greater(hit.CauseId,0);Assert.AreEqual(trigger.CauseId,hit.CauseId);Assert.AreEqual(trigger.Point,hit.Point);
+            Assert.AreEqual(PlayableOwner.Enemy,hit.Owner);Assert.False(own.MatchEvents.Any(e=>e.Owner!=PlayableOwner.Player));
+            // main now includes the separately approved lingering-vision feature.
+            // The notification itself must preserve whichever visibility that feature supplies.
+            bool visible=victim.Vision.IsVisible(new NavPoint(-8,0));
+            new Spacewars.Presentation.NativeMatchNotifications().Update(victim,false,0,profile);
+            Assert.AreEqual(visible,victim.Vision.IsVisible(new NavPoint(-8,0)),"Notifications cannot alter existing vision");
+        }
         [Test] public void FriendlyContactDoesNotTriggerAndAreaDamageChainsEachMineOnce()
         {
             int friendly=Spawn(new NavPoint(-10,0));

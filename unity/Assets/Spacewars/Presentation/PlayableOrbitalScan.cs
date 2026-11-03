@@ -16,6 +16,7 @@ namespace Spacewars.Presentation
         private long scanPendingSequence=-1,scanAppliedTick=-1,scanGeneration=-1;
         private NavPoint scanPendingPoint;
         private VisualElement scanLayer;
+        private readonly Dictionary<(double,double),Vector2> scanProjectionCache=new Dictionary<(double,double),Vector2>();
         private PlayableProfile scanProfile;private PlayableProfileData scanData;
         private PlayableProfileData ScanData{get{if(!ReferenceEquals(scanProfile,profile)){scanProfile=profile;scanData=profile.CopyData();}return scanData;}}
         private void BeginScanTarget(bool pad)=>BeginOrbitalTarget(pad,1);
@@ -96,8 +97,10 @@ namespace Spacewars.Presentation
             if(scanGeneration!=generation||!CanOrbital)CancelScanTarget();
             CompleteScanReceipt();
             if(scanLayer==null){scanLayer=new VisualElement{name="orbital-scan-world",pickingMode=PickingMode.Ignore};AbsoluteFill(scanLayer);scanLayer.style.overflow=Overflow.Hidden;scanLayer.generateVisualContent+=DrawScanWorld;root.Insert(0,scanLayer);}
-            scanLayer.style.display=!mapOpen&&!inLobby&&!preparing&&!MenuOwnsInput&&!ResultsVisible?DisplayStyle.Flex:DisplayStyle.None;scanLayer.MarkDirtyRepaint();
-            NavPoint? preview=ScanPreviewPoint();compactMap?.SetScanPreview(preview,TargetPreviewRadius);tacticalMap?.SetScanPreview(preview,TargetPreviewRadius);
+            NavPoint? preview=ScanPreviewPoint();bool paint=view.ScanTriangles.Count>0||view.ScanLines.Count>0||preview.HasValue;
+            bool show=paint&&!mapOpen&&!inLobby&&!preparing&&!MenuOwnsInput&&!ResultsVisible;
+            scanLayer.style.display=show?DisplayStyle.Flex:DisplayStyle.None;if(show)scanLayer.MarkDirtyRepaint();if(!paint)scanProjectionCache.Clear();
+            compactMap?.SetScanPreview(preview,TargetPreviewRadius);tacticalMap?.SetScanPreview(preview,TargetPreviewRadius);
         }
         private NavPoint? ScanPreviewPoint()
         {
@@ -112,7 +115,7 @@ namespace Spacewars.Presentation
             if(view==null||world==null||cameraView==null)return;
             Vector2 Project(NavPoint point){var v=cameraView.WorldToViewportPoint(world.Point(point));return new Vector2(v.x*root.contentRect.width,(1-v.y)*root.contentRect.height);}
             var painter=context.painter2D;
-            DrawScanFaces(context,view.ScanTriangles,Project);
+            DrawScanFaces(context,view.ScanTriangles,Project,scanProjectionCache);
             foreach(var segment in view.ScanLines)DrawScanLine(painter,Project(segment.From),Project(segment.To),(float)segment.Opacity,(float)ScanData.orbitalScanLineWidth);
             var preview=ScanPreviewPoint();if(preview.HasValue)for(int i=0;i<128;i++){
                 NavPoint At(int step)=>new NavPoint(preview.Value.X+Math.Cos(step*Math.PI/64)*TargetPreviewRadius,preview.Value.Z+Math.Sin(step*Math.PI/64)*TargetPreviewRadius);
@@ -121,16 +124,23 @@ namespace Spacewars.Presentation
                 }else DrawScanLine(painter,Project(At(i)),Project(At(i+1)),1,(float)ScanData.orbitalScanLineWidth);
             }
         }
-        internal static void DrawScanFaces(MeshGenerationContext context,IReadOnlyList<OrbitalScanTriangle> faces,Func<NavPoint,Vector2> project)
+        internal static void DrawScanFaces(MeshGenerationContext context,IReadOnlyList<OrbitalScanTriangle> faces,Func<NavPoint,Vector2> project,Dictionary<(double,double),Vector2> projections=null)
         {
             // One indexed mesh avoids per-face Painter2D antialias seams; vertex colors
             // interpolate the continuous light field. Chunking respects UInt16 indices.
+            projections?.Clear();
+            Vector2 Project(NavPoint p)
+            {
+                if(projections==null)return project(p);
+                var key=(p.X,p.Z);if(projections.TryGetValue(key,out var found))return found;
+                var value=project(p);projections.Add(key,value);return value;
+            }
             const int chunkFaces=16000;
             for(int first=0;first<faces.Count;first+=chunkFaces){
                 int count=Math.Min(chunkFaces,faces.Count-first);var mesh=context.Allocate(count*3,count*3);
                 void VertexAt(Vector2 point,double opacity,double highlight){var color=Color.Lerp(OrbitalTheme.Cyan,Color.white,(float)highlight);color.a=Mathf.Clamp01((float)opacity);mesh.SetNextVertex(new Vertex{position=new Vector3(point.x,point.y,Vertex.nearZ),tint=color});}
                 for(int i=0;i<count;i++){
-                    var f=faces[first+i];var a=project(f.A);var b=project(f.B);var c=project(f.C);
+                    var f=faces[first+i];var a=Project(f.A);var b=Project(f.B);var c=Project(f.C);
                     VertexAt(a,f.Opacity,f.Highlight);VertexAt(b,f.OpacityB,f.HighlightB);VertexAt(c,f.OpacityC,f.HighlightC);
                     ushort index=(ushort)(i*3);mesh.SetNextIndex(index);
                     bool clockwise=(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x)>=0;

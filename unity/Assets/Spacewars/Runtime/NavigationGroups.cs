@@ -21,6 +21,8 @@ namespace Spacewars.Runtime
         // their current Balance Lab revision and retain a geometric anchor.
         public int MarchVersion, MarchProfileRevision; public double MarchStretch, MarchAnchor;
         public bool MarchInitialized;
+        public int FormationVersion; public string FormationSeal;
+        internal RecastFormationPlan FormationPlan;
         public string OwnerId, Source; public int TeamId, TargetId;
         public PlayableOrderOrigin Origin; public PlayableCommandKind Kind; public long JobId, ActionId;
         public NavPoint OriginalGoal; public NavLocation? OriginalLocation; public GroupMemberState[] Members;
@@ -136,14 +138,15 @@ namespace Spacewars.Runtime
         private static long fullValidationVisits,versionSequence;
         private readonly long versionIdentity;internal long VersionIdentity=>versionIdentity;internal readonly long MemberParentIdentity;internal readonly int ChangedMemberIndex;
         internal static long FullValidationVisits=>System.Threading.Interlocked.Read(ref fullValidationVisits);
-        private static readonly long LayoutBytes=Math.Max(256,NavStorageLayout.ObjectBytesBound(typeof(NavigationAuthorityGroup)));
+        private static readonly long LayoutBytes=Math.Max(264,NavStorageLayout.ObjectBytesBound(typeof(NavigationAuthorityGroup)));
+        internal RecastFormationPlan Formation {get;private set;}
         internal readonly Values Data;private NavOwnedStorage memberRoot;internal System.Collections.Generic.IReadOnlyList<NavOwnedStorage> Members=>(System.Collections.Generic.IReadOnlyList<NavOwnedStorage>)memberRoot;
         private NavOwnedText ownerId,source;private NavNameReference originalName;private bool sealedRoot,released;
         internal NavOwnedText OwnerIdOwner=>ownerId;internal NavOwnedText SourceOwner=>source;internal NavNameReference OriginalSelector=>originalName;
         internal string OwnerId=>ownerId?.Value;internal string Source=>source?.Value;
         internal NavLocation? OriginalLocation=>Data.HasLocation?new NavLocation(Data.Location,originalName):(NavLocation?)null;
         internal override bool IsImmutableCaptureRoot=>sealedRoot;
-        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(NavPhysicalStorageKind.AuthorityGroup);
+        public NavPhysicalTag PhysicalTag=>new NavPhysicalTag(NavPhysicalStorageKind.AuthorityGroup,value:Formation==null?NavPhysicalValueKind.None:NavPhysicalValueKind.RecastFormationGroupV1);
         private NavigationAuthorityGroup(Values data,bool owner,long parentIdentity,int changedMember):base(LayoutBytes){Data=data;versionIdentity=System.Threading.Interlocked.Increment(ref versionSequence);MemberParentIdentity=parentIdentity;ChangedMemberIndex=changedMember;if(owner)Retain();}
         private static void PreflightMembers(Values data,System.Collections.Generic.IReadOnlyList<NavOwnedStorage> members,INavStorageReservation reservation)
         {
@@ -164,31 +167,36 @@ namespace Spacewars.Runtime
             if(ownerId!=null)NavStorageAdmission.RequireOwned(reservation,ownerId);if(source!=null)NavStorageAdmission.RequireOwned(reservation,source);if(location.Owner!=null)location.Require(reservation,location.Resolve());
             PreflightMembers(data,members,reservation);
         }
-        private static NavigationAuthorityGroup Create(Values data,NavOwnedText ownerId,NavOwnedText source,NavNameReference location,NavOwnedStorage members,INavStorageReservation reservation,bool owner,bool inheritedMembership=false,long parentIdentity=0,int changedMember=-1)
+        private static NavigationAuthorityGroup Create(Values data,NavOwnedText ownerId,NavOwnedText source,NavNameReference location,NavOwnedStorage members,INavStorageReservation reservation,bool owner,bool inheritedMembership=false,long parentIdentity=0,int changedMember=-1,RecastFormationPlan formation=null,bool reconcile=false)
         {
             if(members==null)throw new ArgumentException("Missing member backing.");NavStorageAdmission.RequireOwned(reservation,members);if(!(members is System.Collections.Generic.IReadOnlyList<NavOwnedStorage> sequence))throw new ArgumentException("Wrong member backing kind.");if(inheritedMembership){data.Validate(source?.Value);if(!members.IsImmutableCaptureRoot||data.HasLocation!=(location.Owner!=null))throw new ArgumentException("Invalid inherited immutable membership.");if(ownerId!=null)NavStorageAdmission.RequireOwned(reservation,ownerId);if(source!=null)NavStorageAdmission.RequireOwned(reservation,source);if(location.Owner!=null)location.Require(reservation,location.Resolve());}
             else Preflight(data,ownerId,source,location,sequence,reservation);
+            RecastFormationPlan replacement=null;try{if(reconcile&&formation!=null){replacement=formation.Reconcile(data,sequence,reservation);if(replacement!=null)formation=replacement;}
             using(var allocation=new NavStorageAllocation(reservation.TryReserve)){
+                if(formation!=null){NavStorageAdmission.RequireOwned(reservation,formation);formation.ValidateGroup(data,sequence);}
                 allocation.Reserve(LayoutBytes);var result=allocation.Register(new NavigationAuthorityGroup(data,owner,parentIdentity,changedMember));
-                try{result.ownerId=NavPhysicalMacro.Acquire(result,ownerId);result.source=NavPhysicalMacro.Acquire(result,source);result.memberRoot=NavPhysicalMacro.Acquire(result,members);if(location.Owner!=null){result.RequireEdge(location.Owner);location.Owner.Retain();}result.originalName=location;result.sealedRoot=true;return result;}
+                try{result.Formation=NavPhysicalMacro.Acquire(result,formation);result.ownerId=NavPhysicalMacro.Acquire(result,ownerId);result.source=NavPhysicalMacro.Acquire(result,source);result.memberRoot=NavPhysicalMacro.Acquire(result,members);if(location.Owner!=null){result.RequireEdge(location.Owner);location.Owner.Retain();}result.originalName=location;result.sealedRoot=true;return result;}
                 catch{if(owner)result.ReleaseStorage();throw;}
             }
+            }finally{replacement?.Release();}
         }
-        internal static NavigationAuthorityGroup CreateOwned(Values data,NavOwnedText ownerId,NavOwnedText source,NavNameReference location,NavRetainedArray<NavOwnedStorage> members,INavStorageReservation reservation)=>Create(data,ownerId,source,location,members,reservation,true);
+        internal static NavigationAuthorityGroup CreateOwned(Values data,NavOwnedText ownerId,NavOwnedText source,NavNameReference location,NavRetainedArray<NavOwnedStorage> members,INavStorageReservation reservation,RecastFormationPlan formation=null)=>Create(data,ownerId,source,location,members,reservation,true,formation:formation,reconcile:true);
         internal static NavigationAuthorityGroup CopyNamesOwned(GroupOrderState value,NavRetainedArray<NavOwnedStorage> members,INavStorageReservation reservation)
         {
-            if(value==null||members==null)throw new ArgumentNullException();var data=new Values(value);var id=value.OwnerId;var name=value.Source;var location=value.OriginalLocation;
+            if(value==null||members==null)throw new ArgumentNullException();if(value.FormationVersion!=(value.FormationPlan==null?0:1)||value.FormationSeal!=value.FormationPlan?.Seal)throw new ArgumentException("Missing owned formation DTO edge.");var data=new Values(value);var id=value.OwnerId;var name=value.Source;var location=value.OriginalLocation;
             data.Validate(name);NavStorageAdmission.RequireOwned(reservation,members);if(location?.NameReference.Owner!=null)location.Value.NameReference.Require(reservation,location.Value.SurfaceId);PreflightMembers(data,members,reservation);
             NavOwnedText ownedId=null,ownedSource=null,privateLocation=null;
-            try{if(id!=null)ownedId=NavOwnedText.Copy(id,reservation);if(name!=null)ownedSource=NavOwnedText.Copy(name,reservation);var selector=NavigationHostRequest.OwnLocationName(location,reservation,out privateLocation);return CreateOwned(data,ownedId,ownedSource,selector,members,reservation);}
+            try{if(id!=null)ownedId=NavOwnedText.Copy(id,reservation);if(name!=null)ownedSource=NavOwnedText.Copy(name,reservation);var selector=NavigationHostRequest.OwnLocationName(location,reservation,out privateLocation);return CreateOwned(data,ownedId,ownedSource,selector,members,reservation,value.FormationPlan);}
             finally{ownedId?.Release();ownedSource?.Release();privateLocation?.Release();}
         }
         internal static NavRetainedArray<NavOwnedStorage> CopyMembersOwned(Values data,NavOwnedText ownerId,NavOwnedText source,NavNameReference location,System.Collections.Generic.IReadOnlyList<NavOwnedStorage> members,INavStorageReservation reservation)
         {Preflight(data,ownerId,source,location,members,reservation);return NavRetainedArray<NavOwnedStorage>.Copy(members,reservation.TryReserve);}
         internal static NavigationAuthorityGroup CopyWithValuesOwned(NavigationAuthorityGroup current,Values data,INavStorageReservation reservation)
-        {if(current==null||!current.IsImmutableCaptureRoot)throw new ArgumentException("Missing sealed group source.");NavStorageAdmission.RequireOwned(reservation,current);return Create(data,current.ownerId,current.source,data.HasLocation?current.originalName:default,current.memberRoot,reservation,true);}
+        {if(current==null||!current.IsImmutableCaptureRoot)throw new ArgumentException("Missing sealed group source.");NavStorageAdmission.RequireOwned(reservation,current);return Create(data,current.ownerId,current.source,data.HasLocation?current.originalName:default,current.memberRoot,reservation,true,formation:current.Formation,reconcile:true);}
         internal static NavigationAuthorityGroup CopyWithMemberOwned(NavigationAuthorityGroup current,int index,NavigationAuthorityMember member,INavStorageReservation reservation)
             =>CopyWithMemberAndMarchOwned(current,index,member,current.Data,reservation);
+        internal static NavigationAuthorityGroup CopyWithFormationOwned(NavigationAuthorityGroup current,RecastFormationPlan plan,INavStorageReservation r)
+        {NavStorageAdmission.RequireOwned(r,current);return Create(current.Data,current.ownerId,current.source,current.originalName,current.memberRoot,r,true,formation:plan);}
         internal const int CompactMemberCount=50,CompactMemberPageSlots=64;
         private static int MemberPageSlots(int count)
         {
@@ -202,21 +210,39 @@ namespace Spacewars.Runtime
         internal static NavigationAuthorityGroup CopyWithMemberAndMarchOwned(NavigationAuthorityGroup current,int index,NavigationAuthorityMember member,Values data,INavStorageReservation reservation)
         {
             if(current==null||member==null||!current.IsImmutableCaptureRoot||!member.IsImmutableCaptureRoot||index<0||index>=current.Members.Count)throw new ArgumentException("Invalid affected member path.");NavStorageAdmission.RequireOwned(reservation,current);NavStorageAdmission.RequireOwned(reservation,member);
-            var original=current.Data;
-            if(!data.SameIssuance(original))throw new ArgumentException("Member/march write changed immutable issuance.");
-            var old=((NavigationAuthorityMember)current.Members[index]).Data;var next=member.Data;
-            if(next.Entity!=old.Entity||next.Slot!=old.Slot||next.OrderRevision<current.Data.OrderRevision||next.Phase==GroupMemberPhase.Dead||next.Phase==GroupMemberPhase.Detached||(current.Data.MarchVersion==0?next.Progress<0||next.ProgressRequest!=0:current.Data.MarchVersion==1?next.Progress>0||next.ProgressVersion!=0:next.ProgressVersion!=2))throw new ArgumentException("Scalar member update changed membership/context.");
+            ValidateMemberReplacement(current,index,member,data);
             NavPagedList<NavOwnedStorage> pages=null;
             int pageSlots=MemberPageSlots(current.Members.Count);
             // Decode preserves the encoded shape. Normalize only at the next write of
             // exactly fifty members; other existing page shapes retain their identity.
             try{if(current.memberRoot is NavPagedList<NavOwnedStorage> existing&&(current.Members.Count!=CompactMemberCount||existing.PageSize==pageSlots))pages=existing.ForkOwned(reservation);else {pages=NavPagedList<NavOwnedStorage>.Create(reservation.TryReserve,pageSlots);for(int i=0;i<current.Members.Count;i++)pages.Add(current.Members[i]);}
-                pages[index]=member;pages.Seal();return Create(data,current.ownerId,current.source,current.originalName,pages,reservation,true,true,current.VersionIdentity,index);
+                pages[index]=member;pages.Seal();return Create(data,current.ownerId,current.source,current.originalName,pages,reservation,true,true,current.VersionIdentity,index,current.Formation,true);
             }finally{pages?.ReleaseStorage();}
+        }
+        internal static void ValidateMemberReplacement(NavigationAuthorityGroup current,int index,NavigationAuthorityMember member,Values data)
+        {
+            var original=current.Data;
+            if(!data.SameIssuance(original))throw new ArgumentException("Member/march write changed immutable issuance.");
+            var old=((NavigationAuthorityMember)current.Members[index]).Data;var next=member.Data;
+            if(next.Entity!=old.Entity||next.Slot!=old.Slot||next.OrderRevision<current.Data.OrderRevision||next.Phase==GroupMemberPhase.Dead||next.Phase==GroupMemberPhase.Detached||(current.Data.MarchVersion==0?next.Progress<0||next.ProgressRequest!=0:current.Data.MarchVersion==1?next.Progress>0||next.ProgressVersion!=0:next.ProgressVersion!=2))throw new ArgumentException("Scalar member update changed membership/context.");
         }
         // A batch has one parent/version proof and one private writable page path.
         // The callback creates fresh owned members; no intermediate group is sealed.
         internal static NavigationAuthorityGroup CopyWithContactBatchOwned(NavigationAuthorityGroup current,Values data,Func<int,NavigationAuthorityMember> prepare,INavStorageReservation reservation)
+        {
+            return CopyWithMemberBatchOwned(current,data,prepare,reservation,false);
+        }
+        // Geometry removal discards the intermediate group after copying its final
+        // membership. Build one private page set for all retries and march resets.
+        internal static NavigationAuthorityGroup CopyWithRebindMembersOwned(NavigationAuthorityGroup current,Values data,NavigationAuthorityMember[] edits,INavStorageReservation reservation)
+        {
+            if(edits.Length!=current.Members.Count)throw new ArgumentException("Rebind member count changed.");
+            return CopyWithMemberBatchOwned(current,data,i=>{
+                // Transfer this owned member to the builder. It is released even on failure.
+                var member=edits[i];edits[i]=null;return member;
+            },reservation,true);
+        }
+        private static NavigationAuthorityGroup CopyWithMemberBatchOwned(NavigationAuthorityGroup current,Values data,Func<int,NavigationAuthorityMember> prepare,INavStorageReservation reservation,bool allowUnchanged)
         {
             if(current==null||!current.IsImmutableCaptureRoot||prepare==null||!data.SameIssuance(current.Data))throw new ArgumentException("Invalid group batch source.");
             NavStorageAdmission.RequireOwned(reservation,current);NavPagedList<NavOwnedStorage> pages=null;
@@ -226,6 +252,7 @@ namespace Spacewars.Runtime
                 else{pages=NavPagedList<NavOwnedStorage>.Create(reservation.TryReserve,slots);for(int i=0;i<current.Members.Count;i++)pages.Add(current.Members[i]);}
                 for(int i=0;i<current.Members.Count;i++){
                     var member=prepare(i);
+                    if(member==null&&allowUnchanged)continue;
                     try{
                         NavStorageAdmission.RequireOwned(reservation,member);var old=((NavigationAuthorityMember)current.Members[i]).Data;var next=member.Data;
                         if(!member.IsImmutableCaptureRoot||next.Entity!=old.Entity||next.Slot!=old.Slot||next.OrderRevision<current.Data.OrderRevision||next.Phase==GroupMemberPhase.Dead||next.Phase==GroupMemberPhase.Detached||
@@ -233,7 +260,7 @@ namespace Spacewars.Runtime
                         pages[i]=member;
                     }finally{member?.ReleaseStorage();}
                 }
-                pages.Seal();return Create(data,current.ownerId,current.source,current.originalName,pages,reservation,true,true,current.VersionIdentity,-2);
+                pages.Seal();return Create(data,current.ownerId,current.source,current.originalName,pages,reservation,true,true,current.VersionIdentity,-2,current.Formation,true);
             }finally{pages?.ReleaseStorage();}
         }
         public void WritePhysicalBody(NavPhysicalBodyWriter writer)
@@ -241,9 +268,9 @@ namespace Spacewars.Runtime
             if(!sealedRoot||StorageBytes!=NavStorageLayout.Charge(LayoutBytes))throw new ArgumentException("Invalid group ownership.");Data.Validate(Source);var w=writer.Output;
             w.Write(Data.WorldGeneration);w.Write(Data.GroupId);w.Write(Data.OrderRevision);w.Write(Data.CommandSequence);w.Write(Data.IssuedTick);w.Write(Data.MembershipRevision);w.Write(Data.JobId);w.Write(Data.ActionId);
             w.Write(Data.MarchVersion);w.Write(Data.MarchProfileRevision);w.Write(Data.TeamId);w.Write(Data.TargetId);WorldWire.Number(w,Data.MarchStretch);WorldWire.Number(w,Data.MarchAnchor);w.Write(Data.MarchInitialized);w.Write((int)Data.Origin);w.Write((int)Data.Kind);WorldWire.Write(w,Data.OriginalGoal);w.Write(Data.HasLocation);if(Data.HasLocation)WorldWire.Write(w,Data.Location);
-            NavPhysicalMacro.WriteEdge(writer,this,ownerId,true);NavPhysicalMacro.WriteEdge(writer,this,source,true);if(originalName.Owner!=null)originalName.Validate(originalName.Resolve(),this);originalName.Write(writer);NavPhysicalMacro.WriteEdge(writer,this,memberRoot);
+            NavPhysicalMacro.WriteEdge(writer,this,ownerId,true);NavPhysicalMacro.WriteEdge(writer,this,source,true);if(originalName.Owner!=null)originalName.Validate(originalName.Resolve(),this);originalName.Write(writer);NavPhysicalMacro.WriteEdge(writer,this,memberRoot);if(Formation!=null)NavPhysicalMacro.WriteEdge(writer,this,Formation);
         }
-        internal static NavigationAuthorityGroup ReadPhysicalBody(NavPhysicalBodyReader reader)
+        internal static NavigationAuthorityGroup ReadPhysicalBody(NavPhysicalBodyReader reader,bool formation=false)
         {
             var r=reader.Input;
             // Stack scalars only: no mutable checkpoint facade is constructed.
@@ -251,11 +278,11 @@ namespace Spacewars.Runtime
             int march=r.ReadInt32(),revision=r.ReadInt32(),team=r.ReadInt32(),target=r.ReadInt32();double stretch=WorldWire.Number(r),anchor=WorldWire.Number(r);bool initialized=NavPhysicalMacro.ReadBoolean(reader);var origin=(PlayableOrderOrigin)r.ReadInt32();var kind=(PlayableCommandKind)r.ReadInt32();var goal=WorldWire.ReadPoint(r);bool hasLocation=NavPhysicalMacro.ReadBoolean(reader);var location=hasLocation?WorldWire.ReadPoint(r):default;
             var data=new Values(world,group,order,command,tick,membership,job,action,march,revision,team,target,stretch,anchor,initialized,origin,kind,goal,hasLocation,location);
             data.ValidateScalars();var ownerId=NavPhysicalMacro.ReadEdge<NavOwnedText>(reader,true);var source=NavPhysicalMacro.ReadEdge<NavOwnedText>(reader,true);data.Validate(source?.Value);var name=NavNameReference.Read(reader);var members=reader.Edge();
-            return Create(data,ownerId,source,name,members,reader.Reservation,false);
+            var plan=formation?NavPhysicalMacro.ReadEdge<RecastFormationPlan>(reader):null;return Create(data,ownerId,source,name,members,reader.Reservation,false,formation:plan);
         }
         internal void ReleaseStorage(){if(released)return;released=true;Release();}
         internal override void ReleaseOwner()=>ReleaseStorage();
-        protected override void ReleaseEdges(){ownerId?.Release();source?.Release();originalName.Owner?.Release();memberRoot?.Release();ownerId=source=null;originalName=default;memberRoot=null;sealedRoot=false;}
+        protected override void ReleaseEdges(){Formation?.Release();Formation=null;ownerId?.Release();source?.Release();originalName.Owner?.Release();memberRoot?.Release();ownerId=source=null;originalName=default;memberRoot=null;sealedRoot=false;}
     }
     public sealed partial class NavigationSession
     {

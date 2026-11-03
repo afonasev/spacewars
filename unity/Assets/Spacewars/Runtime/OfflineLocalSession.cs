@@ -93,14 +93,16 @@ namespace Spacewars.Runtime
     // never smuggle allied private queues, targets, orders, accounts or camera rects.
     public sealed class OfflineMapMarker
     {
-        public int Id { get; } public PlayableOwner Owner { get; } public NavPoint Position { get; } public string Kind { get; } public MapMarkState State {get;}
-        internal OfflineMapMarker(int id,PlayableOwner owner,NavPoint point,string kind,MapMarkState state=MapMarkState.Ready){Id=id;Owner=owner;Position=point;Kind=kind;State=state;}
+        public int Id { get; } public PlayableOwner? Owner { get; } public NavPoint Position { get; } public string Kind { get; } public MapMarkState State {get;}
+        internal OfflineMapMarker(int id,PlayableOwner? owner,NavPoint point,string kind,MapMarkState state=MapMarkState.Ready){Id=id;Owner=owner;Position=point;Kind=kind;State=state;}
     }
     public static class OfflineMapProjection
     {
         public static IReadOnlyList<OfflineMapMarker> Personal(PlayableSnapshot view)=>Array.AsReadOnly(
             view.Entities.Select(e=>new OfflineMapMarker(e.Id,e.Owner,e.Position,e.Kind.ToString(),MapMarkState.Unit)).Concat(view.Buildings.Where(b=>b.Phase!=ConstructionPhase.Pending).Select(b=>new OfflineMapMarker(b.Id,b.Owner,b.Position,b.Kind.ToString())))
             .Concat(view.Vision.KnownBuildings.Where(b=>!view.Buildings.Any(l=>l.Id==b.Id)).Select(b=>new OfflineMapMarker(b.Id,b.Owner,b.Position,b.Kind.ToString(),MapMarkState.Memory))).ToArray());
-        public static IReadOnlyList<OfflineMapMarker> Shared(OfflinePresentationFrame frame,IEnumerable<string> owners)=>Array.AsReadOnly(owners.SelectMany(owner=>Personal(frame.Views[owner])).GroupBy(m=>m.Id).Select(g=>g.OrderBy(m=>m.State==MapMarkState.Memory).First()).ToArray());
+        public static IReadOnlyList<OfflineMapMarker> Shared(OfflinePresentationFrame frame,IEnumerable<string> owners)=>Array.AsReadOnly(owners.SelectMany(owner=>PlayableMapView.Marks(frame.Views[owner]).Select(m=>new OfflineMapMarker(m.Id,m.Owner,m.Position,m.Kind.ToString(),m.State)))
+            .GroupBy(m=>(m.State==MapMarkState.Unit,m.State==MapMarkState.Unit?m.Id:0,m.Position,m.Kind))
+            .Select(g=>g.OrderBy(m=>m.State==MapMarkState.Memory?1:m.State==MapMarkState.Empty?2:0).First()).ToArray());
     }
 }

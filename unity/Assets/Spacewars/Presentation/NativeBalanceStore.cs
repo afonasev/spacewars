@@ -16,7 +16,7 @@ namespace Spacewars.Presentation
         public const string DefaultId="spacewars-default";
         public const string AiProfileId="ai-openings-midgame-v1";
         public const string NewMatchProfileId="spacewars-certified-group-corridor115-v1";
-        public const int NewMatchProfileVersion=2;
+        public const int NewMatchProfileVersion=3;
         public const string ProjectRelativePath="design/native-lab/profiles.json";
         private readonly AtomicStore disk;
         private readonly PlayableProfile baseline;
@@ -143,12 +143,36 @@ namespace Spacewars.Presentation
         public void ResetRelease(){var row=ReleaseRow();Select(DefaultId,(int)row["revision"]);}
         public PlayableProfile Compile(JToken row)=>Compile(row,selectedId??DefaultId);
         private static JObject ProfileJson(PlayableProfileData data){var json=JObject.Parse(JsonUtility.ToJson(data));if(data.navigationMaxAccruedCredits==0)json.Remove(nameof(PlayableProfileData.navigationMaxAccruedCredits));return json;}
+        private static void ImportLegacyMaxThreshold(JObject defaults,JObject values)
+        {
+            const string legacy="orbitalMaxThresholdMultiplier",absolute="orbitalThresholdMax",previous="orbitalThreshold5";
+            double Number(JToken token,string name,double min,double max)
+            {
+                if(token==null||(token.Type!=JTokenType.Integer&&token.Type!=JTokenType.Float))throw new FormatException("Несовместимый тип: "+name);
+                double value=(double)token;
+                if(double.IsNaN(value)||double.IsInfinity(value)||value<min||value>max)throw new FormatException("Недопустимый параметр: "+name);
+                return value;
+            }
+            // Compile a copy: historical rows retain their original bytes and effective value.
+            // The retired schema default (2) is fixed import provenance, not a live balance knob.
+            if(values.Property(legacy)!=null){double multiplier=Number(values[legacy],legacy,1,10);CheckStep(multiplier,2,.1,legacy);}
+            if(values.Property(absolute)==null&&(values.Property(legacy)!=null||values.Property(previous)!=null||defaults.Property(legacy)!=null))
+            {
+                double multiplier=Number(values[legacy]??defaults[legacy]??new JValue(2),legacy,1,10);CheckStep(multiplier,2,.1,legacy);
+                values[absolute]=Number(values[previous]??defaults[previous],previous,1,100000)*multiplier;
+            }
+            values.Remove(legacy);defaults.Remove(legacy);
+        }
         private PlayableProfile Compile(JToken row,string id)
         {
             var defaults=JObject.Parse(JsonUtility.ToJson(baseline.CopyData()));
             JObject released=null;try{released=(JObject)ReleaseRow()["data"];}catch(InvalidOperationException){}
             if(released!=null)foreach(var p in released.Properties())defaults[p.Name]=p.Value.DeepClone();
-            var values=(JObject)row["data"];var known=typeof(PlayableProfileData).GetFields().ToDictionary(f=>f.Name);
+            var values=(JObject)row["data"].DeepClone();ImportLegacyMaxThreshold(defaults,values);
+            // Historical rows omitted relay income when its original fixed default was 10.
+            // Preserve that historical term; revised profiles store their income explicitly.
+            if(values.Property(nameof(PlayableProfileData.relayIncomePerPeriod))==null)defaults[nameof(PlayableProfileData.relayIncomePerPeriod)]=10;
+            var known=typeof(PlayableProfileData).GetFields().ToDictionary(f=>f.Name);
             // Old saved rows are v1, not an inheritance of future release defaults.
             // Presence is deliberate: explicit null/invalid values still validate below.
             if(values.Property(nameof(PlayableProfileData.navigationMaxAccruedCredits))==null)defaults.Remove(nameof(PlayableProfileData.navigationMaxAccruedCredits));

@@ -5,7 +5,7 @@ namespace Spacewars.Simulation
 {
     [Serializable] public sealed class FoundryProfileData
     {
-        public string id="black-foundry-greybox-v2"; public int revision=4;
+        public string id="black-foundry-greybox-v2"; public int revision=5;
         public double scale=1, flankHeight=6, rearHeight=3, directFireHeight=1;
     }
     public sealed class FoundryField
@@ -167,7 +167,7 @@ namespace Spacewars.Simulation
             double[,] forts={{-38,70},{38,70},{-38,-70},{38,-70}};
             for(int i=0;i<4;i++)result.Add(new TerritorySite(7+i,PlayableBuildingKind.Outpost,Point(forts[i,0],forts[i,1]),p,i<2?0:Math.PI));
             double[,] mines={{-57,86},{0,71},{57,86},{-57,-86},{0,-71},{57,-86},{-77,60},{77,60},{-77,-60},{77,-60},{-77,0},{77,0},{-17,18},{17,-18}};
-            for(int i=0;i<14;i++)result.Add(new TerritorySite(11+i,PlayableBuildingKind.Mine,Point(mines[i,0],mines[i,1]),p));
+            for(int i=0;i<14;i++)result.Add(new TerritorySite(11+i,i>=12?PlayableBuildingKind.RelayTower:PlayableBuildingKind.Mine,Point(mines[i,0],mines[i,1]),p));
             return result.ToArray();
         }
         public OfflineMatchConfiguration Configuration(PlayableProfile p,int seed,bool ai=false,string humanId="foundry-1")

@@ -14,10 +14,10 @@ namespace Spacewars.Presentation
         private readonly Dictionary<string,Vector2> apronModelBounds=new Dictionary<string,Vector2>();
         private EnvironmentArtProfile apronArt;
         private Material apronMaterial,capturePadMaterial;
-        private long padTick=-1;
+        private PlayableSnapshot padView;
         private EnvironmentArtProfile ApronArt=>apronArt??(apronArt=EnvironmentArtProfile.Load());
         private static void DestroyPad(PadView p){foreach(var filter in p.Root.GetComponentsInChildren<MeshFilter>())UnityEngine.Object.Destroy(filter.sharedMesh);UnityEngine.Object.Destroy(p.Root);}
-        public void ClearPads(){ClearRelayViews();foreach(var p in territoryPads.Values)DestroyPad(p);territoryPads.Clear();readyPadSites.Clear();apronModelBounds.Clear();padTick=-1;}
+        public void ClearPads(){ClearRelayViews();foreach(var p in territoryPads.Values)DestroyPad(p);territoryPads.Clear();readyPadSites.Clear();apronModelBounds.Clear();padView=null;}
         private Material ApronMaterial
         {
             get
@@ -83,11 +83,14 @@ namespace Spacewars.Presentation
         }
         public void RenderSites(PlayableSnapshot view,Camera camera=null)
         {
+            // A spectator can change perspective at the same paused tick. Do not retain
+            // geometry knowledge learned from another owner or the omniscient overview.
+            if(padView!=null&&(padView.Generation!=view.Generation||padView.Owner!=view.Owner||padView.Vision?.Team!=view.Vision?.Team))ClearPads();
             RenderRelayViews(view,camera);
             var facing=Facing(camera);
             // Camera motion can occur while paused at the same tick; keep the support square to the facade.
             foreach(var pad in territoryPads.Values)pad.Root.transform.rotation=pad.Facing;
-            if(padTick==view.Tick)return;padTick=view.Tick;
+            if(ReferenceEquals(padView,view))return;padView=view;
             var live=new HashSet<string>();
             foreach(var state in view.Sites)
             {

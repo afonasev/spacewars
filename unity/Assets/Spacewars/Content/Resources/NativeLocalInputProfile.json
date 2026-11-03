@@ -5,7 +5,7 @@
   "zoomSpeed": 10,
   "rotationSpeed": 2,
   "holdMs": 300,
-  "selectAllHoldMs": 2000,
+  "selectAllHoldMs": 1000,
   "selectionGrowth": 8,
   "groupDwellMs": 600,
   "radialDeadzone": 0.35,
@@ -115,6 +115,22 @@
       "group": "Курсор и жесты",
       "target": "system",
       "key": "gamepad",
+      "subkey": "holdFeedbackDelayMs",
+      "label": "Задержка заливки удержания",
+      "unit": "мс",
+      "min": 0,
+      "max": 140,
+      "step": 10,
+      "description": "Короткие нажатия не подсвечивают удержание. После задержки лепесток заполняется до прежнего порога срабатывания.",
+      "kind": "numeric",
+      "path": "system.gamepad.holdFeedbackDelayMs",
+      "value": 120
+    },
+    {
+      "section": "Управление · Геймпад",
+      "group": "Курсор и жесты",
+      "target": "system",
+      "key": "gamepad",
       "subkey": "selectAllHoldMs",
       "label": "Выбор всего экрана",
       "unit": "мс",
@@ -124,7 +140,7 @@
       "description": "После этого удержания A круг резко заменяется прямоугольником viewport и выбором своих юнитов на экране.",
       "kind": "numeric",
       "path": "system.gamepad.selectAllHoldMs",
-      "value": 2000
+      "value": 1000
     },
     {
       "section": "Управление · Геймпад",
@@ -363,5 +379,6 @@
   "cameraMaxZoom": 30,
   "controlGroupFocusRadius": 12,
   "cursorRecenterIdleMs": 1000,
-  "mapCursorSpeed": 0.75
+  "mapCursorSpeed": 0.75,
+  "holdFeedbackDelayMs": 120
 }

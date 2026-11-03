@@ -48,13 +48,13 @@ namespace Spacewars.Tests.EditMode
             double airHp=Hp(d,air);Tick(d,1);double damage=PlayableProfile.Default.TankHealth*.5;
             Assert.AreEqual(PlayableProfile.Default.TankHealth-damage,Hp(d,a),1e-8);Assert.AreEqual(PlayableProfile.Default.TankHealth-damage*.7,Hp(d,b),1e-8);Assert.AreEqual(PlayableProfile.Default.TankHealth-damage*.49,Hp(d,c),1e-8);Assert.AreEqual(PlayableProfile.Default.TankHealth,Hp(d,off));Assert.AreEqual(airHp,Hp(d,air));
         }
-        [Test]public void FriendlyGroundBodyStopsTheBeamWithoutTakingDamage()
+        [Test]public void FriendlyGroundBodyDoesNotStopTheBeamOrTakeDamage()
         {
             var d=New();int tower=Tower(d);var at=View(d).Buildings.Single(b=>b.Id==tower).Position;
             int enemy=Enemy(d,new NavPoint(at.X,at.Z+8));
             int ally=(int)Call(d,"SpawnUnit",new NavPoint(at.X,at.Z+5),PlayableOwner.Player,PlayableEntityKind.Tank);d.Navigation.Crowd.Stop(ally,true);
-            Tick(d,1);Assert.AreEqual(1,Weapon(d,tower).ShotSequence);Assert.AreEqual(PlayableProfile.Default.TankHealth,Hp(d,ally));Assert.AreEqual(PlayableProfile.Default.TankHealth,Hp(d,enemy));
-            var shot=(GaussShotState)Raw(d,tower).GetType().GetField("Gauss").GetValue(Raw(d,tower));Assert.Less(shot.End.Z,at.Z+5);Assert.Zero(shot.Targets.Length);
+            Tick(d,1);Assert.AreEqual(1,Weapon(d,tower).ShotSequence);Assert.AreEqual(PlayableProfile.Default.TankHealth,Hp(d,ally));Assert.AreEqual(PlayableProfile.Default.TankHealth-PlayableProfile.Default.GaussDamage,Hp(d,enemy),1e-8);
+            var shot=(GaussShotState)Raw(d,tower).GetType().GetField("Gauss").GetValue(Raw(d,tower));Assert.Greater(shot.End.Z,at.Z+8);CollectionAssert.AreEqual(new[]{enemy},shot.Targets);
         }
         [Test]public void TwoHitsKillTankAndTargetChangeCannotResetFourSecondCooldown()
         {

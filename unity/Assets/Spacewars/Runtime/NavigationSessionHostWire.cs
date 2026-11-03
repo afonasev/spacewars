@@ -156,7 +156,8 @@ namespace Spacewars.Runtime
             for(int i=0;i<authority.GroupCatalog.Count;i++){
                 var version=(NavigationAuthorityGroup)authority.GroupCatalog[i];if(version.Data.GroupId!=state.GroupKeys[i])throw new ArgumentException("BODY group catalog index/key mismatch.");
                 var row=state.Groups.SingleOrDefault(g=>g.GroupId==state.GroupKeys[i]);
-                if(row==null||row.Members==null||!version.Data.BitwiseSame(new NavigationAuthorityGroup.Values(row))||version.OwnerId!=row.OwnerId||version.Source!=row.Source||version.OriginalLocation?.SurfaceId!=row.OriginalLocation?.SurfaceId||version.Members.Count!=row.Members.Length)throw new ArgumentException("Outer group differs from BODY owner.");
+                if(row==null||row.FormationVersion!=(version.Formation==null?0:1)||row.FormationSeal!=version.Formation?.Seal||row.Members==null||!version.Data.BitwiseSame(new NavigationAuthorityGroup.Values(row))||version.OwnerId!=row.OwnerId||version.Source!=row.Source||version.OriginalLocation?.SurfaceId!=row.OriginalLocation?.SurfaceId||version.Members.Count!=row.Members.Length)throw new ArgumentException("Outer group differs from BODY owner.");
+                row.FormationPlan=version.Formation;
                 for(int m=0;m<row.Members.Length;m++){var member=(NavigationAuthorityMember)version.Members[m];var saved=row.Members[m];if(saved==null||!member.Data.BitwiseSame(new NavigationAuthorityMember.Values(saved))||member.ContactPhase!=saved.ContactPhase||member.GoalLocation?.SurfaceId!=saved.GoalLocation?.SurfaceId)throw new ArgumentException("Outer member differs from BODY role/index.");}
             }
             if(state.GroupLayouts.Length!=2||state.CollectionLayouts.Length!=6)throw new ArgumentException("Invalid BODY collection catalog count.");

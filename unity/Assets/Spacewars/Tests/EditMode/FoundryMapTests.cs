@@ -19,7 +19,7 @@ namespace Spacewars.Tests.EditMode
             var json=System.IO.File.ReadAllText(System.IO.Path.Combine(root.FullName,"unity/Tests/Fixtures/Foundry/captured-seed7-gameplay-profile.json"));
             var data=Newtonsoft.Json.JsonConvert.DeserializeObject<PlayableProfileData>(json);
             var map=new FoundryMap(new FoundryProfileData());var p=PlayableProfile.Create(data,map);
-            Assert.AreEqual(4,map.Revision);Assert.AreEqual(15,p.Navigation.GroupCorridorMaximumExcessPercent);
+            Assert.AreEqual(5,map.Revision);Assert.AreEqual(15,p.Navigation.GroupCorridorMaximumExcessPercent);
             Assert.AreEqual(0,data.navigationMaxAccruedCredits);
             var start=new NavPoint(44,96);double radius=PlayableUnitRules.Radius(p,PlayableEntityKind.Explorer);
             Assert.AreEqual(.58,radius);Assert.AreEqual(start,map.Configuration(p,7).Starts.Single(s=>s.SiteId==3).ExplorerAnchor);
@@ -115,9 +115,9 @@ namespace Spacewars.Tests.EditMode
         [Test] public void CountsAssignmentsAndExistingOwnershipMaterializeSixSeparateStarts()
         {
             var p=Profile();var m=(FoundryMap)p.AuthoredMap;var c=m.Configuration(p,19092026);var a=new OfflineParticipantAuthority(c,1);
-            Assert.AreEqual(6,c.Starts.Count);Assert.AreEqual(14,c.Sites.Count(s=>s.Kind==PlayableBuildingKind.Mine));Assert.AreEqual(4,c.Sites.Count(s=>s.Kind==PlayableBuildingKind.Outpost));
+            Assert.AreEqual(6,c.Starts.Count);Assert.AreEqual(12,c.Sites.Count(s=>s.Kind==PlayableBuildingKind.Mine));Assert.AreEqual(2,c.Sites.Count(s=>s.Kind==PlayableBuildingKind.RelayTower));Assert.AreEqual(4,c.Sites.Count(s=>s.Kind==PlayableBuildingKind.Outpost));
             for(int i=0;i<6;i++){Assert.AreEqual(i,c.Assignments[i]);Assert.AreEqual(i<3?1:2,c.Roster[i].Team);var v=a.View(c.Roster[i].Id);Assert.AreEqual(c.Roster[i].Team,v.Team);Assert.AreEqual(6,v.Participants.Count);Assert.AreEqual(c.Starts[i].Position,v.Buildings.Single(b=>b.Owner==(PlayableOwner)i&&b.Kind==PlayableBuildingKind.Headquarters).Position);Assert.AreEqual(1,v.Entities.Count(e=>e.Owner==(PlayableOwner)i));}
-            var mines=c.Sites.Where(s=>s.Kind==PlayableBuildingKind.Mine).ToArray();Assert.Less(mines[12].Position.X,0);Assert.Greater(mines[12].Position.Z,0);Assert.Greater(mines[13].Position.X,0);Assert.Less(mines[13].Position.Z,0);
+            var relays=c.Sites.Where(s=>s.Kind==PlayableBuildingKind.RelayTower).ToArray();Assert.Less(relays[0].Position.X,0);Assert.Greater(relays[0].Position.Z,0);Assert.Greater(relays[1].Position.X,0);Assert.Less(relays[1].Position.Z,0);
         }
         [Test] public void EveryRampSeamAndFreeCellHasContinuousSupportedHeight()
         {

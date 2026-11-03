@@ -9,11 +9,14 @@ namespace Spacewars.Presentation
     {
         public sealed class Entry
         {
+            public string VoiceKey{get;} public string Identity{get;} public long Tick{get;} public long CauseId{get;} public int Priority{get;}
             public string Text{get;} public NavPoint Point{get;} public double ShownAt{get;} public bool Battle{get;}
-            internal Entry(string text,NavPoint point,double now,bool battle){Text=text;Point=point;ShownAt=now;Battle=battle;}
+            internal Entry(string text,NavPoint point,double now,bool battle,string voiceKey=null,string identity=null,long tick=0,long causeId=0,int priority=0){VoiceKey=voiceKey;Identity=identity;Tick=tick;CauseId=causeId;Priority=priority;Text=text;Point=point;ShownAt=now;Battle=battle;}
         }
         private sealed class Front{internal PlayableOwner Owner;internal NavPoint Point;internal long LastTick;}
         private readonly List<Front> fronts=new List<Front>();
+        private readonly List<Entry> fresh=new List<Entry>();
+        public IReadOnlyList<Entry> NewEntries=>fresh;
         private readonly List<Entry> history=new List<Entry>();
         private readonly HashSet<string> signals=new HashSet<string>();
         private long generation=-1,lastTick=-1,lastEvent;
@@ -24,10 +27,18 @@ namespace Spacewars.Presentation
         public PlayableProfileData Settings(PlayableProfile profile){if(!ReferenceEquals(profile,cachedProfile)){cachedProfile=profile;settings=profile.CopyData();}return settings;}
         public Entry Latest=>history.LastOrDefault();
         public int Count=>history.Count;
-        public static string Label(MatchEventKind kind)=>kind==MatchEventKind.MineCaptured?"Ваша шахта захвачена":kind==MatchEventKind.UnitCaptured?"Ваш юнит захвачен":kind==MatchEventKind.RelayControlLost?"Вы потеряли контроль над вышкой связи":kind==MatchEventKind.BuildingAttacked?"Здание атаковано":kind==MatchEventKind.UnitsAttacked?"Юниты атакованы":kind==MatchEventKind.BuildingCompleted?"Здание построено":kind==MatchEventKind.UnitReady?"Юнит готов":"Исследование завершено";
+        public void Reset(PlayableSnapshot baseline=null)
+        {
+            history.Clear();fresh.Clear();fronts.Clear();signals.Clear();cursor=null;
+            generation=baseline?.Generation??-1;lastTick=baseline?.Tick??-1;context=baseline?.OwnerId;
+            lastEvent=baseline?.MatchEvents.Select(e=>e.Id).DefaultIfEmpty(0).Max()??0;
+            if(baseline!=null)foreach(var signal in baseline.TeamSignals)signals.Add(SignalKey(signal));
+        }
+        public static string Label(MatchEventKind kind){var key=SpokenSignalCatalog.Key(kind);return key==null?"":SpokenSignalCatalog.Phrases[key];}
+
         public void Update(PlayableSnapshot view,bool overview,double now,PlayableProfile profile)
         {
-            var data=Settings(profile);string nextContext=overview?"overview":view.OwnerId;
+            fresh.Clear();if(overview){Reset(view);context="overview";return;}var data=Settings(profile);string nextContext=overview?"overview":view.OwnerId;
             bool newGeneration=generation!=view.Generation||view.Tick<lastTick;
             bool switchView=context!=null&&context!=nextContext&&!newGeneration;
             if(newGeneration||switchView){history.Clear();fronts.Clear();signals.Clear();cursor=null;lastEvent=0;}
@@ -38,6 +49,8 @@ namespace Spacewars.Presentation
             foreach(var e in view.MatchEvents.Where(e=>e.Id>lastEvent).OrderBy(e=>e.Id)){
                 lastEvent=Math.Max(lastEvent,e.Id);
                 if(overview?!e.Battle:e.Owner!=view.Owner)continue;
+                // The specific mine alert replaces generic damage from that same nearby blast.
+                if(e.Battle&&view.MatchEvents.Any(m=>m.Kind==MatchEventKind.MineHit&&m.Tick==e.Tick&&Distance(m.Point,e.Point)<=data.notificationFrontRadius*data.notificationFrontRadius))continue;
                 pending.Add((e.Tick,e.Id,0,e,null));
             }
             var currentSignals=new HashSet<string>();
@@ -53,16 +66,16 @@ namespace Spacewars.Presentation
                         if(front!=null){front.Point=e.Point;front.LastTick=e.Tick;continue;}
                         fronts.Add(new Front{Owner=e.Owner,Point=e.Point,LastTick=e.Tick});
                     }
-                    Admit(Label(e.Kind),e.Point,now,e.Battle);
+                    Admit(Label(e.Kind),e.Point,now,e.Battle,SpokenSignalCatalog.Key(e.Kind),"fact:"+e.Id,e.Tick,e.CauseId,SpokenSignalCatalog.Priority(e.Kind));
                 }else{
-                    var s=p.signal;Admit(s.Kind==TeamSignalKind.Attack?"Союзник: атаковать":s.Kind==TeamSignalKind.Defend?"Союзник: защищать":"Союзник: разведать",s.Point,now,false);
+                    var s=p.signal;var key=SpokenSignalCatalog.Key(s.Kind);Admit(SpokenSignalCatalog.Phrases[key],s.Point,now,false,key,"signal:"+s.Id,s.CreatedTick,0,2);
                 }
             }
         }
         private static string SignalKey(PlayableTeamSignal s)=>s.Id+":"+s.CreatedTick;
         private static double Distance(NavPoint a,NavPoint b)=>Math.Pow(a.X-b.X,2)+Math.Pow(a.Z-b.Z,2);
         // Shared admission point for authorized future positional AI communications.
-        public void Admit(string text,NavPoint point,double now,bool battle=false){var entry=new Entry(text,point,now,battle);history.Add(entry);cursor=entry;}
+        public void Admit(string text,NavPoint point,double now,bool battle=false,string voiceKey=null,string identity=null,long tick=0,long causeId=0,int priority=0){var entry=new Entry(text,point,now,battle,voiceKey,identity,tick,causeId,priority);history.Add(entry);fresh.Add(entry);cursor=entry;}
         public void Prune(double now,double seconds){history.RemoveAll(e=>now>=e.ShownAt+seconds);if(cursor!=null&&!history.Contains(cursor))cursor=null;}
         public Entry Visible(double now,PlayableProfile profile){Prune(now,Settings(profile).notificationHistorySeconds);return Latest!=null&&now<Latest.ShownAt+Settings(profile).notificationSeconds?Latest:null;}
         public NavPoint? Focus(bool previous,double now,PlayableProfile profile)

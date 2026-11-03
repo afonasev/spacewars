@@ -144,18 +144,23 @@ namespace Spacewars.Presentation
                     // Search resolution is a bounded fitting invariant, not UI tuning.
                     // Keep text readable and move the complete stack to the nearest
                     // valid location. Test each row against the actual curved petal.
-                    for(int scaleStep=8;scaleStep>=4&&!found;scaleStep--)
+                    // Two-action utility menus have a vertical symmetry axis. Try
+                    // fitting all rows on that axis before considering sideways packing.
+                    for(int pass=0;pass<(Count==2?2:1)&&!found;pass++)
+                    for(int scaleStep=8;scaleStep>=(Count==2&&pass==0?3:4)&&!found;scaleStep--)
                     {
+                        bool centered=Count==2&&pass==0;
                         float scale=scaleStep/8f,w=iconWidth*scale,h=iconHeight*scale;
-                        float stackHeight=h+rowGap+titleHeight+(priceHeight>0?rowGap+priceHeight:0);
+                        float fitGap=centered?rowGap*scale:rowGap;
+                        float stackHeight=h+fitGap+titleHeight+(priceHeight>0?fitGap+priceHeight:0);
                         float best=float.PositiveInfinity;
-                        for(int iy=0;iy<=32;iy++)for(int ix=0;ix<=32;ix++)
+                        for(int iy=0;iy<=32;iy++)for(int ix=0;ix<=(centered?0:32);ix++)
                         {
-                            var at=new Vector2(Mathf.Lerp(left,right,ix/32f),Mathf.Lerp(top,bottom,iy/32f));
+                            var at=new Vector2(centered?anchor.x:Mathf.Lerp(left,right,ix/32f),Mathf.Lerp(top,bottom,iy/32f));
                             float distance=(at-anchor).sqrMagnitude;if(distance>=best)continue;
                             var icon=new Rect(at.x-w/2,at.y-stackHeight/2,w,h);
-                            var label=new Rect(at.x-titleWidth/2,icon.yMax+rowGap,titleWidth,titleHeight);
-                            var price=new Rect(at.x-priceWidth/2,label.yMax+rowGap,priceWidth,priceHeight);
+                            var label=new Rect(at.x-titleWidth/2,icon.yMax+fitGap,titleWidth,titleHeight);
+                            var price=new Rect(at.x-priceWidth/2,label.yMax+fitGap,priceWidth,priceHeight);
                             if(!Fits(icon)||!Fits(label)||priceHeight>0&&!Fits(price))continue;
                             utilityIcon=icon;utilityLabel=label;utilityPrice=price;best=distance;found=true;
                         }

@@ -8,6 +8,57 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class SharedFlowRouterWorkTests
     {
+        [Test]
+        public void WreckReachabilityMatchesFreshRouteAcrossNarrowGapsAndSeparateGoals()
+        {
+            var random=new System.Random(7189);
+            foreach(double radius in new[]{.42,.72,1.15})
+            foreach(bool sealedWall in new[]{false,true})
+            {
+                var terms=NavigationProfile.Default.ForUnit(radius,4,3);
+                var geometry=new NavGeometry(16,new[]{new NavObstacle(-1,-16,1,sealedWall?16:11),
+                    new NavObstacle(new NavPoint(-6,5),1.3),new NavObstacle(new NavPoint(6,-3),1.7)},3);
+                var queries=new SharedFlowRouter(geometry,terms);
+                var reference=new SharedFlowRouterReference(geometry,terms);
+                foreach(var goal in new[]{new NavPoint(8,7),new NavPoint(-8,-5),new NavPoint(6,-3)})
+                for(int i=0;i<36;i++)
+                {
+                    var start=new NavPoint(random.NextDouble()*28-14,random.NextDouble()*28-14);
+                    Assert.AreEqual(reference.FindPath(start,goal).Length!=0,queries.HasPath(start,goal),
+                        $"start {start.X},{start.Z}, goal {goal.X},{goal.Z}, radius {radius}, sealed {sealedWall}");
+                }
+            }
+        }
+
+        [Test] public void SuccessiveWrecksInAChokeKeepAllFortyReachabilityAnswers()
+        {
+            var terms=NavigationProfile.Default.ForUnit(.72,4,3);
+            var obstacles=new System.Collections.Generic.List<NavObstacle>{new NavObstacle(-1,-48,1,24)};
+            var goal=new NavPoint(28,0);
+            SharedFlowRouter previous=null;
+            long coldChecks=0,reusedChecks=0,coldTime=0,reusedTime=0;
+            for(int revision=1;revision<=18;revision++){
+                obstacles.Add(new NavObstacle(new NavPoint(-12+revision%5*2,-14+revision/5*3),.72));
+                if(revision==12)obstacles.RemoveAt(1);
+                var geometry=new NavGeometry(48,obstacles.ToArray(),revision);
+                bool[] Run(bool reuse){
+                    var clock=Stopwatch.StartNew();
+                    var router=reuse&&previous!=null?previous.ForGeometry(geometry):new SharedFlowRouter(geometry,terms);
+                    var answers=new bool[40];
+                    for(int i=0;i<answers.Length;i++)
+                        answers[i]=router.HasPath(new NavPoint(-28+i%4*2,i/4*2-10),goal);
+                    clock.Stop();
+                    if(reuse){previous=router;reusedChecks+=router.GridGeometryChecks;reusedTime+=clock.ElapsedTicks;}
+                    else{coldChecks+=router.GridGeometryChecks;coldTime+=clock.ElapsedTicks;}
+                    return answers;
+                }
+                bool firstReuse=revision%2==0;
+                CollectionAssert.AreEqual(Run(firstReuse),Run(!firstReuse),"geometry revision "+revision);
+            }
+            Assert.Greater(coldChecks,reusedChecks);
+            TestContext.WriteLine($"WRECK_GRID actors=40 revisions=18 coldChecks={coldChecks} reusedChecks={reusedChecks} coldMs={coldTime*1000d/Stopwatch.Frequency:F2} reusedMs={reusedTime*1000d/Stopwatch.Frequency:F2}");
+        }
+
         [Test]public void PreparedPredicatesKeepExactPathsForEveryProducedFootprintAndCancelCleanly()
         {
             var p=PlayableProfile.Default;var g=new NavGeometry(12,new[]{new NavObstacle(-.8,-6,.8,6)},1);

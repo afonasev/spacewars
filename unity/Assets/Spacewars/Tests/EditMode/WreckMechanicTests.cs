@@ -20,6 +20,67 @@ namespace Spacewars.Tests.EditMode
         PlayableCommandStatus Send(int id,PlayableCommandKind kind,NavPoint goal=default,int target=0)=>domain.Apply(new PlayableCommand(1,++sequence,"player-1",kind,new[]{id},goal,targetId:target),out _);
         void Deliver(){var nav=domain.Navigation;if(routeHost!=null){for(int i=0;i<20000&&nav.PendingCount>0;i++){routeHost.Service(new PlayableRouteBinding(domain.Geometry,profile,nav.Admission,nav.RoutePort),4);nav.ApplyResults();}Assert.Zero(nav.PendingCount,"Actual route service must finish the component request: "+routeHost.LastProjectionFailure);return;}while(nav.Requests.TryDequeue(out var request))nav.Answers.TryEnqueue(new NavigationAnswer(request,new SharedFlowRouter(request.Geometry,request.Profile).FindPath(request.Start,request.Goal)));nav.ApplyResults();}
         void Steps(int count){for(int i=0;i<count;i++){Deliver();domain.Step(1d/30d);}}
+        void AgeAllWrecksPastProtection()
+        {long until=View().Wrecks.Select(w=>w.InvulnerableUntilTick).DefaultIfEmpty(domain.Tick).Max();if(until>domain.Tick)Steps((int)(until-domain.Tick));}
+        [TestCase(PlayableEntityKind.Tank)] [TestCase(PlayableEntityKind.Explorer)]
+        [TestCase(PlayableEntityKind.Shkval)] [TestCase(PlayableEntityKind.Hawk)]
+        public void FreshWreckConsumesHitsUntilExactlyOneSecondAfterReveal(PlayableEntityKind weapon)
+        {
+            int dead=Spawn(default);Call("Damage",dead,int.MaxValue);var wreck=View().Wrecks.Single();
+            Assert.AreEqual(1,profile.WreckSpawnProtectionSeconds);Assert.AreEqual(wreck.RevealTick+30,wreck.InvulnerableUntilTick);
+            var geometry=domain.Geometry;var before=domain.CaptureWorldBytes(7,"fresh-hit");
+            Assert.True((bool)Call("DestroyWreck",dead,weapon),"Protected impact is consumed, never retained for retry");
+            Assert.AreSame(geometry,domain.Geometry);Assert.Less(View().Wrecks.Single().DestroyedTick,0);
+            CollectionAssert.AreEqual(before,domain.CaptureWorldBytes(7,"fresh-hit"));
+            Steps((int)(wreck.InvulnerableUntilTick-domain.Tick-1));
+            Assert.True((bool)Call("DestroyWreck",dead,weapon));Assert.True(View().Wrecks.Single().Blocks(domain.Tick));
+            Steps(1);Assert.True((bool)Call("DestroyWreck",dead,weapon));
+            Assert.AreEqual(domain.Tick,View().Wrecks.Single().DestroyedTick);Assert.True(domain.Geometry.IsFree(default,0));
+        }
+        [Test] public void ProtectionDeadlineSurvivesCurrentCheckpointWithoutRestarting()
+        {
+            int dead=Spawn(default);Call("Damage",dead,int.MaxValue);Steps(10);
+            var before=View().Wrecks.Single();var bytes=domain.CaptureWorldBytes(7,"wreck-protection");
+            var restored=PlayableDomain.RestoreWorldBytes(bytes,profile,7,"wreck-protection");
+            try
+            {
+                CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,"wreck-protection"));
+                var saved=restored.Snapshot(1,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7).Wrecks.Single();
+                Assert.AreEqual(before.InvulnerableUntilTick,saved.InvulnerableUntilTick);
+                Assert.False(saved.Damageable(restored.Tick));
+                for(long i=restored.Tick;i<saved.InvulnerableUntilTick;i++)restored.Step(1d/30);
+                Assert.True(saved.Damageable(restored.Tick));
+                Assert.True((bool)typeof(PlayableDomain).GetMethod("DestroyWreck",F).Invoke(restored,new object[]{dead,PlayableEntityKind.Tank}));
+                Assert.True(restored.Geometry.IsFree(default,0));
+            }
+            finally{restored.DestroyOwnedNavigation();}
+        }
+        [Test] public void AlreadyFlyingTankRoundsAreConsumedWithoutBreakingFreshWreck()
+        {
+            int victim=Spawn(default,PlayableEntityKind.Tank,PlayableOwner.Enemy);Call("Damage",victim,(int)View().Entities.Single(e=>e.Id==victim).Health-1);
+            int first=Spawn(new NavPoint(-6,0)),second=Spawn(new NavPoint(-6,2));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(first,PlayableCommandKind.Attack,target:victim));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(second,PlayableCommandKind.Attack,target:victim));
+            for(int i=0;i<300&&View().Projectiles.Count(p=>p.TargetId==victim)<2;i++)Steps(1);
+            Assert.GreaterOrEqual(View().Projectiles.Count(p=>p.TargetId==victim),2,"Two real rounds must already be in flight");
+            for(int i=0;i<300&&!View().Wrecks.Any(w=>w.Id==victim);i++)Steps(1);
+            Assert.True(View().Wrecks.Any(w=>w.Id==victim));var wreck=View().Wrecks.Single(w=>w.Id==victim);
+            Assert.Less(domain.Tick,wreck.InvulnerableUntilTick);
+            for(int i=0;i<300&&View().Projectiles.Any(p=>p.TargetId==victim);i++)Call("AdvanceProjectiles",1d/30);
+            Assert.False(View().Projectiles.Any(p=>p.TargetId==victim),"Old projectiles are spent, not parked until protection ends");
+            Assert.Less(View().Wrecks.Single(w=>w.Id==victim).DestroyedTick,0);Assert.False(domain.Geometry.IsFree(default,0));
+        }
+        [Test] public void ShkvalBlastConsumesProtectedWreckHitWithoutDestruction()
+        {
+            int dead=Spawn(default);Call("Damage",dead,int.MaxValue);int neighbor=Spawn(new NavPoint(1.6,0));Call("Damage",neighbor,int.MaxValue);
+            int gun=Spawn(new NavPoint(-6,0),PlayableEntityKind.Shkval);Assert.AreEqual(PlayableCommandStatus.Applied,Send(gun,PlayableCommandKind.Attack,target:dead));
+            // Launch at fixed authority time to isolate an impact inside the protection interval.
+            for(int i=0;i<300&&!View().Projectiles.Any(p=>p.Kind==PlayableEntityKind.Shkval);i++)Call("AdvanceCombat",1d/30);
+            Assert.True(View().Projectiles.Any(p=>p.Kind==PlayableEntityKind.Shkval));
+            for(int i=0;i<300&&View().Projectiles.Any(p=>p.Kind==PlayableEntityKind.Shkval);i++)Call("AdvanceProjectiles",1d/30);
+            Assert.False(View().Projectiles.Any(p=>p.Kind==PlayableEntityKind.Shkval));
+            foreach(var wreck in View().Wrecks){Assert.Less(wreck.DestroyedTick,0);Assert.True(wreck.Blocks(domain.Tick));}
+        }
         [Test] public void ReverseIdDeathsPublishCanonicalWreckOrderAndExactRestore()
         {
             int lower=Spawn(new NavPoint(-8,0)),higher=Spawn(new NavPoint(8,0));
@@ -52,7 +113,7 @@ namespace Spacewars.Tests.EditMode
             var saved=domain.CaptureWorldBytes(7,"lethal-refusal");var restored=PlayableDomain.RestoreWorldBytes(saved,profile,7,"lethal-refusal");try{CollectionAssert.AreEqual(saved,restored.CaptureWorldBytes(7,"lethal-refusal"));}finally{restored.DestroyOwnedNavigation();}
         }
 
-        [TestCase("removal",true)][TestCase("late-geometry",true)][TestCase("removal",false)][TestCase("held",true)]
+        [TestCase("draft-batch",true)][TestCase("removal",true)][TestCase("late-geometry",true)][TestCase("removal",false)][TestCase("held",true)]
         public void LethalRemovalAndGeometryRefuseAsOnePreparedHit(string stage,bool commanded)
         {
             int victim=Spawn(default),survivor=Spawn(new NavPoint(-10,0));
@@ -63,7 +124,7 @@ namespace Spacewars.Tests.EditMode
             bool Hit()=>(bool)typeof(PlayableDomain).GetMethod("TryDamageWithOwner",F).Invoke(domain,new object[]{victim,(double)int.MaxValue,0,null,null,default(NavPoint),null});
             try{
                 if(stage=="late-geometry")nav.AfterGeometryRemovalPreparationForQa=()=>budget.AllocationAdmission=bytes=>{denied++;return false;};
-                else budget.AllocationAdmission=bytes=>{if(new System.Diagnostics.StackTrace(false).GetFrames().Any(f=>f.GetMethod().Name=="PrepareGeometryRemovals")){denied++;return false;}return true;};
+                else budget.AllocationAdmission=bytes=>{if(new System.Diagnostics.StackTrace(false).GetFrames().Any(f=>f.GetMethod().Name==(stage=="draft-batch"?"CopyWithRebindMembersOwned":"PrepareGeometryRemovals"))){denied++;return false;}return true;};
                 Assert.False(Hit(),"A refused removal or subsequent geometry projection must defer the entire lethal hit");
             }finally{nav.AfterGeometryRemovalPreparationForQa=null;budget.AllocationAdmission=null;}
             Assert.Greater(denied,0);Assert.AreSame(geometry,domain.Geometry);Assert.AreEqual(physical,budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);Assert.Zero(budget.ActiveScopes);
@@ -142,7 +203,7 @@ namespace Spacewars.Tests.EditMode
         [Test] public void ActiveHostAllocationDefersWreckDestructionUntilItsBoundary()=>CheckRefusedWreck(true);
         private void CheckRefusedWreck(bool activeHost)
         {
-            int dead=Spawn(default);Call("Damage",dead,int.MaxValue);
+            int dead=Spawn(default);Call("Damage",dead,int.MaxValue);AgeAllWrecksPastProtection();
             int mover=Spawn(new NavPoint(-10,0));Assert.AreEqual(PlayableCommandStatus.Applied,Send(mover,PlayableCommandKind.Move,new NavPoint(10,0)));
             var before=domain.CaptureWorldBytes(7,"wreck-refusal");var geometry=domain.Geometry;var budget=domain.Navigation.PhysicalHostBudget;
             long physical=budget.PhysicalBytes;int denied=0;System.Threading.Thread worker=null;Exception workerError=null;
@@ -168,7 +229,7 @@ namespace Spacewars.Tests.EditMode
         {
             int dead=Spawn(default);Call("Damage",dead,int.MaxValue);
             int neighbor=0;if(weapon==PlayableEntityKind.Shkval){neighbor=Spawn(new NavPoint(1.6,0));Call("Damage",neighbor,int.MaxValue);}
-            int gun=Spawn(new NavPoint(-6,0),weapon);if(weapon==PlayableEntityKind.Hawk)Steps(20);
+            AgeAllWrecksPastProtection();int gun=Spawn(new NavPoint(-6,0),weapon);if(weapon==PlayableEntityKind.Hawk)Steps(20);
             Assert.AreEqual(PlayableCommandStatus.Applied,Send(gun,PlayableCommandKind.Attack,target:dead));
             using(domain.Navigation.CaptureState()){}var geometry=domain.Geometry;var budget=domain.Navigation.PhysicalHostBudget;int refused=0;
             try{
@@ -187,7 +248,7 @@ namespace Spacewars.Tests.EditMode
         [TestCase(true)][TestCase(false)] public void NaturalExpiryRefusalPreservesWorldAndRetries(bool activeHost)
         {
             NavPoint RetainedGoal(int id){using(var state=domain.Navigation.CaptureState())return state.RetainedGoals.Single(g=>g.Entity==id).Point;}
-            int dead=Spawn(default);Call("Damage",dead,int.MaxValue);
+            int dead=Spawn(default);Call("Damage",dead,int.MaxValue);AgeAllWrecksPastProtection();
             int mover=Spawn(new NavPoint(-10,0));Assert.AreEqual(PlayableCommandStatus.Applied,Send(mover,PlayableCommandKind.Move,new NavPoint(10,0)));
             Assert.AreEqual(new NavPoint(10,0),RetainedGoal(mover),"The accepted pending move must retain its authoritative goal");
             typeof(PlayableDomain).GetProperty("Tick",F).SetValue(domain,View().Wrecks.Single().ExpireTick);
@@ -318,7 +379,7 @@ namespace Spacewars.Tests.EditMode
         }
         [Test] public void LabControlsHaveMetadataAndValidateBurialRange()
         {
-            Assert.AreEqual(30,profile.UnitWreckLifetimeSeconds);Assert.AreEqual(2,profile.UnitDeathSmokeSeconds);Assert.AreEqual(30,profile.HawkWreckChancePercent);
+            Assert.AreEqual(1,profile.WreckSpawnProtectionSeconds);Assert.AreEqual(30,profile.UnitWreckLifetimeSeconds);Assert.AreEqual(2,profile.UnitDeathSmokeSeconds);Assert.AreEqual(30,profile.HawkWreckChancePercent);
             foreach(var field in PlayableProfileMetadata.WreckFields){Assert.True(NativeBalanceFields.Editable(field));Assert.IsNotEmpty(field.Label);Assert.IsNotEmpty(field.Description);Assert.IsNotEmpty(field.Unit);Assert.Greater(field.Step,0);var d=profile.CopyData();Assert.Throws<ArgumentOutOfRangeException>(()=>field.Write(d,field.Maximum+field.Step));}
             var data=profile.CopyData();data.wreckBurialMin=.5;data.wreckBurialMax=.1;Assert.Throws<ArgumentException>(()=>PlayableProfile.Create(data));
         }

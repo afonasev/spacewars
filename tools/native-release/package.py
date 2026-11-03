@@ -99,6 +99,22 @@ def build_windows_helper(destination, flags, env, bridge=False):
         '-o',bridge_destination,'.'],cwd=module,env=env)
    validate_windows_dpi(bridge_destination)
 
+def build_launcher_view(payload, platform):
+ """Place the native view inside the payload BEFORE its signed inventory is made."""
+ source=ROOT/'tools/native-release/launcher'
+ if platform=='windows-x64':
+  shutil.copy2(source/'LauncherView.ps1',payload/'LauncherView.ps1')
+  shutil.copy2(ROOT/'tools/native-release/icons/Spacewars.ico',payload/'Spacewars.ico')
+ else:
+  bundle=payload/'LauncherView.app';contents=bundle/'Contents';binary=contents/'MacOS/LauncherView'
+  binary.parent.mkdir(parents=True,exist_ok=True)
+  (contents/'Info.plist').write_bytes(plistlib.dumps({'CFBundleName':'Spacewars','CFBundleDisplayName':'Spacewars','CFBundleIdentifier':'tech.afonasev.spacewars.launcherview','CFBundleExecutable':'LauncherView','CFBundleIconFile':'Spacewars.icns','CFBundlePackageType':'APPL','LSMinimumSystemVersion':'11.0','NSHighResolutionCapable':True}))
+  (contents/'Resources').mkdir(exist_ok=True)
+  shutil.copy2(ROOT/'tools/native-release/icons/Spacewars.icns',contents/'Resources/Spacewars.icns')
+  run(['clang','-fobjc-arc','-framework','Cocoa','-mmacosx-version-min=11.0',
+       '-arch','arm64','-arch','x86_64',source/'LauncherView.m','-o',binary])
+  run(['codesign','--force','--sign','-',bundle])
+
 def main():
  p=argparse.ArgumentParser();p.add_argument('--version',required=True);p.add_argument('--sequence',required=True,type=int);p.add_argument('--platform',choices=['windows-x64','macos-universal'],required=True);p.add_argument('--prepare-legacy-bridge',action='store_true');p.add_argument('--channel',choices=['production','test'],required=True);p.add_argument('--dmg-format',choices=['UDZO','ULMO'],default='ULMO');p.add_argument('--lzma-dict-mb',type=int,choices=[8,32,64],default=64);p.add_argument('--test-origin');p.add_argument('--allow-dirty',action='store_true');p.add_argument('--output',type=pathlib.Path,default=ROOT/'.local/native-distribution');a=p.parse_args()
  if not all(c.isdigit() or c=='.' for c in a.version) or a.sequence<1:raise ValueError('invalid release version/sequence')
@@ -144,6 +160,7 @@ def main():
   shutil.copytree(player,payload/'Player.app',symlinks=True);shutil.copy2(helper,payload/'UpdateHost');entry='Player.app/Contents/MacOS/Player'
   # ProductName determines Unity's bundle executable; inspect it instead of guessing.
   info=plistlib.loads((player/'Contents/Info.plist').read_bytes());entry='Player.app/Contents/MacOS/'+info['CFBundleExecutable']
+ build_launcher_view(payload,a.platform)
  commit=identity['commit']
  feed=out/'public/native/v1';release=run(['go','run','.','--pack',payload,feed,key,a.platform,entry,a.version,a.sequence,commit,a.channel],cwd=UPDATER)
  raw=(feed/a.platform/'latest.json').read_bytes()

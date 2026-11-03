@@ -65,8 +65,10 @@ namespace Spacewars.Presentation
         {
             if(metric==3)return f.Kind==MatchFactKind.ResearchCompleted;
             bool building=f.Kind==MatchFactKind.BuildingCompleted||f.Kind==MatchFactKind.BuildingLost||f.Kind==MatchFactKind.BuildingSold;
-            if(metric==1)return building&&(f.EntityKind==(int)PlayableBuildingKind.Factory||f.EntityKind==(int)PlayableBuildingKind.Hangar);
-            return metric==0&&(f.Kind==MatchFactKind.RelayCaptured||f.Kind==MatchFactKind.RelayNeutralized||f.Kind==MatchFactKind.RefineryUpgradeCompleted||building&&(f.EntityKind==(int)PlayableBuildingKind.Headquarters||f.EntityKind==(int)PlayableBuildingKind.Outpost||f.EntityKind==(int)PlayableBuildingKind.Mine||f.EntityKind==(int)PlayableBuildingKind.Refinery));
+            bool producer=f.EntityKind==(int)PlayableBuildingKind.Factory||f.EntityKind==(int)PlayableBuildingKind.Hangar;
+            bool upgrade=f.Kind==MatchFactKind.RefineryUpgradeCompleted;
+            if(metric==1)return producer&&(building||upgrade);
+            return metric==0&&(f.Kind==MatchFactKind.RelayCaptured||f.Kind==MatchFactKind.RelayNeutralized||upgrade&&!producer||building&&(f.EntityKind==(int)PlayableBuildingKind.Headquarters||f.EntityKind==(int)PlayableBuildingKind.Outpost||f.EntityKind==(int)PlayableBuildingKind.Mine||f.EntityKind==(int)PlayableBuildingKind.Refinery));
         }
         private void AddGraph(VisualElement parent,string title,double maximum,int metric)
         {

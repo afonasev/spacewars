@@ -14,6 +14,7 @@ namespace Spacewars.Runtime
             internal NavigationRequest[] Members;internal RecastMemberRoute[] Routes;
             internal RecastMapCache.Pin Map;internal RecastNavigationQuery Query;
             internal RecastPayload ResultPayload;internal ILayeredNavigationProvider Provider;
+            internal RecastSpineProposal Spine;internal RecastAttachmentPreparation Attachment;internal bool AttachmentRequired;
             internal RecastPayload RawCorridor,CompletedCorridor;internal RecastSpinePreparation SpinePreparation;internal bool SpineRequired;
             internal NavSolveStatus Result=NavSolveStatus.Pending;
             private Context(long bytes):base(bytes){}
@@ -31,7 +32,7 @@ namespace Spacewars.Runtime
                 }catch{result.Release();throw;}
             }
             internal int Index(NavigationRequest request){for(int i=0;i<Members.Length;i++)if(ReferenceEquals(Members[i],request))return i;return -1;}
-            protected override void ReleaseEdges(){Query?.Dispose();Query=null;SpinePreparation?.Dispose();SpinePreparation=null;CompletedCorridor?.Dispose();CompletedCorridor=null;RawCorridor?.Dispose();RawCorridor=null;Map.Dispose();(Provider as INavStorageFacade)?.StorageRoot.Release();Provider=null;ResultPayload?.Dispose();ResultPayload=null;Routes=null;Members=null;Pin.Dispose();Pin=default;Next=null;}
+            protected override void ReleaseEdges(){Query?.Dispose();Query=null;SpinePreparation?.Dispose();SpinePreparation=null;CompletedCorridor?.Dispose();CompletedCorridor=null;RawCorridor?.Dispose();RawCorridor=null;Attachment?.Dispose();Attachment=null;Map.Dispose();(Provider as INavStorageFacade)?.StorageRoot.Release();Provider=null;ResultPayload?.Dispose();ResultPayload=null;Routes=null;Members=null;Pin.Dispose();Pin=default;Next=null;}
         }
         internal int QueryStepWork=256;
         private Context first;
@@ -100,7 +101,7 @@ namespace Spacewars.Runtime
                 context.Result=result;context.Query.Dispose();context.Query=null;
             }
             // Local work begins on the next invocation after the native quantum.
-            if(context.SpineRequired)return false;
+            if(context.SpineRequired||context.AttachmentRequired)return false;
             return Finish(context,index,out route,out status);
         }
         // Projection keeps the original bounded admission route. Restartable Solve
@@ -112,7 +113,7 @@ namespace Spacewars.Runtime
                     long scratch=checked(8192L+8L*65536*(NavStorageLayout.ValueBytes(typeof(NavTypedLeg))+NavStorageLayout.ValueBytes(typeof(RecastRoutePoint)))+128L*context.Members.Length);
                     using(var workspace=NavStorageScratch.Reserve(r,scratch)){
                         var partition=provider as PartitionNavigationProvider;
-                        ILayeredNavigationProvider owned=null;RecastPayload payload=null,rawPayload=null;
+                        ILayeredNavigationProvider owned=null;RecastPayload payload=null,rawPayload=null;RecastAttachmentPreparation attachment=null;
                         try{
                             if(context.Provider==null){if(partition!=null)owned=PartitionNavigationProvider.CopyOwned(partition,r);else if(provider is LayeredNavigationProvider layered)owned=LayeredNavigationProvider.CopyOwned(layered,r);}
                             var traceProvider=context.Provider??(ILayeredNavigationProvider)owned??provider;
@@ -132,17 +133,18 @@ namespace Spacewars.Runtime
                             if(spine!=null)bytes=checked(bytes+NavStorageLayout.ObjectBytesBound(typeof(RecastSpineProposal))+88+(NavTypedLeg.StorageCharge+NavStorageLayout.ValueBytes(typeof(NavTypedLeg)))*(long)spine.Legs.Length+4L*spine.Stops.Length+24+2L*spine.Binding.Length);
                             foreach(var path in routes)if(path!=null)bytes=checked(bytes+NavStorageLayout.ObjectBytesBound(typeof(RecastMemberRoute))+64+(NavTypedLeg.StorageCharge+NavStorageLayout.ValueBytes(typeof(NavTypedLeg)))*(long)path.Legs.Length+NavStorageLayout.ValueBytes(typeof(RecastRoutePoint))*(long)path.Waypoints.Length);
                             payload=RecastPayload.Allocate(r,bytes);payload.Value=routes;
+                            if(spine!=null&&routes.Any(path=>path==null)){attachment=RecastAttachmentPreparation.Create(context.Members.Length,r);context.RequireEdge(attachment);}
                             // Publish only after every potentially refusing birth/guard.
-                            if(owned!=null){context.Provider=owned;owned=null;}context.ResultPayload=payload;payload=null;context.Routes=routes;Attachments+=context.Members.Length;
-                        }finally{(owned as INavStorageFacade)?.StorageRoot.Release();payload?.Dispose();rawPayload?.Dispose();}
+                            if(owned!=null){context.Provider=owned;owned=null;}context.ResultPayload=payload;payload=null;context.Routes=routes;context.Spine=spine;context.Attachment=attachment;context.AttachmentRequired=attachment!=null;attachment=null;Attachments+=context.Members.Length;
+                        }finally{attachment?.Dispose();(owned as INavStorageFacade)?.StorageRoot.Release();payload?.Dispose();rawPayload?.Dispose();}
                     }
         }
         internal long LocalAttachmentWork{get;private set;}
         private Context Find(NavigationRequest request){for(var c=first;c!=null;c=c.Next)if(c.Index(request)>=0)return c;return null;}
-        internal bool HasPendingAttachment(NavigationRequest request)=>Find(request) is Context c&&c.SpineRequired;
+        internal bool HasPendingAttachment(NavigationRequest request)=>Find(request) is Context c&&(c.SpineRequired||c.AttachmentRequired);
         internal int AdvanceAttachment(NavigationRequest request,INavStorageReservation r,int maximumWork,Func<bool> cancelled)
         {
-            var c=Find(request);if(c==null||!c.SpineRequired)return 0;
+            var c=Find(request);if(c==null||!c.SpineRequired&&!c.AttachmentRequired)return 0;
             AdmitOwner(r);NavStorageAdmission.RequireOwned(r,c);
             if(c.SpineRequired){
                 if(c.SpinePreparation==null){c.SpinePreparation=RecastSpinePreparation.Create(c.RawCorridor,r);c.RequireEdge(c.SpinePreparation);}
@@ -151,7 +153,11 @@ namespace Spacewars.Runtime
                 finally{long used=c.SpinePreparation.Work-before;if(used>Math.Min(QueryStepWork,maximumWork))throw new InvalidOperationException("Recast spine quantum exceeded.");LocalAttachmentWork+=used;}
                 return checked((int)(c.SpinePreparation.Work-before));
             }
-            return 0;
+            if(c.Attachment==null){c.Attachment=RecastAttachmentPreparation.Create(c.Members.Length,r);c.RequireEdge(c.Attachment);}
+            long attachmentBefore=c.Attachment.Work;
+            try{c.Attachment.Step(c.Members,c.Routes,c.Spine,c.Provider,c.Map.Map.Geometry,r,Math.Min(QueryStepWork,maximumWork),cancelled);}
+            finally{long used=c.Attachment.Work-attachmentBefore;if(used>Math.Min(QueryStepWork,maximumWork))throw new InvalidOperationException("Recast attachment quantum exceeded.");LocalAttachmentWork+=used;}
+            return checked((int)(c.Attachment.Work-attachmentBefore));
         }
         internal void CommitAttachment(NavigationRequest request)
         {
@@ -160,14 +166,18 @@ namespace Spacewars.Runtime
                 var completed=c.SpinePreparation.Completed;if(completed!=null){c.RequireEdge(completed);completed.Retain();c.CompletedCorridor=completed;}
                 c.SpineRequired=false;c.SpinePreparation.Dispose();c.SpinePreparation=null;
             }
+            if(c?.Attachment?.Complete==true){c.Routes=c.Attachment.WorkingRoutes;c.AttachmentRequired=false;}
         }
         internal void InvalidateAttachment(NavigationRequest request)
         {
             var c=Find(request);if(c?.SpineRequired==true){c.SpinePreparation?.Dispose();c.SpinePreparation=null;return;}
-
+            if(c?.AttachmentRequired!=true)return;
+            c.Attachment?.Dispose();c.Attachment=null;
+            // Native/direct baseline remains untouched; the required marker
+            // prevents a refused derivative becoming a BlockedConnector result.
         }
         private bool Advance(Context c,int index,INavStorageReservation r,Func<bool> cancelled,out RecastMemberRoute route,out NavSolveStatus status)
-        {route=null;status=NavSolveStatus.Pending;if(c.SpineRequired)return false;return Finish(c,index,out route,out status);}
+        {route=null;status=NavSolveStatus.Pending;if(c.SpineRequired||c.AttachmentRequired)return false;return Finish(c,index,out route,out status);}
         private static bool Finish(Context context,int index,out RecastMemberRoute route,out NavSolveStatus status)
         {status=context.Result;route=null;if(status==NavSolveStatus.Ready){route=context.Routes[index];if(route==null)status=NavSolveStatus.BlockedConnector;}return true;}
         private static bool Trace(ILayeredNavigationProvider provider,NavigationRequest request,NavLocation from,NavLocation target,out IReadOnlyList<NavTypedLeg> legs)

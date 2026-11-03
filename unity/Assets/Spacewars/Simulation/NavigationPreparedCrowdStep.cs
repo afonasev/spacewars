@@ -9,13 +9,15 @@ namespace Spacewars.Simulation
     {
         private static readonly long HeaderBytes=NavStorageLayout.ObjectBytesBound(typeof(NavPreparedCrowdStep)),UnitBytes=NavStorageLayout.ObjectBytesBound(typeof(NavUnit)),CrowdBytes=NavStorageLayout.ObjectBytesBound(typeof(NavCrowd));
         private static long Align(long n)=>checked((n+7)/8*8);
-        private static long Layout(int count)=>checked(HeaderBytes+20*32L+112L*count+Align(8L*count)+Align(count*(long)NavStorageLayout.ValueBytes(typeof(NavRecastStepState)))+Align(count*(long)NavStorageLayout.ValueBytes(typeof(NavRecastSweepReceipt)))+Align(4L*count)+2*Align(count)+2L*count*UnitBytes+CrowdBytes+NavMotionWorkspace.ArrayBytes(count));
+        private static long Layout(int count)=>checked(HeaderBytes+21*32L+112L*count+Align(48L*count)+Align(8L*count)+Align(count*(long)NavStorageLayout.ValueBytes(typeof(NavRecastStepState)))+Align(count*(long)NavStorageLayout.ValueBytes(typeof(NavRecastSweepReceipt)))+Align(4L*count)+2*Align(count)+2L*count*UnitBytes+CrowdBytes+NavMotionWorkspace.ArrayBytes(count));
         internal readonly NavUnit[] Source,Before,After;
         internal readonly NavLiveUnitStorage[] ActorPins;
         internal readonly NavRetainedArray<NavPoint>[] Globals,Locals,NewLocals,RetiredGlobals,RetiredLocals;
         internal readonly NavOwnedStorage[] LocationPins,GoalPins,FailurePins;
         internal readonly int[] InitialRows;internal readonly bool[] TerminalSeeds;
         internal readonly double[] Preferred,RecastReceiver;
+        internal readonly NavFormationFrameHint[] Formation;
+        internal bool AllowRepairCertificateReuse; // derived unhooked owner-frame capability, never saved
         internal readonly NavTypedRoute[] RecastRoutes;internal readonly NavRecastStepState[] RecastStates;internal readonly NavRecastSweepReceipt[] RecastReceipts;
         // Final destination disposition, not an event history. At commit a
         // cleared route also makes any preserved installed owner historical.
@@ -61,14 +63,14 @@ namespace Spacewars.Simulation
 #if UNITY_INCLUDE_TESTS
                     SelectRowForTests?.Invoke(row);
 #endif
-                    Proposals[row]=NavCrowdMotion.Select(Motion,row,Neighbors,NeighborCounts[row],Profile,selectDt,Working,After[row].Goal);
+                    Proposals[row]=NavCrowdMotion.Select(Motion,row,Neighbors,NeighborCounts[row],Profile,selectDt,Working,After[row].Goal,false,RecastRoutes[row]!=null?(NavPoint?)Motion[row].Target:null);
                 }
                 catch(Exception error){lock(this)if(row<firstFailureRow){firstFailureRow=row;selectFailure=error;}}
             }
         }
         private NavPreparedCrowdStep(NavCrowd crowd,int count,INavStorageReservation reservation):base(Layout(count))
         {
-            SourceCrowd=crowd;Reservation=reservation;Source=new NavUnit[count];Before=new NavUnit[count];After=new NavUnit[count];ActorPins=new NavLiveUnitStorage[count];
+            SourceCrowd=crowd;Reservation=reservation;Formation=new NavFormationFrameHint[count];Source=new NavUnit[count];Before=new NavUnit[count];After=new NavUnit[count];ActorPins=new NavLiveUnitStorage[count];
             Globals=new NavRetainedArray<NavPoint>[count];Locals=new NavRetainedArray<NavPoint>[count];NewLocals=new NavRetainedArray<NavPoint>[count];RetiredGlobals=new NavRetainedArray<NavPoint>[count];RetiredLocals=new NavRetainedArray<NavPoint>[count];
             LocationPins=new NavOwnedStorage[count];GoalPins=new NavOwnedStorage[count];FailurePins=new NavOwnedStorage[count];InitialRows=new int[count];Preferred=new double[count];RecastReceiver=new double[count];RecastRoutes=new NavTypedRoute[count];RecastStates=new NavRecastStepState[count];RecastReceipts=new NavRecastSweepReceipt[count];Cleared=new bool[count];TerminalSeeds=new bool[count];for(int i=0;i<count;i++){Preferred[i]=double.NaN;RecastReceiver[i]=double.NaN;}
             Motion=new NavMotionBody[count];Proposals=new NavMotionProposal[count];Neighbors=new int[checked(count*NavCrowdMotion.NeighborCapacity)];NeighborCounts=new int[count];ComponentLabels=new int[count];OriginalSpeeds=new double[count];YieldLabels=new int[count];YieldQueue=new int[count];
@@ -85,6 +87,13 @@ namespace Spacewars.Simulation
         internal int Find(int id){int lo=0,hi=After.Length-1;while(lo<=hi){int mid=(lo+hi)/2,at=After[mid].Id;if(at==id)return mid;if(at<id)lo=mid+1;else hi=mid-1;}for(int i=0;i<After.Length;i++)if(After[i].Id==id)return i;return -1;}
         internal void ReplaceLocal(NavUnit unit,NavLocalRepairWorkspace route)
         {int row=Find(unit.Id);var next=NavRetainedArray<NavPoint>.Copy(route,Reservation.TryReserve);NewLocals[row]?.Release();NewLocals[row]=next;unit.localRoute=next.ReadOnlyBacking;}
+        internal void RetireLocal(NavUnit unit)
+        {
+            int row=Find(unit.Id);var empty=NavRetainedArray<NavPoint>.Copy(Array.Empty<NavPoint>(),Reservation.TryReserve);
+            NewLocals[row]?.Release();NewLocals[row]=empty;unit.localRoute=empty.ReadOnlyBacking;unit.localIndex=0;
+            // This is a retired preference, not a completed traversed prefix.
+            // The global cursor, physical progress and assigned goal stay owned.
+        }
         internal void ClearRoutes(NavUnit unit){int row=Find(unit.Id);Cleared[row]=true;NewLocals[row]?.Release();NewLocals[row]=null;}
         // A Ready projected after an earlier stop replaces that disposition.
         // A later movement rejection may clear this new route again.

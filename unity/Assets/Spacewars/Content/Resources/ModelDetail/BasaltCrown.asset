@@ -23,7 +23,7 @@ MonoBehaviour:
     vertices: 13536
     indices: 13536
     submeshes: 1
-  - hash: e0c907ac88155229ec7501890c80222fb51edd341f4024ad2504280fcb42b2c4
+  - hash: 89a259aadb15e516c973979c923042b2ef3190a460127feecf5014cb422dc91d
     reason: no-safe-further-solid-reduction
     vertices: 2880
     indices: 2880

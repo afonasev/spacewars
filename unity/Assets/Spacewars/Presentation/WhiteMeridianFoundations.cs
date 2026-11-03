@@ -17,6 +17,7 @@ namespace Spacewars.Presentation
         }
         private void CreateMeridianFoundation(WhiteMeridianMap map,TerritorySite site,WhiteMeridianArtProfile art)
         {
+            if(site.Kind==PlayableBuildingKind.RelayTower)return; // Permanent relay owns its circular platform.
             float margin=site.Kind==PlayableBuildingKind.Outpost?art.outpostMargin:art.foundationMargin;
             // Static dressing only: no collider, support, site or navigation mutation.
             // Camera-facing slot rectangles fit within their circumcircle at every angle.

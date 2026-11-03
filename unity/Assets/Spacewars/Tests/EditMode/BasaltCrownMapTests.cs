@@ -45,7 +45,7 @@ namespace Spacewars.Tests.EditMode
             var clear=new NavClearanceProfile("native-map",1,"ground",1,p.TankCollisionRadius);
             var graph=LayeredNavigationGraphCompiler.Compile(provider,clear,new NavGraphProfile(new string('a',64),"distance",1,p.Navigation.GridCell),new NavGraphCompileLimits(300000,150000,600000));
             var factoryExits=m.Sites(p).SelectMany(site=>site.Slots).Select(slot=>new NavPoint(slot.Position.X+Math.Cos(slot.Heading)*p.FactoryExitDistance,slot.Position.Z+Math.Sin(slot.Heading)*p.FactoryExitDistance));
-            foreach(var goal in new[]{new NavPoint(0,0),new NavPoint(-38,8),new NavPoint(38,-8),new NavPoint(-48,6),new NavPoint(48,-6),new NavPoint(40-10/Math.Sqrt(2),32-10/Math.Sqrt(2))}.Concat(factoryExits)){
+            foreach(var goal in new[]{new NavPoint(-4,0),new NavPoint(-38,8),new NavPoint(38,-8),new NavPoint(-48,6),new NavPoint(48,-6),new NavPoint(40-10/Math.Sqrt(2),32-10/Math.Sqrt(2))}.Concat(factoryExits)){
                 Assert.True(provider.TryLocate(new NavPoint(-40+10/Math.Sqrt(2),-32+10/Math.Sqrt(2)),clear,out var start));Assert.True(provider.TryLocate(goal,clear,out var end));
                 var field=new NavSharedTerminalField(graph,new NavTerminalRegion("goal",1,end,new[]{end}),300000);
                 int budget=1000000;while(field.Status==NavSolveStatus.Pending&&budget>0)budget-=field.Advance(Math.Min(10000,budget)).Consumed;
@@ -56,7 +56,7 @@ namespace Spacewars.Tests.EditMode
                 Assert.True(route.Route.Legs.All(l=>provider.TryTrace(l.From,l.To.Position,clear,out _,out _)));
             }
         }
-        [TestCase(3,-1,-12)] [TestCase(7,-47,0)] [TestCase(8,47,0)] public void RevisedMinesCaptureBuildAndPayWithoutOutpostSlots(int siteId,double x,double z){
+        [TestCase(9,16,42.375)] [TestCase(10,-16,-42.375)] [TestCase(7,-47,0)] [TestCase(8,47,0)] public void RevisedMinesCaptureBuildAndPayWithoutOutpostSlots(int siteId,double x,double z){
             var data=PlayableProfile.Default.CopyData();data.enemyAdvanceDelaySeconds=600;
             var p=PlayableProfile.Create(data,new BasaltCrownMap());
             var type=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.PlayableDomain",true);
@@ -80,8 +80,8 @@ namespace Spacewars.Tests.EditMode
         [Test] public void DuelAuthorityAndSaveRestoreBindNativeMap(){
             var p=Profile();var m=(BasaltCrownMap)p.AuthoredMap;
             var roster=new[]{new OfflineParticipant("player-1",1,1,OfflineControl.Human),new OfflineParticipant("enemy-1",2,2,OfflineControl.Ai)};
-            Assert.AreEqual(3,m.Revision);Assert.AreEqual(PlayableBuildingKind.Mine,m.Sites(p).Single(site=>site.Id==3).Kind);Assert.IsEmpty(m.Sites(p).Single(site=>site.Id==3).Slots);
-            var c=m.Configuration(p,7108,roster);Assert.AreEqual("native-basalt-crown-v3",c.SourceIdentity);var a=new OfflineParticipantAuthority(c,1);
+            Assert.AreEqual(4,m.Revision);Assert.AreEqual(PlayableBuildingKind.RelayTower,m.Sites(p).Single(site=>site.Id==3).Kind);Assert.IsEmpty(m.Sites(p).Single(site=>site.Id==3).Slots);
+            var c=m.Configuration(p,7108,roster);Assert.AreEqual("native-basalt-crown-v4",c.SourceIdentity);var a=new OfflineParticipantAuthority(c,1);
             var v=a.View("player-1");Assert.AreEqual(2,v.Participants.Count);Assert.AreEqual(1,v.Entities.Count(e=>e.Owner==PlayableOwner.Player));
             Assert.AreEqual(new NavPoint(-40,-32),v.Buildings.Single(b=>b.Owner==PlayableOwner.Player).Position);
             var bytes=a.CaptureBytes();CollectionAssert.AreEqual(bytes,OfflineParticipantAuthority.Restore(bytes,c).CaptureBytes());

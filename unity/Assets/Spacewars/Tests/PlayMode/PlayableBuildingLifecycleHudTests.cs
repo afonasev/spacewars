@@ -1,10 +1,14 @@
 using System;
+using System.Collections;
+using System.IO;
+using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using Spacewars.Presentation;
 using Spacewars.Simulation;
 using UnityEngine;
 using UnityEngine.UIElements;
+using UnityEngine.TestTools;
 
 public sealed class PlayableBuildingLifecycleHudTests
 {
@@ -20,6 +24,51 @@ public sealed class PlayableBuildingLifecycleHudTests
         Set("view",new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,900,null,Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
     }
     [TearDown] public void Cleanup()=>UnityEngine.Object.DestroyImmediate(host);
+    [UnityTest] public IEnumerator ActiveAndWaitingRepairMarkersRenderWithVariantC()
+    {
+        var priorLights=UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None).Select(l=>l.GetInstanceID()).ToArray();
+        Call("CreateHud");Call("CreateWorld");root=(VisualElement)Get("root");
+        foreach(var child in root.Children())child.style.display=DisplayStyle.None;
+        int width=Screen.width,height=Screen.height;var panel=host.GetComponent<UIDocument>().panelSettings;
+        var output=new RenderTexture(width,height,24);output.Create();panel.targetTexture=output;panel.scaleMode=PanelScaleMode.ConstantPixelSize;panel.scale=1;root.style.width=width;root.style.height=height;
+        var sceneTexture=new RenderTexture(width,height,24);sceneTexture.Create();var camera=(Camera)Get("cameraView");camera.targetTexture=sceneTexture;camera.orthographicSize=14;camera.transform.position=new Vector3(0,25,-18);camera.transform.LookAt(Vector3.zero);
+        var world=(PlayableWorld)Get("world");var profile=PlayableProfile.Default;
+        var left=new NavPoint(-6,0);var right=new NavPoint(6,0);
+        world.Building(901,"Factory",true).Root.position=world.Point(left);world.Building(902,"Headquarters",true).Root.position=world.Point(right);
+        var vision=new PlayableVision(-1,64,64,4,profile.FogEdgeFeather);vision.Refresh(new[]{new VisionSource(default,192)},Array.Empty<KnownBuilding>());world.Fog.Update(vision.Snapshot(),1);
+        PlayableBuildingSnapshot Building(int id,PlayableBuildingKind kind,NavPoint at,bool repairing,bool waiting=false,bool selling=false)=>new PlayableBuildingSnapshot(id,PlayableOwner.Player,kind,at,125,1,0,0,default,lifecycle:new PlayableBuildingLifecycleSnapshot(selling,.5,repairing,waiting,1,15,null,repairing?"Ремонт уже активен":null,3,400,true));
+        void Frame(params PlayableBuildingSnapshot[] buildings)=>Set("view",new PlayableSnapshot(PlayableProfile.RequiredProfileId,profile.Revision,1,7,1,8,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,900,null,Array.Empty<PlayableEntitySnapshot>(),buildings,Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null));
+        try
+        {
+            for(int i=0;i<3;i++)yield return null;
+            Frame(Building(901,PlayableBuildingKind.Factory,left,true),Building(902,PlayableBuildingKind.Headquarters,right,true,true));Call("UpdateLifecycleMarkers");
+            var scene=new VisualElement{pickingMode=PickingMode.Ignore};scene.style.position=Position.Absolute;scene.style.left=scene.style.right=scene.style.top=scene.style.bottom=0;scene.style.backgroundImage=Background.FromRenderTexture(sceneTexture);root.Insert(0,scene);
+            var preview=new Image{image=Resources.Load<Texture2D>("OrbitalIcons/building-repair-active"),scaleMode=ScaleMode.ScaleToFit,pickingMode=PickingMode.Ignore};preview.style.position=Position.Absolute;preview.style.right=12;preview.style.top=12;preview.style.width=preview.style.height=90;root.Add(preview);
+            var caption=new Label("C · ремонт / ожидание кредитов · справа: иконка ×3"){pickingMode=PickingMode.Ignore};caption.style.position=Position.Absolute;caption.style.left=12;caption.style.bottom=12;caption.style.fontSize=13;caption.style.color=Color.white;root.Add(caption);
+            for(int i=0;i<5;i++)yield return null;
+            var markers=(IDictionary)Get("lifecycleMarkers");Assert.AreEqual(2,markers.Count);
+            foreach(int id in new[]{901,902})
+            {
+                var marker=(VisualElement)markers[id];Assert.AreEqual(Color.clear,marker.style.backgroundColor.value,"Approved repair marker has no backplate");Assert.AreEqual(PickingMode.Ignore,marker.pickingMode);Assert.NotNull(marker.Q<Image>("repair-marker-artwork").image);
+                Assert.Greater(marker.worldBound.width,0);Assert.GreaterOrEqual(marker.worldBound.xMin,0);Assert.LessOrEqual(marker.worldBound.xMax,width);Assert.GreaterOrEqual(marker.worldBound.yMin,0);Assert.LessOrEqual(marker.worldBound.yMax,height);
+            }
+            var folder=Environment.GetEnvironmentVariable("SPACEWARS_REPAIR_MARKER_EVIDENCE");
+            if(!string.IsNullOrEmpty(folder))
+            {
+                Directory.CreateDirectory(folder);var previous=RenderTexture.active;var pixels=new Texture2D(width,height,TextureFormat.RGB24,false);
+                try{RenderTexture.active=output;pixels.ReadPixels(new Rect(0,0,width,height),0,0);pixels.Apply();File.WriteAllBytes(Path.Combine(folder,"active-and-waiting-repair-c.png"),pixels.EncodeToPNG());}
+                finally{RenderTexture.active=previous;UnityEngine.Object.DestroyImmediate(pixels);}
+            }
+            Frame(Building(901,PlayableBuildingKind.Factory,left,false,selling:true),Building(902,PlayableBuildingKind.Headquarters,right,false));Call("UpdateLifecycleMarkers");Assert.AreEqual(1,markers.Count);
+            var sale=(VisualElement)markers[901];Assert.AreEqual(DisplayStyle.None,sale.Q<Image>("repair-marker-artwork").style.display.value);Assert.AreEqual("$",((Label)sale).text);Assert.Greater(sale.style.backgroundColor.value.a,0);
+            Frame(Building(901,PlayableBuildingKind.Factory,left,false));Call("UpdateLifecycleMarkers");Assert.AreEqual(0,markers.Count,"Completed/cancelled repair removes its marker");
+        }
+        finally
+        {
+            panel.targetTexture=null;camera.targetTexture=null;output.Release();sceneTexture.Release();UnityEngine.Object.DestroyImmediate(output);UnityEngine.Object.DestroyImmediate(sceneTexture);UnityEngine.Object.DestroyImmediate(camera.gameObject);Set("cameraView",null);
+            foreach(var light in UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None).Where(l=>!priorLights.Contains(l.GetInstanceID())))UnityEngine.Object.DestroyImmediate(light.gameObject);
+        }
+    }
     [Test] public void AutonomousRouteQaKeepsClockRunningOnFocusLossWhileOrdinaryGamePauses()
     {
         var runtime=new Spacewars.Runtime.PlayableRuntime(PlayableProfile.Default,71,7,autonomousOwnerAi:false,autonomousEnemyAi:false);

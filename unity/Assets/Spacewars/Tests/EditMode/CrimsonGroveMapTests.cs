@@ -15,7 +15,7 @@ namespace Spacewars.Tests.EditMode
             var roster=Enumerable.Range(0,8).Select(i=>new OfflineParticipant("seat-"+i,i+1,i+1,OfflineControl.Ai)).ToArray();
             var c=map.Configuration(p,23102026,roster);
             Assert.AreEqual(8,c.Starts.Count);Assert.AreEqual(32,c.Sites.Count);
-            Assert.AreEqual(12,c.Sites.Count(s=>s.Kind==PlayableBuildingKind.Mine));Assert.AreEqual(12,c.Sites.Count(s=>s.Kind==PlayableBuildingKind.Outpost));
+            Assert.AreEqual(8,c.Sites.Count(s=>s.Kind==PlayableBuildingKind.Mine));Assert.AreEqual(4,c.Sites.Count(s=>s.Kind==PlayableBuildingKind.RelayTower));Assert.AreEqual(12,c.Sites.Count(s=>s.Kind==PlayableBuildingKind.Outpost));
             for(int i=0;i<8;i++){
                 foreach(double angle in new[]{22.5+i*45,42.5+i*45}){
                     Assert.AreEqual(map.TerraceHeight/2,map.SurfaceHeight(map.Polar(angle,88)),1e-6,"ramp midpoint");

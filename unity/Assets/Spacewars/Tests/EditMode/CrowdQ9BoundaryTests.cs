@@ -20,12 +20,12 @@ namespace Spacewars.Tests.EditMode
             NavCrowdMotion.Neighbors(bodies,neighbors,counts,profile,Dt,labels);initial=(int[])counts.Clone();
             NavCrowdMotion.ConstrainOverflowComponents(bodies,neighbors,counts,labels,original,profile,Dt);
             AssertActiveExactCounts(bodies,counts,profile,Dt);
-            for(int i=0;i<bodies.Length;i++)if(bodies[i].Active)Assert.LessOrEqual(bodies[i].Speed,original[i],"effective speed cannot exceed original");
+            for(int i=0;i<bodies.Length;i++)if(bodies[i].Active||bodies[i].Potential)Assert.LessOrEqual(bodies[i].Speed,original[i],"effective speed cannot exceed original");
             return counts;
         }
         private static void AssertActiveExactCounts(NavMotionBody[] bodies,int[] counts,NavigationProfile profile,double dt)
         {
-            foreach(int row in Enumerable.Range(0,bodies.Length).Where(i=>bodies[i].Active)){
+            foreach(int row in Enumerable.Range(0,bodies.Length).Where(i=>bodies[i].Active||bodies[i].Potential)){
                 int exact=ExactCount(bodies,row,profile,dt);
                 if(exact>profile.CrowdNeighborCap)Assert.AreEqual(-1,counts[row],"all-pair exact row exceeds cap "+bodies[row].Id);
                 else Assert.AreEqual(exact,counts[row],"independent all-pair exact recount "+bodies[row].Id);
@@ -35,7 +35,7 @@ namespace Spacewars.Tests.EditMode
         {
             var a=bodies[row];int count=0;double horizon=Math.Max(dt,profile.CrowdLookaheadSeconds);
             for(int peer=0;peer<bodies.Length;peer++)if(peer!=row){
-                var b=bodies[peer];double reach=a.Radius+b.Radius+((a.Active?a.Speed:0)+(b.Active?b.Speed:0))*horizon;
+                var b=bodies[peer];double reach=a.Radius+b.Radius+((a.Active||a.Potential?a.Speed:0)+(b.Active||b.Potential?b.Speed:0))*horizon;
                 double x=a.Position.X-b.Position.X,z=a.Position.Z-b.Position.Z;
                 if(x*x+z*z<=reach*reach)count++;
             }
@@ -44,7 +44,7 @@ namespace Spacewars.Tests.EditMode
         private static double PairBoundary(NavMotionBody a,NavMotionBody b,NavigationProfile profile)
         {
             double dx=a.Position.X-b.Position.X,dz=a.Position.Z-b.Position.Z;
-            double speed=(a.Active?a.Speed:0)+(b.Active?b.Speed:0);
+            double speed=(a.Active||a.Potential?a.Speed:0)+(b.Active||b.Potential?b.Speed:0);
             return (Math.Sqrt(dx*dx+dz*dz)-(a.Radius+b.Radius))/(speed*Math.Max(Dt,profile.CrowdLookaheadSeconds));
         }
         private static NavMotionBody[] TiedCapOneBodies(bool reverse)
@@ -56,6 +56,41 @@ namespace Spacewars.Tests.EditMode
                 new NavMotionBody{Id=5,Position=new NavPoint(4,0),Radius=.72,Speed=17,Active=false}
             };
             if(reverse)Array.Reverse(bodies);return bodies;
+        }
+        [TestCase(false)] [TestCase(true)] public void SafeOriginalSpeedReturnsToRemoteActorAndPotentialWithoutExceedingAnyExactRow(bool potential)
+        {
+            var profile=Profile(1);var forward=new[]{
+                new NavMotionBody{Id=1,Position=default,Radius=.72,Speed=4,Active=true},
+                new NavMotionBody{Id=2,Position=new NavPoint(10,0),Radius=.72,Speed=4,Active=!potential,Potential=potential},
+                new NavMotionBody{Id=3,Position=new NavPoint(2,0),Radius=.72,Speed=99},
+                new NavMotionBody{Id=4,Position=new NavPoint(-2.5,0),Radius=.72,Speed=99}
+            };var reverse=forward.Reverse().ToArray();
+            var counts=Constrain(forward,profile,out var initial);var reverseCounts=Constrain(reverse,profile,out _);
+            Assert.AreEqual(-1,initial[0]);Assert.Less(forward[0].Speed,4,"Full restore into the two hazards must remain refused");Assert.Greater(forward[0].Speed,0);
+            Assert.AreEqual(4,forward[1].Speed,"Remote accepted actor/receiver regains its complete original cap");
+            Assert.True(counts.Where((c,i)=>forward[i].Active||forward[i].Potential).All(c=>c>=0&&c<=profile.CrowdNeighborCap));
+            foreach(var body in forward){int twin=Array.FindIndex(reverse,b=>b.Id==body.Id);Assert.AreEqual(body.Speed,reverse[twin].Speed,"Entity ordering is stable across reversed arrays");Assert.AreEqual(counts[Array.FindIndex(forward,b=>b.Id==body.Id)],reverseCounts[twin]);}
+            Assert.AreEqual(99,forward[2].Speed);Assert.AreEqual(99,forward[3].Speed);
+        }
+        [Test] public void ExistingIntermediateBandRecoversCapacityWhenFullSpeedHasTooManyHazards()
+        {
+            var profile=Profile(1);var bodies=new[]{
+                new NavMotionBody{Id=1,Position=default,Radius=.72,Speed=4,Active=true},
+                new NavMotionBody{Id=2,Position=new NavPoint(10,0),Radius=.72,Speed=4,Active=true},
+                new NavMotionBody{Id=3,Position=new NavPoint(2,0),Radius=.72,Speed=99},
+                new NavMotionBody{Id=4,Position=new NavPoint(-2.5,0),Radius=.72,Speed=99},
+                new NavMotionBody{Id=5,Position=new NavPoint(15,0),Radius=.72,Speed=99},
+                new NavMotionBody{Id=6,Position=new NavPoint(15.5,0),Radius=.72,Speed=99}
+            };var counts=Constrain(bodies,profile,out var initial);
+            Assert.AreEqual(-1,initial[0]);Assert.AreEqual(-1,initial[1]);Assert.Less(bodies[0].Speed,2);
+            double priorBandFloor=4d*(profile.CrowdSpeedBands-1)/profile.CrowdSpeedBands;Assert.AreEqual(2,priorBandFloor,"The prior existing half-speed band remains the recorded floor");
+            var floorTrial=(NavMotionBody[])bodies.Clone();floorTrial[1].Speed=priorBandFloor;Assert.LessOrEqual(ExactCount(floorTrial,1,profile,Dt),profile.CrowdNeighborCap,"The prior band is independently safe");
+            Assert.Greater(bodies[1].Speed,priorBandFloor,"Certified incident headroom must improve the old entire band result");Assert.Less(bodies[1].Speed,4);
+            var critical=bodies[5];double dx=bodies[1].Position.X-critical.Position.X,dz=bodies[1].Position.Z-critical.Position.Z;
+            double ceiling=(Math.Sqrt(dx*dx+dz*dz)-(bodies[1].Radius+critical.Radius))/Math.Max(Dt,profile.CrowdLookaheadSeconds);
+            Assert.LessOrEqual(bodies[1].Speed,ceiling);Assert.Less(ceiling-bodies[1].Speed,1e-12,"Only directed-rounding slack below the independently excluded critical hazard");
+            var original=bodies[1];original.Speed=4;var trial=(NavMotionBody[])bodies.Clone();trial[1]=original;Assert.Greater(ExactCount(trial,1,profile,Dt),profile.CrowdNeighborCap);
+            Assert.That(counts[1],Is.InRange(0,profile.CrowdNeighborCap));Assert.AreEqual(99,bodies[4].Speed);Assert.AreEqual(99,bodies[5].Speed);
         }
         [Test] public void CapOneUsesIndependentSecondBoundaryAndStableIdTiesAcrossReverseOrder()
         {
@@ -124,6 +159,25 @@ namespace Spacewars.Tests.EditMode
                     Assert.Zero(warm.PhysicalHostBudget.HeldBytes);Assert.Zero(warm.PhysicalHostBudget.ActiveScopes);Assert.Zero(cold.PhysicalHostBudget.HeldBytes);Assert.Zero(cold.PhysicalHostBudget.ActiveScopes);
                 }
             }finally{Destroy(cold);Destroy(warm);}
+        }
+        private static int[] IncidentOnly(NavMotionBody[] bodies,double[] ceilings,NavigationProfile profile){
+            var neighbors=new int[bodies.Length*NavCrowdMotion.NeighborCapacity];var counts=new int[bodies.Length];NavCrowdMotion.Neighbors(bodies,neighbors,counts,profile,Dt);
+            typeof(NavCrowdMotion).GetMethod("ReclaimIncidentCapacity",System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic).Invoke(null,new object[]{bodies,counts,ceilings,profile,Dt});
+            AssertActiveExactCounts(bodies,counts,profile,Dt);return counts;
+        }
+        [TestCase(false,false)] [TestCase(true,false)] [TestCase(false,true)] [TestCase(true,true)] public void IncidentCapacityRespectsFullActiveOrPotentialPeerAndReversedStorage(bool potential,bool overflow){
+            var profile=Profile(1);var bodies=new[]{
+                new NavMotionBody{Id=1,Position=default,Radius=.72,Speed=1,Active=true},
+                new NavMotionBody{Id=2,Position=new NavPoint(5,0),Radius=.72,Speed=1,Active=!potential,Potential=potential},
+                new NavMotionBody{Id=3,Position=new NavPoint(6,0),Radius=.72,Speed=99}
+            };if(overflow)bodies=bodies.Concat(new[]{new NavMotionBody{Id=4,Position=new NavPoint(5,1),Radius=.72,Speed=99}}).ToArray();var reverse=bodies.Reverse().ToArray();var counts=IncidentOnly(bodies,bodies.Select(a=>a.Id==1?4d:a.Speed).ToArray(),profile);var reverseCounts=IncidentOnly(reverse,reverse.Select(a=>a.Id==1?4d:a.Speed).ToArray(),profile);
+            Assert.Greater(bodies[0].Speed,1);Assert.Less(bodies[0].Speed,2,"full peer limits incoming edge before own available capacity is spent");Assert.AreEqual(0,counts[0]);Assert.AreEqual(overflow?-1:1,counts[1]);Assert.AreEqual(1,bodies[1].Speed);Assert.AreEqual(99,bodies[2].Speed);
+            foreach(var a in bodies){int i=Array.FindIndex(reverse,b=>b.Id==a.Id);Assert.AreEqual(a.Speed,reverse[i].Speed);Assert.AreEqual(counts[Array.FindIndex(bodies,b=>b.Id==a.Id)],reverseCounts[i]);}
+        }
+        [Test] public void IncidentCapacityUsesOwnNextEdgeAndNeverExceedsOriginalCeiling(){
+            var profile=Profile(1);var bodies=new[]{new NavMotionBody{Id=1,Radius=.72,Speed=.1,Active=true},new NavMotionBody{Id=2,Position=new NavPoint(2,0),Radius=.72,Speed=99},new NavMotionBody{Id=3,Position=new NavPoint(4,0),Radius=.72,Speed=99}};
+            var counts=IncidentOnly(bodies,new[]{4d,99d,99d},profile);Assert.Greater(bodies[0].Speed,2);Assert.Less(bodies[0].Speed,2.14);Assert.AreEqual(1,counts[0]);Assert.AreEqual(99,bodies[1].Speed);Assert.AreEqual(99,bodies[2].Speed);
+            var safe=new[]{new NavMotionBody{Id=1,Radius=.72,Speed=.1,Active=true},new NavMotionBody{Id=2,Position=new NavPoint(100,0),Radius=.72,Speed=99}};IncidentOnly(safe,new[]{4d,99d},profile);Assert.AreEqual(4,safe[0].Speed);
         }
         private static byte[] SessionBytes(NavigationSession session)
         {using(var state=session.CaptureOwnedState())return WorldWire.Pack(writer=>WorldWire.Write(writer,state));}

@@ -21,6 +21,16 @@ public sealed class NativeRallyGestureTests
         CollectionAssert.AreEqual(new[]{"cancelRally"},gestures.Step(1,2,true,true,p));Assert.AreEqual("buildingWheel",gestures.Mode);
         Assert.IsEmpty(gestures.Step(2,0,true,true,p));
     }
+    [TestCase("rallyTarget")][TestCase("rallyMap")]
+    public void ConfirmWithHeldStickDoesNotActivateAProducerPetal(string mode)
+    {
+        var gestures=new OfflinePadGestures();var p=Profile;var sector=new OfflinePadSector("rally",true);
+        gestures.SetMode(mode);gestures.StepDetailed(0,0,true,true,p,true,sector);
+        gestures.StepDetailed(1,1,true,true,p,true,sector);
+        var intents=gestures.StepDetailed(2,0,true,true,p,true,sector);
+        CollectionAssert.AreEqual(new[]{"rally"},intents.Select(i=>i.Kind));
+        Assert.AreEqual("buildingWheel",gestures.Mode);
+    }
     [Test] public void OrdinaryMapAStillJumpsCameraAndFocusLossReleasesHeldPlacement()
     {
         var gestures=new OfflinePadGestures();var p=Profile;gestures.SetMode("tacticalMap");gestures.Step(0,0,true,true,p);gestures.Step(1,1,true,true,p);

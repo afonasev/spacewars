@@ -12,6 +12,7 @@ namespace Spacewars.Presentation
         private readonly Dictionary<string,Mesh> meshes=new Dictionary<string,Mesh>();
         private readonly Dictionary<string,Material[]> loadedMaterials=new Dictionary<string,Material[]>();
         private readonly Dictionary<string,Material> materials=new Dictionary<string,Material>();
+        private HawkVisualProfile hawkVisual;
         private Material Material(string hex,bool lit,float metal=0,float rough=.4f,bool transparent=false,bool additive=false,bool launchClip=false)
         {
             string key=hex+lit+metal+rough+transparent+additive+launchClip;
@@ -75,13 +76,13 @@ namespace Spacewars.Presentation
         }
         // Geometry invariant: nose center is .5L, its half-length is .28L / 2.
         public static float RocketTipOffset(float length)=>length*(.5f+.28f/2);
-        public GameObject Rocket(Transform parent,float radius,float length,Color owner,bool detailed=false)
+        public GameObject Rocket(Transform parent,float radius,float length,Color owner,bool detailed=false,bool additiveExhaust=true)
         {
             var g=new GameObject("Rocket");g.transform.SetParent(parent,false);
             RocketParts(g.transform,radius,length,owner,detailed);
-            IgniteRocket(g,length);return g;
+            IgniteRocket(g,length,additive:additiveExhaust);return g;
         }
-        public void IgniteRocket(GameObject rocket,float length,bool launchClip=false)
+        public void IgniteRocket(GameObject rocket,float length,bool launchClip=false,bool additive=true)
         {
             var anchor=rocket.transform.Find("rocket-exhaust");
             if(!anchor){anchor=new GameObject("rocket-exhaust").transform;anchor.SetParent(rocket.transform,false);}
@@ -90,7 +91,7 @@ namespace Spacewars.Presentation
             {
                 // Add flame renderers only after the loaded body has become a flying projectile.
                 var flame=Axial("exhaust",0,1,1,12);
-                foreach(var part in new[]{("exhaust-edge","#ff791b"),("exhaust-core","#fff0b0")})Part(part.Item1,anchor,flame,Material(part.Item2,false,transparent:true,additive:true,launchClip:launchClip),-.5f);
+                foreach(var part in new[]{("exhaust-edge","#ff791b"),("exhaust-core","#fff0b0")})Part(part.Item1,anchor,flame,Material(part.Item2,false,transparent:true,additive:additive,launchClip:launchClip),-.5f);
             }
             if(launchClip)for(int i=0;i<2;i++)anchor.GetChild(i).GetComponent<Renderer>().sharedMaterial=Material(i==0?"#ff791b":"#fff0b0",false,transparent:true,additive:true,launchClip:true);
             anchor.gameObject.SetActive(true);
@@ -165,15 +166,21 @@ namespace Spacewars.Presentation
         // Authored fin/nozzle proportions preserve the existing missile envelope and tip contact.
         public GameObject HawkRocket(Transform parent,float radius,float length,Color owner)
         {
-            var rocket=Rocket(parent,radius,length,owner);
-            // Neutral metal separates the flying body from its bright exhaust and team livery.
-            // Team identification stays on the existing band; geometry and nose contact are unchanged.
-            rocket.transform.Find("rocket-body").GetComponent<Renderer>().sharedMaterial=Material("#b8c1c8",true,.65f,.4f);
+            var rocket=Rocket(parent,radius,length,owner,additiveExhaust:false);
+            hawkVisual=hawkVisual??HawkVisualProfile.Load();
+            // Alpha compositing avoids additive flame buildup; matte metal keeps the body
+            // readable without turning specular highlights into flying flashes.
+            ColorUtility.TryParseHtmlString("#b8c1c8",out var bodyColor);bodyColor*=hawkVisual.missileBodyBrightness;
+            rocket.transform.Find("rocket-body").GetComponent<Renderer>().sharedMaterial=Material("#"+ColorUtility.ToHtmlStringRGB(bodyColor),true,.65f,hawkVisual.missileRoughness);
             Part("hawk-nozzle-rim",rocket.transform,Axial("hawk-nozzle:"+radius+":"+length,radius*.85f,radius*.85f,length*.055f,16),Material("#7a858f",true,.8f,.3f),-length*.35f);
             string key="hawk-fin:"+radius+":"+length;
             if(!meshes.TryGetValue(key,out var fin))
             {
-                fin=new Mesh{name=key};fin.vertices=new[]{new Vector3(-length*.30f,radius,0),new Vector3(-length*.29f,radius*1.9f,0),new Vector3(-length*.04f,radius,0)};fin.triangles=new[]{0,1,2,2,1,0};fin.RecalculateNormals();fin.RecalculateBounds();resources.Add(fin);meshes.Add(key,fin);
+                fin=new Mesh{name=key};fin.vertices=new[]{new Vector3(-length*.30f,radius,0),new Vector3(-length*.29f,radius*1.9f,0),new Vector3(-length*.04f,radius,0)};
+                // The material is already double-sided (Cull Off). Reversed duplicate
+                // triangles cancel the shared vertex normals, producing non-finite HDR
+                // lighting that bloom expands into a white ball.
+                fin.triangles=new[]{0,1,2};fin.RecalculateNormals();fin.RecalculateBounds();resources.Add(fin);meshes.Add(key,fin);
             }
             for(int i=0;i<4;i++){var part=Part("hawk-fin",rocket.transform,fin,Material("#394652",true,.6f,.35f));part.transform.localRotation=Quaternion.Euler(i*90,0,0);}
             Part("hawk-band",rocket.transform,Axial("hawk-band:"+radius+":"+length,radius*1.01f,radius*1.01f,length*.04f,16),Material("#"+ColorUtility.ToHtmlStringRGB(owner),true,.4f,.4f),length*.12f);

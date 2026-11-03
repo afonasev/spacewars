@@ -27,6 +27,13 @@ namespace Spacewars.Presentation
     // owner projection. Presentation never enumerates authority/private opponents.
     public static class OfflinePadWorldActions
     {
+        // A captured center pad has one construction choice: keep it focused at rest.
+        // Disabled choices remain focused for their reason, while gestures still reject them.
+        public static int? RingSector(OfflinePadAction[] actions,double x,double y,double deadzone)
+        {
+            if(actions.Length==1&&actions[0].Sector.Id.StartsWith("build:",StringComparison.Ordinal))return 0;
+            return OfflinePadGestures.RingSector(x,y,actions.Length,deadzone);
+        }
         // Presentation order only; authority, prerequisites and research identifiers stay unchanged.
         public static int ResearchMenuOrder(PlayableResearchKind kind)=>kind switch {
             PlayableResearchKind.TankChassis=>0,PlayableResearchKind.ExplorerAssaultGuns=>1,

@@ -23,7 +23,9 @@ namespace Spacewars.Input.Tests
         object Call(string n,params object[] args)=>typeof(PlayableBootstrap).GetMethods(F).Single(m=>m.Name==n&&m.GetParameters().Length==args.Length).Invoke(hud,args);
         [SetUp] public override void Setup(){base.Setup();go=new GameObject("Wreck context input");hud=go.AddComponent<PlayableBootstrap>();hud.enabled=false;input=go.AddComponent<PlayableInput>();mouse=InputSystem.AddDevice<Mouse>();keyboard=InputSystem.AddDevice<Keyboard>();input.AssignedMouse=mouse;input.AssignedKeyboard=keyboard;input.SourceSeatSemantics=true;input.Order=(p,a,s)=>Call("Order",p,a,s);}
         [TearDown] public override void TearDown(){Get<PlayableRuntime>("runtime")?.RequestStop();UnityEngine.Object.DestroyImmediate(go);base.TearDown();}
-        [UnityTest,Timeout(30000)] public IEnumerator RightClickOnVisibleWreckOrdersOneManualShotThroughActualAdapter()
+        [UnityTest,Timeout(30000)] public IEnumerator RightClickOnVisibleWreckOrdersOneManualShotThroughActualAdapter()=>RunWreckScenario(false);
+        [UnityTest,Timeout(30000)] public IEnumerator InFlightShotsPreserveFreshWreckThroughItsProtectionDeadline()=>RunWreckScenario(true);
+        private IEnumerator RunWreckScenario(bool protectionOnly)
         {
             // Isolated fixture health only: obtain a real death quickly without diagnostic damage injection.
             var data=PlayableProfile.Default.CopyData();data.tankHealth=1;var p=PlayableProfile.Create(data);Set("profile",p);Call("CreateHud");
@@ -39,6 +41,17 @@ namespace Spacewars.Input.Tests
                     Assert.True(runtime.TrySubmit(new PlayableCommand(1,1,"player-1",PlayableCommandKind.Attack,new[]{hawk.Id},targetId:tank.Id)).Accepted);
                     until=Time.realtimeSinceStartupAsDouble+10;while(!runtime.Latest.Wrecks.Any(w=>w.Id==tank.Id)&&Time.realtimeSinceStartupAsDouble<until){Pump();yield return null;}
                     Assert.IsNull(runtime.Latest.Failure);var wreck=runtime.Latest.Wrecks.Single(w=>w.Id==tank.Id);Assert.True(wreck.Blocks(runtime.Latest.Tick));
+                    Assert.AreEqual(wreck.RevealTick+30,wreck.InvulnerableUntilTick);
+                    until=Time.realtimeSinceStartupAsDouble+3;
+                    while(runtime.Latest.Tick<wreck.InvulnerableUntilTick&&Time.realtimeSinceStartupAsDouble<until)
+                    {
+                        var protectedView=runtime.Latest;
+                        if(protectedView.Tick<wreck.InvulnerableUntilTick)Assert.True(protectedView.Wrecks.Any(w=>w.Id==tank.Id&&w.DestroyedTick<0),"In-flight Hawk shots cannot erase the protected wreck");
+                        Pump();yield return null;
+                    }
+                    Assert.GreaterOrEqual(runtime.Latest.Tick,wreck.InvulnerableUntilTick);
+                    if(!protectionOnly)
+                    {
                     Set("view",runtime.Latest);Set("sequence",1L);var selection=Get<HashSet<int>>("selection");selection.Add(hawk.Id);Vector2 point=camera.WorldToScreenPoint(Get<PlayableWorld>("world").Point(wreck.Position));Assert.True((bool)Call("IsWreckAt",point));
                     InputSystem.QueueStateEvent(mouse,new MouseState{position=point,buttons=2});InputSystem.QueueStateEvent(mouse,new MouseState{position=point,buttons=0});InputSystem.Update();input.Poll();
                     Assert.AreEqual(2,Get<long>("sequence"),"One right click must submit exactly one context command.");
@@ -46,6 +59,7 @@ namespace Spacewars.Input.Tests
                     Assert.AreEqual(wreck.Id,runtime.Latest.Entities.Single(e=>e.Id==hawk.Id).CurrentOrder?.TargetId);
                     until=Time.realtimeSinceStartupAsDouble+5;while(runtime.Latest.Wrecks.Any(w=>w.Id==wreck.Id&&w.Blocks(runtime.Latest.Tick))&&Time.realtimeSinceStartupAsDouble<until){Pump();yield return null;}
                     Assert.False(runtime.Latest.Wrecks.Any(w=>w.Id==wreck.Id&&w.Blocks(runtime.Latest.Tick)));Assert.IsNull(runtime.Latest.Failure);
+                    }
                 }finally{Set("cameraView",null);UnityEngine.Object.DestroyImmediate(cameraObject);runtime.RequestStop();}
                 double stop=Time.realtimeSinceStartupAsDouble+3;while(!runtime.IsStopped&&Time.realtimeSinceStartupAsDouble<stop)yield return null;Assert.True(runtime.IsStopped);
             }

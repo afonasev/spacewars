@@ -82,8 +82,10 @@ namespace Spacewars.Editor
                     File.WriteAllText(Output+"/source/"+hash+".json",JsonConvert.SerializeObject(new{hash,name=f.name,vertices=V(m.vertices),normals=V(m.normals),uv=V(m.uv),colors=V(m.colors),tangents=V(m.tangents),submeshes=Enumerable.Range(0,m.subMeshCount).Select(i=>m.GetIndices(i,true)).ToArray()},Formatting.None));
                 }
             }
-            foreach(var prefab in Resources.LoadAll<GameObject>("Wrecks").OrderBy(p=>p.name))Inspect("Wrecks",prefab);
-            foreach(string key in Maps){
+            var selected=(Environment.GetEnvironmentVariable("SPACEWARS_MAP_LOD_KEYS")??"").Split(new[]{',',';'},StringSplitOptions.RemoveEmptyEntries);
+            if(selected.Any(k=>k!="Wrecks"&&!Maps.Contains(k)))throw new ArgumentException("Unknown map LOD export key");
+            if(selected.Length==0||selected.Contains("Wrecks"))foreach(var prefab in Resources.LoadAll<GameObject>("Wrecks").OrderBy(p=>p.name))Inspect("Wrecks",prefab);
+            foreach(string key in Maps.Where(k=>selected.Length==0||selected.Contains(k))){
                 var host=new GameObject(key);PlayableWorld world=null;
                 try{
                     if(key=="Nereida")host.AddComponent<NereidaPreview>().Build(NereidaPreview.LoadProfile());

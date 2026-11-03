@@ -17,7 +17,7 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(1,View(0).TeamSignals.Count);Assert.AreEqual(1,View(2).TeamSignals.Count);Assert.Zero(View(1).TeamSignals.Count);Assert.Zero(View(3).TeamSignals.Count);
             var after=View(0);CollectionAssert.AreEqual(before.Entities.Select(e=>e.CurrentOrder),after.Entities.Select(e=>e.CurrentOrder));
             Assert.AreEqual(before.Credits,after.Credits);Assert.AreEqual(before.Vision.IsVisible(new NavPoint(0,0)),after.Vision.IsVisible(new NavPoint(0,0)));
-            var spectator=a.SpectatorView("spectator-99");Assert.Zero(spectator.Overview.TeamSignals.Count);foreach(var perspective in spectator.Players)Assert.Zero(perspective.TeamSignals.Count);
+            var spectator=a.SpectatorView("spectator-99");Assert.Zero(spectator.Overview.TeamSignals.Count);foreach(var perspective in spectator.Players)CollectionAssert.AreEqual(View((int)perspective.Owner).TeamSignals.Select(s=>s.Id),perspective.TeamSignals.Select(s=>s.Id),"Selected spectator gets exactly that owner’s team signals");
         }
         [Test] public void FourthEvictsOnlyAuthorsOldestAndRepeatRetainsIdentity()
         {

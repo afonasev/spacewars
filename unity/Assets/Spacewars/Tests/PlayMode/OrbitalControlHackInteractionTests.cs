@@ -45,7 +45,7 @@ namespace Spacewars.Input.Tests
             else {Call(seat,"ApplyOrbitalFromHud",OrbitalAbilities.ControlHack);var entity=Get<PlayableSnapshot>(seat,"view").Entities.Single(e=>e.Id==id);var at=(Vector2)Get<Camera>(seat,"cameraView").WorldToScreenPoint(Get<PlayableWorld>(seat,"world").EntityPoint(entity)+Vector3.up*.5f);Assert.True((bool)Call(seat,"ScanPointer",at,true,true,false));}
             yield return Wait(()=>Get<PlayableSnapshot>(seat,"view").Entities.Any(e=>e.Id==id&&e.Owner==initial.Owner),"hack live owner transfer");
             Assert.Greater(Get<PlayableSnapshot>(seat,"view").Orbital.Abilities[0].Remaining,0);Assert.AreEqual(otherCamera,Get<Camera>(other,"cameraView").transform.position);
-            yield return Wait(()=>Get<NativeMatchNotifications>(other,"matchNotifications").Latest?.Text=="Ваш юнит захвачен","former owner ordinary notice");
+            yield return Wait(()=>Get<NativeMatchNotifications>(other,"matchNotifications").Latest?.Text=="Юнит захвачен","former owner ordinary notice");
             yield return Capture(pad?"hack-pad-captured":"hack-mouse-captured",captureWidth:1600,captureHeight:1000,captureChecks:()=>Assert.Greater(Get<PlayableSnapshot>(seat,"view").Orbital.Abilities[0].Remaining,0));
             Runtime.RequestStop();yield return Wait(()=>Runtime.IsStopped,"hack stop");
         }

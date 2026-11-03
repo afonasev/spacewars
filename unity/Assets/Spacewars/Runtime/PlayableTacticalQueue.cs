@@ -8,6 +8,9 @@ namespace Spacewars.Runtime
 {
     internal sealed partial class PlayableDomain
     {
+#if UNITY_EDITOR || UNITY_INCLUDE_TESTS
+        internal Action<int,PlayableTacticalCompletion> TacticalCompletionForQa;
+#endif
         private sealed class QueueIssuance
         {
             internal long Id,Revision,Tick,GroupId; internal PlayableCommand Command;
@@ -201,7 +204,12 @@ namespace Spacewars.Runtime
                 bool complete=kind==PlayableCommandKind.Attack?(!TargetAlive(e.Issuance.Command.TargetId)||u.Kind!=PlayableEntityKind.Explorer&&u.Kind!=PlayableEntityKind.Hawk&&AirTarget(e.Issuance.Command.TargetId)):e.Arrived&&(kind==PlayableCommandKind.Move||!AnchorOccupied(u,e));
                 if(!complete)continue;
                 if(q.Pending?.Failed==true&&q.Pending.TerminalFailure!=null&&kind==PlayableCommandKind.Attack){ParkFailedReplacement(u,q);continue;}
-                if(q.Pending==null)q.Completion=new PlayableTacticalCompletion(e.Stamp,e.Issuance.Id,e.Issuance.GroupId,e.Incarnation,e.ActivationTick,Tick,e.Issuance.Command.TargetLocation,e.Assigned,e.Issuance.Command.TargetId);
+                if(q.Pending==null){
+                    q.Completion=new PlayableTacticalCompletion(e.Stamp,e.Issuance.Id,e.Issuance.GroupId,e.Incarnation,e.ActivationTick,Tick,e.Issuance.Command.TargetLocation,e.Assigned,e.Issuance.Command.TargetId);
+#if UNITY_EDITOR || UNITY_INCLUDE_TESTS
+                    TacticalCompletionForQa?.Invoke(u.Id,q.Completion);
+#endif
+                }
                 q.Active=null;u.CurrentOrder=null;u.HasAttackMove=false;u.Target=0;u.ExplicitTarget=false;InterruptBurst(u);
                 if(q.Pending==null&&kind==PlayableCommandKind.Attack)navigation.Stop(u.Id,false);
             }

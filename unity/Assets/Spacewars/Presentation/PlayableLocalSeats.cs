@@ -65,8 +65,9 @@ namespace Spacewars.Presentation
             sharedMapTerrain.UpdateUnion(localPresentations.Where(seat=>!seat.BotSeat).Select(seat=>seat.world.Fog).ToArray());
             var markers=OfflineMapProjection.Shared(frame,localPresentations.Where(seat=>!seat.BotSeat).Select(seat=>seat.LocalOwnerId).ToArray()).Select(m=>new PlayableMapMark(m.Id,m.Position,Enum.TryParse<PlayableBuildingKind>(m.Kind,out var kind)?kind:default(PlayableBuildingKind),m.State,m.Owner)).ToArray();
             sharedLocalMap.SetPublic(markers,profile.ArenaHalfExtent);
-            sharedLocalMap.SetScanTriangles(localPresentations.Where(seat=>!seat.BotSeat&&seat.view!=null).SelectMany(seat=>seat.view.ScanTriangles).ToArray());
-            sharedLocalMap.SetScanLines(localPresentations.Where(seat=>!seat.BotSeat&&seat.view!=null).SelectMany(seat=>seat.view.ScanLines).ToArray());
+            // Retain clipped per-seat buffers and their blending order without cloning every vertex.
+            var scanSeats=localPresentations.Where(seat=>!seat.BotSeat&&seat.view!=null).ToArray();
+            sharedLocalMap.SetScanLayers(scanSeats.Select(seat=>seat.view.ScanTriangles).ToArray(),scanSeats.Select(seat=>seat.view.ScanLines).ToArray());
             var scanning=localPresentations.FirstOrDefault(seat=>seat.scanTargeting&&seat.localInputFocused);
             sharedLocalMap.SetScanPreview(scanning?.ScanPreviewPoint(),scanning?.ScanData.orbitalScanRadius??0);
             sharedLocalMap.SetOrderMarkers(Array.Empty<PlayableQueueMarker>());

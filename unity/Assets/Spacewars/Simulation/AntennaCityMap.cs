@@ -5,7 +5,7 @@ namespace Spacewars.Simulation
 {
     [Serializable] public sealed class AntennaCityProfileData
     {
-        public string id="antenna-city-greybox-v1"; public int revision=3;
+        public string id="antenna-city-greybox-v1"; public int revision=4;
         public double scale=1, plazaHeight=4, blockHeight=6;
         public double mainStreetWidth=16,sideStreetWidth=12,baseYardRadius=18,outpostYardRadius=14,mineYardRadius=6,blockGap=6,districtPassageWidth=16;
         public double keyPointPadScale=.85,keyPointPadBorder=.8;
@@ -93,7 +93,7 @@ namespace Spacewars.Simulation
             for(int i=0;i<6;i++)sites.Add(new TerritorySite(i+7,PlayableBuildingKind.Outpost,PointAt(-120+60*i,82),p));
             for(int i=0;i<6;i++)sites.Add(new TerritorySite(i+13,PlayableBuildingKind.Mine,PointAt(-120+60*i,142),p));
             for(int i=0;i<6;i++)sites.Add(new TerritorySite(i+19,PlayableBuildingKind.Mine,PointAt(-90+60*i,124),p));
-            for(int i=0;i<3;i++)sites.Add(new TerritorySite(i+25,PlayableBuildingKind.Mine,PointAt(-90+120*i,52),p));
+            for(int i=0;i<3;i++)sites.Add(new TerritorySite(i+25,PlayableBuildingKind.RelayTower,PointAt(-90+120*i,52),p));
             return sites.ToArray();
         }
         public OfflineMatchConfiguration Configuration(PlayableProfile p,int seed,OfflineParticipant[] roster){

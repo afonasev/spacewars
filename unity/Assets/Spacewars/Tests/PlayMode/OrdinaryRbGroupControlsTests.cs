@@ -24,6 +24,7 @@ namespace Spacewars.Input.Tests
             Set(pad.leftStick,Vector2.up);InputSystem.Update();Call(app,"UpdateFrame");yield return new WaitForSecondsRealtime(.35f);Call(app,"UpdateFrame");
             Assert.IsEmpty(groups.Members(1,entities),"hold prepares assignment, release confirms");ButtonFrame(pad,pad.rightShoulder,false);CollectionAssert.AreEqual(new[]{ids[0]},groups.Members(1,entities));Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");
             Selection(seat).Clear();Selection(seat).Add(ids[0]);Call(app,"UpdateFrame");ButtonFrame(pad,pad.rightShoulder,true);Set(pad.leftStick,Vector2.up);InputSystem.Update();Call(app,"UpdateFrame");
+            yield return new WaitForSecondsRealtime(.35f);Call(app,"UpdateFrame");
             yield return Capture("rb-group-actions",captureWidth:1600,captureHeight:1000,captureChecks:()=>
             {
                 var ring=Get<OrbitalBattleRing>(seat,"padAuxiliaryRing");Inside(Get<VisualElement>(seat,"root").worldBound,ring.Q<RadialActionCard>().worldBound,"group action card");
@@ -36,10 +37,43 @@ namespace Spacewars.Input.Tests
                 Assert.True(ring.Query<Label>().ToList().Any(l=>l.text.Contains("Сохранено")));Assert.False(ring.Query<Label>().ToList().Any(l=>l.text.Contains("RT")));
             });
             ButtonFrame(pad,pad.rightShoulder,false);Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");CollectionAssert.AreEqual(new[]{ids[0]},Selection(seat));
-            Selection(seat).Clear();Call(app,"UpdateFrame");ButtonFrame(pad,pad.rightShoulder,true);Set(pad.leftStick,Vector2.up);InputSystem.Update();Call(app,"UpdateFrame");ButtonFrame(pad,pad.rightShoulder,false);Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");CollectionAssert.AreEquivalent(ids,Selection(seat));
+            Selection(seat).Clear();Call(app,"UpdateFrame");ButtonFrame(pad,pad.rightShoulder,true);Set(pad.leftStick,Vector2.up);InputSystem.Update();Call(app,"UpdateFrame");yield return new WaitForSecondsRealtime(.35f);Call(app,"UpdateFrame");ButtonFrame(pad,pad.rightShoulder,false);Set(pad.leftStick,Vector2.zero);InputSystem.Update();Call(app,"UpdateFrame");CollectionAssert.AreEquivalent(ids,Selection(seat));
             ButtonFrame(pad,pad.rightTrigger,true);yield return new WaitForSecondsRealtime(.35f);Call(app,"UpdateFrame");ButtonFrame(pad,pad.rightTrigger,false);Assert.AreEqual("world",Get<OfflinePadGestures>(seat,"battleGestures").Mode);
             Assert.True(Get<bool>(seat,"orbitalOpen"),"RT now opens orbital support without changing group selection");Call(seat,"CloseOrbital");
             Assert.AreEqual(sequence,Get<long>(seat,"sequence"),"group buttons/X/opening RT cannot issue simulation commands");CollectionAssert.AreEquivalent(otherBefore,Selection(other));Assert.IsEmpty(Get<KeyboardControlGroups>(other,"keyboardGroups").Members(1,(KeyboardSelectable[])Call(other,"KeyboardEntities")));
+        }
+        [UnityTest] public IEnumerator BumperTapsNavigateImmediatelyWithoutShowingWheels()
+        {
+            yield return StartOrdinary(2,false,true);
+            var seat=Seats[0];var pad=pads[0];var other=Seats[1];var before=Selection(other).ToArray();
+            var v=Get<PlayableSnapshot>(seat,"view");var building=v.Buildings.First(b=>b.Owner==v.Owner&&b.Kind==PlayableBuildingKind.Headquarters);
+            var unit=v.Entities.First(e=>e.Owner==v.Owner);var groups=Get<KeyboardControlGroups>(seat,"keyboardGroups");var entities=(KeyboardSelectable[])Call(seat,"KeyboardEntities");
+            groups.Apply(1,true,0,new[]{building.Id},entities,300,out _);groups.Apply(2,true,0,new[]{unit.Id},entities,300,out _);
+            Selection(seat).Clear();Call(app,"UpdateFrame");long sequence=Get<long>(seat,"sequence");
+            void Hidden()
+            {
+                Assert.False(Get<OfflinePadGestures>(seat,"battleGestures").AuxiliaryWheelVisible);
+                Assert.AreEqual(DisplayStyle.None,Get<OrbitalBattleRing>(seat,"padAuxiliaryRing").style.display.value,"auxiliary wheel flashed");
+                Assert.AreEqual(DisplayStyle.None,Get<OrbitalBattleRing>(seat,"battleRing").style.display.value,"intermediate building wheel flashed");
+            }
+            ButtonFrame(pad,pad.rightShoulder,true);Hidden();ButtonFrame(pad,pad.rightShoulder,false);Hidden();
+            CollectionAssert.AreEqual(new[]{building.Id},Selection(seat),"first release must cycle immediately, including building groups");
+            ButtonFrame(pad,pad.rightShoulder,true);Hidden();ButtonFrame(pad,pad.rightShoulder,false);Hidden();
+            CollectionAssert.AreEquivalent(v.Entities.Where(e=>e.Owner==v.Owner&&e.Health>0).Select(e=>e.Id),Selection(seat),"second short release selects army immediately");
+            Call(app,"UpdateFrame");Hidden();
+            var camera=Get<Camera>(seat,"cameraView");camera.transform.position+=new Vector3(50,0,50);var cameraBefore=camera.transform.position;
+            ButtonFrame(pad,pad.leftShoulder,true);Hidden();ButtonFrame(pad,pad.leftShoulder,false);Hidden();
+            Assert.Greater(Vector3.Distance(cameraBefore,camera.transform.position),1,"first LB release focuses base immediately");
+            Call(app,"UpdateFrame");ButtonFrame(pad,pad.leftShoulder,true);Hidden();ButtonFrame(pad,pad.leftShoulder,false);Hidden();
+            yield return Capture("bumper-short-no-wheel",captureWidth:1600,captureHeight:1000,captureChecks:Hidden);
+            ButtonFrame(pad,pad.rightShoulder,true);Hidden();yield return new WaitForSecondsRealtime(.35f);Call(app,"UpdateFrame");
+            Assert.True(Get<OfflinePadGestures>(seat,"battleGestures").AuxiliaryWheelVisible);Assert.AreEqual(DisplayStyle.Flex,Get<OrbitalBattleRing>(seat,"padAuxiliaryRing").style.display.value);
+            yield return Capture("bumper-held-group-wheel",captureWidth:1600,captureHeight:1000,captureChecks:()=>Assert.AreEqual(DisplayStyle.Flex,Get<OrbitalBattleRing>(seat,"padAuxiliaryRing").style.display.value));
+            ButtonFrame(pad,pad.rightShoulder,false);Call(app,"UpdateFrame");Hidden();
+            ButtonFrame(pad,pad.leftShoulder,true);Hidden();yield return new WaitForSecondsRealtime(.35f);Call(app,"UpdateFrame");
+            Assert.True(Get<OfflinePadGestures>(seat,"battleGestures").AuxiliaryWheelVisible);Assert.AreEqual(DisplayStyle.Flex,Get<OrbitalBattleRing>(seat,"padAuxiliaryRing").style.display.value);
+            ButtonFrame(pad,pad.leftShoulder,false);Call(app,"UpdateFrame");Hidden();
+            CollectionAssert.AreEquivalent(before,Selection(other));Assert.AreEqual(sequence,Get<long>(seat,"sequence"),"navigation must not issue simulation commands");
         }
         [UnityTest] public IEnumerator AHeldTwoSecondsShowsOwnViewportRectangleAndSelectsOnce()
         {

@@ -13,6 +13,10 @@ import (
 )
 
 func TestHostExplicitBackgroundAndExitActivation(t *testing.T) {
+	oldLauncher := launcherForHost
+	launcherForHost = func(string) (*desktopLauncher, error) { return nil, nil }
+	defer func() { launcherForHost = oldLauncher }()
+
 	oldArgs := os.Args
 	os.Args = append(append([]string(nil), os.Args...), "-noaudio", "-muted", "-fixture-path", "a path with spaces")
 	defer func() { os.Args = oldArgs }()

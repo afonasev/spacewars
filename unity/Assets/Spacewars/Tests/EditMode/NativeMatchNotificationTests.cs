@@ -36,7 +36,7 @@ namespace Spacewars.Tests.EditMode
             Feed(0,E(1,0,0));Feed(1,E(2,1,20,MatchEventKind.UnitReady));Feed(2,E(3,2,40,MatchEventKind.ResearchCompleted));
             Assert.AreEqual(20,n.Focus(true,4,p).Value.X);Assert.AreEqual(0,n.Focus(true,4,p).Value.X);Assert.AreEqual(0,n.Focus(true,4,p).Value.X);
             Assert.AreEqual(40,n.Focus(false,4,p).Value.X);
-            Assert.AreEqual("Исследование завершено",n.Visible(4.99,p).Text);Assert.Null(n.Visible(5,p));
+            Assert.AreEqual("Исследование готово",n.Visible(4.99,p).Text);Assert.Null(n.Visible(5,p));
             Assert.AreEqual(20,n.Focus(true,5,p).Value.X);Assert.Null(n.Focus(false,7,p));
         }
         [Test] public void OwnSignalsAreMarksOnlyAndAllyRefreshWithSameIdentityIsNewNotification()
@@ -48,14 +48,14 @@ namespace Spacewars.Tests.EditMode
             var refreshed=new PlayableTeamSignal(2,(PlayableOwner)2,TeamSignalKind.Defend,new NavPoint(11,0),5,155);
             n.Update(View().WithTeamSignals(new[]{own,refreshed}),false,2,p);Assert.AreEqual(2,n.Count);Assert.AreEqual(11,n.Latest.Point.X);
         }
-        [Test] public void OverviewContainsBattlesOnlyAndPerspectiveChangeDoesNotReplayOldFacts()
+        [Test] public void OverviewFactsStayUnshownAndPerspectiveChangeDoesNotReplayOldFacts()
         {
             Call("Sound",PlayableSoundKind.ProductionComplete,new NavPoint(-20,0),PlayableEntityKind.Tank,(PlayableOwner?)PlayableOwner.Player,true);
             Call("MatchEvent",MatchEventKind.UnitsAttacked,PlayableOwner.Enemy,new NavPoint(20,0));
             var frame=(PlayableSpectatorFrame)Call("SpectatorSnapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
             Assert.AreEqual(1,frame.Overview.MatchEvents.Count);Assert.True(frame.Overview.MatchEvents.All(e=>e.Battle));
-            n.Update(frame.Overview,true,0,p);Assert.AreEqual(1,n.Count);n.Update(frame.Perspective(PlayableOwner.Player),false,1,p);Assert.Zero(n.Count);
-            n.Update(frame.Perspective(PlayableOwner.Player).WithMatchEvents(new[]{E(3,1,0,MatchEventKind.BuildingCompleted)}),false,2,p);Assert.AreEqual("Здание построено",n.Latest.Text);
+            n.Update(frame.Overview,true,0,p);Assert.Zero(n.Count);n.Update(frame.Perspective(PlayableOwner.Player),false,1,p);Assert.Zero(n.Count);
+            n.Update(frame.Perspective(PlayableOwner.Player).WithMatchEvents(new[]{E(3,1,0,MatchEventKind.BuildingCompleted)}),false,2,p);Assert.AreEqual("Здание готово",n.Latest.Text);
         }
         [Test] public void CompletionFactsDoNotMutateCheckpointAndAiProjectionRemainsEmpty()
         {

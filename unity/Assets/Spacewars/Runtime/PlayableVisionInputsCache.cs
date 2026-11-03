@@ -15,6 +15,7 @@ namespace Spacewars.Runtime
         private VisionUnitInput[] visionUnitInputs;
         private VisionBuildingInput[] visionBuildingInputs;
         private int visionInputTeams;
+        private PlayableOwner?[] visionRelayOwners;
         private VisionUnitInput ReadVisionInput(Unit unit)
         {
             NavUnit actor=null;bool source=unit.Health>0&&TryActor(unit.Id,out actor);
@@ -24,7 +25,7 @@ namespace Spacewars.Runtime
         private bool VisionInputsUnchanged()
         {
             if(offline?.ProvingGround!=null||!ReferenceEquals(visionInputProfile,profile)||visionUnitInputs==null||visionBuildingInputs==null||
-                visionUnitInputs.Length!=units.Count||visionBuildingInputs.Length!=buildings.Count||visionInputTeams!=visions.Count)return false;
+                visionUnitInputs.Length!=units.Count||visionBuildingInputs.Length!=buildings.Count||visionInputTeams!=visions.Count||visionRelayOwners==null||visionRelayOwners.Length!=sites.Count)return false;
             int index=0;
             foreach(var unit in units.Values){
                 var current=ReadVisionInput(unit);var prior=visionUnitInputs[index++];
@@ -38,6 +39,8 @@ namespace Spacewars.Runtime
                     building.Position.X!=prior.Position.X||building.Position.Z!=prior.Position.Z||building.Heading!=prior.Heading||
                     (building.Upgrade?.Complete==true||CenterUpgraded(building.Id)||building.ProducerUpgrade?.Complete==true)!=prior.Upgraded)return false;
             }
+            index=0;foreach(var site in sites.Values)
+                if(visionRelayOwners[index++]!=(site.Site.Kind==PlayableBuildingKind.RelayTower?site.Locked:null))return false;
             return true;
         }
         private void RememberVisionInputs()
@@ -47,6 +50,10 @@ namespace Spacewars.Runtime
             if(visionBuildingInputs==null||visionBuildingInputs.Length!=buildings.Count)visionBuildingInputs=new VisionBuildingInput[buildings.Count];
             int index=0;foreach(var unit in units.Values)visionUnitInputs[index++]=ReadVisionInput(unit);
             index=0;foreach(var b in buildings.Values)visionBuildingInputs[index++]=new VisionBuildingInput{Id=b.Id,Owner=b.Owner,Kind=b.Kind,Phase=b.Phase,Position=b.Position,Heading=b.Heading,Upgraded=b.Upgrade?.Complete==true||CenterUpgraded(b.Id)||b.ProducerUpgrade?.Complete==true};
+            // Site geometry is immutable. Only latched relay ownership changes
+            // its vision source; partial capture/drain/recovery is not a new source.
+            if(visionRelayOwners==null||visionRelayOwners.Length!=sites.Count)visionRelayOwners=new PlayableOwner?[sites.Count];
+            index=0;foreach(var site in sites.Values)visionRelayOwners[index++]=site.Site.Kind==PlayableBuildingKind.RelayTower?site.Locked:null;
             visionInputProfile=profile;visionInputTeams=visions.Count;
         }
     }

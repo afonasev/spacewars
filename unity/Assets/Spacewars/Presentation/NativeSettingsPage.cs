@@ -113,7 +113,7 @@ namespace Spacewars.Presentation
             string[] keys=Array.Empty<string>();
             if(group=="Экран")keys=new[]{"spacewars.display.width","spacewars.display.height","spacewars.display.fullscreen","spacewars.display.vsync",NativeDevicePreferences.Prefix+"frameLimit"};
             if(group=="Графика"){foreach(var key in NativeGraphicsSettings.PreferenceKeys)PlayerPrefs.DeleteKey(key);keys=new[]{"spacewars.display.shadows"};}
-            if(group=="Звук")keys=new[]{"spacewars.ui.volume","spacewars.audio.music","spacewars.audio.effects","spacewars.audio.notifications"};
+            if(group=="Звук")keys=new[]{"spacewars.ui.volume","spacewars.audio.music","spacewars.audio.effects","spacewars.audio.notifications","spacewars.audio.voice","spacewars.audio.voiceEnabled"};
             if(group=="Управление")keys=new[]{"spacewars.controls.cursorSpeed","spacewars.controls.cameraSpeed","spacewars.controls.cursorRecenterIdleMs",NativeCameraScrollSettings.EdgeKey,NativeCameraScrollSettings.ArrowKey,NativeDevicePreferences.Prefix+"deadzone",NativeDevicePreferences.Prefix+"invertX",NativeDevicePreferences.Prefix+"invertY"};
             if(group=="Интерфейс")keys=new[]{"spacewars.ui.alwaysHealth",NativeUserSettings.HideDistantHealthKey,NativeDevicePreferences.Prefix+"uiScale",NativeDevicePreferences.Prefix+"highContrast",NativeDevicePreferences.Prefix+"showFps"};
             foreach(var key in keys)PlayerPrefs.DeleteKey(key);

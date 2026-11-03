@@ -64,7 +64,10 @@ namespace Spacewars.Presentation
             }
             else if(tacticalHudOpen)
             {
-                top.RemoveFromHierarchy();armyComposition.RemoveFromHierarchy();root.Insert(tacticalTopIndex,top);root.Insert(tacticalArmyIndex,armyComposition);
+                top.RemoveFromHierarchy();armyComposition.RemoveFromHierarchy();
+                // Restore earlier siblings first: removing both elements shrinks the valid index range.
+                foreach(var saved in new[]{(element:top,index:tacticalTopIndex),(element:armyComposition,index:tacticalArmyIndex)}.OrderBy(item=>item.index))
+                    root.Insert(Mathf.Clamp(saved.index,0,root.childCount),saved.element);
                 bottom.style.display=!inLobby&&!preparing?DisplayStyle.Flex:DisplayStyle.None;
                 UpdateArmyCompositionCounts();ShowArmyComposition(armyCompositionHovered||root.focusController?.focusedElement==hudFocusButton);
             }

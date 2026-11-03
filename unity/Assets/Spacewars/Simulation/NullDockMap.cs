@@ -5,7 +5,7 @@ namespace Spacewars.Simulation
 {
     [Serializable] public sealed class NullDockProfileData
     {
-        public string id="null-dock-a04-v1"; public int revision=2;
+        public string id="null-dock-a04-v1"; public int revision=3;
         public double terraceHeight=2, moduleHeight=6;
     }
     public sealed class NullDockField
@@ -100,8 +100,8 @@ namespace Spacewars.Simulation
             new TerritorySite(6,PlayableBuildingKind.Mine,Point(180,14),p),
             new TerritorySite(7,PlayableBuildingKind.Mine,Point(22,22),p),
             new TerritorySite(8,PlayableBuildingKind.Mine,Point(170,138),p),
-            new TerritorySite(9,PlayableBuildingKind.Mine,Point(82,72),p),
-            new TerritorySite(10,PlayableBuildingKind.Mine,Point(110,88),p)
+            new TerritorySite(9,PlayableBuildingKind.RelayTower,Point(80,110),p),
+            new TerritorySite(10,PlayableBuildingKind.RelayTower,Point(112,50),p)
         };
         public OfflineMatchConfiguration Configuration(PlayableProfile p,int seed,OfflineParticipant[] roster){
             if(roster.Length!=2||roster[0].Team==roster[1].Team)throw new ArgumentException("Null Dock requires two hostile participants.");

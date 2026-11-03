@@ -1,0 +1,121 @@
+{
+  "generator": "edge-tts 7.3.1; offline game assets, no runtime service",
+  "female": "ru-RU-SvetlanaNeural +6% +4Hz",
+  "male": "ru-RU-DmitryNeural +0% -6Hz",
+  "filters": {
+    "system": "silenceremove=start_periods=1:start_duration=0.01:start_threshold=-48dB,areverse,silenceremove=start_periods=1:start_duration=0.01:start_threshold=-48dB,areverse,highpass=f=90,lowpass=f=11000,acompressor=threshold=0.14:ratio=2:attack=8:release=80:makeup=1.2,loudnorm=I=-18:TP=-3:LRA=7,aresample=48000,apad=pad_dur=0.08",
+    "ally": "silenceremove=start_periods=1:start_duration=0.01:start_threshold=-48dB,areverse,silenceremove=start_periods=1:start_duration=0.01:start_threshold=-48dB,areverse,highpass=f=350,lowpass=f=3100,acompressor=threshold=0.08:ratio=4:attack=3:release=90:makeup=2.2,asoftclip=type=tanh:threshold=0.75:output=0.9,loudnorm=I=-18:TP=-3:LRA=7,aresample=48000,apad=pad_dur=0.08"
+  },
+  "samples": [
+    {
+      "key": "system-building-attacked",
+      "text": "Здание атаковано.",
+      "sha256": "260f40854b1da1836fe6ea67b39b1e41c9c0ee606a7f58ac63a093c2dd47804c"
+    },
+    {
+      "key": "system-units-attacked",
+      "text": "Юниты атакованы.",
+      "sha256": "f244eea1f46b9f4b16b4b1abdf0aebdc713869a015af6f0a5a821cbafa339d1f"
+    },
+    {
+      "key": "system-building-ready",
+      "text": "Здание готово.",
+      "sha256": "e01f48cdf7044335aad07776d8d6ed0b9d499f7e680d0e4eb8605cf89d9ccb38"
+    },
+    {
+      "key": "system-unit-ready",
+      "text": "Юнит готов.",
+      "sha256": "98af5afac2c05cb68b9ff1cfa06e2d857fd34cc7755e4a55eca057c825ec1e49"
+    },
+    {
+      "key": "system-research-ready",
+      "text": "Исследование готово.",
+      "sha256": "2c76370ecce8a91a9552cca8899932f8e70c6e5fda4c9514f1b3806bc91663f6"
+    },
+    {
+      "key": "system-unit-captured",
+      "text": "Юнит захвачен.",
+      "sha256": "a3c61bc0ca061a67ae086dfba525705a7becf0ec1e020985dab683cc50b40363"
+    },
+    {
+      "key": "system-mine-captured",
+      "text": "Шахта захвачена.",
+      "sha256": "9333c00b2cac627064b3817d244bd1e072bc8693f039c5537f9a27d4e97488a7"
+    },
+    {
+      "key": "system-relay-lost",
+      "text": "Вышка потеряна.",
+      "sha256": "d26ca4409a02c9d44ef7f46705cccef13a76244cae203df3b3f4b4b00a775e4a"
+    },
+    {
+      "key": "system-mine-hit",
+      "text": "Мина!",
+      "sha256": "d973218cc50e4a6f96351ff5b275ecd47e78bc4806c0631073c0a8b8dedc9259"
+    },
+    {
+      "key": "system-mine-triggered",
+      "text": "Мина сработала.",
+      "sha256": "a4c571236b571622d5ad64e957a51bbb6d99455f31e317586ad8d6fd2e0ae4f9"
+    },
+    {
+      "key": "system-upgrade-ready",
+      "text": "Улучшение готово.",
+      "sha256": "215a776a0759341db0898dcbfa3422932043484ef38301046d54a334228cc223"
+    },
+    {
+      "key": "system-army-limit",
+      "text": "Лимит армии.",
+      "sha256": "53bbe29268b6ee99d7b363416be9398e588e1b67766ec9b46a508dc780d06442"
+    },
+    {
+      "key": "system-credits-needed",
+      "text": "Нет кредитов.",
+      "sha256": "6faaa60e248b7db99d385e9451ef2daed3757856231c43afc74d6597df2d6cd7"
+    },
+    {
+      "key": "system-exit-blocked",
+      "text": "Выход заблокирован.",
+      "sha256": "c3d456edb7e5062e78a6932b16bbd26ee8dbeb4971d95869f37a56fa3ffbc46e"
+    },
+    {
+      "key": "ally-attack",
+      "text": "Атаковать!",
+      "sha256": "ea5fcf28edc30cfba89078841b18b10b7ad2a9019cfc686a5f13a5744b5658b2"
+    },
+    {
+      "key": "ally-defend",
+      "text": "Защищать!",
+      "sha256": "343fb22601c3d011449b6d3b895614f6b3e181fd7b581d7f2ab89dc98eed7bee"
+    },
+    {
+      "key": "ally-recon",
+      "text": "Разведать!",
+      "sha256": "e8753d0bd8cef54256106cfb9ca61927931414e3e4dddd59df884731c6c8494b"
+    },
+    {
+      "key": "ally-advance",
+      "text": "Выдвигаюсь.",
+      "sha256": "24c3437a1960a735895942bd26adab716fb0fa99aabafe638d99c9c0f3157947"
+    },
+    {
+      "key": "ally-engage",
+      "text": "Вступил в бой с противником!",
+      "sha256": "2c6c4d93a66adda2ff8e0f806d2e9a84bac74471b7e3612e61b57afa5176cf6a"
+    },
+    {
+      "key": "ally-raid",
+      "text": "Начинаю рейд.",
+      "sha256": "8473c86911f1b1bc6d57a41e4a4aa29b5a9f88f512fb56b7babdad32050f0e1f"
+    },
+    {
+      "key": "ally-retreat",
+      "text": "Отступаю.",
+      "sha256": "f7e1ab17f6d1b480350754d209d072949f1db6f4ff67f446850077aa0eac1f2d"
+    },
+    {
+      "key": "ally-need-defense",
+      "text": "Нужна защита!",
+      "sha256": "076869a7601731d1454d62b10a7cdac7b0b7a50e8ed0ab37ae7c4264c706c463"
+    }
+  ]
+}

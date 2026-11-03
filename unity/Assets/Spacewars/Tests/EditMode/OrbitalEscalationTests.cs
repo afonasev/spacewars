@@ -21,8 +21,25 @@ namespace Spacewars.Tests.EditMode
             var p=new PlayableProfileData();var s=new OrbitalEscalationState();
             s.Damage(249.5,p);Assert.AreEqual(0,s.Level);s.Damage(20.75,p);Assert.AreEqual(1,s.Level);Assert.AreEqual(20.25,s.Progress);
             s.Damage(479.75,p);Assert.AreEqual(2,s.Level);Assert.AreEqual(0,s.Progress);
-            s.Damage(7000,p);Assert.AreEqual(5,s.Level);Assert.AreEqual(0,s.Progress);Assert.AreEqual(p.orbitalThreshold5*2,s.Snapshot(p).Threshold);
+            s.Damage(7000,p);Assert.AreEqual(5,s.Level);Assert.AreEqual(0,s.Progress);Assert.AreEqual(p.orbitalThresholdMax,s.Snapshot(p).Threshold);
             s.Damage(7999.75,p);Assert.AreEqual(5,s.Level);Assert.AreEqual(7999.75,s.Progress);s.Damage(.25,p);Assert.AreEqual(6,s.Level);Assert.Zero(s.Progress);s.Damage(9999,p);Assert.Zero(s.Progress);
+        }
+        [Test] public void MaxThresholdIsIndependentOfPreviousLevelAndKeepsFractionalProgress()
+        {
+            var p=PlayableProfile.Default.CopyData();p.orbitalThresholdMax=12345.6;var state=new OrbitalEscalationState();
+            state.Damage(p.orbitalThreshold1+p.orbitalThreshold2+p.orbitalThreshold3+p.orbitalThreshold4+p.orbitalThreshold5,p);Assert.AreEqual(5,state.Level);
+            p.orbitalThreshold5=1;Assert.AreEqual(12345.6,state.Snapshot(p).Threshold);
+            state.Damage(12345.5,p);Assert.AreEqual(5,state.Level);Assert.AreEqual(12345.5,state.Progress);
+            state.Damage(.1,p);Assert.AreEqual(6,state.Level);Assert.Zero(state.Progress);
+        }
+        [Test] public void AbsoluteMaxMetadataUsesHpAndValidatesItsIndependentRange()
+        {
+            var f=PlayableProfileMetadata.Fields.Single(field=>field.FieldName=="orbitalThresholdMax");Assert.AreEqual("HP",f.Unit);Assert.That(f.Label,Does.Contain("V").And.Contain("MAX"));
+            Assert.False(PlayableProfileMetadata.Fields.Any(field=>field.FieldName=="orbitalMaxThresholdMultiplier"));
+            foreach(double invalid in new[]{0d,1000000.1,double.NaN,double.PositiveInfinity}){
+                var data=PlayableProfile.Default.CopyData();data.orbitalThresholdMax=invalid;Assert.Throws<ArgumentException>(()=>PlayableProfile.Create(data));
+            }
+            var valid=PlayableProfile.Default.CopyData();valid.orbitalThresholdMax=45.1;Assert.AreEqual(45.1,OrbitalAbilities.Threshold(5,PlayableProfile.Create(valid).CopyData()));
         }
         [Test] public void PendingChoicesAreOrderedUniqueAndPermanent()
         {

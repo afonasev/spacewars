@@ -14,7 +14,8 @@ namespace Spacewars.Presentation
         private NativeTeamSignals teamSignals;
         private long lastAiCommunication;
         private NativeTeamSignals SharedSignals=>(localCoordinator??this).teamSignals;
-        private PlayableTeamSignal[] VisibleAiSignals=>SharedSignals?.Visible(view.Team,IsChatSpectator,view.Tick)??Array.Empty<PlayableTeamSignal>();
+        private bool SignalPerspectiveActive=>!IsChatSpectator||spectatorPerspective.HasValue;
+        private PlayableTeamSignal[] VisibleAiSignals=>!SignalPerspectiveActive||view==null?Array.Empty<PlayableTeamSignal>():SharedSignals?.Visible(view.Team,false,view.Tick)??Array.Empty<PlayableTeamSignal>();
 
         private VisualElement chatPanel,chatFeed,chatCompose;
         private TextField chatInput;
@@ -90,7 +91,8 @@ namespace Spacewars.Presentation
             bool visible=!inLobby&&!preparing&&!paused&&!ResultsVisible&&view!=null;
             if(!visible){CloseChat();chatPanel.style.display=DisplayStyle.None;return;}
             double now=Time.unscaledTimeAsDouble;
-            var messages=SharedChat?.Visible(ChatAuthorId,IsChatSpectator,now)??Array.Empty<NativeMatchChat.Message>();
+            var messages=(SharedChat?.Visible(ChatAuthorId,IsChatSpectator,now)??Array.Empty<NativeMatchChat.Message>())
+                .Where(m=>!m.IsAi||!IsChatSpectator||SignalPerspectiveActive&&m.Team==view.Team).ToArray();
             var keep=new HashSet<NativeMatchChat.Message>(messages);
             foreach(var key in new List<NativeMatchChat.Message>(chatLines.Keys))if(!keep.Contains(key)){chatLines[key].RemoveFromHierarchy();chatLines.Remove(key);}
             foreach(var message in messages)
@@ -122,7 +124,8 @@ namespace Spacewars.Presentation
         private void ReadAiCommunications()
         {
             if(runtime==null||matchChat==null||matchSetup==null||view==null)return;
-            var viewers=IsChatSpectator?new[]{PlayableRuntime.LocalSpectatorId}:
+            if(IsChatSpectator&&!SignalPerspectiveActive)return;
+            var viewers=IsChatSpectator?new[]{view.OwnerId}:
                 matchSetup.Participants.Select((p,i)=>new{p.Human,Id=i==0?"player-1":"foundry-"+(i+1)}).Where(p=>p.Human).Select(p=>p.Id).ToArray();
             foreach(var evt in viewers.SelectMany(runtime.AiCommunications).GroupBy(e=>e.Id).Select(g=>g.First()).OrderBy(e=>e.Id))
             {
@@ -137,7 +140,7 @@ namespace Spacewars.Presentation
             if(author<0&&evt.Author=="enemy-1")author=1;
             double now=Time.unscaledTimeAsDouble;
             if(!matchChat.SendAi(author,evt,now))return false;
-            if(evt.Point.HasValue)teamSignals.Publish(evt.Id,author,evt.Point.Value,evt.Kind,view.Tick,profile);
+            if(evt.Point.HasValue)teamSignals.Publish(evt.Id,author,evt.Point.Value,evt.Kind,evt.Tick,profile);
             return true;
         }
 

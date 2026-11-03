@@ -46,7 +46,7 @@ namespace Spacewars.Simulation
                 for(int i=0;i<count;i++){
                     var a=points[i];var b=points[(i+1)%count];
                     if(double.IsNaN(a.X)||double.IsInfinity(a.X)||double.IsNaN(a.Z)||double.IsInfinity(a.Z))throw new ArgumentException("Invalid polygon vertices");
-                    if(Distance(a,b)<Epsilon)throw new ArgumentException("Zero polygon edge");
+                    if(Distance(a,b)<Epsilon*Epsilon)throw new ArgumentException("Zero polygon edge");
                     area+=a.X*b.Z-b.X*a.Z;
                     minX=Math.Min(minX,a.X);maxX=Math.Max(maxX,a.X);minZ=Math.Min(minZ,a.Z);maxZ=Math.Max(maxZ,a.Z);
                     for(int j=i+2;j<count;j++){if(i==0&&j==count-1)continue;if(Intersects(a,b,points[j],points[(j+1)%count]))throw new ArgumentException("Self-intersecting polygon");}
@@ -72,7 +72,7 @@ namespace Spacewars.Simulation
         public NavPolygon(IEnumerable<NavPoint> source)
         {
             vertices=source.ToArray();if(vertices.Length<3||vertices.Any(p=>double.IsNaN(p.X)||double.IsInfinity(p.X)||double.IsNaN(p.Z)||double.IsInfinity(p.Z)))throw new ArgumentException("Invalid polygon vertices");
-            double area=0;for(int i=0;i<vertices.Length;i++){var a=vertices[i];var b=vertices[(i+1)%vertices.Length];if(Distance(a,b)<Epsilon)throw new ArgumentException("Zero polygon edge");area+=a.X*b.Z-b.X*a.Z;
+            double area=0;for(int i=0;i<vertices.Length;i++){var a=vertices[i];var b=vertices[(i+1)%vertices.Length];if(Distance(a,b)<Epsilon*Epsilon)throw new ArgumentException("Zero polygon edge");area+=a.X*b.Z-b.X*a.Z;
                 for(int j=i+2;j<vertices.Length;j++){if(i==0&&j==vertices.Length-1)continue;if(Intersects(a,b,vertices[j],vertices[(j+1)%vertices.Length]))throw new ArgumentException("Self-intersecting polygon");}}
             if(Math.Abs(area)<Epsilon)throw new ArgumentException("Zero polygon area");if(area<0)Array.Reverse(vertices);
             MinX=vertices.Min(p=>p.X);MaxX=vertices.Max(p=>p.X);MinZ=vertices.Min(p=>p.Z);MaxZ=vertices.Max(p=>p.Z);

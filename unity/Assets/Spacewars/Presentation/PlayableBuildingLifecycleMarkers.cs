@@ -9,17 +9,20 @@ namespace Spacewars.Presentation
     public sealed partial class PlayableBootstrap
     {
         private readonly Dictionary<int,LifecycleMarker> lifecycleMarkers=new Dictionary<int,LifecycleMarker>();
-        // Normalized vector icon geometry is an authored shape; size/opacity/cadence are profile-owned.
         private sealed class LifecycleMarker : Label
         {
-            public bool Selling;
-            private static readonly Vector2[] Wrench={new Vector2(.68f,.08f),new Vector2(.52f,.12f),new Vector2(.40f,.26f),new Vector2(.40f,.42f),new Vector2(.13f,.69f),new Vector2(.13f,.80f),new Vector2(.20f,.87f),new Vector2(.31f,.87f),new Vector2(.58f,.60f),new Vector2(.74f,.60f),new Vector2(.88f,.46f),new Vector2(.92f,.30f),new Vector2(.75f,.44f),new Vector2(.62f,.31f),new Vector2(.76f,.16f)};
-            public LifecycleMarker(){generateVisualContent+=ctx=>
+            private readonly Image repairArtwork;
+            private bool selling;
+            public bool Selling
             {
-                if(Selling)return;var painter=ctx.painter2D;painter.fillColor=new Color(1,.85f,.3f);painter.BeginPath();
-                for(int i=0;i<Wrench.Length;i++){var p=new Vector2(Wrench[i].x*contentRect.width,Wrench[i].y*contentRect.height);if(i==0)painter.MoveTo(p);else painter.LineTo(p);}
-                painter.ClosePath();painter.Fill();
-            };}
+                get=>selling;
+                set{if(selling==value)return;selling=value;repairArtwork.style.display=selling?DisplayStyle.None:DisplayStyle.Flex;}
+            }
+            public LifecycleMarker()
+            {
+                repairArtwork=new Image{name="repair-marker-artwork",image=Resources.Load<Texture2D>("OrbitalIcons/building-repair-active"),scaleMode=ScaleMode.ScaleToFit,pickingMode=PickingMode.Ignore};
+                repairArtwork.style.position=Position.Absolute;repairArtwork.style.left=repairArtwork.style.right=repairArtwork.style.top=repairArtwork.style.bottom=0;Add(repairArtwork);
+            }
         }
         private readonly HashSet<int> activeLifecycleMarkers=new HashSet<int>();
         private readonly List<int> staleLifecycleMarkers=new List<int>();
@@ -44,13 +47,13 @@ namespace Spacewars.Presentation
                 {
                     marker=new LifecycleMarker();marker.pickingMode=PickingMode.Ignore;marker.style.position=Position.Absolute;
                     marker.style.unityTextAlign=TextAnchor.MiddleCenter;marker.style.unityFontStyleAndWeight=FontStyle.Bold;
-                    marker.style.backgroundColor=new Color(.03f,.06f,.08f,.9f);marker.style.color=new Color(1,.85f,.3f);
+                    marker.style.color=new Color(1,.85f,.3f);
                     root.Insert(0,marker);lifecycleMarkers.Add(b.Id,marker);
                 }
                 var point=cameraView.WorldToScreenPoint(world.Point(b.Position)+Vector3.up*(float)(height+profile.LifecycleMarkerOffsetMeters));
                 var panel=RuntimePanelUtils.ScreenToPanel(root.panel,new Vector2(point.x,Screen.height-point.y));
                 float size=(float)(profile.LifecycleMarkerPixels*(state.Selling?profile.SaleMarkerScale:1));
-                marker.Selling=state.Selling;marker.text=state.Selling?"$":"";marker.MarkDirtyRepaint();
+                marker.Selling=state.Selling;marker.text=state.Selling?"$":"";marker.style.backgroundColor=state.Selling?new Color(.03f,.06f,.08f,.9f):Color.clear;marker.MarkDirtyRepaint();
                 marker.style.width=size;marker.style.height=size;marker.style.fontSize=size;
                 marker.style.left=panel.x-size/2;marker.style.top=panel.y-size/2;
                 marker.style.opacity=(float)(profile.LifecycleMarkerMinOpacity+(1-profile.LifecycleMarkerMinOpacity)*(.5+.5*System.Math.Sin(view.Tick/30d*System.Math.PI*2*profile.LifecycleMarkerPulseHz)));

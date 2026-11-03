@@ -26,7 +26,7 @@ namespace Spacewars.Runtime
         {
             if(!VisibleTarget(u.Owner,target)||!Target(target,out var point,out _))return false;
             if(AirTarget(target)&&u.Kind!=PlayableEntityKind.Explorer&&u.Kind!=PlayableEntityKind.Hawk)return false;
-            if(u.Kind==PlayableEntityKind.Shkval)return true; // ArtilleryTarget supplies observation-bound ballistic/friendly-fire scoring.
+            if(u.Kind==PlayableEntityKind.Shkval)return true; // The ballistic arc can pass above direct-fire cover.
             if(u.Kind==PlayableEntityKind.Hawk)return HawkLineClear(u,self.Position,u.Air.Height+HawkBodyHeight/2,target);
             if(AirTarget(target))return SpatialFireClear(u,self.Position,GroundHeight(self.Position)+DirectFireHeight,target,0);
             return GroundFireClear(self.Position,point,u.Kind==PlayableEntityKind.Explorer?0:profile.TankProjectileCollisionRadius);

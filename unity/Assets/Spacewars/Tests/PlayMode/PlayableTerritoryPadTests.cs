@@ -69,6 +69,37 @@ public sealed class PlayableTerritoryPadTests
             Call("CancelBuilding",View().Buildings.Single(b=>b.SiteId==1&&b.SlotId==1).Id,PlayableOwner.Player,null);
         }
     }
+    [UnityTest] public IEnumerator SpectatorPerspectiveSwitchRefreshesPadsWithoutAdvancingSimulation()
+    {
+        var frame=(PlayableSpectatorFrame)Call("SpectatorSnapshot",1L,RuntimeStatus.Running,true,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+        var player=frame.Perspective(PlayableOwner.Player);var overview=frame.Overview;
+        Assert.AreEqual(player.Tick,overview.Tick);
+        var unseen=overview.Sites.First(s=>s.Site.Kind!=PlayableBuildingKind.RelayTower&&!player.DiscoveredSites.Any(p=>p.Id==s.Site.Id));
+        world.Fog.ShowPublic();world.SetPresentationLayer(8);world.RenderSites(player);yield return null;
+        Assert.IsNull(Pad(unseen.Site.Id+":0"));CaptureSpectatorPad(unseen.Site.Position,"player-before.png",false);
+        world.RenderSites(overview);yield return null;
+        foreach(var site in overview.Sites.Where(s=>s.Site.Kind!=PlayableBuildingKind.RelayTower))AssertVisible(Pad(site.Site.Id+":0"),8);
+        CaptureSpectatorPad(unseen.Site.Position,"spectator-overview.png",true);
+        world.RenderSites(player);yield return null;
+        Assert.IsNull(Pad(unseen.Site.Id+":0"),"Switching back must retain player geography restrictions at the same paused tick.");
+    }
+    private void CaptureSpectatorPad(NavPoint point,string name,bool expectPad)
+    {
+        var camera=new GameObject("Spectator pad camera").AddComponent<Camera>();camera.transform.SetParent(host.transform);
+        camera.cullingMask=1<<8;camera.orthographic=true;camera.orthographicSize=8;
+        camera.transform.position=world.Point(point)+new Vector3(9,15,-12);camera.transform.LookAt(world.Point(point));
+        camera.clearFlags=CameraClearFlags.SolidColor;camera.backgroundColor=Color.black;
+        var target=new RenderTexture(640,480,24);target.Create();camera.targetTexture=target;
+        var texture=new Texture2D(640,480,TextureFormat.RGB24,false);var previous=RenderTexture.active;
+        try
+        {
+            camera.Render();RenderTexture.active=target;texture.ReadPixels(new Rect(0,0,640,480),0,0);texture.Apply();
+            if(expectPad)Assert.True(texture.GetPixels().Any(c=>c.maxColorComponent>.05f),"The spectator camera must actually render the restored public pad.");
+            string directory=Path.GetFullPath(Path.Combine(Application.dataPath,"../../.local/spectator-territory-pads/screenshots"));Directory.CreateDirectory(directory);
+            File.WriteAllBytes(Path.Combine(directory,name),texture.EncodeToPNG());
+        }
+        finally{RenderTexture.active=previous;camera.targetTexture=null;target.Release();UnityEngine.Object.DestroyImmediate(target);UnityEngine.Object.DestroyImmediate(texture);UnityEngine.Object.DestroyImmediate(camera.gameObject);}
+    }
     [UnityTest] public IEnumerator DestroyedCenterRecreatesCapturePadAndRendersOnViewerCamera()
     {
         world.Fog.ShowPublic();world.SetPresentationLayer(8);Call("Damage",1,View().Buildings.Single(b=>b.Id==1).Health);

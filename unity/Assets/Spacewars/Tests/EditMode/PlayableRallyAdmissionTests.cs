@@ -132,7 +132,8 @@ namespace Spacewars.Tests.EditMode
         [TestCase(PlayableEntityKind.Tank)][TestCase(PlayableEntityKind.Explorer)][TestCase(PlayableEntityKind.Shkval)]
         public void AbsentPointProducesIdleAndAcceptedPointProducesAttackMove(PlayableEntityKind kind)
         {
-            void Produce()=>Call("Apply",new PlayableCommand(1,++sequence,"player-1",kind==PlayableEntityKind.Tank?PlayableCommandKind.QueueTank:kind==PlayableEntityKind.Explorer?PlayableCommandKind.QueueExplorer:PlayableCommandKind.QueueShkval,new[]{factory}),null);
+            if(kind==PlayableEntityKind.Shkval){Call("BuildAt",1,3,PlayableBuildingKind.ScientificCenter,1,PlayableOwner.Player,null);Call("AdvanceFoundations");Call("AdvanceBuildings",100d);Assert.True(View().Buildings.Any(b=>b.Kind==PlayableBuildingKind.ScientificCenter&&b.Phase==ConstructionPhase.Ready),"Shkval production requires its real prerequisite.");}
+            void Produce()=>Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",new PlayableCommand(1,++sequence,"player-1",kind==PlayableEntityKind.Tank?PlayableCommandKind.QueueTank:kind==PlayableEntityKind.Explorer?PlayableCommandKind.QueueExplorer:PlayableCommandKind.QueueShkval,new[]{factory}),null));
             Produce();Call("AdvanceProduction",100d);var idle=View().Entities.OrderByDescending(u=>u.Id).First();Assert.False(State.HasRally);Assert.False(idle.Moving);Assert.False(Nav.IsPending(idle.Id));Assert.IsNull(idle.CurrentOrder);
             Accept(new NavPoint(10,10));Produce();Call("AdvanceProduction",100d);var moved=View().Entities.OrderByDescending(u=>u.Id).First();Assert.AreEqual(kind,moved.Kind);Assert.True(Nav.IsPending(moved.Id));Assert.AreEqual(PlayableTacticalOrderKind.AttackMove,moved.CurrentOrder.Kind);Assert.Zero(moved.TargetId);
         }

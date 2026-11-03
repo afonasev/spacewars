@@ -10,6 +10,7 @@ namespace Spacewars.Presentation
     public sealed partial class PlayableBootstrap
     {
         private bool signalWheelOpen,signalWheelPad,signalStickReady;
+        private long signalAudioBaselineTick=-1;
         private long signalGeneration=-1,signalObservedTick=-1;private double signalObservedAt;
         private NavPoint signalPoint;private Vector2 signalWheelCentre;
         private VisualElement signalWorldLayer,signalModalPanel,signalHints;
@@ -89,19 +90,19 @@ namespace Spacewars.Presentation
             if(signalObservedTick!=view.Tick){signalObservedTick=view.Tick;signalObservedAt=Time.unscaledTimeAsDouble;}
             if(!CanSignal||signalWheelPad&&(SeatPad==null||!SeatPad.added))CancelTeamSignal();
             if(signalWheelOpen&&!signalWheelPad){var mouse=input.AssignedMouse??Mouse.current;if(mouse!=null)signalWheel.Choose(PanelPoint(mouse.position.ReadValue())-signalWheelCentre,(float)profile.TeamSignalWheelPixels*.20f);}
-            var manual=spectatorMode||view.OwnerEliminated?Array.Empty<PlayableTeamSignal>():view.TeamSignals;
+            var manual=!SignalPerspectiveActive||view.OwnerEliminated?Array.Empty<PlayableTeamSignal>():view.TeamSignals;
             var signals=manual.Concat(VisibleAiSignals).ToArray();
             // Union minimaps have no private layer: only each seat's own compact/tactical surfaces are updated.
             compactMap?.SetTeamSignals(signals,TeamSignalTick);tacticalMap?.SetTeamSignals(signals,TeamSignalTick);
             signalWorldLayer.style.display=!mapOpen&&!MenuOwnsInput&&!inLobby&&!preparing&&!ResultsVisible?DisplayStyle.Flex:DisplayStyle.None;signalWorldLayer.MarkDirtyRepaint();
-            bool sound=false;foreach(var signal in signals)if(heardTeamSignals.Add(signal.Id))sound=true;
+            bool sound=false;foreach(var signal in signals)if(heardTeamSignals.Add(signal.Id)&&(!IsChatSpectator||signal.CreatedTick>signalAudioBaselineTick))sound=true;
             heardTeamSignals.RemoveWhere(id=>!signals.Any(s=>s.Id==id));
             if(sound&&!paused)(localCoordinator??this).gameplayAudio?.TeamSignal();
         }
         private void DrawTeamSignals(MeshGenerationContext ctx)
         {
             if(view==null||world==null||cameraView==null)return;
-            var manual=spectatorMode||view.OwnerEliminated?Array.Empty<PlayableTeamSignal>():view.TeamSignals;
+            var manual=!SignalPerspectiveActive||view.OwnerEliminated?Array.Empty<PlayableTeamSignal>():view.TeamSignals;
             foreach(var signal in manual.Concat(VisibleAiSignals))
             {
                 // Viewport-relative drawing keeps local seats and RenderTexture captures aligned.

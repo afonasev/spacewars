@@ -99,6 +99,9 @@ class Pipeline(unittest.TestCase):
             if '--sign-document' in args:
                 pathlib.Path(args[-1]).write_text('signed fixture')
             return '{}'
+        if args==['gh','workflow','run','installer-downloads.yml','--repo','afonasev/spacewars','--ref','main','-f','apply=true']:
+            self.assertFalse(self.releases[0]['draft'])
+            return ''
         if args[:3]==['gh','release','create']:
             notes=pathlib.Path(args[args.index('--notes-file')+1]).read_text()
             self.releases=[{'id':71,'tag_name':'v9.8.7','draft':True,'prerelease':'--prerelease' in args,'assets':[],'html_url':'https://example.invalid/release','target_commitish':self.public,'body':notes}]
@@ -143,7 +146,10 @@ class Pipeline(unittest.TestCase):
         with tempfile.TemporaryDirectory() as t:
             self.setup_fixture(t);self.fail_upload=True
             with self.assertRaisesRegex(RuntimeError,'interrupted upload'):self.invoke()
-            self.assertTrue(self.releases[0]['draft']);first=copy.deepcopy(self.calls);self.invoke(True)
+            self.assertTrue(self.releases[0]['draft'])
+            self.assertFalse(any(c[:2]==['gh','workflow'] for c in self.calls))
+            first=copy.deepcopy(self.calls);self.invoke(True)
+            self.assertEqual(sum(c[:2]==['gh','workflow'] for c in self.calls),1)
             self.assertFalse(self.releases[0]['draft']);self.assertNotIn('spacewars-publisher',self.releases[0]['body'])
             for token in ['build.py','package.py']:
                 self.assertEqual(sum(len(c)>1 and c[1].endswith(token) for c in self.calls),2)
@@ -153,11 +159,13 @@ class Pipeline(unittest.TestCase):
             self.assertFalse(any('--prepare-legacy-bridge' in c for c in self.calls))
             receipt=json.loads((self.out/'publication.json').read_text());self.assertIn('NotRun',receipt['client_download_readback'])
             before=len(self.calls);self.invoke(True)
+            self.assertEqual(sum(c[:2]==['gh','workflow'] for c in self.calls),2)
             self.assertFalse(any(c[:3]==['gh','release','upload'] or c[:4]==['gh','api','--method','PATCH'] for c in self.calls[before:]))
     def test_test_channel_is_prerelease_and_never_latest(self):
         with tempfile.TemporaryDirectory() as t:
             self.setup_fixture(t);self.channel='test';self.invoke()
             self.assertTrue(self.releases[0]['prerelease'])
+            self.assertFalse(any(c[:2]==['gh','workflow'] for c in self.calls))
             self.assertTrue(any('--prerelease' in c and '--latest=false' in c for c in self.calls))
             self.assertTrue(any('make_latest=false' in c for c in self.calls))
     def test_legacy_archive_is_built_only_with_explicit_flag(self):

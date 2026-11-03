@@ -50,9 +50,24 @@ namespace Spacewars.Simulation
         public NavPoint SurfaceGradient(NavPoint point) => default(NavPoint);
         public bool SupportsFootprint(NavPoint point, double radius) => geometry.IsFree(point, radius);
         public bool SupportsSweep(NavPoint from, NavPoint to, double radius) => geometry.SegmentFree(from, to, radius);
-        public bool TryLocate(NavPoint point, double radius, out NavLocation location) => locations.TryLocate(point, radius, out location);
-        public bool IsValidLocation(NavLocation location, double radius) => locations.Valid(location, radius);
-        public bool TryTraverse(NavLocation from, NavPoint to, double radius, out NavLocation location) => locations.Traverse(from, to, radius, out location);
+        // The entire map is one rectangular support with the same limits as geometry.
+        // A disk that clears both endpoints stays on this support along the segment.
+        public bool TryLocate(NavPoint point, double radius, out NavLocation location)
+        {
+            location = default;
+            if (!geometry.IsFree(point, radius)) return false;
+            location = Supports[0].OwnedLocation(point);
+            return true;
+        }
+        public bool IsValidLocation(NavLocation location, double radius)
+            => location.SurfaceId == Supports[0].SurfaceId && geometry.IsFree(location.Position, radius);
+        public bool TryTraverse(NavLocation from, NavPoint to, double radius, out NavLocation location)
+        {
+            location = default;
+            if (from.SurfaceId != Supports[0].SurfaceId || !geometry.SegmentFree(from.Position, to, radius)) return false;
+            location = Supports[0].OwnedLocation(to);
+            return true;
+        }
         public bool CompatibleCombatSurface(NavLocation anchor, NavLocation other) => locations.Combat(anchor, other);
     }
 }

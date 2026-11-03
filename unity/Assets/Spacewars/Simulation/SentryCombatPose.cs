@@ -15,6 +15,14 @@ namespace Spacewars.Simulation
         internal SentryCombatPose(NavPoint position,double ground,double scale,double heading,double elevation,double progress,bool repair=false,bool gauss=false,double recoil=0)
         {this.recoil=recoil;this.gauss=gauss;this.repair=repair;yawHeight=SentryTurretGeometry.YawHeight;pitchHeight=gauss?GaussTowerGeometry.PitchHeight:repair?RepairTowerGeometry.PitchHeight:SentryTurretGeometry.PitchHeight;pitchBack=repair?RepairTowerGeometry.PitchBack:0;at=new V(position.X,ground,position.Z);this.scale=scale;yaw=Math.PI/2-heading;pitch=elevation;height=BuildingCombatGeometry.ConstructionHeight(progress);}
         internal double Reach=>(Math.Max(Mesh(0).Reach,Math.Max(Mesh(1).Reach,Mesh(2).Reach))+pitchHeight+Math.Abs(pitchBack)+recoil)*scale;
+        internal bool OutsideBlastSquare(NavPoint center,double halfWidth)
+        {
+            double reach=Math.Max(Mesh(0).BlastReach,Math.Max(Mesh(1).BlastReach,Mesh(2).BlastReach));
+            // Yaw and pitch preserve length. Include the articulated offsets and recoil.
+            reach+=Math.Abs(yawHeight)+Math.Abs(pitchHeight-yawHeight)+Math.Abs(pitchBack)+Math.Abs(recoil);
+            double bound=halfWidth+reach*scale;
+            return Math.Abs(center.X-at.X)>bound||Math.Abs(center.Z-at.Z)>bound;
+        }
         static V TurnYaw(V v,double a){double c=Math.Cos(a),s=Math.Sin(a);return new V(c*v.X+s*v.Z,v.Y,-s*v.X+c*v.Z);}
         static V TurnPitch(V v,double a){double c=Math.Cos(a),s=Math.Sin(a);return new V(v.X,c*v.Y+s*v.Z,-s*v.Y+c*v.Z);}
         V Local(BallisticPoint point,int part)

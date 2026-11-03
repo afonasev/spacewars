@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Spacewars.Simulation;
 using Spacewars.Runtime;
@@ -35,7 +36,7 @@ namespace Spacewars.Presentation
         {
             if(seat.view==null||!seat.cameraView)return;
             var right=seat.cameraView.transform.right;
-            audioScreens.Add(new GameplayAudioScreen(seat.view,seat.Ground(seat.SeatScreenCenter),new NavPoint(right.x,right.z),seat.selection));
+            audioScreens.Add(new GameplayAudioScreen(seat.view,seat.Ground(seat.SeatScreenCenter),new NavPoint(right.x,right.z),seat.selection,seat.IsChatSpectator&&!seat.spectatorPerspective.HasValue?Array.Empty<AiCommunication>():runtime.AiCommunications(seat.view.OwnerId),seat.spectatorMode&&!seat.spectatorPerspective.HasValue));
         }
     }
     public sealed partial class OfflineTwoLocalBootstrap
@@ -53,7 +54,7 @@ namespace Spacewars.Presentation
             {
                 var v=views[i];if(v?.View==null||!v.Camera)continue;
                 var right=v.Camera.transform.right;
-                audioScreens.Add(new GameplayAudioScreen(v.View,Ground(i,v.Camera.pixelRect.center),new NavPoint(right.x,right.z),v.Selection));
+                audioScreens.Add(new GameplayAudioScreen(v.View,Ground(i,v.Camera.pixelRect.center),new NavPoint(right.x,right.z),v.Selection,runtime.AiCommunications(v.View.OwnerId)));
             }
             gameplayAudio.Tick(audioScreens,active,Time.unscaledDeltaTime);
             gameplayAudio.PresentationState(views.Length>0?views[0]?.View?.Generation??0:0,active,session?.Paused==true,runtime?.Result!=null);

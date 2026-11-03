@@ -30,6 +30,116 @@ namespace Spacewars.Tests.EditMode
             Assert.False(q.Blocked,"A terrain-clear retreat direction exists.");Assert.Zero(q.Heading);Assert.AreEqual(default(NavPoint),q.Velocity);
             Assert.True(q.StaticNoWinner,"A distant active peer cannot turn an aligned no-winner into an indefinite voluntary wait.");
         }
+        [Test] public void WideStagingRecoveryUsesAcceptedWaypointWhenTemporaryFrontierIsOccupied()
+        {
+            var map=ThreeCrossingsMap.Default;var profile=PlayableProfile.RecastGroupCorridorDefault.Navigation;
+            var s=new NavigationSession(805,new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision),profile,null,map);
+            try{
+                var from=new NavPoint(12.697164442559522,17.816507576646746);var accepted=new NavPoint(12.80000114440918,35.400001525878906);var frontier=new NavPoint(11.6,from.Z);
+                var own=s.Crowd.Add(48,from,.58,7,7.5,new NavLocation(from,"bank/east"));own.Heading=Math.PI;Assert.True(s.Crowd.SetRoute(48,accepted,new[]{accepted},new NavLocation(accepted,"bank/east")));
+                foreach(var p in new[]{new NavPoint(11.6,17.439749167483455),new NavPoint(11.6,18.6)}){var peer=s.Crowd.Add(s.Crowd.Units.Count+100,p,.58,7,7.5,new NavLocation(p,"bank/east"));peer.Outcome=NavigationOutcome.Arrived;}
+                Assert.True(s.PhysicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,805,1,out var scope));using(scope){var frame=NavPreparedCrowdStep.Create(s.Crowd,3,scope.OwnedReservation());try{
+                    frame.Observe();int row=frame.Find(48);for(int tick=0;tick<15&&frame.After[row].localRoute.Length==0;tick++){frame.Formation[row]=new NavFormationFrameHint{Flags=NavFormationFrameHint.Guide|NavFormationFrameHint.StagingFeed,Target=frontier};frame.Compute(1d/30);}
+                    Assert.Greater(frame.Working.RepairCount,0);Assert.Greater(frame.After[row].localRoute.Length,0,"Recovery must not repeatedly fail toward an occupied temporary holding point.");Assert.Greater(frame.After[row].noProgressTicks,0,"The real failure enters bounded recovery rather than policy-wait masking.");Assert.AreEqual(accepted,frame.After[row].Goal);Assert.Less(frame.After[row].noProgressTicks,150);Assert.True(frame.After[row].Moving);
+                }finally{frame.Release();}scope.Discard();}
+            }finally{s.ReleaseCommittedHostRoot();}
+        }
+        [Test] public void AdmittedRecoveryUsesAcceptedRouteAroundRecordedHoldingCurtain()
+        {
+            // Actual ordinary-bank1 actor34@1969 and every peer within repair reach.
+            var map=ThreeCrossingsMap.Default;var profile=PlayableProfile.RecastGroupCorridorDefault.Navigation;
+            var session=new NavigationSession(805,new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision),profile,null,map);
+            try{var from=new NavPoint(16.30631606441674,39.077261495845306);var accepted=new NavPoint(-8.19999885559082,33.60000228881836);var guide=new NavPoint(3.9063160644167407,41.6);
+                var own=session.Crowd.Add(34,from,.58,7,7.5,new NavLocation(from,"bank/east"));own.Heading=2.940885211069915;Assert.True(session.Crowd.SetRoute(34,accepted,new[]{accepted},new NavLocation(accepted,"bank/west")));
+                foreach(var at in new[]{
+                    new NavPoint(12.362118169702056,36.694672505225505),
+                    new NavPoint(12.463321349782166,38.065520069037554),
+                    new NavPoint(12.548847714207163,41.59046588421331),
+                    new NavPoint(12.485480704044694,34.489088428633956),
+                    new NavPoint(16.089563269041978,41.54253218842191),
+                    new NavPoint(19.69443050674439,38.09829444540725),
+                    new NavPoint(19.60366306038688,34.250842622475886),
+                    new NavPoint(16.0,36.6),
+                    new NavPoint(16.0,40.2),
+                    new NavPoint(16.0,43.8),
+                    new NavPoint(16.08569114875063,34.34493956596554),
+                    new NavPoint(16.103228369978222,37.93342612488696),
+                }){var peer=session.Crowd.Add(100+session.Crowd.Units.Count,at,.58,7,7.5,new NavLocation(at,"bank/east"));peer.Outcome=NavigationOutcome.Arrived;}
+                Assert.True(session.PhysicalHostBudget.TryOpenScope(NavigationPreparationKind.Admission,805,1,out var scope));using(scope){var frame=NavPreparedCrowdStep.Create(session.Crowd,session.Crowd.Units.Count,scope.OwnedReservation());try{frame.Observe();int row=frame.Find(34);for(int tick=0;tick<30&&frame.After[row].localRoute.Length==0;tick++){frame.Formation[row]=new NavFormationFrameHint{Flags=NavFormationFrameHint.Guide,Target=guide};frame.Compute(1d/30);}
+                    Assert.Greater(frame.Working.RepairCount,0);Assert.Greater(frame.After[row].localRoute.Length,0,"An occupied temporary upper lane cannot replace accepted lower route intent during recovery.");Assert.AreEqual(accepted,frame.After[row].Goal);Assert.True(frame.After[row].Moving);Assert.Less(frame.After[row].noProgressTicks,150);
+                    var at=frame.After[row].Location;foreach(var point in frame.After[row].localRoute){Assert.True(frame.Working.Geometry.SegmentFree(at.Position,point,.58));Assert.True(map.TryTraverse(at,point,.58,out at));}
+                }finally{frame.Release();}scope.Discard();}
+            }finally{session.ReleaseCommittedHostRoot();session.DestroyNavigationAuthority();Assert.Zero(session.PhysicalHostBudget.PhysicalBytes);Assert.Zero(session.PhysicalHostBudget.HeldBytes);Assert.Zero(session.PhysicalHostBudget.ActiveScopes);}
+        }
+        [Test] public void BankApproachWaitsOnOtherFloorsAndAheadOfActualRearFrontier()
+        {
+            var layout=new RecastFormationGuide.Layout(new NavPoint(8,38),new NavPoint(-8,38),new NavPoint(-1,0),16,-4.42,4.42,3.6,.58);
+            var at=new NavLocation(new NavPoint(20,38),"lower");var behind=RecastFormationGuide.BankApproach(at,"lower",1,layout,-8);
+            Assert.AreEqual(NavFormationFrameHint.Bound,behind.Flags);Assert.AreEqual(-8,behind.ForwardLimit);Assert.AreEqual(default(NavPoint),behind.Target,"Staging must retain accepted route intent, not a temporary parking target.");
+            Assert.AreEqual(NavFormationFrameHint.Wait,RecastFormationGuide.BankApproach(new NavLocation(at.Position,"upper"),"lower",1,layout,-8).Flags);
+            Assert.AreEqual(NavFormationFrameHint.Wait,RecastFormationGuide.BankApproach(at,"lower",1,layout,-12).Flags);
+            Assert.AreEqual(NavFormationFrameHint.Wait,RecastFormationGuide.BankApproach(new NavLocation(new NavPoint(7.8,38),"bridge/north"),"bank/east",1,layout,-8).Flags);
+            var rear=new NavLocation(new NavPoint(30,38),"lower");var first=RecastFormationGuide.BankApproach(rear,"lower",1,layout,-8,5,5,4);var second=RecastFormationGuide.BankApproach(rear,"lower",1,layout,-8,6,5,4);
+            Assert.AreEqual(NavFormationFrameHint.Bound,first.Flags);Assert.AreEqual(NavFormationFrameHint.Bound,second.Flags);Assert.AreEqual(first.ForwardLimit-3.6,second.ForwardLimit);
+            Assert.AreEqual(NavFormationFrameHint.Wait,RecastFormationGuide.BankApproach(rear,"lower",1,layout,-8,9,5,4).Flags,"Far future row may not compress at the frontier.");
+        }
+        [TestCase(0d,false)][TestCase(.7d,false)][TestCase(1.9d,false)]
+        [TestCase(0d,true)][TestCase(.7d,true)][TestCase(1.9d,true)]
+        public void OpposingGuideLanesKeepFrozenCountAndDisjointPhysicalSweeps(double angle,bool asymmetric)
+        {
+            var d=new NavPoint(Math.Cos(angle),Math.Sin(angle));var end=new NavPoint(16*d.X,16*d.Z);
+            double low=asymmetric?-3.42:-4.42,high=asymmetric?5.42:4.42;
+            var forward=new RecastFormationGuide.Layout(default,end,d,16,low,high,3.6,.58);
+            var reverse=new RecastFormationGuide.Layout(end,default,new NavPoint(-d.X,-d.Z),16,-high,-low,3.6,.58);
+            Assert.AreEqual(3,forward.Lanes);Assert.AreEqual(forward.Lanes,reverse.Lanes);Assert.AreEqual(3.6,forward.Pitch);
+            for(int i=0;i<forward.Lanes;i++){
+                var a=forward.Point(8,i);double lateral=a.X*(-d.Z)+a.Z*d.X;Assert.GreaterOrEqual(lateral,low-1e-12);Assert.LessOrEqual(lateral,high+1e-12);
+                for(int j=0;j<reverse.Lanes;j++){
+                    var b=reverse.Point(8,j);double dx=a.X-b.X,dz=a.Z-b.Z;
+                    Assert.GreaterOrEqual(dx*dx+dz*dz,Math.Pow(2*.58,2)-1e-12,"Counterflow full straight sweeps must have separate footprint lanes");
+                }
+                if(i>0){var b=forward.Point(8,i-1);Assert.GreaterOrEqual(Math.Pow(a.X-b.X,2)+Math.Pow(a.Z-b.Z,2),Math.Pow(2*.58,2)-1e-12);}
+            }
+            var narrow=new RecastFormationGuide.Layout(default,end,d,16,-.1,.1,3.6,.58);
+            var point=narrow.Point(8,0);Assert.AreEqual(8*d.X,point.X);Assert.AreEqual(8*d.Z,point.Z,"An unfit half must retain the certified original lane");
+        }
+        [TestCase(false)][TestCase(true)]
+        public void DirectionalNorthGuideCentersRetainActualTypedFootprintClearance(bool reverse)
+        {
+            var p=PlayableProfile.RecastGroupCorridorDefault;var map=(ThreeCrossingsMap)p.AuthoredMap;
+            var bounds=map.Supports.Single(s=>s.SurfaceId=="bridge/north").Bounds;double middle=(bounds.MinZ+bounds.MaxZ)/2,radius=p.ExplorerCollisionRadius;
+            var a=new NavPoint(reverse?bounds.MaxX:bounds.MinX,middle);var b=new NavPoint(reverse?bounds.MinX:bounds.MaxX,middle);var d=new NavPoint(reverse?-1:1,0);
+            double half=(bounds.MaxZ-bounds.MinZ)/2-radius;var layout=new RecastFormationGuide.Layout(a,b,d,bounds.MaxX-bounds.MinX,-half,half,p.Navigation.ArrivalSlotSpacing,radius);
+            Assert.GreaterOrEqual(layout.Lanes,2);
+            for(int lane=0;lane<layout.Lanes;lane++){
+                var point=layout.Point(layout.Length/2,lane);
+                Assert.True(map.IsValidLocation(new NavLocation(point,"bridge/north"),radius),"Actual typed full footprint refuses lane "+lane+" at "+point.X+","+point.Z);
+            }
+        }
+        sealed class ShortTurnOnlyClearance:INavMotionClearance
+        {
+            readonly double reachSquared;internal ShortTurnOnlyClearance(double reach){reachSquared=reach*reach;}
+            public bool ClearMotion(int actor,NavPoint end)=>end.X<=0&&end.X*end.X+end.Z*end.Z<=reachSquared;
+        }
+        [Test] public void RejectedLongStaticTurnForecastPreservesImmediatePhysicalMoveEvidence()
+        {
+            var profile=PlayableProfile.RecastGroupCorridorDefault.Navigation;const double dt=1d/30;const double speed=7;
+            var bodies=new[]{new NavMotionBody{Id=39,Position=default,Target=new NavPoint(-10,0),Heading=0,Radius=.58,Speed=speed,TurnSpeed=7.5,Active=true},new NavMotionBody{Id=35,Position=new NavPoint(-2,0),Radius=.58,Speed=speed,Active=false}};
+            var neighbors=new int[bodies.Length*NavCrowdMotion.NeighborCapacity];var counts=new int[bodies.Length];NavCrowdMotion.Neighbors(bodies,neighbors,counts,profile,dt);
+            var proposal=NavCrowdMotion.Select(bodies,0,neighbors,counts[0],profile,dt,new ShortTurnOnlyClearance(speed*dt),new NavPoint(-10,0));
+            Assert.False(proposal.Blocked,"A refused longer turn forecast cannot erase an available physical dt endpoint.");Assert.AreEqual(default(NavPoint),proposal.Position);Assert.LessOrEqual(Math.Abs(NavCrowdMotion.Angle(proposal.Heading-bodies[0].Heading)),bodies[0].TurnSpeed*dt);
+        }
+        sealed class OpenFrontierClearance:INavMotionClearance {public bool ClearMotion(int actor,NavPoint end)=>true;}
+        [Test] public void ActualReachedFrontierPeerIsStationaryBeforeSelectWhileRearActorRemainsActive()
+        {
+            var profile=PlayableProfile.RecastGroupCorridorDefault.Navigation;var layout=new RecastFormationGuide.Layout(new NavPoint(8,38),new NavPoint(-8,38),new NavPoint(-1,0),16,-4.42,4.42,3.6,.58);
+            var peer=new NavPoint(11.600078891090615,34.3387591068665);var own=new NavPoint(12.039425859906714,33.26200717518965);
+            var stopped=RecastFormationGuide.BankApproach(new NavLocation(peer,"bank/east"),"bank/east",1,layout,-3.6,9,9,4,profile.ArrivalTolerance);var rear=RecastFormationGuide.BankApproach(new NavLocation(own,"bank/east"),"bank/east",1,layout,-3.6,9,9,4,profile.ArrivalTolerance);
+            Assert.AreEqual(NavFormationFrameHint.Wait,stopped.Flags);Assert.AreEqual(NavFormationFrameHint.Bound,rear.Flags,"Actual53 .439m from cap must not become a hidden voluntary wait.");
+            var bodies=new[]{new NavMotionBody{Id=53,Position=own,Target=new NavPoint(11.439425859906715,33.06200717518965),Heading=2.7763996929958767,Radius=.58,Speed=1.8632401639911291,TurnSpeed=7.5,OwnPaceCap=7,Active=(rear.Flags&NavFormationFrameHint.Wait)==0},new NavMotionBody{Id=25,Position=peer,Target=peer,Radius=.58,Speed=7,Active=(stopped.Flags&NavFormationFrameHint.Wait)==0}};
+            var neighbors=new int[2*NavCrowdMotion.NeighborCapacity];neighbors[0]=1;var q=NavCrowdMotion.Select(bodies,0,neighbors,1,profile,1d/30,new OpenFrontierClearance(),new NavPoint(-37.6,29.4));
+            Assert.GreaterOrEqual(NavCrowdMotion.ClosestSquared(new NavPoint(own.X-peer.X,own.Z-peer.Z),q.Velocity,1d/30),Math.Pow(1.16,2)-1e-9,"Select must see the honest reached-cap stationary peer before final Joint.");Assert.True(bodies[0].Active);Assert.False(bodies[1].Active);
+        }
         [Test] public void ProvenanceRequiresActuallyRejectedTranslationAndIsFreshPerSelection()
         {
             var bodies=new[]{new NavMotionBody{Id=1,Position=new NavPoint(-1,0),Radius=.72,Active=true},new NavMotionBody{Id=2,Position=new NavPoint(1,0),Radius=.72,Active=true}};

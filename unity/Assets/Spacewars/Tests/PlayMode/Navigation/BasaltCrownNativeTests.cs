@@ -77,7 +77,7 @@ namespace Spacewars.Tests.PlayMode
         }
         [Test] public void DetailedShouldersAndMineApronsPreserveFullClearance(){
             var p=Profile();var m=(BasaltCrownMap)p.AuthoredMap;var art=BasaltCrownArtProfile.Load();
-            var mines=BasaltCrownDetails.HillMines(m,p);CollectionAssert.AreEqual(new[]{3,4},mines.Select(s=>s.Id));
+            var mines=BasaltCrownDetails.HillMines(m,p);Assert.IsEmpty(mines,"Citadel mining was replaced by one relay");
             foreach(var mine in mines){Assert.IsEmpty(mine.Slots);Assert.True(m.SupportsFootprint(mine.Position,art.mineApronRadius+art.mineApronFeather));}
             var allMines=BasaltCrownDetails.Mines(m,p);Assert.AreEqual(4,allMines.Length);
             foreach(var mine in allMines){

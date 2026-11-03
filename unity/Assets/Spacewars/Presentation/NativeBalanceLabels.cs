@@ -99,7 +99,7 @@ namespace Spacewars.Presentation
         internal static string Entity(PlayableProfileField f)
         {
             string section=Section(f);
-            if(section==Escalation){string name=f.FieldName??"";return name.StartsWith("orbitalMine",StringComparison.Ordinal)?"Мина-ловушка":name.StartsWith("orbitalHack",StringComparison.Ordinal)?"Взлом управления":name.StartsWith("orbitalScan",StringComparison.Ordinal)?"Сканирование":(name.StartsWith("orbitalThreshold",StringComparison.Ordinal)||name=="orbitalMaxThresholdMultiplier")?"Пороги уровней":name.StartsWith("orbitalUi",StringComparison.Ordinal)||name.StartsWith("orbitalCard",StringComparison.Ordinal)||name=="orbitalPanelWidth"||name=="orbitalIconSize"||name=="orbitalLevelFontSize"?"Панель":"Перезарядка";}
+            if(section==Escalation){string name=f.FieldName??"";return name.StartsWith("orbitalMine",StringComparison.Ordinal)?"Мина-ловушка":name.StartsWith("orbitalHack",StringComparison.Ordinal)?"Взлом управления":name.StartsWith("orbitalScan",StringComparison.Ordinal)?"Сканирование":(name.StartsWith("orbitalThreshold",StringComparison.Ordinal))?"Пороги уровней":name.StartsWith("orbitalUi",StringComparison.Ordinal)||name.StartsWith("orbitalCard",StringComparison.Ordinal)||name=="orbitalPanelWidth"||name=="orbitalIconSize"||name=="orbitalLevelFontSize"?"Панель":"Перезарядка";}
             if(section==Research)return ResearchEntity(f)??"Прочие исследования";
             if(section=="ИИ")return f.Path.StartsWith("ai.research.")?"Исследования":"Боевое поведение";
             if(section==Mechanics)return SharedEntity(f);
@@ -123,7 +123,7 @@ namespace Spacewars.Presentation
             "Научный центр"=>new[]{"Улучшение научного центра","Усиленный бетон","Оружейные системы","Защитные системы"},
             _=>Array.Empty<string>()};
         internal static string Glyph(string name)=>name switch {
-            "Пулемётная турель"=>"sentry-turret","Гаусс-башня"=>"gauss-tower","Ремонтная вышка"=>"repair-tower",
+            "Ретранслятор"=>"relay-tower","Пулемётная турель"=>"sentry-turret","Гаусс-башня"=>"gauss-tower","Ремонтная вышка"=>"repair-tower",
             "Усиленный бетон"=>"reinforced-concrete","Ястреб"=>"hawk","Танк"=>"tank","Исследователь"=>"explorer","Шквал"=>"shkval","Штаб"=>"headquarters","Форпост"=>"outpost","Шахта"=>"mine","Фабрика"=>"factory","Ангар"=>"hangar","Переработчик"=>"refinery","Научный центр"=>"science","Улучшение научного центра"=>"science","Оружейные системы"=>"weapon-systems-1","Защитные системы"=>"defensive-systems-1",
             "Улучшенное шасси"=>"tank","Штурмовые орудия"=>"explorer","Улучшенное наведение"=>"shkval","Залповый огонь"=>"hawk",_=>null};
         internal static string Bucket(PlayableProfileField f)

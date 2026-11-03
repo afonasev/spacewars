@@ -56,7 +56,7 @@ namespace Spacewars.Presentation
             DockDeckDetails(batch,map,art);
             foreach(var site in map.Sites(profile)){
                 float h=(float)map.SurfaceHeight(site.Position);var at=V(site.Position,h+.03f);
-                float radius=site.Kind==PlayableBuildingKind.Mine?3.3f:DockBaseSiteRadius;
+                float radius=site.Kind==PlayableBuildingKind.RelayTower?1.8f:site.Kind==PlayableBuildingKind.Mine?3.3f:DockBaseSiteRadius;
                 batch.Ring(at,radius,radius-.2f,new Color(.66f,.48f,.21f),4);
                 if(site.Kind==PlayableBuildingKind.Mine){
                     // Ore handling trim is flush, so neither the captured building nor units are obstructed.

@@ -199,11 +199,18 @@ namespace Spacewars.Presentation
         private bool PollSelectionRosterPad(Gamepad pad)
         {
             bool unavailable=spectatorMode||mapOpen||inLobby||preparing||paused||restarting||quitting||ResultsVisible||view?.Outcome!=PlayableMatchOutcome.Playing||PadAuxiliaryWheel||signalWheelOpen;
-            if(unavailable){EndSelectionRosterFocus();return false;}
+            if(unavailable){EndSelectionRosterFocus();selectionRosterReleaseGate=false;return false;}
             if(selectionRosterReleaseGate)
             {
-                if(!pad.buttonSouth.isPressed&&!pad.buttonEast.isPressed&&!pad.buttonWest.isPressed&&!pad.buttonNorth.isPressed&&!pad.rightTrigger.isPressed&&pad.dpad.ReadValue()==Vector2.zero)selectionRosterReleaseGate=false;
-                battleGestures.Cancel();return true;
+                battleGestures.Cancel();
+                if(OrdinaryPadButtonMask(pad)==0&&!pad.rightTrigger.isPressed&&pad.dpad.ReadValue()==Vector2.zero)
+                {
+                    selectionRosterReleaseGate=false;
+                    // Buttons are genuinely neutral; stick motion was never owned by
+                    // the card, so it must not require an extra neutral-stick frame.
+                    battleGestures.StepDetailed(Time.unscaledTimeAsDouble*1000,0,true,true,battleInputProfile);
+                }
+                return true;
             }
             if(pad.rightTrigger.wasPressedThisFrame&&selectionDockUnits.Length>0)
             {

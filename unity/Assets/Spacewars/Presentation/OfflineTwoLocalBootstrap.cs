@@ -182,7 +182,7 @@ namespace Spacewars.Presentation
                         if(assignedPad.leftStickButton.wasPressedThisFrame){v.CameraState.Reset();v.CameraState.Apply(v.Camera);v.Cursor=Center(1);}}
                 }
             }
-            var actions=PadMenuActions(v,out int pages);var stick=assignedPad.leftStick.ReadValue();var index=OfflinePadGestures.RingSector(stick.x,-stick.y,actions.Length,padProfile.radialDeadzone);var sector=index.HasValue?actions[index.Value].Sector:null;
+            var actions=PadMenuActions(v,out int pages);var stick=assignedPad.leftStick.ReadValue();var index=OfflinePadWorldActions.RingSector(actions,stick.x,-stick.y,padProfile.radialDeadzone);var sector=index.HasValue?actions[index.Value].Sector:null;
             int mask=(assignedPad.buttonSouth.isPressed?1:0)|(assignedPad.buttonEast.isPressed?2:0)|(assignedPad.buttonWest.isPressed?4:0)|(assignedPad.selectButton.isPressed?8:0)|(assignedPad.startButton.isPressed?16:0)|(assignedPad.rightShoulder.isPressed?32:0)|(assignedPad.leftShoulder.isPressed?64:0)|(assignedPad.rightTrigger.isPressed?128:0)|(assignedPad.buttonNorth.isPressed?256:0);
             var intents=gestures.StepDetailed(Time.unscaledTimeAsDouble*1000,mask,assignedPad.added,focused&&!session.Paused,padProfile,gestures.Map||PadEntity(1,v.Cursor)==0,sector);
             foreach(var intent in intents){
@@ -201,8 +201,8 @@ namespace Spacewars.Presentation
             v.CursorMarker.style.borderTopLeftRadius=v.CursorMarker.style.borderTopRightRadius=v.CursorMarker.style.borderBottomLeftRadius=v.CursorMarker.style.borderBottomRightRadius=cursorRadius;
             v.MapPanel.style.display=gestures.Map?DisplayStyle.Flex:DisplayStyle.None;
 
-            actions=PadMenuActions(v,out pages);index=OfflinePadGestures.RingSector(stick.x,-stick.y,actions.Length,padProfile.radialDeadzone);
-            padRing.Set(actions,gestures.Added?gestures.AddedSectorId:index.HasValue?actions[index.Value].Sector.Id:null,gestures.Mode,v.BasePage,pages,gestures.Added,gestures.Progress,padProfile.radialRadius);if(actions.Length>0){padRing.BringToFront();v.CursorMarker.style.display=DisplayStyle.None;}
+            actions=PadMenuActions(v,out pages);index=OfflinePadWorldActions.RingSector(actions,stick.x,-stick.y,padProfile.radialDeadzone);
+            padRing.Set(gestures.Mode=="groupWheel"&&!gestures.AuxiliaryWheelVisible?Array.Empty<OfflinePadAction>():actions,gestures.Added?gestures.AddedSectorId:index.HasValue?actions[index.Value].Sector.Id:null,gestures.Mode,v.BasePage,pages,gestures.Added,gestures.Progress,padProfile.radialRadius);if(actions.Length>0&&(gestures.Mode!="groupWheel"||gestures.AuxiliaryWheelVisible)){padRing.BringToFront();v.CursorMarker.style.display=DisplayStyle.None;}
             if(session.Paused)padRing.style.display=DisplayStyle.None;
         }
         private static double Distance(NavPoint a,NavPoint b)=>Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Z-b.Z)*(a.Z-b.Z));

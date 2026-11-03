@@ -34,6 +34,7 @@ namespace Spacewars.Runtime
                 {
                     MatchEvent(MatchEventKind.RelayControlLost,owner,state.Site.Position);
                     Fact(owner,MatchFactKind.RelayNeutralized,0,(int)PlayableBuildingKind.RelayTower,"Вышка связи №"+state.Site.Id);
+                    AddLingeringVision(owner,state.Site.Position,profile.RelayVisionRange);
                     state.Progress=0;state.Locked=null;state.Claimant=null;
                 }
                 return;

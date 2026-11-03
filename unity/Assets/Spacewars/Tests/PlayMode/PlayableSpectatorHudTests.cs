@@ -41,6 +41,34 @@ public sealed class PlayableSpectatorHudTests
         return (PlayableSpectatorFrame)Activator.CreateInstance(typeof(PlayableSpectatorFrame),Flags,null,new object[]{players[0],players},null);
     }
     void Show(PlayableSpectatorFrame frame){Set("spectatorFrame",frame);Set("view",frame.Overview);Call("UpdateHud");Call("UpdateSpectatorHud");}
+    [Test] public void EscalationUsesEachPlayersOwnLevelProgressAndBothCooldowns()
+    {
+        var source=Fixture(8);var ready=new OrbitalEscalationSnapshot(2,125,250,0,0,new[]{new OrbitalAbilitySnapshot(1,0,30,1)},Array.Empty<int>());
+        var cooling=new OrbitalEscalationSnapshot(3,40,200,3,2,new[]{new OrbitalAbilitySnapshot(1,0,30,1),new OrbitalAbilitySnapshot(2,8.2,30,2)},Array.Empty<int>());
+        var maximum=new OrbitalEscalationSnapshot(6,0,0,0,0,Enumerable.Range(1,5).Select(id=>new OrbitalAbilitySnapshot(id,0,30,1)).ToArray(),Array.Empty<int>());
+        var players=source.Players.Select((player,i)=>player.WithOrbital(i==0?ready:i==1?cooling:i==7?maximum:OrbitalEscalationSnapshot.Empty)).ToArray();
+        var frame=(PlayableSpectatorFrame)Activator.CreateInstance(typeof(PlayableSpectatorFrame),Flags,null,new object[]{players[0],players},null);Show(frame);
+        var rows=Get<Dictionary<string,VisualElement>>("spectatorRowCache");var a=rows["Игрок 1"][6];var b=rows["Игрок 2"][6];var max=rows["Игрок 8"][6];
+        Assert.AreEqual("2",a.Q<Label>("spectator-escalation-number").text);Assert.AreEqual(.5f,a.Q<OrbitalProgressRing>().Fraction);
+        Assert.That(a.Q("spectator-ability-1").tooltip,Does.Contain("готово"));Assert.AreEqual("✓",a.Q<Label>("seconds").text);Assert.IsEmpty(a.Query<Button>().ToList(),"Read-only observer abilities must never expose commands");
+        Assert.AreEqual("2",b.Q("spectator-ability-1").Q<Label>("seconds").text,"Common cooldown also gates an otherwise ready ability");
+        Assert.AreEqual("5",b.Q("spectator-ability-2").Q<Label>("seconds").text,"Use speed-adjusted personal remaining time, rounded upward");
+        Assert.True(b.Q<OrbitalProgressRing>().Pending);Assert.That(b[0].tooltip,Does.Contain("Ожидается выбор"));
+        Assert.AreEqual("MAX",max.Q<Label>("spectator-escalation-number").text);Assert.AreEqual(1,max.Q<OrbitalProgressRing>().Fraction);Assert.AreEqual(5,max[1].childCount,"All five selected abilities remain visible even for an eliminated player");
+        Assert.AreEqual(0,rows["Игрок 3"][6][1].childCount);Call("SetSpectatorPerspective",PlayableOwner.Enemy);Call("UpdateSpectatorHud");
+        Assert.AreEqual("2",a.Q<Label>("spectator-escalation-number").text);Assert.AreEqual("5",b.Q("spectator-ability-2").Q<Label>("seconds").text);
+        Call("UpdateSpectatorEscalation",b,ready);Assert.AreEqual(1,b[1].childCount);Assert.AreEqual("✓",b.Q<Label>("seconds").text);Assert.AreEqual(DisplayStyle.None,b.Q<OrbitalCooldownSweep>().style.display.value);
+    }
+    [UnityTest] public IEnumerator EscalationColumnStaysAccessibleInNarrowPerspective()
+    {
+        var root=Get<VisualElement>("root");root.style.width=640;root.style.height=620;Show(Fixture(8));Call("SetSpectatorPerspective",PlayableOwner.Enemy);Call("UpdateHud");Call("UpdateSpectatorHud");
+        yield return null;yield return null;Call("UpdateSpectatorHud");yield return null;yield return null;
+        var panel=Get<VisualElement>("spectatorPanel");var scroll=Get<ScrollView>("spectatorTableScroll");var table=Get<VisualElement>("spectatorTable");var cell=Get<VisualElement>("spectatorRows")[0][6];
+        Assert.False(panel.worldBound.Overlaps(Get<VisualElement>("top").worldBound));Assert.Greater(table.worldBound.width,scroll.contentViewport.worldBound.width);
+        scroll.ScrollTo(cell);yield return null;yield return null;Assert.LessOrEqual(cell.worldBound.xMax,scroll.contentViewport.worldBound.xMax+1);Assert.GreaterOrEqual(cell.worldBound.xMin,scroll.contentViewport.worldBound.xMin-1);
+        Set("spectatorCollapsed",true);Call("UpdateSpectatorCollapse");Assert.AreEqual(DisplayStyle.None,scroll.style.display.value);Assert.AreEqual(8,Get<VisualElement>("spectatorRows").childCount);
+        Set("spectatorCollapsed",false);Call("UpdateSpectatorCollapse");Assert.AreEqual(DisplayStyle.Flex,scroll.style.display.value);
+    }
     [Test] public void ProducerUpgradeQueueUsesBuildingPortraitAndNeverUnitRepeatBadge()
     {
         var players=new[]{PlayableBuildingKind.Factory,PlayableBuildingKind.Hangar}.Select((kind,i)=>{
@@ -94,6 +122,8 @@ public sealed class PlayableSpectatorHudTests
     }
     [Test] public void AllRowsSurvivePerspectiveCollapseAndInspectionIsReadOnly()
     {
+        var priorLights=UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None).Select(x=>x.GetInstanceID()).ToArray();Call("CreateWorld");
+        try{
         var frame=Fixture(8);Show(frame);var root=Get<VisualElement>("root");Assert.AreEqual(8,Get<VisualElement>("spectatorRows").childCount);
         Call("SetSpectatorPerspective",PlayableOwner.Enemy);Call("UpdateHud");Call("UpdateSpectatorHud");Assert.AreEqual(PlayableOwner.Enemy,Get<PlayableOwner?>("spectatorPerspective"));Assert.AreEqual(8,Get<VisualElement>("spectatorRows").childCount);
         Set("spectatorCollapsed",true);Call("UpdateSpectatorCollapse");Assert.AreEqual(DisplayStyle.None,Get<VisualElement>("spectatorRows").style.display.value);Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>("top").style.display.value);
@@ -103,6 +133,10 @@ public sealed class PlayableSpectatorHudTests
         Call("ResearchClick",PlayableResearchKind.TankChassis);Call("ExecuteBattleAction","tank",false,false);Assert.AreEqual(0,Get<long>("sequence"));
         Call("SetSpectatorPerspective",PlayableOwner.Enemy);Assert.IsNull(Get<PlayableOwner?>("spectatorPerspective"));
         Assert.AreEqual(0,Get<System.Collections.Generic.HashSet<int>>("selection").Count);
+        }finally{
+            var camera=Get<Camera>("cameraView");if(camera!=null)UnityEngine.Object.DestroyImmediate(camera.gameObject);Set("cameraView",null);
+            foreach(var light in UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None).Where(x=>!priorLights.Contains(x.GetInstanceID())))UnityEngine.Object.DestroyImmediate(light.gameObject);
+        }
     }
     [UnityTest] public IEnumerator SpeedButtonsDriveActualRuntimeAndKeepPlayerPaint()
     {
@@ -196,10 +230,10 @@ public sealed class PlayableSpectatorHudTests
         {
             foreach(int count in new[]{2,8})
             {
-                var frame=Fixture(count);Get<System.Collections.Generic.Dictionary<string,VisualElement>>("spectatorRowCache").Clear();Get<VisualElement>("spectatorRows").Clear();Set("spectatorSequence",-1L);Show(frame);Call("SetSpectatorPerspective",PlayableOwner.Player);Set("inspectionEntityId",10);Call("ApplyResponsiveHud",1600/scale);Call("UpdateHud");Call("UpdateSpectatorHud");yield return null;yield return null;
-                Assert.AreEqual(count,Get<VisualElement>("spectatorRows").childCount);var rows=Get<VisualElement>("spectatorRows");Assert.LessOrEqual(rows.worldBound.xMax,660);Assert.Less(rows.worldBound.yMax,500);
+                var raw=Fixture(count);var seeded=raw.Players.Select((player,i)=>player.WithOrbital(new OrbitalEscalationSnapshot(i==0?3:6,i==0?125:0,i==0?250:0,0,0,Enumerable.Range(1,i==0?3:5).Select(id=>new OrbitalAbilitySnapshot(id,id==2?17:id==3?42:0,60,1)).ToArray(),Array.Empty<int>()))).ToArray();var frame=(PlayableSpectatorFrame)Activator.CreateInstance(typeof(PlayableSpectatorFrame),Flags,null,new object[]{seeded[0],seeded},null);Get<System.Collections.Generic.Dictionary<string,VisualElement>>("spectatorRowCache").Clear();Get<VisualElement>("spectatorRows").Clear();Set("spectatorSequence",-1L);Show(frame);Call("SetSpectatorPerspective",PlayableOwner.Player);Set("inspectionEntityId",10);Call("ApplyResponsiveHud",1600/scale);Call("UpdateHud");Call("UpdateSpectatorHud");yield return null;yield return null;
+                Assert.AreEqual(count,Get<VisualElement>("spectatorRows").childCount);var rows=Get<VisualElement>("spectatorRows");Assert.LessOrEqual(rows.worldBound.xMax,root.worldBound.xMax);Assert.AreEqual(7,rows[0].childCount);Assert.Less(rows.worldBound.yMax,500);
                 Capture(texture,System.IO.Path.Combine(folder,"r7-"+count+"-players.png"));
-                var upgrade=rows[0][5][0];upgrade.Focus();yield return null;Assert.AreEqual(DisplayStyle.Flex,Get<Label>("spectatorTooltip").style.display.value);Assert.True(Get<Label>("spectatorTooltip").text.Contains("Улучшает"));Capture(texture,System.IO.Path.Combine(folder,"r7-"+count+"-tooltip.png"));root.Focus();
+                var upgrade=rows[0][5][0];upgrade.Focus();yield return null;Assert.AreEqual(DisplayStyle.Flex,Get<Label>("spectatorTooltip").style.display.value);Assert.True(Get<Label>("spectatorTooltip").text.Contains("Увеличивает скорость танка"));Capture(texture,System.IO.Path.Combine(folder,"r7-"+count+"-tooltip.png"));root.Focus();
                 Set("inspectionEntityId",70);Call("UpdateHud");Call("UpdateSpectatorHud");yield return null;yield return null;Assert.AreEqual(3,root.Q("research-slots").Children().Count(e=>e.tooltip!="Свободный слот"));Capture(texture,System.IO.Path.Combine(folder,"r7-"+count+"-research.png"));
                 Set("spectatorCollapsed",true);Call("UpdateSpectatorCollapse");yield return null;Capture(texture,System.IO.Path.Combine(folder,"r7-"+count+"-collapsed.png"));Set("spectatorCollapsed",false);Call("UpdateSpectatorCollapse");Set("spectatorPerspective",null);
             }

@@ -11,7 +11,7 @@ namespace Spacewars.Simulation
         public static int Tier(int id)=>id==ControlHack||id>=1&&id<=2?1:id>=3&&id<=5?2:id>=6&&id<=7?3:0;
         public static string Name(int id)=>id==ControlHack?"Взлом управления":id==1?"Сканирование":id==2?"Мина-ловушка":"Поддержка "+(Tier(id)==1?"I":Tier(id)==2?"II":"III")+" · "+(id==1||id==3||id==6?"А":id==5?"В":"Б");
         public static double Duration(int id,PlayableProfileData p)=>id==ControlHack?p.orbitalHackSeconds:Tier(id)==1?p.orbitalBasicSeconds:Tier(id)==2?p.orbitalAdvancedSeconds:p.orbitalUltimateSeconds;
-        public static double Threshold(int level,PlayableProfileData p)=>level==0?p.orbitalThreshold1:level==1?p.orbitalThreshold2:level==2?p.orbitalThreshold3:level==3?p.orbitalThreshold4:level==4?p.orbitalThreshold5:level==5?p.orbitalThreshold5*p.orbitalMaxThresholdMultiplier:0;
+        public static double Threshold(int level,PlayableProfileData p)=>level==0?p.orbitalThreshold1:level==1?p.orbitalThreshold2:level==2?p.orbitalThreshold3:level==3?p.orbitalThreshold4:level==4?p.orbitalThreshold5:level==5?p.orbitalThresholdMax:0;
     }
     public sealed class OrbitalScanSnapshot
     {
@@ -109,7 +109,7 @@ namespace Spacewars.Simulation
             F("orbitalCardWidth","Ширина карточки выбора","px",180,420,1,p=>p.orbitalCardWidth),F("orbitalCardHeight","Высота карточки выбора","px",200,440,1,p=>p.orbitalCardHeight),F("orbitalCardArtworkSize","Иконка в карточке","px",90,280,1,p=>p.orbitalCardArtworkSize),
             F("orbitalUiRingWidth","Толщина шкалы уровня","px",1,8,.5,p=>p.orbitalUiRingWidth),F("orbitalUiCornerRadius","Скругление иконок","px",0,16,1,p=>p.orbitalUiCornerRadius),F("orbitalUiPulseSeconds","Период пульсации выбора","с",.3,5,.1,p=>p.orbitalUiPulseSeconds),F("orbitalUiCoolingArtworkOpacity","Яркость иконки при перезарядке","доля",0,1,.05,p=>p.orbitalUiCoolingArtworkOpacity),
             F("orbitalPanelWidth","Ширина панели","px",60,120,1,p=>p.orbitalPanelWidth),F("orbitalIconSize","Размер иконки","px",24,64,1,p=>p.orbitalIconSize),F("orbitalLevelFontSize","Размер уровня","px",24,56,1,p=>p.orbitalLevelFontSize),
-            V("orbitalMaxThresholdMultiplier","Порог MAX относительно V","Во сколько раз XP для V → MAX больше XP для IV → V.","×",1,10,.1,p=>p.orbitalMaxThresholdMultiplier),
+            V("orbitalThresholdMax","Урон от V до MAX","Самостоятельное количество снятого здоровья для перехода V → MAX. Не зависит от порогов других уровней.","HP",1,1000000,.1,p=>p.orbitalThresholdMax),
             V("orbitalUiMaxFontScale","Размер надписи MAX","Размер MAX относительно обычной цифры; сохраняет текст внутри медальона.","доля",.3,.8,.05,p=>p.orbitalUiMaxFontScale),
             F("orbitalThreshold1","Урон до I","HP",1,100000,1,p=>p.orbitalThreshold1),F("orbitalThreshold2","Урон от I до II","HP",1,100000,1,p=>p.orbitalThreshold2),F("orbitalThreshold3","Урон от II до III","HP",1,100000,1,p=>p.orbitalThreshold3),F("orbitalThreshold4","Урон от III до IV","HP",1,100000,1,p=>p.orbitalThreshold4),F("orbitalThreshold5","Урон от IV до V","HP",1,100000,1,p=>p.orbitalThreshold5),
             F("orbitalBasicSeconds","Базовая перезарядка","с",1,600,1,p=>p.orbitalBasicSeconds),F("orbitalAdvancedSeconds","Продвинутая перезарядка","с",1,600,1,p=>p.orbitalAdvancedSeconds),F("orbitalUltimateSeconds","Ультимативная перезарядка","с",1,600,1,p=>p.orbitalUltimateSeconds),F("orbitalCommonSeconds","Общий интервал","с",0,60,1,p=>p.orbitalCommonSeconds),F("orbitalFinalSpeed","Скорость восстановления на MAX","×",1,10,.1,p=>p.orbitalFinalSpeed)

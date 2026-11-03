@@ -28,7 +28,11 @@ namespace Spacewars.Presentation
                         {
                             var original=renderer.sharedMaterials[slot];var block=new MaterialPropertyBlock();renderer.GetPropertyBlock(block,slot);
                             var color=block.HasColor("_BaseColor")?block.GetColor("_BaseColor"):original.GetColor("_BaseColor");
-                            color=Color.Lerp(color,new Color(color.grayscale,color.grayscale,color.grayscale,1),(float)profile.FogMemoryDesaturation)*(float)profile.FogMemoryBrightness;
+                            var role=original.name;bool team=role.EndsWith("team-primary")||role.EndsWith("team-emissive");
+                            // Preserve only the confirmed owner's palette, never hidden live ownership.
+                            if(team&&OwnerPaint!=null)color=OwnerPaint(known.Owner);
+                            if(!team)color=Color.Lerp(color,new Color(color.grayscale,color.grayscale,color.grayscale,1),(float)profile.FogMemoryDesaturation);
+                            color*=(float)profile.FogMemoryBrightness;
                             block.SetColor("_BaseColor",color);block.SetColor("_EmissionColor",Color.black);renderer.SetPropertyBlock(block,slot);
                         }
                     }

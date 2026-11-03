@@ -2,12 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Spacewars.Simulation;
+using Spacewars.Runtime;
 
 namespace Spacewars.Presentation
 {
     [Serializable] public sealed class GameplayAudioProfile
     {
         public string id="hybrid-gameplay-v2";
+        public float speechGain=.55f;
+        public double speechMaxAgeSeconds=2,speechRepeatSeconds=3;
+        public int speechQueueLimit=4;
         public double near=8,far=70,mergeDistance=8,repeatSeconds=.08,movementCell=18,fadeSeconds=.15;
         public float explorerImpactGain=.045f;
         public float effectsBudget=.38f,notificationGain=.12f,shotGain=.28f,impactGain=.14f,explosionGain=.30f,movementGain=.08f;
@@ -23,11 +27,13 @@ namespace Spacewars.Presentation
     }
     public sealed class GameplayAudioScreen
     {
+        public readonly bool Overview;
+        public readonly IReadOnlyList<AiCommunication> Communications;
         public readonly PlayableSnapshot View;
         public readonly NavPoint Focus,Right;
         public readonly ICollection<int> Selected;
-        public GameplayAudioScreen(PlayableSnapshot view,NavPoint focus,NavPoint right,ICollection<int> selected=null)
-        {View=view;Focus=focus;Right=right;Selected=selected;}
+        public GameplayAudioScreen(PlayableSnapshot view,NavPoint focus,NavPoint right,ICollection<int> selected=null,IReadOnlyList<AiCommunication> communications=null,bool overview=false)
+        {View=view;Focus=focus;Right=right;Selected=selected;Communications=communications??Array.Empty<AiCommunication>();Overview=overview;}
     }
     public sealed class GameplayAudioCue
     {
@@ -74,6 +80,7 @@ namespace Spacewars.Presentation
                     if(baseline){seen[e.Id]=e.Tick;continue;}
                     if(e.Tick>tick||tick-e.Tick>profile.freshTicks||seen.ContainsKey(e.Id))continue;
                     bool notification=PlayableSoundPolicy.OwnerOnly(e.Kind);
+                    if(screen.Overview&&notification)continue;
                     if(e.Kind==PlayableSoundKind.HeavyDamage&&!HeavyDamage(view,e))continue;
                     float gain=1,pan=0;
                     if(!notification&&!Spatial(screen,e.Position,out gain,out pan))continue;

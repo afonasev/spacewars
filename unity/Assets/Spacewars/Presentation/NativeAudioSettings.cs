@@ -11,9 +11,14 @@ namespace Spacewars.Presentation
         public static float Music{get=>Get("music");set=>Set("music",value);}
         public static float Effects{get=>Get("effects");set=>Set("effects",value);}
         public static float Notifications{get=>Get("notifications");set=>Set("notifications",value);}
+        public static float Voice{get=>Get("voice");set=>Set("voice",value);}
+        public static bool VoiceEnabled{get=>PlayerPrefs.GetInt(Prefix+"voiceEnabled",1)!=0;set{if(!NativeSilentStartup.IsSilent)NativePreferenceWriter.SetInt(Prefix+"voiceEnabled",value?1:0);}}
         public static void AddSliders(VisualElement content)
         {
             Add(content,"Музыка","music",Music);Add(content,"Эффекты","effects",Effects);Add(content,"Подтверждения и уведомления","notifications",Notifications);
+            var voice=new Toggle("Голосовые сигналы"){name="settings-audio-voice-enabled",value=VoiceEnabled};
+            voice.RegisterValueChangedCallback(e=>VoiceEnabled=e.newValue);content.Add(voice);
+            Add(content,"Громкость голоса","voice",Voice);
         }
         private static void Add(VisualElement content,string label,string key,float current)
         {

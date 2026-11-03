@@ -667,7 +667,8 @@ namespace Spacewars.Runtime
         }
         private NavigationRequest ProbeLocked(int producer,long order,NavigationProfile typed,NavPoint start,NavPoint goal)
         {
-            var request=new NavigationRequest(Generation,++requestSequence,-producer,order,typed,navigationGeometry,start,goal);
+            bool hasStart=Crowd.Locate(start,typed.Radius,out var startLocation),hasGoal=Crowd.Locate(goal,typed.Radius,out var goalLocation);
+            var request=new NavigationRequest(Generation,++requestSequence,-producer,order,typed,navigationGeometry,start,goal,startLocation:hasStart?(NavLocation?)startLocation:null,goalLocation:hasGoal?(NavLocation?)goalLocation:null);
             if(Requests.Count+RegisteredRouteCount>=RouteRequestCapacity||!Requests.TryEnqueue(request))return null;
             probes[-producer]=request;PublishAdmission();return request;
         }
@@ -1040,7 +1041,7 @@ namespace Spacewars.Runtime
             // Legacy formats deliberately receive a fresh identity and replay.
             InstallRestoredHost(decodedHost,state,restored);
             OwnRestoredCommandBacking(decodedAuthority,state.AdmissionPublicationIdentity,restored);
-            ValidatePhysicalRestoredRoutes();
+            ValidatePhysicalRestoredRoutes(state.RecastCoordinationVersion==2);
             // Catalog directories stage cold hydration; runtime maps now retain
             // each surviving request/group owner. Keep the same lean core shape
             // as the hot Session, rather than retaining decode-only directories.
@@ -1364,6 +1365,26 @@ namespace Spacewars.Runtime
             LastOwnedMovementNullReason=0;LastOwnedMovementNullDetail=null;LastOwnedMovementNullActor=0;LastOwnedMovementNullGroup=0;LastOwnedMovementComputation=null;LastTrafficDispatchStage=0;LastNavigationStepPath=0;
             try{
                 if(dt<=0||double.IsNaN(dt)||double.IsInfinity(dt)){LastNavigationStepPath=1;throw new ArgumentException("Invalid step duration.");}
+                if(motionAuthority!=null){
+                    // A lone producer receipt is deliberately not a composed movement
+                    // batch. Drain its owned FIFO prefix before preparing this tick's
+                    // motion, just as ApplyResults does; otherwise a ready rally proof
+                    // stays forever in Answers on an ordinary threaded Runtime.
+                    int remaining;using(EnterTransport())remaining=checked(barrierAnswers.Count+Answers.Count);
+                    while(remaining-->0){
+                        using(EnterTransport()){
+                            NavigationAnswer first=null;
+                            for(int i=0;i<barrierAnswers.Count;i++)if(first==null||barrierAnswers[i].Request.Request<first.Request.Request)first=barrierAnswers[i];
+                            if(first==null)Answers.TryPeek(out first);
+                            if(first==null||first.Request.Entity>=0)break;
+                        }
+                        if(!TryPrepareAnswerNamesBatch(out var probeNames,true)){LastNavigationStepPath=20;return;}
+                        using(probeNames){
+                            if(probeNames==null||probeNames.Answers[0].Request.Entity>=0)break;
+                            if(TryPublishOwnedProbeAnswer(probeNames)!=true){LastNavigationStepPath=20;return;}
+                        }
+                    }
+                }
                 var movement=TryPublishOwnedMovement(dt);if(movement.HasValue){LastNavigationStepPath=movement.Value?2:3;return;}
                 var traffic=TryDispatchPreparedTraffic(dt);if(traffic.HasValue){LastNavigationStepPath=traffic.Value?4:5;return;}
                 if(motionAuthority!=null){

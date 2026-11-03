@@ -16,6 +16,8 @@ namespace Spacewars.Presentation
         private readonly Dictionary<string,double> commandKeys=new Dictionary<string,double>();
         private Voice[] voices;
         private AudioSource notification;
+        private SpokenSignalPlayer speech;
+        public SpokenSignalPlayer Speech=>speech;
         private AudioListener ownedListener;
         private GameplayMixGuard mixGuard;
         private bool ownsGuard;
@@ -50,6 +52,7 @@ namespace Spacewars.Presentation
             }
             voices=Enumerable.Range(0,profile.voices).Select(i=>new Voice{Source=Source("Effect "+i)}).ToArray();
             notification=Source("Human command");notification.priority=32;
+            speech=GetComponent<SpokenSignalPlayer>()??gameObject.AddComponent<SpokenSignalPlayer>();speech.Initialize(profile);
             var listener=FindAnyObjectByType<AudioListener>();
             if(!listener)listener=ownedListener=gameObject.AddComponent<AudioListener>();
             mixGuard=listener.GetComponent<GameplayMixGuard>();
@@ -63,6 +66,7 @@ namespace Spacewars.Presentation
         }
         public void ResetAudio()
         {
+            speech?.ResetSpeech();
             if(voices==null)return;
             foreach(var v in voices){v.Source.Stop();v.Source.volume=0;v.Key=null;v.Gain=0;v.TargetGain=0;}
             notification.Stop();commandKeys.Clear();pendingCommands.Clear();signalKeys.Clear();selections.Clear();plan.Reset();EffectsGainSum=0;generation=long.MinValue;lastTick=-1;lastSignal=-10;signalPriority=0;
@@ -127,7 +131,7 @@ namespace Spacewars.Presentation
             Initialize();
             if(!ReferenceEquals(profile,NativeGameplayAudioProfile.Current))
             {ResetAudio();foreach(var v in voices)Destroy(v.Source.gameObject);Destroy(notification.gameObject);voices=null;Initialize();}
-            if(!active){if(generation!=long.MinValue)ResetAudio();notification.volume=DiagnosticSuppressOutput?0:profile.notificationGain*NativeAudioSettings.Notifications;return;}
+            if(!active){speech?.Tick(screens,false,Time.unscaledTimeAsDouble);if(generation!=long.MinValue)ResetAudio();notification.volume=DiagnosticSuppressOutput?0:profile.notificationGain*NativeAudioSettings.Notifications;return;}
             var first=screens.FirstOrDefault(s=>s.View!=null);
             if(first==null){ResetAudio();return;}
             if(generation!=first.View.Generation||first.View.Tick<lastTick){ResetAudio();generation=first.View.Generation;}
@@ -136,6 +140,7 @@ namespace Spacewars.Presentation
             {if(v.Key!=null&&!v.Source.isPlaying&&!v.Loop){v.Key=null;v.Gain=0;}if(v.Loop)v.TargetGain=0;}
             double now=Time.unscaledTimeAsDouble;
             foreach(var cue in plan.Observe(screens,now,true))Play(cue);
+            speech.Tick(screens,true,now);
             float blend=(float)(1-Math.Exp(-Math.Max(0,seconds)/profile.fadeSeconds));
             foreach(var v in voices)
             {
@@ -180,6 +185,7 @@ namespace Spacewars.Presentation
         private void OnDestroy()
         {
             if(voices!=null)foreach(var v in voices)if(v.Source)Destroy(v.Source.gameObject);
+            if(speech)Destroy(speech);
             if(notification)Destroy(notification.gameObject);if(ownsGuard&&mixGuard)Destroy(mixGuard);if(ownedListener)Destroy(ownedListener);
         }
     }

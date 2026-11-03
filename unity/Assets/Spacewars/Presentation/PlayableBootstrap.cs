@@ -124,8 +124,9 @@ namespace Spacewars.Presentation
                 Application.runInBackground=true;
                 var args=Environment.GetCommandLineArgs();for(int i=0;i+1<args.Length;i++)if(args[i]=="-playableEvidence")evidence=args[i+1];
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
+                battleBenchmark=Array.IndexOf(args,"-battleBenchmark")>=0;
                 responsiveUiEvidence=Array.IndexOf(args,"-responsiveUiEvidence")>=0;
-                battleHudUnattended=Array.IndexOf(args,"-provingGroundEvidence")>=0||Array.IndexOf(args,"-fleetFinishEvidence")>=0||Array.IndexOf(args,"-battleHudEvidence")>=0||Array.IndexOf(args,"-hawkFlightEvidence")>=0||Array.IndexOf(args,"-hawkCombatEvidence")>=0;
+                battleHudUnattended=battleBenchmark||Array.IndexOf(args,"-provingGroundEvidence")>=0||Array.IndexOf(args,"-fleetFinishEvidence")>=0||Array.IndexOf(args,"-battleHudEvidence")>=0||Array.IndexOf(args,"-hawkFlightEvidence")>=0||Array.IndexOf(args,"-hawkCombatEvidence")>=0;
                 for(int i=0;i+1<args.Length;i++)if(args[i]=="-resultUiEvidence")resultUiEvidence=args[i+1];
                 for(int i=0;i+1<args.Length;i++)if(args[i]=="-resultActionEvidence")resultActionEvidence=args[i+1];
                 styleASceneEvidence=Array.IndexOf(args,"-styleASceneEvidence")>=0;
@@ -157,9 +158,10 @@ namespace Spacewars.Presentation
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
                 for(int i=0;i+1<args.Length;i++)if(args[i]=="-orbitalUiEvidence")orbitalEvidence=args[i+1];
                 if(orbitalEvidence!=null)StartCoroutine(CaptureOrbitalUiEvidence());
+                if(battleBenchmark)StartCoroutine(LoadingPreparation.Run(RunBattleBenchmark(args),error=>{Debug.LogException(error);runtime?.RequestStop();Application.Quit(1);}));
 #endif
                 // Evidence must enter through the current menu/lobby lifecycle too.
-                if(evidence!=null&&lobbyEvidence==null&&Array.IndexOf(args,"-provingGroundEvidence")<0&&Array.IndexOf(args,"-fleetFinishEvidence")<0)StartCoroutine(StartEvidenceMatch());
+                if(evidence!=null&&Array.IndexOf(args,"-battleBenchmark")<0&&lobbyEvidence==null&&Array.IndexOf(args,"-provingGroundEvidence")<0&&Array.IndexOf(args,"-fleetFinishEvidence")<0)StartCoroutine(StartEvidenceMatch());
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
                 if(evidence!=null&&Array.IndexOf(args,"-fleetFinishEvidence")>=0)StartCoroutine(LoadingPreparation.Run(CaptureFleetFinishEvidence(),e=>{File.WriteAllText(Path.Combine(evidence,"fleet-result.txt"),"FAIL "+e);Debug.LogException(e);runtime?.RequestStop();Flush();Application.Quit(1);}));
                 if(evidence!=null&&Array.IndexOf(args,"-provingGroundEvidence")>=0)StartCoroutine(LoadingPreparation.Run(CaptureProvingGroundEvidence(),e=>{File.WriteAllText(Path.Combine(evidence,"proving-result.txt"),"FAIL "+e);Debug.LogException(e);runtime?.RequestStop();Flush();Application.Quit();}));

@@ -18,8 +18,8 @@ namespace Spacewars.Tests.EditMode
             {
                 int id=(int)Call("SpawnUnit",default(NavPoint),PlayableOwner.Player,PlayableEntityKind.Tank);Call("Damage",id,int.MaxValue);
                 byte[] current;using(var stream=new MemoryStream()){using(var writer=new BinaryWriter(stream,System.Text.Encoding.UTF8,true))Call("WriteWrecks",writer);current=stream.ToArray();}
-                // WRK1 has the same single-wreck fields and no trailing appearance byte.
-                byte[] previous=current.Take(current.Length-1).ToArray();BitConverter.GetBytes(0x57524B31).CopyTo(previous,0);
+                // WRK1 lacks the WRK2 appearance byte and WRK3 protection deadline.
+                byte[] previous=current.Take(current.Length-9).ToArray();BitConverter.GetBytes(0x57524B31).CopyTo(previous,0);
                 ((IDictionary)typeof(PlayableDomain).GetField("wrecks",hidden).GetValue(domain)).Clear();
                 using(var stream=new MemoryStream(previous))using(var reader=new BinaryReader(stream)){Call("ReadWrecks",reader);Assert.AreEqual(stream.Length,stream.Position);}
                 var wreck=domain.Snapshot(1,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7).Wrecks.Single();

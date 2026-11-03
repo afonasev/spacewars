@@ -60,7 +60,7 @@ namespace Spacewars.Tests.EditMode
             foreach(var ridge in m.OriginalRidges)Assert.True(m.Solids.Any(solid=>solid.GeometryEquals(ridge)));
         }
         [Test] public void OutpostSlotsHaveOneRearAndTwoSymmetricFrontBuildings(){
-            var p=Profile();var map=(MossHighlandMap)p.AuthoredMap;Assert.AreEqual(4,map.Revision);
+            var p=Profile();var map=(MossHighlandMap)p.AuthoredMap;Assert.AreEqual(5,map.Revision);
             foreach(var site in map.Sites(p).Where(s=>s.Kind==PlayableBuildingKind.Outpost)){
                 Assert.AreEqual(3,site.Slots.Count);
                 foreach(var slot in site.Slots){double dx=slot.Position.X-site.Position.X,dz=slot.Position.Z-site.Position.Z;Assert.That(Math.Sqrt(dx*dx+dz*dz),Is.EqualTo(p.SlotRingRadius).Within(1e-9));}

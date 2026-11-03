@@ -107,6 +107,7 @@ def write_publication(out,release,head,public_commit,expected,channel,version):
  if release['draft']:raise ValueError('release is still a draft')
  receipt={'version':version,'channel':channel,'url':release['html_url'],'commit':head,'public_commit':public_commit,'assets':expected,'verification':'local signed package verification and GitHub upload metadata','client_download_readback':'NotRun: user policy 2026-11-02; no draft/public payload downloads'}
  (out/'publication.json').write_text(json.dumps(receipt,indent=2)+'\n')
+ if channel=='production':run(['gh','workflow','run','installer-downloads.yml','--repo',REPO,'--ref','main','-f','apply=true'])
  print(release['html_url'])
 
 def main():
@@ -160,6 +161,7 @@ def main():
     body,provenance=release_notes.generate(ROOT,head,baseline)
     if a.notes:body,authored=release_notes.authored(ROOT,head,a.notes,a.version,assets);provenance['authored']=authored
     body=body.replace('\n\n## English','\n\nУстановщики без подписи издателя ОС.\n\n## English')+'\nInstallers do not have an OS publisher signature.\n'
+    body=release_notes.with_installer_downloads(body,a.version,REPO,f'Spacewars-{a.version}-Windows-x64.exe',f'Spacewars-{a.version}-macOS-Universal.dmg')
     (out/'release-notes.md').write_text(body+'\n<!-- spacewars-publisher:'+state.data['owner_token']+' -->\n')
     (out/'release-notes-source.json').write_text(json.dumps(provenance,indent=2)+'\n')
    state.record('notes',[out/'release-notes.md',out/'release-notes-source.json']+list(assets.glob('notes-*.png')))

@@ -248,6 +248,47 @@ namespace Spacewars.Simulation
             }
             return result;
         }
+        // Wreck waiting asks for reachability, never for waypoints. A clear row or
+        // column certifies all the original four-neighbour grid edges along that leg.
+        // An inconclusive certificate always falls back to the ordinary router.
+        internal bool HasPath(NavPoint start,NavPoint goal)
+        {
+            if(!geometry.IsFree(start,profile.Radius)||!geometry.IsFree(goal,profile.Radius))return false;
+            if(geometry.SegmentFreeBetweenFreeEndpoints(start,goal,profile.Radius))return true;
+            var from=ToCell(start);var to=ToCell(goal);
+            if(Attached(start,from)&&Attached(goal,to)&&geometry.SegmentFree(ToPoint(to),goal,profile.Radius))
+            {
+                var a=ToPoint(from);var b=ToPoint(to);
+                var corner=new NavPoint(a.X,b.Z);
+                if(ClearGridLeg(a,corner)&&ClearGridLeg(corner,b))return true;
+                corner=new NavPoint(b.X,a.Z);
+                if(ClearGridLeg(a,corner)&&ClearGridLeg(corner,b))return true;
+                // A wreck can cut both L-shaped walks while leaving an open middle lane.
+                var middle=ToPoint(new Cell((int)(((long)from.X+to.X)/2),(int)(((long)from.Z+to.Z)/2)));
+                var c=new NavPoint(a.X,middle.Z);var d=new NavPoint(b.X,middle.Z);
+                if(ClearGridLeg(a,c)&&ClearGridLeg(c,d)&&ClearGridLeg(d,b))return true;
+                c=new NavPoint(middle.X,a.Z);d=new NavPoint(middle.X,b.Z);
+                if(ClearGridLeg(a,c)&&ClearGridLeg(c,d)&&ClearGridLeg(d,b))return true;
+            }
+            return FindPath(start,goal).Length!=0;
+        }
+
+        private bool ClearGridLeg(NavPoint a,NavPoint b)
+        {
+            // Reject even an overlapping obstacle bounding box. All grid centres and
+            // their swept discs then fit inside this empty strip, in either direction.
+            double pad=profile.Radius+(1+geometry.HalfExtent)*1e-12;
+            double left=Math.Min(a.X,b.X)-pad,right=Math.Max(a.X,b.X)+pad;
+            double bottom=Math.Min(a.Z,b.Z)-pad,top=Math.Max(a.Z,b.Z)+pad;
+            if(left< -geometry.HalfExtent||right>geometry.HalfExtent||bottom< -geometry.HalfExtent||top>geometry.HalfExtent)return false;
+            var obstacles=geometry.Obstacles;
+            for(int i=0;i<obstacles.Count;i++){
+                var obstacle=obstacles[i];
+                if(left<=obstacle.MaxX&&right>=obstacle.MinX&&bottom<=obstacle.MaxZ&&top>=obstacle.MinZ)return false;
+            }
+            return true;
+        }
+
         private NavPoint[] FindPathCore(NavPoint start, NavPoint goal)
         {
             if (!geometry.IsFree(start, profile.Radius) || !geometry.IsFree(goal, profile.Radius)) return new NavPoint[0];

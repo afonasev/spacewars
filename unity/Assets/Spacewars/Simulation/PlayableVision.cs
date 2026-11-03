@@ -52,18 +52,25 @@ namespace Spacewars.Simulation
             !(p.X<minX||p.X>maxX||p.Z<minZ||p.Z>maxZ);
     }
 
+    public sealed class KnownRelay
+    {
+        public int SiteId {get;}
+        public PlayableOwner? Owner {get;}
+        public KnownRelay(int siteId,PlayableOwner? owner){SiteId=siteId;Owner=owner;}
+    }
     public sealed class TeamVisionSnapshot
     {
         private readonly VisionSource[] sourceValues;
         private readonly VisionQueryBounds queryBounds;
-        internal TeamVisionSnapshot(int team,long revision,long fogRevision,double halfWidth,double halfDepth,double cellSize,VisionSource[] sources,long[] cells,byte[] coverage,KnownBuilding[] memory)
+        internal TeamVisionSnapshot(int team,long revision,long fogRevision,double halfWidth,double halfDepth,double cellSize,VisionSource[] sources,long[] cells,byte[] coverage,KnownBuilding[] memory,KnownRelay[] relays=null)
         {
-            Team=team;Revision=revision;FogRevision=fogRevision;HalfWidth=halfWidth;HalfDepth=halfDepth;CellSize=cellSize;
+            KnownRelays=Array.AsReadOnly((KnownRelay[])(relays??Array.Empty<KnownRelay>()).Clone());Team=team;Revision=revision;FogRevision=fogRevision;HalfWidth=halfWidth;HalfDepth=halfDepth;CellSize=cellSize;
             sourceValues=(VisionSource[])sources.Clone();queryBounds=VisionQueryBounds.Create(sourceValues);Sources=Array.AsReadOnly(sourceValues);DiscoveredCells=Array.AsReadOnly((long[])cells.Clone());
             Coverage=Array.AsReadOnly((byte[])coverage.Clone());KnownBuildings=Array.AsReadOnly((KnownBuilding[])memory.Clone());
         }
         public int Team{get;} public long Revision{get;} public long FogRevision{get;} public double HalfWidth{get;} public double HalfDepth{get;} public double CellSize{get;}
         public IReadOnlyList<VisionSource> Sources{get;} public IReadOnlyList<long> DiscoveredCells{get;}
+        public IReadOnlyList<KnownRelay> KnownRelays{get;}
         public IReadOnlyList<byte> Coverage{get;} public IReadOnlyList<KnownBuilding> KnownBuildings{get;}
         public bool IsVisible(NavPoint p)=>queryBounds.MayContain(p)&&PlayableVision.VisibleArray(sourceValues,p);
     }
@@ -80,6 +87,14 @@ namespace Spacewars.Simulation
         private VisionQueryBounds queryBounds;
         private readonly HashSet<long> discovered=new HashSet<long>();
         private readonly Dictionary<int,KnownBuilding> known=new Dictionary<int,KnownBuilding>();
+        private readonly Dictionary<int,PlayableOwner?> knownRelays=new Dictionary<int,PlayableOwner?>();
+        public void ObserveRelays(IEnumerable<TerritorySiteSnapshot> sites)
+        {
+            foreach(var site in sites)
+                if(site.Site.Kind==PlayableBuildingKind.RelayTower&&IsVisible(site.Site.Position)&&
+                    (!knownRelays.TryGetValue(site.Site.Id,out var owner)||owner!=site.Owner))
+                {knownRelays[site.Site.Id]=site.Owner;revision++;cached=null;}
+        }
         private readonly byte[] coverage=new byte[RasterResolution*RasterResolution];
         private long revision;
         private TeamVisionSnapshot cached;
@@ -219,7 +234,7 @@ namespace Spacewars.Simulation
         private static int Pixel(double n,double half)=>Math.Max(0,Math.Min(RasterResolution-1,(int)Math.Floor((n+half)/(2*half)*RasterResolution)));
         public TeamVisionSnapshot Snapshot()
         {
-            if(cached==null)cached=new TeamVisionSnapshot(team,revision,CoverageUpdates,halfWidth,halfDepth,cellSize,sources,discovered.OrderBy(x=>x).ToArray(),coverage,known.Values.OrderBy(b=>b.Id).ToArray());
+            if(cached==null)cached=new TeamVisionSnapshot(team,revision,CoverageUpdates,halfWidth,halfDepth,cellSize,sources,discovered.OrderBy(x=>x).ToArray(),coverage,known.Values.OrderBy(b=>b.Id).ToArray(),knownRelays.OrderBy(r=>r.Key).Select(r=>new KnownRelay(r.Key,r.Value)).ToArray());
             return cached;
         }
         public static double BuildingRadius(PlayableProfile p,PlayableBuildingKind kind,ConstructionPhase phase)

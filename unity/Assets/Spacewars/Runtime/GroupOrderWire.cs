@@ -44,8 +44,9 @@ namespace Spacewars.Runtime
         private const int Tag=0x47525031;
         internal static void WriteExtension(BinaryWriter w,NavigationSessionState state)
         {
-            w.Write(Tag);bool v2=state.RecastCoordinationVersion==2||System.Linq.Enumerable.Any(state.Groups??System.Array.Empty<GroupOrderState>(),g=>g.MarchVersion==2)||System.Linq.Enumerable.Any(state.InstalledExecutions??System.Array.Empty<NavigationInstalledExecutionState>(),e=>e.ExecutionGeometryIndex>=0);w.Write(state.RecastCoordinationVersion==2?13:v2?10:state.HostAuthority==null?8:9);w.Write(state.GroupSequence);if(state.RecastCoordinationVersion==2)w.Write(2);
+            w.Write(Tag);bool v2=state.RecastCoordinationVersion==2||System.Linq.Enumerable.Any(state.Groups??System.Array.Empty<GroupOrderState>(),g=>g.MarchVersion==2)||System.Linq.Enumerable.Any(state.InstalledExecutions??System.Array.Empty<NavigationInstalledExecutionState>(),e=>e.ExecutionGeometryIndex>=0);w.Write(state.RecastCoordinationVersion==2?14:v2?10:state.HostAuthority==null?8:9);w.Write(state.GroupSequence);if(state.RecastCoordinationVersion==2){w.Write(2);w.Write(1);}
             Array(w,state.Groups??System.Array.Empty<GroupOrderState>(),g=>{
+                if(state.RecastCoordinationVersion==2){w.Write(g.FormationVersion);String(w,g.FormationSeal);}
                 w.Write(g.WorldGeneration);w.Write(g.GroupId);w.Write(g.OrderRevision);w.Write(g.CommandSequence);w.Write(g.IssuedTick);w.Write(g.MembershipRevision);
                 String(w,g.OwnerId);w.Write(g.TeamId);w.Write((int)g.Origin);w.Write((int)g.Kind);String(w,g.Source);w.Write(g.JobId);w.Write(g.ActionId);WorldWire.Write(w,g.OriginalGoal);w.Write(g.TargetId);
                 Array(w,g.Members,m=>{w.Write(m.Entity);w.Write(m.Incarnation);w.Write(m.OrderRevision);w.Write(m.MobilityRevision);w.Write(m.Slot);w.Write((int)m.Phase);
@@ -84,14 +85,14 @@ namespace Spacewars.Runtime
         {
             if(r.BaseStream.Position==r.BaseStream.Length){LegacyAnswerStatuses(state);return;}
             if(r.ReadInt32()!=Tag)throw new ArgumentException("Unsupported navigation group extension.");
-            int version=r.ReadInt32();if(version<1||version>13)throw new ArgumentException("Unsupported navigation surface extension.");
+            int version=r.ReadInt32();if(version<1||version>14)throw new ArgumentException("Unsupported navigation surface extension.");
             if(version==8&&legacyFormat==NavigationV8Format.Unspecified)throw new ArgumentException("Navigation v8 requires explicit A5Arrival or MainInstalledLayout import format.");
             if(legacyFormat<NavigationV8Format.Unspecified||legacyFormat>NavigationV8Format.MainInstalledLayout)throw new ArgumentException("Unknown navigation v8 import format.");
-            state.GroupSequence=r.ReadInt64();if(version>=11){state.RecastCoordinationVersion=r.ReadInt32();if(state.RecastCoordinationVersion!=(version==11?1:2))throw new ArgumentException("Unsupported Recast coordination sidecar.");}state.Groups=Array(r,()=>Record(r,()=>new GroupOrderState{
+            state.GroupSequence=r.ReadInt64();if(version>=11){state.RecastCoordinationVersion=r.ReadInt32();if(state.RecastCoordinationVersion!=(version==11?1:2))throw new ArgumentException("Unsupported Recast coordination sidecar.");}if(version==14&&r.ReadInt32()!=1)throw new ArgumentException("Unsupported formation version.");state.Groups=Array(r,()=>{int formation=version==14?r.ReadInt32():0;string seal=version==14?String(r):null;if(formation<0||formation>1||(formation==0)!=(seal==null))throw new ArgumentException("Invalid formation stamp.");if(seal!=null)NavContract.Sha256(seal);return Record(r,()=>new GroupOrderState{FormationVersion=formation,FormationSeal=seal,
                 WorldGeneration=r.ReadInt64(),GroupId=r.ReadInt64(),OrderRevision=r.ReadInt64(),CommandSequence=r.ReadInt64(),IssuedTick=r.ReadInt64(),MembershipRevision=r.ReadInt64(),
                 OwnerId=String(r),TeamId=r.ReadInt32(),Origin=EnumValue<PlayableOrderOrigin>(r),Kind=EnumValue<PlayableCommandKind>(r),Source=String(r),JobId=r.ReadInt64(),ActionId=r.ReadInt64(),OriginalGoal=ReadPoint(r),TargetId=r.ReadInt32(),
                 Members=Array(r,()=>Record(r,()=>new GroupMemberState{Entity=r.ReadInt32(),Incarnation=r.ReadInt64(),OrderRevision=r.ReadInt64(),MobilityRevision=r.ReadInt64(),Slot=r.ReadInt32(),Phase=EnumValue<GroupMemberPhase>(r),
-                    Goal=ReadPoint(r),HasGoal=Boolean(r),FormationReleased=Boolean(r),Branch=r.ReadInt64(),Reservation=r.ReadInt64(),Progress=Number(r),ContactTick=r.ReadInt64(),ContactPhase=String(r)}))}));
+                    Goal=ReadPoint(r),HasGoal=Boolean(r),FormationReleased=Boolean(r),Branch=r.ReadInt64(),Reservation=r.ReadInt64(),Progress=Number(r),ContactTick=r.ReadInt64(),ContactPhase=String(r)}))});});
             var identities=Array(r,()=>Boolean(r)?Record(r,()=>new NavigationMemberIdentity(r.ReadInt64(),r.ReadInt64(),r.ReadInt64(),r.ReadInt64(),r.ReadInt64())):null);
             if(identities.Length!=state.Requests.Length)throw new ArgumentException("Request group identity count mismatch.");
             for(int i=0;i<identities.Length;i++)state.Requests[i].MemberIdentity=identities[i];

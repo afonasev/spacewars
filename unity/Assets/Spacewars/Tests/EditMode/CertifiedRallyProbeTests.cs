@@ -19,6 +19,20 @@ namespace Spacewars.Tests.EditMode
             while(session.Requests.TryDequeue(out var request))if(request.Entity==1)session.Answers.TryEnqueue(new NavigationAnswer(request,new[]{request.Goal}));
             Assert.IsTrue(session.DeliveryBarrierReady);session.Step(1d/30);Assert.AreEqual(1,session.AppliedResults);Assert.AreEqual(1,session.PendingCount,"Producer proof remains pending, not accepted");
         }
+        [TestCase(PlayableEntityKind.Explorer)][TestCase(PlayableEntityKind.Shkval)]
+        public void AuthoredProducerProbeCompletesForEveryFactoryFootprint(PlayableEntityKind kind)
+        {
+            var map=new FoundryMap(new FoundryProfileData());var profile=PlayableProfile.Create(PlayableProfile.Default.CopyData(),map);
+            var geometry=new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision);var session=new NavigationSession(1,geometry,profile.Navigation,terrain:map);
+            var typed=profile.Navigation.ForUnit(PlayableUnitRules.Radius(profile,kind),PlayableUnitRules.Speed(profile,kind,false),PlayableUnitRules.Turn(profile,kind));
+            Assert.NotNull(session.Probe(7,1,typed,new NavPoint(0,0),new NavPoint(1,0)));
+            using(var host=new UnityHostRouteService()){
+                var binding=new PlayableRouteBinding(geometry,profile,session.Admission,session.RoutePort);
+                for(int i=0;i<100&&session.PendingCount>0;i++){host.Service(binding,4);session.ApplyResults();}
+                var failure=typeof(NavigationSession).GetProperty("LastAnswerNamesFailure",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).GetValue(session);
+                Assert.AreEqual(0,session.PendingCount,"kind="+kind+" nameFailure="+failure);Assert.True(session.TryProbeAnswer(out var answer));Assert.AreEqual(NavSolveStatus.Ready,answer.Status);
+            }
+        }
         [TestCase(false,0)][TestCase(false,1)][TestCase(true,0)][TestCase(true,1)]
         public void TypedProducerProbeCompletesWithCertifiedHost(bool authored,long order)
         {
@@ -27,7 +41,9 @@ namespace Spacewars.Tests.EditMode
             var geometry=authored?new NavGeometry(map.HalfExtent,map.MovementBlockers.ToArray(),map.Revision):new NavGeometry(32,Array.Empty<NavObstacle>(),1);
             var session=new NavigationSession(1,geometry,profile.Navigation,terrain:map);
             var typed=profile.Navigation.ForUnit(profile.TankCollisionRadius,profile.TankSpeed,profile.TankTurnSpeed);
-            Assert.IsNotNull(session.Probe(7,order,typed,new NavPoint(0,0),new NavPoint(1,0)));
+            var request=session.Probe(7,order,typed,new NavPoint(0,0),new NavPoint(1,0));Assert.IsNotNull(request);
+            Assert.True(request.StartLocation.HasValue);Assert.True(request.GoalLocation.HasValue);
+            Assert.AreEqual(request.Start,request.StartLocation.Value.Position);Assert.AreEqual(request.Goal,request.GoalLocation.Value.Position);
             using(var host=new UnityHostRouteService())
             {
                 var binding=new PlayableRouteBinding(geometry,profile,session.Admission,session.RoutePort);

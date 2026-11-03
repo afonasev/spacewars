@@ -70,7 +70,7 @@ namespace Spacewars.Tests.EditMode
             var sites=map.Sites(p);Assert.AreEqual(10,sites.Length);
             Assert.AreEqual(2,sites.Count(s=>s.Kind==PlayableBuildingKind.Headquarters));
             Assert.AreEqual(2,sites.Count(s=>s.Kind==PlayableBuildingKind.Outpost));
-            Assert.AreEqual(6,sites.Count(s=>s.Kind==PlayableBuildingKind.Mine));
+            Assert.AreEqual(4,sites.Count(s=>s.Kind==PlayableBuildingKind.Mine));Assert.AreEqual(2,sites.Count(s=>s.Kind==PlayableBuildingKind.RelayTower));
             Assert.AreEqual(16,sites.Sum(s=>s.Slots.Count));
             foreach(var site in sites)foreach(var slot in site.Slots)Assert.True(map.SupportsFootprint(slot.Position,p.FactoryFootprintRadius),"slot "+site.Id+"/"+slot.Id);
             Assert.True(PartitionNavigationProvider.SupportsTerrain(map));

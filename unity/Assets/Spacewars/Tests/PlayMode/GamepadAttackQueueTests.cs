@@ -26,8 +26,8 @@ namespace Spacewars.Input.Tests
         NativeLocalInputProfile Profile=>JsonUtility.FromJson<NativeLocalInputProfile>(Resources.Load<TextAsset>("NativeLocalInputProfile").text);
         [TearDown] public override void TearDown(){if(host!=null)UnityEngine.Object.DestroyImmediate(host);base.TearDown();}
 
-        [TestCase("world",2,"context")][TestCase("world",256,"attackMove")]
-        [TestCase("tacticalMap",2,"context")][TestCase("tacticalMap",256,"attackMove")]
+        [TestCase("world",4,"context")][TestCase("world",256,"attackMove")]
+        [TestCase("tacticalMap",4,"context")][TestCase("tacticalMap",256,"attackMove")]
         public void ShortReplacesAndLongAppendsExactlyOnce(string mode,int bit,string kind)
         {
             var p=Profile;var g=new OfflinePadGestures();g.SetMode(mode);g.Step(0,0,true,true,p);
@@ -39,7 +39,7 @@ namespace Spacewars.Input.Tests
             Assert.IsEmpty(g.Step(12+p.holdMs*3,0,true,true,p,false));
         }
 
-        [TestCase(2)][TestCase(256)]
+        [TestCase(4)][TestCase(256)]
         public void InterruptedHoldRequiresNeutralAndOtherSeatStaysIndependent(int bit)
         {
             var p=Profile;var g=new OfflinePadGestures();var other=new OfflinePadGestures();g.Step(0,0,true,true,p);other.Step(0,0,true,true,p);
@@ -57,10 +57,23 @@ namespace Spacewars.Input.Tests
             Assert.IsEmpty(g.Step(1,256,true,true,p));Assert.IsEmpty(g.Step(1+p.holdMs,256,true,true,p));Assert.IsFalse(g.AttackPreview);Assert.IsFalse(g.QueuePreview);Assert.IsEmpty(g.Step(2+p.holdMs,0,true,true,p));
         }
 
+        [TestCase("world",false)] [TestCase("world",true)]
+        [TestCase("tacticalMap",false)] [TestCase("tacticalMap",true)]
+        public void BStopsOrHoldsWithoutMovementOrQueuePreview(string mode,bool held)
+        {
+            var p=Profile;var gestures=new OfflinePadGestures();gestures.SetMode(mode);gestures.Step(0,0,true,true,p);
+            Assert.IsEmpty(gestures.Step(1,2,true,true,p));
+            double released=held?2+p.holdMs:2;
+            Assert.IsEmpty(gestures.Step(released-1,2,true,true,p));Assert.IsFalse(gestures.QueuePreview);Assert.IsFalse(gestures.AttackPreview);
+            var intent=gestures.StepDetailed(released,0,true,true,p).Single();
+            Assert.AreEqual(held?"hold":"stop",intent.Kind);Assert.IsFalse(intent.Append);
+            Assert.IsEmpty(gestures.StepDetailed(released+1,0,true,true,p));
+        }
+
         IEnumerator StartTwoHumans()
         {
             var keyboard=InputSystem.AddDevice<Keyboard>();var mouse=InputSystem.AddDevice<Mouse>();keyboard.MakeCurrent();mouse.MakeCurrent();pads=new[]{InputSystem.AddDevice<Gamepad>(),InputSystem.AddDevice<Gamepad>()};
-            host=new GameObject("B Y queue ordinary adapter");app=host.AddComponent<PlayableBootstrap>();app.enabled=false;Put(app,"profile",PlayableProfile.ThreeCrossingsDefault);Call(app,"CreateWorld");Call(app,"CreateHud");Put(app,"input",host.AddComponent<PlayableInput>());Call(app,"BindLocalKeyboardInput");Call(app,"CreateLobby");Call(app,"ShowLobby");
+            host=new GameObject("X Y queue ordinary adapter");app=host.AddComponent<PlayableBootstrap>();app.enabled=false;Put(app,"profile",PlayableProfile.ThreeCrossingsDefault);Call(app,"CreateWorld");Call(app,"CreateHud");Put(app,"input",host.AddComponent<PlayableInput>());Call(app,"BindLocalKeyboardInput");Call(app,"CreateLobby");Call(app,"ShowLobby");
             Get<VisualElement>(app,"lobbyScreen").Q<DropdownField>("lobby-map-choice").value="Огненный разлом (6)";
             var draft=Get<NativeLobbyConfiguration>(app,"lobbySetup");draft.HasExplicitSeed=true;draft.ExplicitSeed=19092026;
             for(int i=0;i<2;i++){draft.Participants[i].Human=true;draft.Participants[i].DeviceId=i==0?0:pads[i].deviceId;draft.Participants[i].Team=i+1;}
@@ -80,8 +93,8 @@ namespace Spacewars.Input.Tests
             yield return StartTwoHumans();var seats=Get<List<PlayableBootstrap>>(app,"localPresentations");Assert.AreEqual(2,seats.Count);var seat=seats[1];var v=Get<PlayableSnapshot>(seat,"view");var own=v.Entities.First(e=>e.Owner==v.Owner);Get<HashSet<int>>(seat,"selection").Add(own.Id);
             var point=new NavPoint(own.Position.X+4,own.Position.Z+4);Put(seat,"padCursorGround",point);Put(seat,"padCursorInitialized",true);Put(seat,"battleCursor",(Vector2)Get<Camera>(seat,"cameraView").WorldToScreenPoint(Get<PlayableWorld>(seat,"world").Point(point)));Call(seat,"PollOrdinaryPad");
             long other=Get<long>(seats[0],"sequence"),before=Get<long>(seat,"sequence");
-            Button(seat,pads[1].buttonEast,true);Button(seat,pads[1].buttonEast,false);var command=Submitted(seat,before+1);Assert.AreEqual(PlayableCommandKind.Move,command.Kind);Assert.AreEqual(PlayableOrderMode.Replace,command.Mode);
-            foreach(var button in new[]{pads[1].buttonEast,pads[1].buttonNorth,pads[1].buttonEast})
+            Button(seat,pads[1].buttonWest,true);Button(seat,pads[1].buttonWest,false);var command=Submitted(seat,before+1);Assert.AreEqual(PlayableCommandKind.Move,command.Kind);Assert.AreEqual(PlayableOrderMode.Replace,command.Mode);
+            foreach(var button in new[]{pads[1].buttonWest,pads[1].buttonNorth,pads[1].buttonWest})
             {
                 before=Get<long>(seat,"sequence");Button(seat,button,true);yield return new WaitForSecondsRealtime(Profile.holdMs/1000f+.05f);Call(seat,"PollOrdinaryPad");Assert.AreEqual(before,Get<long>(seat,"sequence"));Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(seat,"battleCursorVisual").Q<Label>("pad-queue-preview").style.display.value);
                 Button(seat,button,false);command=Submitted(seat,before+1);Assert.AreEqual(button==pads[1].buttonNorth?PlayableCommandKind.AttackMove:PlayableCommandKind.Move,command.Kind);Assert.AreEqual(PlayableOrderMode.Append,command.Mode);Assert.AreEqual(v.OwnerId,command.PlayerId);
@@ -89,7 +102,17 @@ namespace Spacewars.Input.Tests
             before=Get<long>(seat,"sequence");Button(seat,pads[1].buttonNorth,true);Button(seat,pads[1].buttonNorth,false);command=Submitted(seat,before+1);Assert.AreEqual(PlayableCommandKind.AttackMove,command.Kind);Assert.AreEqual(PlayableOrderMode.Replace,command.Mode);
             Button(seat,pads[1].selectButton,true);Button(seat,pads[1].selectButton,false);Assert.IsTrue(Get<bool>(seat,"mapOpen"));Put(seat,"padCursorGround",point);
             before=Get<long>(seat,"sequence");Button(seat,pads[1].buttonNorth,true);yield return new WaitForSecondsRealtime(Profile.holdMs/1000f+.05f);Button(seat,pads[1].buttonNorth,false);command=Submitted(seat,before+1);Assert.AreEqual(PlayableCommandKind.AttackMove,command.Kind);Assert.AreEqual(PlayableOrderMode.Append,command.Mode);Assert.AreEqual(point,command.Target);Assert.IsTrue(Get<bool>(seat,"mapOpen"));Assert.AreEqual(other,Get<long>(seats[0],"sequence"));
-            Get<PlayableRuntime>(app,"runtime").RequestStop();
+            before=Get<long>(seat,"sequence");Button(seat,pads[1].buttonEast,true);Button(seat,pads[1].buttonEast,false);
+            Assert.AreEqual(before+1,Get<long>(seat,"sequence"),"B dispatches one Stop");
+            var receipts=Get<PlayableRuntime>(app,"runtime");float stopDeadline=Time.realtimeSinceStartup+5;
+            while(!receipts.OfflineFrame.Receipts.Any(r=>r.Receipt.OwnerId==v.OwnerId&&r.Receipt.Sequence==before+1)&&Time.realtimeSinceStartup<stopDeadline)yield return null;
+            Assert.True(receipts.OfflineFrame.Receipts.Any(r=>r.Receipt.OwnerId==v.OwnerId&&r.Receipt.Sequence==before+1&&r.Receipt.Status==PlayableCommandStatus.Applied));
+            before=Get<long>(seat,"sequence");Button(seat,pads[1].buttonEast,true);yield return new WaitForSecondsRealtime(Profile.holdMs/1000f+.05f);Call(seat,"PollOrdinaryPad");
+            Assert.IsFalse(Get<OfflinePadGestures>(seat,"battleGestures").QueuePreview);Button(seat,pads[1].buttonEast,false);Assert.AreEqual(before+1,Get<long>(seat,"sequence"));
+            stopDeadline=Time.realtimeSinceStartup+5;
+            while(!receipts.OfflineFrame.Receipts.Any(r=>r.Receipt.OwnerId==v.OwnerId&&r.Receipt.Sequence==before+1)&&Time.realtimeSinceStartup<stopDeadline)yield return null;
+            Assert.True(receipts.OfflineFrame.Receipts.Any(r=>r.Receipt.OwnerId==v.OwnerId&&r.Receipt.Sequence==before+1&&r.Receipt.Status==PlayableCommandStatus.Applied));
+            receipts.RequestStop();
         }
 
         [UnityTest] public IEnumerator FinishedControlsDiagramsKeepApprovedHelpAndSettingsSizes()

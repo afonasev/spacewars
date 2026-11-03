@@ -10,7 +10,7 @@ namespace Spacewars.Runtime
     // WorldWire/PlayableWorldRecords. There are no serialized engine objects/jobs.
     public sealed class PlayableWorldState : IDisposable
     {
-        public const int CurrentVersion=30;
+        public const int CurrentVersion=31;
         public int Version=CurrentVersion,Seed;
         public long Generation,Tick;
         public string SourceIdentity;
@@ -145,7 +145,7 @@ namespace Spacewars.Runtime
                 foreach(var layout in new[]{units.CaptureLayout(),buildings.CaptureLayout(),centerDamage.CaptureLayout(),rallyWork.CaptureLayout()})Array(w,layout,i=>w.Write(i));
                 WriteMatchHistory(w);WriteSpatialCompletionExtension(w);WriteTacticalQueueExtension(w);
                 w.Write(0x494E4331);Array(w,incomeEvents.ToArray(),e=>{w.Write(e.Tick);w.Write(e.BuildingId);w.Write((int)e.Owner);w.Write((int)e.Kind);Number(w,e.Position.X);Number(w,e.Position.Z);Number(w,e.Amount);});
-            WriteCampaignState(w);WriteBuildingDestructions(w);WriteTeamSignals(w);WriteWrecks(w);WriteShkvalLaunches(w);WriteDefaultCombat(w);WriteOrbital(w);WriteShkvalDamage(w);WriteShkvalBlastTerms(w);WriteMines(w);WriteAirMotionSources(w);
+            WriteCampaignState(w);WriteBuildingDestructions(w);WriteTeamSignals(w);WriteWrecks(w);WriteShkvalLaunches(w);WriteDefaultCombat(w);WriteOrbital(w);WriteShkvalDamage(w);WriteShkvalBlastTerms(w);WriteMines(w);WriteLingeringVision(w);WriteAirMotionSources(w);
             },nav.CaptureBudget);
             state.Domain=state.CaptureDomain.Bytes;
             state.CaptureNavigationBytes=WorldWire.PackOwned(w=>{WorldWire.Write(w,nav);w.Flush();nav.ReleasePrivateSerializedOutputs();},nav.CaptureBudget);state.Navigation=state.CaptureNavigationBytes.Bytes;
@@ -227,9 +227,11 @@ namespace Spacewars.Runtime
                     d.incomeEvents.AddRange(Array(r,()=>Record(r,()=>new PlayableIncomeEvent(r.ReadInt64(),r.ReadInt32(),EnumValue<PlayableOwner>(r),EnumValue<PlayableBuildingKind>(r),new NavPoint(Number(r),Number(r)),Number(r)))));
                     foreach(var e in d.incomeEvents)if(e.Tick<0||e.Tick>d.Tick||e.BuildingId<=0||!d.HasOwner(e.Owner)||e.Amount<=0)throw new ArgumentException("Invalid income event.");
                 }
-                d.ReadCampaignState(r);d.ReadBuildingDestructions(r);d.ReadTeamSignals(r);d.ReadWrecks(r);d.ReadShkvalLaunches(r);d.ReadDefaultCombat(r);d.ReadOrbital(r);d.ReadShkvalDamage(r);d.ReadShkvalBlastTerms(r);d.ReadMines(r);d.ReadAirMotionSources(r,transaction);return d;
+                d.ReadCampaignState(r);d.ReadBuildingDestructions(r);d.ReadTeamSignals(r);d.ReadWrecks(r);d.ReadShkvalLaunches(r);d.ReadDefaultCombat(r);d.ReadOrbital(r);d.ReadShkvalDamage(r);d.ReadShkvalBlastTerms(r);d.ReadMines(r);d.ReadLingeringVision(r);d.ReadAirMotionSources(r,transaction);return d;
             },transaction);
             foreach(var section in state.Vision){var v=UnpackPrivate(section,0,section.Length,ReadPlayableVisionState,transaction);if(v==null||!candidate.Owners.Any(x=>candidate.TeamOf(x)==v.Team)||candidate.visions.ContainsKey(v.Team))throw new ArgumentException("Invalid world vision binding.");var next=new PlayableVision(v.Team,profile.ArenaHalfExtent,profile.ArenaHalfExtent,profile.VisionCellSize,profile.FogEdgeFeather);next.RestoreState(v);candidate.visions.Add(v.Team,next);}
+            foreach(var vision in candidate.visions.Values.Select(x=>x.CaptureState()))foreach(var relay in vision.KnownRelays)
+                if(!candidate.sites.TryGetValue(relay.SiteId,out var site)||site.Site.Kind!=PlayableBuildingKind.RelayTower||relay.Owner.HasValue&&!candidate.HasOwner(relay.Owner.Value))throw new ArgumentException("Invalid remembered relay binding.");
             foreach(var v in candidate.visions.Values.Select(x=>x.CaptureState()))foreach(var known in v.KnownBuildings)if(!candidate.HasOwner(known.Owner)||known.Team!=candidate.TeamOf(known.Owner)||known.Team==v.Team||known.Id>=candidate.nextId)throw new ArgumentException("Invalid remembered building binding.");
             // RestoreWorldState has authenticated every consumed catalog field and
             // installed its exact maps before these cross-domain checks run.

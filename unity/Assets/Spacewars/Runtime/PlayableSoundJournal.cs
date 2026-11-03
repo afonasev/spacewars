@@ -15,6 +15,7 @@ namespace Spacewars.Runtime
             if(subjectOwner.HasValue){
                 if(kind==PlayableSoundKind.ConstructionComplete)MatchEvent(MatchEventKind.BuildingCompleted,subjectOwner.Value,position);
                 else if(kind==PlayableSoundKind.ProductionComplete)MatchEvent(MatchEventKind.UnitReady,subjectOwner.Value,notificationPoint??position);
+                else if(kind==PlayableSoundKind.UpgradeComplete)MatchEvent(MatchEventKind.UpgradeCompleted,subjectOwner.Value,position);
                 else if(kind==PlayableSoundKind.ResearchComplete)MatchEvent(MatchEventKind.ResearchCompleted,subjectOwner.Value,position);
             }
             PublishSound(new PlayableSoundEvent(++nextSoundEvent,Tick,kind,position,weapon,building,unitId,hullHeading,altitude:altitude,owner:subjectOwner,shotSide:shotSide),subjectOwner);

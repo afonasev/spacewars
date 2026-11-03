@@ -64,6 +64,11 @@ public sealed class NativeCompactLabTests
             nav.ActivateElement(view.Page.Q<Button>("lab-section-Здания"));nav.ActivateElement(view.Page.Q<Button>("lab-object-Переработчик"));
             Assert.NotNull(view.Page.Q<TextField>("lab-field-refineryUpgradeCost"));Assert.NotNull(view.Page.Q<Button>("lab-object-Переработчик").Q<OrbitalGlyph>());
             for(int i=0;i<5;i++)yield return null;Capture(texture,"refinery-1280x800");
+            // Keep an explicit visual witness for building entries below the first sidebar page.
+            nav.ActivateElement(view.Page.Q<Button>("lab-object-Ретранслятор"));
+            for(int i=0;i<5;i++)yield return null;
+            view.Page.Q<ScrollView>("lab-tree").ScrollTo(view.Page.Q<Button>("lab-object-Ретранслятор"));
+            for(int i=0;i<5;i++)yield return null;Capture(texture,"relay-1280x800");
             nav.ActivateElement(view.Page.Q<Button>("lab-object-Научный-центр"));Assert.NotNull(view.Page.Q("lab-field-scienceHealth"));Assert.IsNull(view.Page.Q("lab-field-scientificCenterUpgradeCost"));
             nav.ActivateElement(view.Page.Q<Button>("lab-research-link-Улучшение-научного-центра"));Assert.NotNull(view.Page.Q("lab-field-scientificCenterUpgradeCost"));
             view.Page.Q<TextField>("lab-field-scientificCenterUpgradeCost").value="301";

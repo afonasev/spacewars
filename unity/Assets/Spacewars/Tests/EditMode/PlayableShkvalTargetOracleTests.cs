@@ -13,95 +13,26 @@ namespace Spacewars.Tests.EditMode
     {
         private const BindingFlags Hidden=BindingFlags.Instance|BindingFlags.NonPublic;
         private static double Distance(NavPoint a,NavPoint b){double x=a.X-b.X,z=a.Z-b.Z;return Math.Sqrt(x*x+z*z);}
-        private static BallisticBody Body(int id,double x,double z,PlayableOwner owner=PlayableOwner.Enemy,NavPoint velocity=default(NavPoint),bool building=false,double height=2,double baseHeight=0)
-            =>new BallisticBody(id,owner,new NavPoint(x,z),velocity,1,height,100,building,baseHeight);
-        private static bool Hostile(PlayableOwner a,PlayableOwner b)=>(a==PlayableOwner.Enemy)!=(b==PlayableOwner.Enemy);
-        private sealed class ReferenceResult{internal int Target,Candidates,PredictionArrays,PredictionElements;}
-        // Full current observed-set selector oracle. Geometry/flight primitives are shared;
-        // candidate iteration, score accumulation and ranking are independently explicit.
-        private static ReferenceResult Reference(IReadOnlyList<BallisticBody> bodies,bool guided=false,IReadOnlyList<NavObstacle> solids=null,Func<NavPoint,double> terrain=null)
+        [TestCase(PlayableBuildingKind.Factory)][TestCase(PlayableBuildingKind.Hangar)]
+        [TestCase(PlayableBuildingKind.SentryTurret)][TestCase(PlayableBuildingKind.RepairTower)][TestCase(PlayableBuildingKind.GaussTower)]
+        public void BlastBoundsKeepContactsOnAnimatedAndPartiallyConstructedBuildings(PlayableBuildingKind kind)
         {
-            solids=solids??Array.Empty<NavObstacle>();var result=new ReferenceResult();double bestScore=0,bestDistance=double.PositiveInfinity;
-            foreach(var target in bodies){
-                if(!Hostile(target.Owner,PlayableOwner.Player))continue;double d=Distance(default(NavPoint),target.Position);if(d>13)continue;result.Candidates++;
-                var flight=guided?PlayableBallistics.Aim(default(NavPoint),target.Position,target.Velocity,1.15,4,12,true,2,1,2,terrain):new BallisticFlight(new BallisticPoint(0,(terrain?.Invoke(default(NavPoint))??0)+1.15,0),new BallisticPoint(target.Position.X,target.BaseHeight,target.Position.Z),4,12);
-                var hit=PlayableBallistics.FirstContact(flight,.09,solids,1.74,bodies,0,terrain:terrain).Value;
-                var predicted=new BallisticBody[bodies.Count];result.PredictionArrays++;result.PredictionElements+=predicted.Length;
-                for(int i=0;i<predicted.Length;i++)predicted[i]=bodies[i].Predict(flight.Duration*hit.Progress,terrain);
-                double score=0;foreach(var body in predicted)if(PlayableBallistics.BlastHits(hit.Point,1.4,body,solids,1.74,predicted,terrain))score+=Math.Min(body.Health,10)*(Hostile(body.Owner,PlayableOwner.Player)?1:-2);
-                bool wins=score>bestScore||score>0&&score==bestScore&&(d<bestDistance||d==bestDistance&&String.CompareOrdinal(target.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),result.Target.ToString(System.Globalization.CultureInfo.InvariantCulture))<0);
-                if(wins){result.Target=target.Id;bestScore=score;bestDistance=d;}
+            var profile=PlayableProfile.Default;
+            var center=new NavPoint(14,-7);
+            var pose=BuildingCombatGeometry.Pose(profile,kind,false,center,1,heading:.73,opening:.8,platform:.6,constructionProgress:.4);
+            if(TerritoryRules.Defensive(kind))
+                Assert.True(BuildingCombatGeometry.TryPreparedTurretPose(profile,kind,center,1,.73,.61,.4,.12,out pose));
+            foreach(var p in new[]{new BallisticPoint(14,2,-7),new BallisticPoint(15.4,1.1,-8.2),new BallisticPoint(5,.5,-11)}){
+                var q=pose.Closest(p);
+                double radius=Math.Sqrt((p.X-q.X)*(p.X-q.X)+(p.Y-q.Y)*(p.Y-q.Y)+(p.Z-q.Z)*(p.Z-q.Z));
+                Assert.False(pose.OutsideBlastSquare(p.Ground,radius+1e-5));
+                var building=new BallisticBody(7,PlayableOwner.Enemy,center,default,1,3,100,true,1,pose);
+                Assert.True(PlayableBallistics.BlastHits(p,radius,building,Array.Empty<NavObstacle>(),2,new[]{building}),
+                    "An explosion touching the posed surface must cause splash even outside the navigation footprint.");
+                if(radius>.001)Assert.False(PlayableBallistics.BlastHits(p,radius-.001,building,Array.Empty<NavObstacle>(),2,new[]{building}));
             }
-            return result;
         }
-        private static int Pick(IReadOnlyList<BallisticBody> bodies,bool guided=false,IReadOnlyList<NavObstacle> solids=null,Func<NavPoint,double> terrain=null)
-            =>PlayableBallistics.BestTarget(default(NavPoint),PlayableOwner.Player,13,1.15,4,12,.09,1.4,10,2,solids??Array.Empty<NavObstacle>(),1.74,bodies,terrain,guided,2,1,2,Hostile);
-        [TestCase(false)][TestCase(true)] public void FullObservedReferenceKeepsForecastInterceptionShieldingAndRanking(bool guided)
-        {
-            var bodies=new[]{Body(1,0,0,PlayableOwner.Player),Body(10,10,3,baseHeight:2),Body(2,10,-3,velocity:new NavPoint(.4,0),baseHeight:2),Body(7,13.5,0,PlayableOwner.Third,new NavPoint(-2,0),baseHeight:2),Body(9,7,0,building:true,height:6),Body(12,9,0,baseHeight:2)};
-            var solids=new[]{new NavObstacle(4,-.2,4.2,.2)};Func<NavPoint,double> terrain=p=>p.X>=8?2:0;
-            Assert.AreEqual(Reference(bodies,guided,solids,terrain).Target,Pick(bodies,guided,solids,terrain));
-            var ties=new[]{Body(1,0,0,PlayableOwner.Player),Body(2,10,-3),Body(10,10,3)};
-            Assert.AreEqual(10,Reference(ties,guided).Target);Assert.AreEqual(10,Pick(ties,guided));
-            Assert.AreEqual(Reference(ties.Reverse().ToArray(),guided).Target,Pick(ties.Reverse().ToArray(),guided));
-        }
-        [Test] public void FriendlyOutsideCurrentRangeCanReverseAutomaticChoiceAtImpactTime()
-        {
-            var flight=new BallisticFlight(new BallisticPoint(0,1.15,0),new BallisticPoint(10,0,0),4,12);
-            var baseBodies=new[]{Body(1,0,0,PlayableOwner.Player),Body(2,10,0)};
-            double time=flight.Duration*PlayableBallistics.FirstContact(flight,.09,Array.Empty<NavObstacle>(),1.74,baseBodies,0).Value.Progress;
-            var full=baseBodies.Concat(new[]{Body(7,13.5,0,PlayableOwner.Player,new NavPoint(-3.5/time,0))}).ToArray();
-            Assert.Greater(Distance(default(NavPoint),full[2].Position),13);Assert.AreEqual(0,Pick(full));
-            var clipped=full.Where(b=>Distance(default(NavPoint),b.Position)<=13).ToArray();Assert.AreEqual(2,Pick(clipped));
-            Assert.AreEqual(Reference(full).Target,Pick(full));
-        }
-        // BestTarget's single Count access supplies the sole prediction-array newarr.
-        // This list only exposes IReadOnlyList, so geometry enumerations do not count as constructions.
-        private sealed class ConstructionProbe : IReadOnlyList<BallisticBody>
-        {
-            private readonly IReadOnlyList<BallisticBody> bodies;internal int CountReads;
-            internal ConstructionProbe(IReadOnlyList<BallisticBody> bodies){this.bodies=bodies;}
-            public int Count{get{CountReads++;return bodies.Count;}}
-            public BallisticBody this[int i]=>bodies[i];
-            public IEnumerator<BallisticBody> GetEnumerator()=>bodies.GetEnumerator();
-            IEnumerator IEnumerable.GetEnumerator()=>GetEnumerator();
-        }
-        private static void VerifyConstructionProbeIl()
-        {
-            var method=typeof(PlayableBallistics).GetMethod("BestTarget");var bytes=method.GetMethodBody().GetILAsByteArray();
-            var map=typeof(System.Reflection.Emit.OpCodes).GetFields(BindingFlags.Public|BindingFlags.Static).Where(f=>f.FieldType==typeof(System.Reflection.Emit.OpCode)).Select(f=>(System.Reflection.Emit.OpCode)f.GetValue(null)).ToDictionary(op=>op.Value);
-            int at=0,arrays=0,counts=0;System.Reflection.Emit.OpCode previous=default(System.Reflection.Emit.OpCode);MethodBase previousMethod=null;
-            while(at<bytes.Length){short value=bytes[at++]==0xfe?(short)(0xfe00|bytes[at++]):(short)bytes[at-1];var op=map[value];int size=0;MethodBase target=null;
-                switch(op.OperandType){case System.Reflection.Emit.OperandType.InlineNone:break;
-                    case System.Reflection.Emit.OperandType.ShortInlineBrTarget:case System.Reflection.Emit.OperandType.ShortInlineI:case System.Reflection.Emit.OperandType.ShortInlineVar:size=1;break;
-                    case System.Reflection.Emit.OperandType.InlineVar:size=2;break;
-                    case System.Reflection.Emit.OperandType.InlineI8:case System.Reflection.Emit.OperandType.InlineR:size=8;break;
-                    case System.Reflection.Emit.OperandType.InlineSwitch:size=4+4*BitConverter.ToInt32(bytes,at);break;
-                    default:size=4;break;}
-                if(op.OperandType==System.Reflection.Emit.OperandType.InlineMethod){target=method.Module.ResolveMethod(BitConverter.ToInt32(bytes,at));if(target.DeclaringType==typeof(IReadOnlyCollection<BallisticBody>)&&target.Name=="get_Count")counts++;}
-                if(op==System.Reflection.Emit.OpCodes.Newarr){Assert.AreEqual(typeof(BallisticBody),method.Module.ResolveType(BitConverter.ToInt32(bytes,at)));arrays++;Assert.AreEqual(System.Reflection.Emit.OpCodes.Callvirt,previous);Assert.AreEqual("get_Count",previousMethod?.Name);Assert.AreEqual(typeof(IReadOnlyCollection<BallisticBody>),previousMethod?.DeclaringType);}
-                previous=op;previousMethod=target;at+=size;
-            }
-            Assert.AreEqual(1,arrays,"Exactly one prediction array construction site");Assert.AreEqual(1,counts,"Probe Count accesses must identify only that construction site");
-        }
-        private static object allocationEscape;
-        private static long ArrayBytes(int count){long before=GC.GetAllocatedBytesForCurrentThread();allocationEscape=new BallisticBody[count];long bytes=GC.GetAllocatedBytesForCurrentThread()-before;GC.KeepAlive(allocationEscape);allocationEscape=null;return bytes;}
-        private static int ManagedBodyBytes(){var method=new System.Reflection.Emit.DynamicMethod("BallisticBodyManagedBytes",typeof(int),Type.EmptyTypes);var il=method.GetILGenerator();il.Emit(System.Reflection.Emit.OpCodes.Sizeof,typeof(BallisticBody));il.Emit(System.Reflection.Emit.OpCodes.Ret);return ((Func<int>)method.CreateDelegate(typeof(Func<int>)))();}
-        [TestCase(0)][TestCase(1)][TestCase(4)][TestCase(8)] public void RecordStructuralPredictionAllocationOnFixedInputs(int candidates)
-        {
-            var bodies=new List<BallisticBody>{Body(1,0,0,PlayableOwner.Player),Body(40,25,0,PlayableOwner.Player),Body(41,26,0,PlayableOwner.Player),Body(42,27,0,PlayableOwner.Player)};
-            for(int i=0;i<candidates;i++)bodies.Add(Body(10+i,8+i*.35,(i%2==0?-1:1)*2));
-            Pick(bodies);ArrayBytes(0);ArrayBytes(1);ArrayBytes(bodies.Count);
-            var reference=Reference(bodies);long header=ArrayBytes(0),one=ArrayBytes(1),array=ArrayBytes(bodies.Count);
-            Func<PlayableOwner,PlayableOwner,bool> hostility=Hostile;var solids=Array.Empty<NavObstacle>();
-            int stride=ManagedBodyBytes();VerifyConstructionProbeIl();var probe=new ConstructionProbe(bodies);
-            long before=GC.GetAllocatedBytesForCurrentThread();int actual=PlayableBallistics.BestTarget(default(NavPoint),PlayableOwner.Player,13,1.15,4,12,.09,1.4,10,2,solids,1.74,probe,hostile:hostility);long total=GC.GetAllocatedBytesForCurrentThread()-before;
-            Assert.AreEqual(reference.Target,actual);Assert.AreEqual(candidates,reference.Candidates);Assert.AreEqual(candidates,reference.PredictionArrays);
-            Assert.AreEqual(candidates*bodies.Count,reference.PredictionElements);Assert.Greater(stride,0);Assert.AreEqual(candidates==0?0:1,probe.CountReads,"Production prediction constructions measured through verified IL Count site");
-            bool counter=one>0&&array>0;
-            TestContext.WriteLine("STRUCTURAL observed="+bodies.Count+" candidates="+candidates+" sourcePredictionArrays="+reference.PredictionArrays+" sourcePredictionElements="+reference.PredictionElements+" managedElementBytes="+stride+" sourcePredictionPayloadBytes="+(reference.PredictionElements*stride)+" productionPredictionArrays="+probe.CountReads+" productionPredictionElements="+(probe.CountReads*bodies.Count)+" productionPredictionPayloadBytes="+(probe.CountReads*bodies.Count*stride)+" allocationCounterAvailable="+counter+" escapedOneElementArrayCounter="+one+" calibratedHeaderBytes="+(counter?header.ToString():"unknown")+" sourcePredictionArrayBytes="+(counter?(reference.PredictionArrays*array).ToString():"unknown")+" actualBestTargetAllocatedBytes="+(counter?total.ToString():"unavailable")+"; no CPU/performance qualification");
-        }
-        [TestCase(false)][TestCase(true)] public void ExplicitShotAndCurrentCapturePreserveBaselineOrGuidedFlight(bool guided)
+        [TestCase(false)][TestCase(true)] public void ExplicitShotAndCurrentCapturePreserveCenteredFlight(bool guided)
         {
             var profile=PlayableProfile.Default;const int seed=19261019;const string source="native-shkval-target-oracle-v1";
             var c=OfflineParticipantAuthorityTests.Config(2,false,seed);var costs=new double[c.Starts.Count,c.Starts.Count];for(int i=0;i<c.Starts.Count;i++)for(int j=0;j<c.Starts.Count;j++)costs[i,j]=c.RouteCost(i,j);
@@ -117,19 +48,19 @@ namespace Spacewars.Tests.EditMode
                 foreach(object unit in Units(world).Values)unit.GetType().GetField("Reload").SetValue(unit,999d);
                 var actor=Units(world)[gun];actor.GetType().GetField("Reload").SetValue(actor,0d);
                 var victim=Units(world)[enemy];victim.GetType().GetField("Velocity").SetValue(victim,new NavPoint(.5,0));Call(world,"RefreshVision");
-                Assert.AreEqual(0,(int)Call(world,"ArtilleryTarget",actor,new NavPoint(-13,-5)),"Automatic friendly-fire penalty must apply before explicit Attack");
+                Assert.AreEqual(enemy,(int)Call(world,"ArtilleryTarget",actor,new NavPoint(-13,-5)),"The nearby ally must not veto the closest enemy");
                 Assert.AreEqual(PlayableCommandStatus.Applied,world.Apply(new PlayableCommand(91,1,c.Roster[0].Id,PlayableCommandKind.Attack,new[]{gun},targetId:enemy),out _));
                 Call(world,"AdvanceIndexedCombat",1d/30);
                 var preparation=world.CaptureWorldBytes(seed,source);var preparing=PlayableDomain.RestoreConfiguredWorldBytes(preparation,profile,seed,source,config);
                 try{CollectionAssert.AreEqual(preparation,preparing.CaptureWorldBytes(seed,source));for(int tick=0;tick<55;tick++){Call(preparing,"AdvanceIndexedCombat",1d/30);Call(world,"AdvanceIndexedCombat",1d/30);CollectionAssert.AreEqual(world.CaptureWorldBytes(seed,source),preparing.CaptureWorldBytes(seed,source),"Exact pre-first-shot elevation continuation");}}
                 finally{preparing.Navigation.ReleaseCommittedHostRoot();preparing.DestroyOwnedNavigation();}
                 for(int tick=0;tick<60&&Shots(world).Count==0;tick++)Call(world,"AdvanceIndexedCombat",1d/30);
-                Assert.AreEqual(1,Shots(world).Count,"Explicit Attack must override the automatic penalty and launch");
+                Assert.AreEqual(1,Shots(world).Count,"Explicit Attack must launch");
                 var rocket=Shots(world)[0].GetType().GetField("Rocket").GetValue(Shots(world)[0]);var flight=(BallisticFlight)rocket.GetType().GetField("Flight").GetValue(rocket);
-                var expected=guided?PlayableBallistics.Aim(new NavPoint(-13,-5),new NavPoint(-4,-5),new NavPoint(.5,0),profile.ShkvalLaunchHeight,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed,true,profile.ShkvalLeadSpeedThreshold,profile.ShkvalLeadFalloff,profile.ShkvalMaxLeadTimeSec):new BallisticFlight(new BallisticPoint(-13,profile.ShkvalLaunchHeight,-5),new BallisticPoint(-4,0,-5),profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed);
+                var expectedEnd=new BallisticPoint(-4,PlayableUnitRules.Radius(profile,PlayableEntityKind.Tank),-5);
                 var launchBinding=(ShkvalLaunchSnapshot)rocket.GetType().GetField("Launch").GetValue(rocket);
                 var physical=ShkvalLaunchGeometry.At(launchBinding.Ground,launchBinding.Hull,launchBinding.Turret,launchBinding.Pitch,guided,launchBinding.Barrel,profile.ShkvalModelRadius*profile.ShkvalModelScale/2.05,profile.ShkvalProjectileLength).Center;
-                Assert.AreEqual(physical,flight.Start);Assert.AreEqual(expected.End,flight.End);Assert.AreEqual(new BallisticFlight(physical,expected.End,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed).Duration,flight.Duration);
+                Assert.AreEqual(physical,flight.Start);Assert.AreEqual(expectedEnd,flight.End);Assert.AreEqual(new BallisticFlight(physical,expectedEnd,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed).Duration,flight.Duration);
                 byte[] bytes=world.CaptureWorldBytes(seed,source);restored=PlayableDomain.RestoreConfiguredWorldBytes(bytes,profile,seed,source,config);
                 CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(seed,source));
                 foreach(var d in new[]{world,restored}){Call(d,"RefreshVision");Call(d,"ReconcileWreckRoutes");}
@@ -163,15 +94,15 @@ namespace Spacewars.Tests.EditMode
                 foreach(object unit in Units(world).Values)unit.GetType().GetField("Reload").SetValue(unit,999d);
                 var actor=Units(world)[gun];actor.GetType().GetField("Reload").SetValue(actor,0d);
                 var victim=Units(world)[enemy];victim.GetType().GetField("Velocity").SetValue(victim,new NavPoint(.5,0));Call(world,"RefreshVision");
-                Assert.AreEqual(0,(int)Call(world,"ArtilleryTarget",actor,new NavPoint(-13,-5)),"Automatic friendly-fire penalty must apply before explicit Attack");
+                Assert.AreEqual(enemy,(int)Call(world,"ArtilleryTarget",actor,new NavPoint(-13,-5)),"The nearby ally must not veto the closest enemy");
                 Assert.AreEqual(PlayableCommandStatus.Applied,world.Apply(new PlayableCommand(91,1,c.Roster[0].Id,PlayableCommandKind.Attack,new[]{gun},targetId:enemy),out _));
                 for(int tick=0;tick<60&&Shots(world).Count==0;tick++)Call(world,"AdvanceIndexedCombat",1d/30);
-                Assert.AreEqual(1,Shots(world).Count,"Explicit Attack must override the automatic penalty and launch");
+                Assert.AreEqual(1,Shots(world).Count,"Explicit Attack must launch");
                 var rocket=Shots(world)[0].GetType().GetField("Rocket").GetValue(Shots(world)[0]);var flight=(BallisticFlight)rocket.GetType().GetField("Flight").GetValue(rocket);
-                var expected=guided?PlayableBallistics.Aim(new NavPoint(-13,-5),new NavPoint(-4,-5),new NavPoint(.5,0),profile.ShkvalLaunchHeight,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed,true,profile.ShkvalLeadSpeedThreshold,profile.ShkvalLeadFalloff,profile.ShkvalMaxLeadTimeSec):new BallisticFlight(new BallisticPoint(-13,profile.ShkvalLaunchHeight,-5),new BallisticPoint(-4,0,-5),profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed);
+                var expectedEnd=new BallisticPoint(-4,PlayableUnitRules.Radius(profile,PlayableEntityKind.Tank),-5);
                 var launchBinding=(ShkvalLaunchSnapshot)rocket.GetType().GetField("Launch").GetValue(rocket);
                 var physical=ShkvalLaunchGeometry.At(launchBinding.Ground,launchBinding.Hull,launchBinding.Turret,launchBinding.Pitch,guided,launchBinding.Barrel,profile.ShkvalModelRadius*profile.ShkvalModelScale/2.05,profile.ShkvalProjectileLength).Center;
-                Assert.AreEqual(physical,flight.Start);Assert.AreEqual(expected.End,flight.End);Assert.AreEqual(new BallisticFlight(physical,expected.End,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed).Duration,flight.Duration);
+                Assert.AreEqual(physical,flight.Start);Assert.AreEqual(expectedEnd,flight.End);Assert.AreEqual(new BallisticFlight(physical,expectedEnd,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed).Duration,flight.Duration);
                 byte[] bytes=world.CaptureWorldBytes(seed,source);restored=PlayableDomain.RestoreConfiguredWorldBytes(bytes,profile,seed,source,config);
                 CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(seed,source));
                 var launch=(ShkvalLaunchSnapshot)rocket.GetType().GetField("Launch").GetValue(rocket);Assert.NotNull(launch);Assert.AreEqual(0,launch.Barrel);Assert.AreEqual(guided,launch.Upgraded);

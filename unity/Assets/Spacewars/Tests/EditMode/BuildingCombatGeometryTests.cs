@@ -55,7 +55,7 @@ namespace Spacewars.Tests.EditMode
    if(kind==PlayableEntityKind.Shkval)
    {
     var rt=Domain.GetNestedType("Rocket",BindingFlags.NonPublic);var rocket=Activator.CreateInstance(rt);void R(string n,object v)=>rt.GetField(n).SetValue(rocket,v);
-    var f=new BallisticFlight(new BallisticPoint(-3,1,0),new BallisticPoint(3,1,0),0,15);R("Flight",f);R("Predicted",new BallisticContact(.3,new BallisticPoint(-1.3,1,0),target));R("Radius",p.ShkvalProjectileRadius);R("BlastRadius",p.ShkvalBlastRadius);R("MarkerStartRadius",p.ShkvalMarkerStartRadius);R("MarkerOpacity",p.ShkvalMarkerOpacity);R("BuildingHeight",p.ShkvalBuildingCollisionHeight);R("BuildingTarget",true);Set("Rocket",rocket);
+    var f=new BallisticFlight(new BallisticPoint(-3,1,0),new BallisticPoint(3,1,0),0,15);R("Flight",f);R("DirectDamage",1d);R("Predicted",new BallisticContact(.3,new BallisticPoint(-1.3,1,0),target));R("Radius",p.ShkvalProjectileRadius);R("BlastRadius",p.ShkvalBlastRadius);R("MarkerStartRadius",p.ShkvalMarkerStartRadius);R("MarkerOpacity",p.ShkvalMarkerOpacity);R("BuildingHeight",p.ShkvalBuildingCollisionHeight);R("BuildingTarget",true);Set("Rocket",rocket);
    }
    ((IList)Domain.GetField("projectiles",Flags).GetValue(domain)).Add(shot);Domain.GetField("nextProjectile",Flags).SetValue(domain,102);return shot;
   }

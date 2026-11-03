@@ -126,7 +126,7 @@ namespace Spacewars.Runtime
             if(!c.MarchConfigured)return true;
             foreach(var observation in c.GroupSources){
                 using(EnterTransport()){if(!MovementSourceCurrent(c)||!MarchRecordMatches(c.Groups[observation.Version.Data.GroupId],observation.Version))return false;}
-                var next=GroupMarch.PrepareOwned(c.Frame,observation.Version,c.Installed,c.Detached,c.Members,c.MarchStretch,c.MarchRevision,dt,scope.OwnedReservation(),UsesRecastGroundRoutes);
+                var next=GroupMarch.PrepareOwned(c.Frame,observation.Version,c.Installed,c.Detached,c.Members,c.MarchStretch,c.MarchRevision,dt,scope.OwnedReservation(),UsesRecastGroundRoutes,physicalHostBudget);
                 if(next!=null)c.Changes[c.ChangeCount++]=new RebindGroup{Source=observation,Next=next};
             }return true;
         }

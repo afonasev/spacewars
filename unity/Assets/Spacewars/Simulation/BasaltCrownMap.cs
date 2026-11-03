@@ -12,7 +12,7 @@ namespace Spacewars.Simulation
     public sealed class BasaltCrownMap : IPlayableTerrain, INavArrivalPointTerrain
     {
         public string Id=>"basalt-crown-native-v1";
-        public int Revision=>3;
+        public int Revision=>4;
         public double HalfExtent=>56;
         public double DirectFireHeight=>1;
         public int SurfaceSemanticsVersion=>1;
@@ -24,6 +24,7 @@ namespace Spacewars.Simulation
         public IReadOnlyList<NavObstacle> MovementBlockers{get;}
         public IReadOnlyList<BasaltMaterialPatch> Materials{get;}=Array.AsReadOnly(BasaltCrownLayout.Materials);
         public IReadOnlyList<NavSurfaceTransition> SurfaceTransitions=>locations.Transitions;
+        internal IReadOnlyList<NavPartitionSeam> PreparationSeams=>locations.Seams;
         private readonly NavGeometry geometry;
         private readonly TerrainLocations locations;
         TerrainLocations INavArrivalPointTerrain.ArrivalLocations=>locations;
@@ -44,7 +45,7 @@ namespace Spacewars.Simulation
             var blockers=new List<NavObstacle>(solids);
             // The central cliffs are visible support edges. Zero-thickness segments
             // use a numerical width solely for the geometry's polygon contract.
-            const double epsilon=.00001;
+            const double epsilon=.00001; // NavPolygon now compares squared lengths to squared tolerance.
             foreach(var s in supports.Where(s=>s.Id=="citadel")){
                 var b=s.Bounds;
                 AddEdge(new NavPoint(b.MinX,b.MinZ),new NavPoint(b.MaxX,b.MinZ));
@@ -89,15 +90,16 @@ namespace Spacewars.Simulation
         public TerritorySite[] Sites(PlayableProfile p)=>new[]{
             new TerritorySite(1,PlayableBuildingKind.Headquarters,Headquarters(PlayableOwner.Player),p),
             new TerritorySite(2,PlayableBuildingKind.Headquarters,Headquarters(PlayableOwner.Enemy),p,Math.PI),
-            new TerritorySite(3,PlayableBuildingKind.Mine,new NavPoint(0,-12),p),
-            new TerritorySite(4,PlayableBuildingKind.Mine,new NavPoint(0,14),p),
+            new TerritorySite(3,PlayableBuildingKind.RelayTower,new NavPoint(0,0),p),
             new TerritorySite(5,PlayableBuildingKind.Outpost,new NavPoint(40,-32),p,3*Math.PI/4),
             new TerritorySite(6,PlayableBuildingKind.Outpost,new NavPoint(-40,32),p,7*Math.PI/4),
             new TerritorySite(7,PlayableBuildingKind.Mine,new NavPoint(-48,0),p),
-            new TerritorySite(8,PlayableBuildingKind.Mine,new NavPoint(48,0),p)};
+            new TerritorySite(8,PlayableBuildingKind.Mine,new NavPoint(48,0),p),
+            new TerritorySite(9,PlayableBuildingKind.Mine,new NavPoint(16,42.375),p),
+            new TerritorySite(10,PlayableBuildingKind.Mine,new NavPoint(-16,-42.375),p)};
         public OfflineMatchConfiguration Configuration(PlayableProfile p,int seed,OfflineParticipant[] roster){
             var starts=new[]{new OfflineStart("start-west",1,Headquarters(PlayableOwner.Player),new NavPoint(-40+10/Math.Sqrt(2),-32+10/Math.Sqrt(2)),Math.PI/4,1),new OfflineStart("start-east",2,Headquarters(PlayableOwner.Enemy),new NavPoint(40-10/Math.Sqrt(2),32-10/Math.Sqrt(2)),5*Math.PI/4,2)};
-            return new OfflineMatchConfiguration(p,"native-basalt-crown-v3",Id,"native-authored-diagonal-v1",seed,roster,starts,Sites(p),MovementBlockers.ToArray(),new double[2,2],terrain:Id);
+            return new OfflineMatchConfiguration(p,"native-basalt-crown-v4",Id,"native-authored-diagonal-v1",seed,roster,starts,Sites(p),MovementBlockers.ToArray(),new double[2,2],terrain:Id);
         }
     }
 }

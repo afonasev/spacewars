@@ -17,7 +17,7 @@ public sealed class PostMatchDetailsUiTests:InputTestFixture
 {
     private GameObject host;private PanelSettings panel;private PostMatchResultsView ui;private NativeMenuNavigation navigation;private VisualElement root;private RenderTexture target;
     private const BindingFlags F=BindingFlags.Instance|BindingFlags.NonPublic;
-    private static MatchResult RichMatch()
+    private static MatchResult RichMatch(bool producerUpgrades=false)
     {
         var type=typeof(PlayableRuntime).Assembly.GetType("Spacewars.Runtime.PlayableDomain",true);var p=PlayableProfile.Default;var d=Activator.CreateInstance(type,F,null,new object[]{p,1L,false},null);
         object Call(string method,params object[] args)=>type.GetMethod(method,F).Invoke(d,args);
@@ -31,6 +31,7 @@ public sealed class PostMatchDetailsUiTests:InputTestFixture
         foreach(var owner in new[]{PlayableOwner.Player,PlayableOwner.Enemy}){
             foreach(var k in new[]{PlayableResearchKind.TankChassis,PlayableResearchKind.ImprovedWeaponSystems,PlayableResearchKind.ShkvalGuidance})Fact(owner,MatchFactKind.ResearchCompleted,(int)k,PlayableResearchRules.Description(p,k));
             Fact(owner,MatchFactKind.RefineryUpgradeCompleted,(int)PlayableBuildingKind.Refinery,PlayableResearchRules.RefineryDescription(p));
+            if(producerUpgrades)foreach(var producer in new[]{PlayableBuildingKind.Factory,PlayableBuildingKind.Hangar})Fact(owner,MatchFactKind.RefineryUpgradeCompleted,(int)producer,"Ускорение производства");
         }
         Call("Step",20d);Fact(PlayableOwner.Player,MatchFactKind.PlayerDefeated,0);Fact(PlayableOwner.Player,MatchFactKind.BuildingSold,(int)PlayableBuildingKind.Factory);Fact(PlayableOwner.Enemy,MatchFactKind.BuildingLost,(int)PlayableBuildingKind.Refinery);Call("Step",10d);Fact(PlayableOwner.Enemy,MatchFactKind.PlayerLeft,0);Call("Step",10d);Call("FinishManually");return (MatchResult)type.GetProperty("Result",F).GetValue(d);
     }
@@ -51,15 +52,30 @@ public sealed class PostMatchDetailsUiTests:InputTestFixture
     }
     [UnityTest]public IEnumerator FourGraphsStacksFilteringCloudsAndNestedDescriptions()
     {
+        ui.Root.RemoveFromHierarchy();ui=new PostMatchResultsView(RichMatch(true),()=>{},()=>{},()=>{});root.Add(ui.Root);navigation.SetScope(ui.Root,null,ui.FirstTab);
         ui.ShowTab(1);for(int i=0;i<8;i++)yield return null;
         Assert.IsNull(ui.Root.Q("result-graph-values"));for(int i=0;i<4;i++)Assert.IsNotNull(ui.Root.Q("result-graph-"+i));
-        Assert.AreEqual(3,ui.Result.ResearchCount(PlayableOwner.Player,80));Assert.AreEqual(1,ui.Result.Players[0].BuildingsUpgraded);
+        Assert.AreEqual(3,ui.Result.ResearchCount(PlayableOwner.Player,80));Assert.AreEqual(3,ui.Result.Players[0].BuildingsUpgraded);
+        var upgrades=ui.Result.Facts.Where(f=>f.Kind==MatchFactKind.RefineryUpgradeCompleted).ToArray();Assert.AreEqual(6,upgrades.Length);
+        foreach(int metric in new[]{0,1})
+        {
+            var found=new System.Collections.Generic.HashSet<long>();
+            foreach(var marker in ui.Root.Q("result-graph-"+metric).Query<VisualElement>(className:"result-event-marker").ToList())
+            {
+                ((Action)marker.userData)();for(int i=0;i<3;i++)yield return null;
+                foreach(var fact in upgrades)if(ui.Root.Q("result-popup").Q("result-popup-event-"+fact.Sequence)!=null)found.Add(fact.Sequence);
+                if(metric==1&&upgrades.Any(f=>f.EntityKind==(int)PlayableBuildingKind.Factory&&ui.Root.Q("result-popup").Q("result-popup-event-"+f.Sequence)!=null))Capture("producer-upgrades-army.png");
+                navigation.Back();
+            }
+            var expected=upgrades.Where(f=>metric==0?f.EntityKind==(int)PlayableBuildingKind.Refinery:f.EntityKind!=(int)PlayableBuildingKind.Refinery).Select(f=>f.Sequence);
+            CollectionAssert.AreEquivalent(expected,found,"Only the appropriate upgrade events appear in each graph's actual event popups.");
+        }
         ui.InspectTime(40);yield return null;var tooltip=ui.Root.Q("result-graph-tooltip");Assert.That(TextOf(tooltip),Does.Contain("Игрок 1"));Assert.LessOrEqual(tooltip.worldBound.xMax,ui.Root.worldBound.xMax);Capture("four-graphs-hover.png");
         var research=ui.Root.Q("result-graph-3");var count=research.Q<Label>("result-stack-count");Assert.IsNotNull(count);Assert.GreaterOrEqual(int.Parse(count.text),3);
         var stack=count.parent;((Action)stack.userData)();for(int i=0;i<3;i++)yield return null;var popup=ui.Root.Q("result-popup");Assert.IsNotNull(popup);
         Assert.AreEqual(6,popup.Query<VisualElement>().ToList().Count(e=>e.name.StartsWith("result-popup-event-")),"All simultaneous events from both owners remain available.");
         var first=popup.Query<VisualElement>().ToList().First(e=>e.name.StartsWith("result-popup-event-"));((Action)first.userData)();for(int i=0;i<3;i++)yield return null;
-        Assert.That(TextOf(ui.Root.Q("result-description")),Does.Contain("Улучшает ходовые характеристики танка."));Capture("research-stack-description.png");
+        Assert.That(TextOf(ui.Root.Q("result-description")),Does.Contain(PlayableResearchRules.Description(PlayableProfile.Default,PlayableResearchKind.TankChassis)));Capture("research-stack-description.png");
         navigation.Back();ui.Root.Q<Toggle>("result-hide-events").value=true;Assert.IsNull(ui.Root.Q("result-stack-count"));Assert.AreEqual(3,ui.Result.ResearchCount(PlayableOwner.Player,80));ui.Root.Q<Toggle>("result-hide-events").value=false;
         ui.Root.Q<Toggle>("result-filter-0").value=false;ui.InspectTime(40);Assert.IsFalse(TextOf(ui.Root.Q("result-graph-tooltip")).Contains("Игрок 1"));
         ui.ShowTab(0);for(int i=0;i<3;i++)yield return null;var buildings=ui.Root.Q("result-cell-0-2");((Action)buildings.userData)();for(int i=0;i<3;i++)yield return null;

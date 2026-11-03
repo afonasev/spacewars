@@ -398,10 +398,10 @@ MonoBehaviour:
     vertices: 784
     indices: 1152
     submeshes: 1
-  - hash: f6e6fac79faac2b81d7d2ad28d330069cbb8dec622478a7e3221ca0375b043cd
+  - hash: 97fddfe5221eb35115dfc532f9e6f934e07d377972a24d89df622195551c8de5
     reason: no-safe-further-solid-reduction
-    vertices: 29970
-    indices: 29970
+    vertices: 27270
+    indices: 27270
     submeshes: 1
   entries:
   - hash: 19860f24c1318552cb0acc6b40422ae40942ad5fd1db3e1ba47ffac1b57a644e

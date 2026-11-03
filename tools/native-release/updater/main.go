@@ -466,54 +466,157 @@ func host(root, exe string) error {
 	if status.State == "checking" {
 		go check()
 	}
-	game := exec.Command(filepath.Join(root, "releases", a.ID, filepath.FromSlash(current.Entry)), applicationArgs(os.Args[1:])...)
-	game.Env = append(os.Environ(), "SPACEWARS_UPDATE_ENDPOINT=http://"+listener.Addr().String(), "SPACEWARS_UPDATE_TOKEN="+token)
-	game.Stdout = os.Stdout
-	game.Stderr = os.Stderr
-	if e = game.Start(); e != nil {
-		return e
+	launcher, e := launcherForHost(launcherRelease(root, a.ID))
+	if e != nil {
+		return fmt.Errorf("launcher view: %w", e)
 	}
-	exit := make(chan error, 1)
-	go func() { exit <- game.Wait() }()
-	timer := time.NewTimer(90 * time.Second)
-	defer timer.Stop()
-	var gameErr error
-	select {
-	case gameErr = <-exit:
-	case <-timer.C:
+	running := false
+	if launcher != nil {
+		defer launcher.close()
+		viewStop := make(chan struct{})
+		defer close(viewStop)
+		go func() {
+			tick := time.NewTicker(200 * time.Millisecond)
+			defer tick.Stop()
+			for {
+				mu.Lock()
+				v := launcherView(status, running)
+				mu.Unlock()
+				if launcher.send(v) != nil {
+					return
+				}
+				select {
+				case <-tick.C:
+				case <-viewStop:
+					return
+				case <-launcher.closed:
+					return
+				}
+			}
+		}()
+	}
+	for {
+		if launcher != nil {
+			mu.Lock()
+			menu = true
+			ready = false
+			commit = false
+			if paused && status.State == "paused" {
+				beginDownload()
+			}
+			mu.Unlock()
+			for {
+				select {
+				case <-launcher.closed:
+					return launcher.err
+				case action := <-launcher.actions:
+					mu.Lock()
+					if action == "play" {
+						menu = false
+						stopDownload(true)
+						running = true
+						mu.Unlock()
+						goto launchPlayer
+					}
+					switch status.State {
+					case "available", "error":
+						if next.Sequence > current.Sequence {
+							beginDownload()
+						}
+					case "downloading", "paused":
+						stopDownload(false)
+						paused = false
+						status.State = "available"
+					case "prepared":
+						status.State = "applying"
+						prepared := stage
+						mu.Unlock()
+						applyErr := applyForHost(exe, prepared)
+						mu.Lock()
+						if applyErr == nil {
+							mu.Unlock()
+							_ = os.Remove(filepath.Join(cache, "pending.json"))
+							return restartBootstrap(root)
+						}
+						status.State = "prepared"
+						status.Notice = "Не удалось установить обновление. Попробуйте снова."
+					}
+					mu.Unlock()
+				}
+			}
+		}
+	launchPlayer:
+		game := exec.Command(filepath.Join(root, "releases", a.ID, filepath.FromSlash(current.Entry)), applicationArgs(os.Args[1:])...)
+		game.Env = append(os.Environ(), "SPACEWARS_UPDATE_ENDPOINT=http://"+listener.Addr().String(), "SPACEWARS_UPDATE_TOKEN="+token)
+		game.Stdout = os.Stdout
+		game.Stderr = os.Stderr
+		if e = game.Start(); e != nil {
+			if launcher == nil {
+				return e
+			}
+			mu.Lock()
+			running = false
+			status.Notice = "Не удалось запустить игру. Попробуйте снова."
+			mu.Unlock()
+			continue
+		}
+		exit := make(chan error, 1)
+		go func() { exit <- game.Wait() }()
+		timer := time.NewTimer(90 * time.Second)
+		var gameErr error
+		select {
+		case gameErr = <-exit:
+		case <-timer.C:
+			mu.Lock()
+			ok := ready
+			mu.Unlock()
+			if !ok {
+				_ = game.Process.Kill()
+			}
+			gameErr = <-exit
+		}
+		timer.Stop()
 		mu.Lock()
-		ok := ready
+		doCommit, healthy := commit, ready
+		preparedStage := stage
 		mu.Unlock()
-		if !ok {
-			_ = game.Process.Kill()
+		if preparedStage != "" && healthy && gameErr == nil {
+			if e = applyForHost(exe, preparedStage); e != nil {
+				_ = os.WriteFile(filepath.Join(cache, "last-error.txt"), []byte(e.Error()), 0600)
+			} else {
+				_ = os.Remove(filepath.Join(cache, "pending.json"))
+			}
+			if doCommit {
+				if e != nil {
+					_ = os.WriteFile(filepath.Join(cache, "skip-pending-once"), []byte("1"), 0600)
+				}
+				return restartBootstrap(root)
+			}
+			if launcher != nil {
+				return restartBootstrap(root)
+			}
+			return nil
 		}
-		gameErr = <-exit
-	}
-	mu.Lock()
-	doCommit, healthy := commit, ready
-	preparedStage := stage
-	mu.Unlock()
-	if preparedStage != "" && healthy && gameErr == nil {
-		if e = applyForHost(exe, preparedStage); e != nil {
-			_ = os.WriteFile(filepath.Join(cache, "last-error.txt"), []byte(e.Error()), 0600)
-		} else {
-			_ = os.Remove(filepath.Join(cache, "pending.json"))
-		}
-		if doCommit {
-			if e != nil {
-				_ = os.WriteFile(filepath.Join(cache, "skip-pending-once"), []byte("1"), 0600)
+		if gameErr != nil && !healthy && hashOK(a.Previous) {
+			if e = rollbackWithPermission(exe); e != nil {
+				return fmt.Errorf("bootstrap recovery failed: %w", e)
 			}
 			return restartBootstrap(root)
 		}
-		return nil
-	}
-	if gameErr != nil && !healthy && hashOK(a.Previous) {
-		if e = rollbackWithPermission(exe); e != nil {
-			return fmt.Errorf("bootstrap recovery failed: %w", e)
+		if launcher == nil {
+			return classifyPlayerExit(healthy, gameErr)
 		}
-		return restartBootstrap(root)
+		mu.Lock()
+		running = false
+		if gameErr != nil {
+			status.Notice = "Игра завершилась с ошибкой. Можно запустить снова."
+		}
+		// No click made while the Player was alive may launch another Player.
+		for len(launcher.actions) > 0 {
+			<-launcher.actions
+		}
+		mu.Unlock()
 	}
-	return classifyPlayerExit(healthy, gameErr)
 }
 func classifyPlayerExit(ready bool, err error) error {
 	if ready && err != nil {

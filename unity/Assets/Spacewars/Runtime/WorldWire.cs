@@ -327,9 +327,10 @@ namespace Spacewars.Runtime
             ByteArray(w,v.Coverage);
             Array(w,v.KnownBuildings,x=>{WorldWire.Write(w,x);
             });
+            Array(w,v.KnownRelays,x=>{w.Write(x.SiteId);w.Write(x.Owner.HasValue);if(x.Owner.HasValue)w.Write((int)x.Owner.Value);});
             }
         internal static PlayableVisionState ReadPlayableVisionState(BinaryReader r) {if(!Boolean(r))return null;
-            return Record(r,()=>new PlayableVisionState{Version=r.ReadInt32(),Team=r.ReadInt32(),RasterResolution=r.ReadInt32(),Revision=r.ReadInt64(),CoverageUpdates=r.ReadInt64(),HalfWidth=Number(r),HalfDepth=Number(r),CellSize=Number(r),Feather=Number(r),Sources=Array(r,()=>ReadVisionSourceState(r)),DiscoveredCells=Array(r,()=>r.ReadInt64()),Coverage=ByteArray(r),KnownBuildings=Array(r,()=>ReadKnownBuildingState(r))});
+            return Record(r,()=>new PlayableVisionState{Version=r.ReadInt32(),Team=r.ReadInt32(),RasterResolution=r.ReadInt32(),Revision=r.ReadInt64(),CoverageUpdates=r.ReadInt64(),HalfWidth=Number(r),HalfDepth=Number(r),CellSize=Number(r),Feather=Number(r),Sources=Array(r,()=>ReadVisionSourceState(r)),DiscoveredCells=Array(r,()=>r.ReadInt64()),Coverage=ByteArray(r),KnownBuildings=Array(r,()=>ReadKnownBuildingState(r)),KnownRelays=Array(r,()=>new KnownRelayState{SiteId=r.ReadInt32(),Owner=Boolean(r)?(PlayableOwner?)EnumValue<PlayableOwner>(r):null})});
             }
         internal static void Write(BinaryWriter w,VisionSourceState v) {w.Write(v!=null);
             if(v==null)return;
@@ -429,7 +430,12 @@ namespace Spacewars.Runtime
         // capture admission that can race a background host resolution.
         internal static NavigationCaptureBytes AirMotionBindingOwned(PlayableProfile p,INavStorageReservation reservation)
             =>NavigationCaptureBytes.Write(reservation,w=>WriteBinding(w,p,false,false));
-        private static void WriteBinding(BinaryWriter w,PlayableProfile p,bool legacyQueue,bool legacyMarch){w.Write(legacyQueue?9:PlayableCommand.CurrentSchemaVersion);String(w,p.DisplayName);String(w,BuildingCombatGeometry.Version);Number(w,p.DefaultCombatPursuitSeconds);Number(w,p.RepairTowerHealthPerSecond);foreach(var f in PlayableProfileMetadata.Fields.Where(f=>(f.Path.StartsWith("turret.",StringComparison.Ordinal)||f.Path.StartsWith("gauss.",StringComparison.Ordinal))))Number(w,f.Read(p.CopyData()));foreach(var f in PlayableProfileMetadata.WreckFields)Number(w,f.Read(p.CopyData()));
+        private static void WriteBinding(BinaryWriter w,PlayableProfile p,bool legacyQueue,bool legacyMarch)
+        {
+            var profileData=p.CopyData();
+            w.Write(legacyQueue?9:PlayableCommand.CurrentSchemaVersion);String(w,p.DisplayName);String(w,BuildingCombatGeometry.Version);Number(w,p.DefaultCombatPursuitSeconds);Number(w,p.RepairTowerHealthPerSecond);
+            foreach(var f in PlayableProfileMetadata.Fields.Where(f=>f.Path.StartsWith("turret.",StringComparison.Ordinal)||f.Path.StartsWith("gauss.",StringComparison.Ordinal)))Number(w,f.Read(profileData));
+            foreach(var f in PlayableProfileMetadata.WreckFields)Number(w,f.Read(profileData));
             Number(w,p.WeaponSystemsLevel3Cost);
             Number(w,p.WeaponSystemsLevel3Seconds);
             Number(w,p.WeaponSystemsLevel3BonusPercent);
@@ -506,7 +512,7 @@ namespace Spacewars.Runtime
             Number(w,p.HangarVisionRange);
             Number(w,p.HangarFootprintRadius);
             Number(w,p.HangarModelHeightMeters);
-            Number(w,p.HangarModelScale);foreach(var field in PlayableProfileMetadata.HawkFields)Number(w,field.Read(p.CopyData()));
+            Number(w,p.HangarModelScale);foreach(var field in PlayableProfileMetadata.HawkFields)Number(w,field.Read(profileData));
             Number(w,p.ScienceHealth);
             Number(w,p.ScienceBuildSeconds);
             Number(w,p.ScienceVisionRange);
@@ -778,7 +784,7 @@ namespace Spacewars.Runtime
             Write(w,s.Origin);
             }}if(!legacyQueue){w.Write(p.UnitOrderQueueLimit);Number(w,p.CameraEdgePanSpeed);Number(w,p.CameraEdgePanZonePixels);}
             if(!legacyQueue&&!legacyMarch){Number(w,p.GroupMarchMaximumStretch);Number(w,p.IncomeMarkerFontPixels);Number(w,p.IncomeMarkerRisePixels);Number(w,p.IncomeMarkerDurationSeconds);Number(w,p.RallyFlagHeight);}
-            if(legacyQueue||legacyMarch){if(!p.Navigation.HasCrowdV1Defaults)throw new ArgumentException("Legacy binding requires v1 crowd defaults.");}else p.Navigation.WriteCrowdBinding(w);if(p.HasAccruedCreditExtension){w.Write(0x41434331);w.Write(p.MaxAccruedCredits);}if(p.UsesRecastGroundRoutes){w.Write(0x52435331);w.Write(1);}if(!legacyQueue&&!legacyMarch)WriteEffectiveProfileBindingV1(w,p);foreach(var f in OrbitalProfileMetadata.Fields)Number(w,f.Read(p.CopyData()));
+            if(legacyQueue||legacyMarch){if(!p.Navigation.HasCrowdV1Defaults)throw new ArgumentException("Legacy binding requires v1 crowd defaults.");}else p.Navigation.WriteCrowdBinding(w);if(p.HasAccruedCreditExtension){w.Write(0x41434331);w.Write(p.MaxAccruedCredits);}if(p.UsesRecastGroundRoutes){w.Write(0x52435331);w.Write(1);}if(!legacyQueue&&!legacyMarch)WriteEffectiveProfileBindingV1(w,p);foreach(var f in OrbitalProfileMetadata.Fields)Number(w,f.Read(profileData));
             // The original default has no binding suffix, preserving older default-profile checkpoints.
             if(p.ShkvalDirectHitDamage!=20){w.Write(0x53484431);w.Write(p.ShkvalDirectHitDamage);}
             if(p.ShkvalBaseBlastRadiusMultiplier!=0.8){w.Write(0x53425231);Number(w,p.ShkvalBaseBlastRadiusMultiplier);}}
@@ -791,7 +797,7 @@ namespace Spacewars.Runtime
         {
             w.Write(0x45504231); // EPB1
             w.Write(1);
-            w.Write(114);
+            w.Write(116);
             Number(w,p.TurretCreditCost);
             Number(w,p.TurretBuildSeconds);
             Number(w,p.TurretHealthMultiplier);
@@ -871,6 +877,7 @@ namespace Spacewars.Runtime
             Number(w,p.ExplorerImpactScale);
             Number(w,p.UnitWreckLifetimeSeconds);
             Number(w,p.WreckSinkSeconds);
+            Number(w,p.WreckSpawnProtectionSeconds);
             Number(w,p.WreckBurialMin);
             Number(w,p.WreckBurialMax);
             Number(w,p.WreckSinkDepth);
@@ -906,6 +913,8 @@ namespace Spacewars.Runtime
             Number(w,p.IncomeSettlementSeconds);
             Number(w,p.FactoryGateSeconds);
             Number(w,p.FactoryRolloutSpeed);
+            Number(w,p.RelayVisionRange);
+            Number(w,p.LingeringVisionSeconds);
         }
 
 

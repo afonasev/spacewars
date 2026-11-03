@@ -193,18 +193,22 @@ namespace Spacewars.Tests.EditMode
                 var member=typeof(PlayableProfileData).GetField("hawk"+char.ToUpperInvariant(f.Path[5])+f.Path.Substring(6));Assert.NotNull(member);
                 foreach(double value in new[]{f.Minimum-1,f.Maximum+1,double.NaN,double.PositiveInfinity}){var data=p.CopyData();member.SetValue(data,value);Assert.Throws<ArgumentException>(()=>PlayableProfile.Create(data));}}
         }
-        [Test] public void HoldDoesNotMoveForBlockedShotAndAttackFindsClearApproach()
+        // The previous friendly-HQ obstruction contract was superseded by the user's transit rule.
+        [Test] public void HeldHawkFiresThroughFriendlyHeadquartersWithoutMoving()
         {
-            int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-26,0),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-16,0);Send(PlayableCommandKind.Hold,a);var start=Entity(a).Position;Tick(90);Assert.AreEqual(start,Entity(a).Position);Assert.AreEqual(p.TankHealth,Entity(b).Health);Assert.False(View.Projectiles.Any(x=>x.Kind==PlayableEntityKind.Hawk));
-            Send(PlayableCommandKind.Attack,a,target:b);bool moved=false;for(int tick=0;tick<300;tick++){Tick();moved|=!Entity(a).Position.Equals(start);if(Entity(b).Health<p.TankHealth)break;}Assert.True(moved,"Attack approaches a clear line around the blocking HQ");Assert.Less(Entity(b).Health,p.TankHealth);
+            int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-26,0),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-16,0);
+            Set(b,"Reload",1000d);Send(PlayableCommandKind.Hold,a);var start=Entity(a).Position;
+            var actor=(NavUnit)Get<object>(a,"Air").GetType().GetField("Actor").GetValue(Get<object>(a,"Air"));
+            typeof(NavUnit).GetProperty("Heading").SetValue(actor,0d);Set(a,"StoppedSeconds",p.HawkPreparationSeconds);Tick(90);
+            Assert.AreEqual(start,Entity(a).Position);Assert.Less(Entity(b).Health,p.TankHealth);
         }
         [Test] public void SweptRocketMeetsRockAndEarliestBodyBeforeBuilding()
         {
             var rock=PlayableMap.SolidObstacles(p).First();double z=(rock.MinZ+rock.MaxZ)/2;
-            var args=new object[]{new BallisticPoint(rock.MinX-1,.5,z),new BallisticPoint(rock.MaxX+1,.5,z),.07d,0,null,false,0,default(BallisticPoint),0d,0};
+            var args=new object[]{new BallisticPoint(rock.MinX-1,.5,z),new BallisticPoint(rock.MaxX+1,.5,z),.07d,0,null,false,0,default(BallisticPoint),0d,0,null};
             Assert.True((bool)typeof(PlayableDomain).GetMethod("AirContact",Hidden).Invoke(d,args));Assert.Zero((int)args[6]);
             var hq=View.Buildings.First(b=>b.Kind==PlayableBuildingKind.Headquarters);double x=hq.Position.X,z2=hq.Position.Z;int near=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Explorer,x-8,z2);
-            args=new object[]{new BallisticPoint(x-10,.5,z2),new BallisticPoint(x+5,.5,z2),.07d,0,null,false,0,default(BallisticPoint),0d,0};Assert.True((bool)typeof(PlayableDomain).GetMethod("AirContact",Hidden).Invoke(d,args));Assert.AreEqual(near,(int)args[6],"First unit in front of the building receives physical contact");
+            args=new object[]{new BallisticPoint(x-10,.5,z2),new BallisticPoint(x+5,.5,z2),.07d,0,null,false,0,default(BallisticPoint),0d,0,null};Assert.True((bool)typeof(PlayableDomain).GetMethod("AirContact",Hidden).Invoke(d,args));Assert.AreEqual(near,(int)args[6],"First unit in front of the building receives physical contact");
             Call("Damage",near,10000);args[6]=0;Assert.True((bool)typeof(PlayableDomain).GetMethod("AirContact",Hidden).Invoke(d,args));Assert.AreEqual(hq.Id,(int)args[6],"Building stops the same 3D ray");
         }
         [Test] public void VerticalMotionPreservesPreparationAndSubstantialYawResetsIt()

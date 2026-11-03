@@ -4,6 +4,16 @@ namespace Spacewars.Runtime
 {
  internal sealed partial class PlayableDomain
  {
+  internal void PrepareStartingCombatGeometry(Func<bool> stopping)
+  {
+   // The immutable collision meshes build triangle trees on first use. Prepare the models
+   // present on this map during loading, before a salvo can charge that cost to one tick.
+   foreach(var building in buildings.Values)
+   {
+    if(stopping())return;
+    if(building.Phase!=ConstructionPhase.Pending)_=BuildingCombat(building).Reach;
+   }
+  }
   private BuildingCombatPose BuildingCombat(Building b)
   {
    if(b.Kind==PlayableBuildingKind.RepairTower)return new BuildingCombatPose(new SentryCombatPose(b.Position,GroundHeight(b.Position)+BuildingCombatGeometry.ApronLift,profile.TurretModelScale,b.Healing?.Heading??Math.PI/2,b.Healing?.Pitch??0,b.Ready?1:b.Build/BuildingDuration(b),true));

@@ -17,6 +17,8 @@ namespace Spacewars.Simulation
         public bool RefineryUpgraded;
         public bool ScientificCenterUpgraded, ProducerUpgraded;
     }
+    [Serializable] public sealed class KnownRelayState
+    {public int SiteId;public PlayableOwner? Owner;}
     // A subsystem checkpoint, not a complete world/archive. The enclosing world state
     // must bind profile/map/generation/tick and coordinate the authoritative sources.
     [Serializable] public sealed class PlayableVisionState
@@ -28,15 +30,17 @@ namespace Spacewars.Simulation
         public long[] DiscoveredCells;
         public byte[] Coverage;
         public KnownBuildingState[] KnownBuildings;
+        public KnownRelayState[] KnownRelays=Array.Empty<KnownRelayState>();
     }
 
     public sealed partial class PlayableVision
     {
         // Technical format identity, never a balance setting. Unsupported formats fail closed.
-        public const int StateVersion = 3;
+        public const int StateVersion = 4;
 
         public PlayableVisionState CaptureState() => new PlayableVisionState
         {
+            KnownRelays=knownRelays.OrderBy(r=>r.Key).Select(r=>new KnownRelayState{SiteId=r.Key,Owner=r.Value}).ToArray(),
             Version = StateVersion, Team = team, RasterResolution = RasterResolution,
             Revision = revision, CoverageUpdates = CoverageUpdates,
             HalfWidth = halfWidth, HalfDepth = halfDepth, CellSize = cellSize, Feather = feather,
@@ -57,8 +61,8 @@ namespace Spacewars.Simulation
                 state.RasterResolution != RasterResolution || state.HalfWidth != halfWidth || state.HalfDepth != halfDepth ||
                 state.CellSize != cellSize || state.Feather != feather || state.Revision < 0 || state.CoverageUpdates < 0 ||
                 state.Revision < state.CoverageUpdates || state.Sources == null || state.DiscoveredCells == null ||
-                state.Coverage == null || state.Coverage.Length != coverage.Length || state.KnownBuildings == null ||
-                revision != 0 || CoverageUpdates != 0 || sources.Length != 0 || discovered.Count != 0 || known.Count != 0)
+                state.Coverage == null || state.Coverage.Length != coverage.Length || state.KnownBuildings == null || state.KnownRelays == null ||
+                revision != 0 || CoverageUpdates != 0 || sources.Length != 0 || discovered.Count != 0 || known.Count != 0 || knownRelays.Count != 0)
                 throw new ArgumentException("Vision checkpoint or fresh destination mismatch.", nameof(state));
 
             var nextSources = new List<VisionSource>();
@@ -84,6 +88,10 @@ namespace Spacewars.Simulation
                     throw new ArgumentException("Invalid known building.", nameof(state));
                 nextKnown.Add(row.Id, new KnownBuilding(row.Id, row.Team, row.Owner, row.Kind, new NavPoint(row.X, row.Z), row.Heading, row.RefineryUpgraded, row.ScientificCenterUpgraded, row.ProducerUpgraded));
             }
+            var relayIds=new HashSet<int>();
+            foreach(var relay in state.KnownRelays)
+                if(relay==null||relay.SiteId<1||!relayIds.Add(relay.SiteId)||relay.Owner.HasValue&&!Enum.IsDefined(typeof(PlayableOwner),relay.Owner.Value))
+                    throw new ArgumentException("Invalid remembered relay.",nameof(state));
             var orderedSources = nextSources.OrderBy(s => s.Position.X).ThenBy(s => s.Position.Z).ThenBy(s => s.Radius).ToArray();
             var nextCoverage = (byte[])state.Coverage.Clone();
 
@@ -91,6 +99,7 @@ namespace Spacewars.Simulation
             queryBounds = VisionQueryBounds.Create(sources);
             foreach (long key in nextDiscovered) discovered.Add(key);
             foreach (var pair in nextKnown) known.Add(pair.Key, pair.Value);
+            foreach(var relay in state.KnownRelays)knownRelays.Add(relay.SiteId,relay.Owner);
             Array.Copy(nextCoverage, coverage, coverage.Length);
             revision = state.Revision; CoverageUpdates = state.CoverageUpdates; cached = null;
             lastRefreshSources = null; lastRefreshBuildings = null; refreshInput.Clear();

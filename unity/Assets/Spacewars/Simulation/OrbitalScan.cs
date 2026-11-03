@@ -23,7 +23,7 @@ namespace Spacewars.Simulation
         // Union-only vertex tests could bridge a hidden gap between separate sources.
         public static bool Covered(NavPoint a,NavPoint b,NavPoint c,IReadOnlyList<VisionSource> sources)
         {
-            foreach(var source in sources){
+            for(int i=0;i<sources.Count;i++){var source=sources[i];
                 bool Inside(NavPoint p){double x=p.X-source.Position.X,z=p.Z-source.Position.Z;return x*x+z*z<=source.Radius*source.Radius+1e-9;}
                 if(Inside(a)&&Inside(b)&&Inside(c))return true;
             }
@@ -33,7 +33,7 @@ namespace Spacewars.Simulation
         {
             double dx=b.X-a.X,dz=b.Z-a.Z,aa=dx*dx+dz*dz;if(aa<1e-18)yield break;
             var intervals=new List<(double lo,double hi)>();
-            foreach(var source in sources){
+            for(int i=0;i<sources.Count;i++){var source=sources[i];
                 double x=a.X-source.Position.X,z=a.Z-source.Position.Z,bb=2*(x*dx+z*dz),cc=x*x+z*z-source.Radius*source.Radius,disc=bb*bb-4*aa*cc;
                 if(disc<0)continue;double root=Math.Sqrt(disc),lo=Math.Max(0,(-bb-root)/(2*aa)),hi=Math.Min(1,(-bb+root)/(2*aa));
                 if(hi>lo)intervals.Add((lo,hi));

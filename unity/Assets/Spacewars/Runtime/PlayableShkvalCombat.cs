@@ -114,13 +114,19 @@ namespace Spacewars.Runtime
                 result.Add(new BallisticBody(b.Id,b.Owner,b.Position,default(NavPoint),BuildingRadius(b.Kind),buildingHeight>0?buildingHeight:profile.ShkvalBuildingCollisionHeight,b.Health,true,GroundHeight(b.Position),BuildingCombat(b)));
             return result.ToArray();
         }
-        private BallisticFlight BaselineFlight(NavPoint from,NavPoint target)=>new BallisticFlight(new BallisticPoint(from.X,GroundHeight(from)+profile.ShkvalLaunchHeight,from.Z),new BallisticPoint(target.X,GroundHeight(target),target.Z),profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed);
-        private BallisticFlight GuidedFlight(Unit u,NavPoint from,NavPoint target)
+        private int ArtilleryTarget(Unit gun,NavPoint from)
         {
-            var velocity=units.TryGetValue(u.Target,out var victim)?victim.Velocity:default(NavPoint);
-            return PlayableBallistics.Aim(from,target,velocity,profile.ShkvalLaunchHeight,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed,true,profile.ShkvalLeadSpeedThreshold,profile.ShkvalLeadFalloff,profile.ShkvalMaxLeadTimeSec,TerrainHeight);
+            double range=PlayableUnitRules.Range(profile,gun.Kind,UnitUpgraded(gun));
+            return NearestSpatialTarget(from,gun.Owner,range,unitsFirst:false);
         }
-        private int ArtilleryTarget(Unit u,NavPoint from)=>PlayableBallistics.BestTarget(from,u.Owner,PlayableUnitRules.Range(profile,u.Kind,UnitUpgraded(u)),profile.ShkvalLaunchHeight,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed,profile.ShkvalProjectileRadius,PlayableUnitRules.ShkvalBlastRadius(profile,UnitUpgraded(u)),WeaponDamage(u.Owner,profile.ShkvalDamage),profile.ShkvalFriendlyFirePenalty,SolidObstacles(),profile.BallisticWallHeight,BallisticBodies(u.Owner).Where(b=>!AirTarget(b.Id)).ToArray(),TerrainHeight,UnitUpgraded(u),profile.ShkvalLeadSpeedThreshold,profile.ShkvalLeadFalloff,profile.ShkvalMaxLeadTimeSec,Hostile,u.Id);
+
+        private BallisticPoint ArtilleryAimPoint(int targetId,NavPoint position)
+        {
+            double height=GroundHeight(position);
+            if(units.TryGetValue(targetId,out var unit))
+                height+=PlayableUnitRules.Radius(profile,unit.Kind); // Half the ground unit's ballistic body height.
+            return new BallisticPoint(position.X,height,position.Z);
+        }
         private void AdvanceShkval(Unit u,NavUnit self,double dt)
         {
             bool defaultCombat=u.DefaultCombat!=null;
@@ -146,16 +152,20 @@ namespace Spacewars.Runtime
             var slope=profile.AuthoredMap?.SurfaceGradient(self.Position)??default(NavPoint);
             double scale=profile.ShkvalModelRadius*profile.ShkvalModelScale/2.05;
             int barrel=u.BurstSequence%4;
-            var aimed=UnitUpgraded(u)?GuidedFlight(u,self.Position,target):BaselineFlight(self.Position,target);
-            ShkvalLaunchGeometry.Aim(ground,self.Heading,UnitUpgraded(u),barrel,scale,profile.ShkvalProjectileLength,slope,aimed.End,profile.ShkvalArcHeight,out double desired,out double pitch);
+            var aimPoint=ArtilleryAimPoint(u.Target,target);
+            ShkvalLaunchGeometry.Aim(ground,self.Heading,UnitUpgraded(u),barrel,scale,profile.ShkvalProjectileLength,slope,aimPoint,profile.ShkvalArcHeight,out double desired,out double pitch);
             u.Turret=Turn(u.Turret,desired,profile.ShkvalTurretTurnSpeed*dt);
             u.ShkvalPitch=Turn(u.ShkvalPitch,pitch,profile.ShkvalTurretTurnSpeed*dt);
             // Numerical pose equality prevents even a small release snap; turn speed remains profiled.
             if(moved||u.StoppedSeconds<profile.ShkvalStopForMs/1000||u.Reload>0||Math.Abs(Angle(desired-u.Turret))>1e-8||Math.Abs(pitch-u.ShkvalPitch)>1e-8)return;
             var start=ShkvalLaunchGeometry.At(ground,self.Heading,u.Turret,u.ShkvalPitch,UnitUpgraded(u),barrel,scale,profile.ShkvalProjectileLength,slope).Center;
-            var flight=new BallisticFlight(start,aimed.End,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed);
+            var flight=new BallisticFlight(start,aimPoint,profile.ShkvalArcHeight,profile.ShkvalProjectileSpeed);
             // Launch prediction is observation-bound. Physical contacts below use full current state.
-            var prediction=PlayableBallistics.FirstContact(flight,profile.ShkvalProjectileRadius,SolidObstacles(),profile.BallisticWallHeight,BallisticBodies(u.Owner),u.Id,terrain:TerrainHeight).Value;
+            var prediction=PlayableBallistics.FirstContact(flight,profile.ShkvalProjectileRadius,SolidObstacles(),profile.BallisticWallHeight,BallisticBodies(u.Owner),u.Id,terrain:TerrainHeight,canContact:other=>Hostile(other,u.Owner)).Value;
+            // The ground ring marks the locked center on a direct shot and the obstruction on an intercepted shot.
+            // The real explosion still uses the first physical contact during flight.
+            var markerPoint=prediction.BodyId==u.Target&&units.ContainsKey(u.Target)?aimPoint:prediction.Point;
+            prediction=new BallisticContact(prediction.Progress,markerPoint,prediction.BuildingId);
             // Four bores and two reserve rockets are approved visual invariants, never ammo gates.
             // Feed cadence follows the existing firing interval: one empty interval, one feed interval.
             double interval=profile.ShkvalFireIntervalMs/1000;
@@ -165,21 +175,23 @@ namespace Spacewars.Runtime
             for(int offset=1;offset<4;offset++){int cell=(fired+offset)%4;if(u.ShkvalCells[cell]>0){u.ShkvalCells[cell]=Math.Min(u.ShkvalCells[cell],interval);break;}}
             projectiles.Add(new Projectile{TermsRevision=profile.Revision,Id=nextProjectile++,Owner=u.Id,Target=u.Target,Faction=u.Owner,Kind=PlayableEntityKind.Shkval,Position=start.Ground,Damage=WeaponDamage(u.Owner,profile.ShkvalDamage),
                 Rocket=new Rocket{UsesBlastUpgrade=true,DirectDamage=WeaponDamage(u.Owner,profile.ShkvalDirectHitDamage),Launch=new ShkvalLaunchSnapshot(u.BurstSequence++%4,new BallisticPoint(self.Position.X,GroundHeight(self.Position),self.Position.Z),self.Heading,u.Turret,UnitUpgraded(u),flight.Tangent(0),flight.Duration,flight.Start.Y,u.ShkvalPitch,flight.Start),Flight=flight,Predicted=prediction,BuildingTarget=buildings.ContainsKey(u.Target),Radius=profile.ShkvalProjectileRadius,BlastRadius=PlayableUnitRules.ShkvalBlastRadius(profile,UnitUpgraded(u)),MarkerStartRadius=profile.ShkvalMarkerStartRadius,MarkerOpacity=profile.ShkvalMarkerOpacity,BuildingHeight=profile.ShkvalBuildingCollisionHeight}});
-            RememberDefaultShot(u);Sound(PlayableSoundKind.Shot,self.Position,u.Kind,u.Owner);
+            RememberDefaultShot(u);Sound(PlayableSoundKind.Shot,self.Position,u.Kind,u.Owner,unitId:u.Id);
             u.Reload=profile.ShkvalFireIntervalMs/1000;
         }
         private bool AdvanceRocket(Projectile p,double dt)
         {
+            SalvoTrace.Record(SalvoPhase.Flight);
             var r=p.Rocket;double previousElapsed=r.Elapsed;var previousPosition=p.Position;double from=r.Elapsed/r.Flight.Duration;r.Elapsed=Math.Min(r.Flight.Duration,r.Elapsed+dt);double to=r.Elapsed/r.Flight.Duration;
             var bodies=BallisticBodies(null,r.BuildingHeight);var solids=SolidObstacles();
-            var hit=PlayableBallistics.FirstContact(r.Flight,r.Radius,solids,profile.BallisticWallHeight,bodies,p.Owner,from,to,TerrainHeight);
+            var hit=PlayableBallistics.FirstContact(r.Flight,r.Radius,solids,profile.BallisticWallHeight,bodies,p.Owner,from,to,TerrainHeight,other=>Hostile(other,p.Faction));
             p.Position=r.Flight.Point(to).Ground;
+            SalvoTrace.Record(SalvoPhase.Contact,hit.HasValue?1:0);
             if(hit==null)return false;
             // Snapshot every hit before mutations so a destroyed cover still shields this explosion.
             var victims=bodies.Where(b=>b.Id==hit.Value.BodyId||PlayableBallistics.BlastHits(hit.Value.Point,r.BlastRadius,b,solids,profile.BallisticWallHeight,bodies,TerrainHeight)).Select(b=>b.Id).ToArray();
             double DamageFor(int id)=>id==hit.Value.BodyId?r.DirectDamage:p.Damage;
             int visibleMask=0;foreach(PlayableOwner owner in Owners)if(Vision(owner).IsVisible(hit.Value.Point.Ground))visibleMask|=1<<(int)owner;
-            var wreckVictims=wrecks.Values.Where(w=>w.Blocks(Tick)&&PlayableBallistics.BlastHits(hit.Value.Point,r.BlastRadius,new BallisticBody(w.Id,w.Owner,w.Position,default(NavPoint),w.Radius,2*w.Radius,1,false,GroundHeight(w.Position)),solids,profile.BallisticWallHeight,bodies,TerrainHeight)).Select(w=>w.Id).ToArray();
+            var wreckVictims=wrecks.Values.Where(w=>w.Damageable(Tick)&&PlayableBallistics.BlastHits(hit.Value.Point,r.BlastRadius,new BallisticBody(w.Id,w.Owner,w.Position,default(NavPoint),w.Radius,2*w.Radius,1,false,GroundHeight(w.Position)),solids,profile.BallisticWallHeight,bodies,TerrainHeight)).Select(w=>w.Id).ToArray();
             // One prospective publication covers every lethal hit and removed
             // wreck. Refusal precedes all impact facts, so the entire rocket can retry.
             var prospective=new System.Collections.Generic.Dictionary<int,PlayableWreckSnapshot>();
@@ -191,15 +203,20 @@ namespace Spacewars.Runtime
             }
             var removedActors=prospective.Values.Where(w=>w.Kind!=PlayableEntityKind.Hawk).Select(w=>w.Id).ToArray();
             bool geometryChange=wreckVictims.Length>0||removals.Count>0||prospective.Values.Any(w=>w.Blocks(Tick));
+            SalvoTrace.Record(SalvoPhase.Victims,geometryChange?1:0);
             if(geometryChange&&!TryRebuildGeometry(removedWrecks:wreckVictims,removals:removals,additionalWrecks:prospective.Values,removedActors:removedActors.Length>0?removedActors:null)){
+                SalvoTrace.Record(SalvoPhase.Refused);
                 r.Elapsed=previousElapsed;p.Position=previousPosition;return false;
             }
+            SalvoTrace.Record(SalvoPhase.Published,prospective.Count);
             foreach(int id in wreckVictims)wrecks[id]=wrecks[id].Destroy(Tick,PlayableEntityKind.Shkval);
             MarkMinesForAreaDamage(hit.Value.Point,r.BlastRadius);
             Sound(PlayableSoundKind.Impact,hit.Value.Point.Ground,p.Kind);
             impacts.Add(new PlayableImpactSnapshot(p.Id,p.Faction,hit.Value.Point,r.BlastRadius,Tick,visibleMask));
             foreach(int id in victims)TryDamagePrepared(id,DamageFor(id),p.Owner,p.Faction,null,default(NavPoint),null,prospective);
+            SalvoTrace.Record(SalvoPhase.Damage);
             if(geometryChange){ReconcileWreckRoutes();RetryWreckWaits();}
+            SalvoTrace.Record(SalvoPhase.Routes);
             return true;
         }
     }

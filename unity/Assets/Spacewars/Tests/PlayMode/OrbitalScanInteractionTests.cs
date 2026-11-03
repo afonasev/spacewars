@@ -14,6 +14,13 @@ namespace Spacewars.Input.Tests
 {
     public sealed partial class OrdinaryLocalPadTests
     {
+        [Test] public void ScanMapStrokeWidthRefreshesOnProfileRebind()
+        {
+            var p=PlayableProfile.Default;var map=new PlayableMapSurface(p,null);
+            float Width()=>(float)typeof(PlayableMapSurface).GetField("scanLineWidth",F).GetValue(map);
+            Assert.AreEqual((float)p.CopyData().orbitalScanLineWidth,Width());
+            var data=p.CopyData();data.orbitalScanLineWidth=2.5;map.Rebind(PlayableProfile.Create(data),null);Assert.AreEqual(2.5f,Width());
+        }
         [UnityTest] public IEnumerator ScanCardsAndTabTargetUseLiveAuthority()
         {
             yield return StartOrdinary(2,configureRoster:d=>d.Participants[0].DeviceId=0);
@@ -47,8 +54,17 @@ namespace Spacewars.Input.Tests
             Assert.True(Get<PlayableSnapshot>(seat,"view").Vision.IsVisible(target));Assert.Greater(Get<PlayableSnapshot>(seat,"view").ScanLines.Count,0);
             yield return Capture("scan-active-tab",captureWidth:1600,captureHeight:1000,captureChecks:()=>Assert.False(Get<bool>(seat,"mapOpen")));
             yield return new WaitForSeconds(.25f);
-            yield return Capture("scan-light-sweep",captureWidth:1600,captureHeight:1000,captureChecks:()=>Assert.Greater(Get<PlayableSnapshot>(seat,"view").ScanTriangles.Count,0,"light field is visible during active scan"));
+            yield return Capture("scan-light-sweep",captureWidth:1600,captureHeight:1000,captureChecks:()=>
+            {
+                var current=Get<PlayableSnapshot>(seat,"view");Assert.Greater(current.ScanTriangles.Count,0,"light field is visible during active scan");
+                var projected=Get<System.Collections.Generic.Dictionary<(double,double),Vector2>>(seat,"scanProjectionCache");
+                Assert.Greater(projected.Count,0);Assert.Less(projected.Count,current.ScanTriangles.Count*3,"shared world points are projected once, without dropping faces");
+                var shared=Get<PlayableMapSurface>(app,"sharedLocalMap");
+                var layers=(System.Collections.Generic.IReadOnlyList<OrbitalScanTriangle>[])typeof(PlayableMapSurface).GetField("scanTriangleLayers",F).GetValue(shared);
+                Assert.True(layers.Any(layer=>ReferenceEquals(layer,current.ScanTriangles)),"shared minimap retains original clipped buffers instead of cloning vertices");
+            });
             yield return Wait(()=>Get<PlayableSnapshot>(seat,"view").ScanLines.Count==0,"scan expired");
+            Assert.AreEqual(DisplayStyle.None,Get<VisualElement>(seat,"scanLayer").style.display.value,"expired scan overlay is not continuously repainted");
             Runtime.RequestPause(true);yield return Wait(()=>Runtime.Latest.Paused,"reset cooldown fixture");type.GetMethod("AdvanceOrbital",F).Invoke(domain,new object[]{30d});Runtime.RequestPause(false);
             yield return Wait(()=>Get<PlayableSnapshot>(seat,"view").Orbital.Abilities[0].Remaining==0,"ready again");
             Call(seat,"ApplyOrbitalFromHud",1);var beforeMini=camera.transform.position;var mini=Get<PlayableMapSurface>(app,"sharedLocalMap");var mb=mini.worldBound;var screenMini=new Vector2(mb.center.x*panel.scale,Screen.height-mb.center.y*panel.scale);Call(seat,"MapSelect",1,screenMini,screenMini,false);

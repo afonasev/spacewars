@@ -17,7 +17,7 @@ namespace Spacewars.Simulation
         public double orbitalCardWidth=320,orbitalCardHeight=336,orbitalCardArtworkSize=220;
         public double orbitalUiRingWidth=3,orbitalUiCornerRadius=5,orbitalUiPulseSeconds=1.2,orbitalUiCoolingArtworkOpacity=.25;
         public double orbitalPanelWidth=76,orbitalIconSize=36,orbitalLevelFontSize=32;
-        public double orbitalMaxThresholdMultiplier=2,orbitalUiMaxFontScale=.5;
+        public double orbitalThresholdMax=8000,orbitalUiMaxFontScale=.5;
         public double orbitalThreshold1=250,orbitalThreshold2=500,orbitalThreshold3=1000,orbitalThreshold4=2000,orbitalThreshold5=4000;
         public double orbitalBasicSeconds=30,orbitalAdvancedSeconds=60,orbitalUltimateSeconds=90,orbitalCommonSeconds=10,orbitalFinalSpeed=2;
 
@@ -272,6 +272,7 @@ namespace Spacewars.Simulation
         public double visionCellSize;
         public double fogRevealMs;
         public double fogConcealMs;
+        public double lingeringVisionSeconds=1;
         public double fogEdgeFeather;
         public double fogExploredOpacity;
         public double fogUnseenOpacity;
@@ -299,7 +300,8 @@ namespace Spacewars.Simulation
         public double outpostCaptureSeconds;
         public double mineCaptureRadius;
         public double mineCaptureSeconds;
-        public double relayIncomePerPeriod=10,relayCaptureRadius=7,relayCaptureSeconds=5,relayFootprintRadius=.75;
+        public double relayIncomePerPeriod=5,relayCaptureRadius=7,relayCaptureSeconds=5,relayFootprintRadius=.75;
+        public double relayVisionRange=10; // Independent relay sight; tank sight keeps its own default.
         public double headquartersSlots;
         public double outpostSlots;
         public double slotRingRadius;
@@ -359,6 +361,7 @@ namespace Spacewars.Simulation
         public double directImpactRadius=0.18, directImpactSeconds=0.16, directImpactSparkLength=0.45, explorerImpactScale=0.4;
         public double unitWreckLifetimeSeconds=30;
         public double wreckSinkSeconds=2;
+        public double wreckSpawnProtectionSeconds=1;
         public double wreckBurialMin=0.03;
         public double wreckBurialMax=0.16;
         public double wreckSinkDepth=2;
@@ -533,6 +536,7 @@ namespace Spacewars.Simulation
         public double VisionCellSize {get; private set;}
         public double FogRevealMs {get; private set;}
         public double FogConcealMs {get; private set;}
+        public double LingeringVisionSeconds {get; private set;}
         public double FogEdgeFeather {get; private set;}
         public double FogExploredOpacity {get; private set;}
         public double FogUnseenOpacity {get; private set;}
@@ -708,6 +712,7 @@ public double HawkMissileRadius {get; private set;}
         public double ExplorerImpactScale {get; private set;}
         public double UnitWreckLifetimeSeconds {get; private set;}
         public double WreckSinkSeconds {get; private set;}
+        public double WreckSpawnProtectionSeconds {get; private set;}
         public double WreckBurialMin {get; private set;}
         public double WreckBurialMax {get; private set;}
         public double WreckSinkDepth {get; private set;}
@@ -811,6 +816,7 @@ public double HawkMissileRadius {get; private set;}
             DirectImpactSparkLength=data.directImpactSparkLength;ExplorerImpactScale=data.explorerImpactScale;
             UnitWreckLifetimeSeconds=data.unitWreckLifetimeSeconds;
             WreckSinkSeconds=data.wreckSinkSeconds;
+            WreckSpawnProtectionSeconds=data.wreckSpawnProtectionSeconds;
             WreckBurialMin=data.wreckBurialMin;
             WreckBurialMax=data.wreckBurialMax;
             WreckSinkDepth=data.wreckSinkDepth;
@@ -970,6 +976,7 @@ HawkMissileRadius=data.hawkMissileRadius;
             VisionCellSize=data.visionCellSize;
             FogRevealMs=data.fogRevealMs;
             FogConcealMs=data.fogConcealMs;
+            LingeringVisionSeconds=data.lingeringVisionSeconds;
             FogEdgeFeather=data.fogEdgeFeather;
             FogExploredOpacity=data.fogExploredOpacity;
             FogUnseenOpacity=data.fogUnseenOpacity;
@@ -977,7 +984,7 @@ HawkMissileRadius=data.hawkMissileRadius;
             MinimapLandmarkOutline=data.minimapLandmarkOutline;
             MinimapUnitMarkerSize=data.minimapUnitMarkerSize;
 
-            OutpostHealth=data.outpostHealth;OutpostBuildSeconds=data.outpostBuildSeconds;OutpostCreditCost=data.outpostCreditCost;OutpostIncomePerPeriod=data.outpostIncomePerPeriod;OutpostFootprintRadius=data.outpostFootprintRadius;OutpostModelHeightMeters=data.outpostModelHeightMeters;OutpostModelScale=data.outpostModelScale;MineHealth=data.mineHealth;MineBuildSeconds=data.mineBuildSeconds;MineCreditCost=data.mineCreditCost;MineIncomePerPeriod=data.mineIncomePerPeriod;MineFootprintRadius=data.mineFootprintRadius;MineModelHeightMeters=data.mineModelHeightMeters;MineModelScale=data.mineModelScale;HeadquartersCaptureRadius=data.headquartersCaptureRadius;HeadquartersCaptureSeconds=data.headquartersCaptureSeconds;OutpostCaptureRadius=data.outpostCaptureRadius;OutpostCaptureSeconds=data.outpostCaptureSeconds;MineCaptureRadius=data.mineCaptureRadius;MineCaptureSeconds=data.mineCaptureSeconds;RelayIncomePerPeriod=data.relayIncomePerPeriod;RelayCaptureRadius=data.relayCaptureRadius;RelayCaptureSeconds=data.relayCaptureSeconds;RelayFootprintRadius=data.relayFootprintRadius;HeadquartersSlots=data.headquartersSlots;OutpostSlots=data.outpostSlots;SlotRingRadius=data.slotRingRadius;OrdinaryPadRadius=data.ordinaryPadRadius;PadBorderRatio=data.padBorderRatio;CapturePulseHz=data.capturePulseHz;ConstructionDamageMultiplier=data.constructionDamageMultiplier;EvacuationClearance=data.evacuationClearance;EvacuationRetrySeconds=data.evacuationRetrySeconds;OutpostX=data.outpostX;OutpostZ=data.outpostZ;MineX=data.mineX;MineZ=data.mineZ;
+            OutpostHealth=data.outpostHealth;OutpostBuildSeconds=data.outpostBuildSeconds;OutpostCreditCost=data.outpostCreditCost;OutpostIncomePerPeriod=data.outpostIncomePerPeriod;OutpostFootprintRadius=data.outpostFootprintRadius;OutpostModelHeightMeters=data.outpostModelHeightMeters;OutpostModelScale=data.outpostModelScale;MineHealth=data.mineHealth;MineBuildSeconds=data.mineBuildSeconds;MineCreditCost=data.mineCreditCost;MineIncomePerPeriod=data.mineIncomePerPeriod;MineFootprintRadius=data.mineFootprintRadius;MineModelHeightMeters=data.mineModelHeightMeters;MineModelScale=data.mineModelScale;HeadquartersCaptureRadius=data.headquartersCaptureRadius;HeadquartersCaptureSeconds=data.headquartersCaptureSeconds;OutpostCaptureRadius=data.outpostCaptureRadius;OutpostCaptureSeconds=data.outpostCaptureSeconds;MineCaptureRadius=data.mineCaptureRadius;MineCaptureSeconds=data.mineCaptureSeconds;RelayIncomePerPeriod=data.relayIncomePerPeriod;RelayCaptureRadius=data.relayCaptureRadius;RelayCaptureSeconds=data.relayCaptureSeconds;RelayFootprintRadius=data.relayFootprintRadius;RelayVisionRange=data.relayVisionRange;HeadquartersSlots=data.headquartersSlots;OutpostSlots=data.outpostSlots;SlotRingRadius=data.slotRingRadius;OrdinaryPadRadius=data.ordinaryPadRadius;PadBorderRatio=data.padBorderRatio;CapturePulseHz=data.capturePulseHz;ConstructionDamageMultiplier=data.constructionDamageMultiplier;EvacuationClearance=data.evacuationClearance;EvacuationRetrySeconds=data.evacuationRetrySeconds;OutpostX=data.outpostX;OutpostZ=data.outpostZ;MineX=data.mineX;MineZ=data.mineZ;
             DefenderOffsetX=data.defenderOffsetX;DefenderOffsetZ=data.defenderOffsetZ;
             SchemaVersion = data.schemaVersion; ProfileId = data.profileId; Revision = data.revision;
             SourceCommit = data.sourceCommit; SourceProfileId = data.sourceProfileId; SourceProfileRevision = data.sourceProfileRevision; SourceManifestSha256 = data.sourceManifestSha256;
@@ -1024,6 +1031,7 @@ HawkMissileRadius=data.hawkMissileRadius;
         public double RelayCaptureRadius {get;private set;}
         public double RelayCaptureSeconds {get;private set;}
         public double RelayFootprintRadius {get;private set;}
+        public double RelayVisionRange {get;private set;}
         public double HeadquartersSlots {get; private set;}
         public double OutpostSlots {get; private set;}
         public double SlotRingRadius {get; private set;}
@@ -1227,12 +1235,12 @@ HawkMissileRadius=data.hawkMissileRadius;
                 minimapLandmarkOutline=2,
                 minimapUnitMarkerSize=0.9,
 
-                outpostHealth=300,outpostBuildSeconds=20,outpostCreditCost=400,outpostIncomePerPeriod=5,outpostFootprintRadius=1.7,outpostModelHeightMeters=4.6,outpostModelScale=0.8,mineHealth=250,mineBuildSeconds=15,mineCreditCost=200,mineIncomePerPeriod=15,mineFootprintRadius=1.4,mineModelHeightMeters=2.4,mineModelScale=0.7,headquartersCaptureRadius=4.5,headquartersCaptureSeconds=5,outpostCaptureRadius=3.5,outpostCaptureSeconds=5,mineCaptureRadius=3,mineCaptureSeconds=5,headquartersSlots=5,outpostSlots=3,slotRingRadius=6.5,ordinaryPadRadius=1.6,padBorderRatio=0.06,capturePulseHz=2,constructionDamageMultiplier=1.5,evacuationClearance=1,evacuationRetrySeconds=1,outpostX=-16,outpostZ=20,mineX=16,mineZ=-20,
+                outpostHealth=300,outpostBuildSeconds=20,outpostCreditCost=300,outpostIncomePerPeriod=5,outpostFootprintRadius=1.7,outpostModelHeightMeters=4.6,outpostModelScale=0.8,mineHealth=250,mineBuildSeconds=15,mineCreditCost=250,mineIncomePerPeriod=15,mineFootprintRadius=1.4,mineModelHeightMeters=2.4,mineModelScale=0.7,headquartersCaptureRadius=4.5,headquartersCaptureSeconds=5,outpostCaptureRadius=3.5,outpostCaptureSeconds=5,mineCaptureRadius=3,mineCaptureSeconds=5,headquartersSlots=5,outpostSlots=3,slotRingRadius=6.5,ordinaryPadRadius=1.6,padBorderRatio=0.06,capturePulseHz=2,constructionDamageMultiplier=1.5,evacuationClearance=1,evacuationRetrySeconds=1,outpostX=-16,outpostZ=20,mineX=16,mineZ=-20,
                 defenderOffsetX=5,defenderOffsetZ=4, schemaVersion=RequiredSchemaVersion, armyCapacity=100, profileId=RequiredProfileId, revision=1, sourceCommit="7d0acb8d078451eaf0ed166a6f8b6d748925abf8", sourceProfileId="local:main:1788708872201:1", sourceProfileRevision=5, sourceManifestSha256="a9b40994adc17b96d9079279044b75cd79af2d6a3ab9c2c8ed576e6d1dad86b6",
                 followDistance=2, followArrivalTolerance=.25, idleAutoDefenseMultiplier=1.1, tankCollisionRadius=.72d, tankModelRadius=.65d, tankModelScale=1d, tankSpeed=4d, tankTurnSpeed=4.5d, tankTurretTurnSpeed=6d, tankAimToleranceRadians=.034906585d, tankRange=10d, tankVisionRange=13d, tankHealth=100, tankFiresWhileMoving=true, tankStopForMilliseconds=0, tankPopulationCost=3, tankCreditCost=150, tankProductionMenuOrder=20, tankProductionSeconds=15, tankWeaponDamage=8, tankWeaponReloadMilliseconds=900, tankProjectileType="kinetic-shell", tankProjectileSpeed=15d, tankProjectileCollisionRadius=.06d, projectileExtraRangePercent=20d,
                 buildingSaleRefundRatio=0.75d,buildingSaleCombatLockoutSec=5d,buildingSaleDemolitionSec=2d,buildingRepairDurationSec=30d,buildingRepairCostRatio=0.5d,buildingRepairCombatLockoutSec=5d,saleMarkerScale=0.7d,
                 lifecycleMarkerPixels=30d,lifecycleMarkerPulseHz=1d,lifecycleMarkerMinOpacity=0.4d,lifecycleMarkerOffsetMeters=0.8d,
-                scienceHealth=250, scienceBuildSeconds=20, scienceVisionRange=14, scienceFootprintRadius=1.45, scienceCreditCost=300, scienceModelHeightMeters=1.6407, scienceModelScale=0.8, refineryUpgradeCost=250, refineryUpgradeSeconds=20, refineryUpgradedIncome=20, refineryTurbineSpeed=90,tankChassisGlowIntensity=1.2,tankChassisCost=300,tankChassisSeconds=30,tankChassisSpeed=6,explorerAssaultCost=300,explorerAssaultSeconds=30,explorerAssaultBurstSize=6,explorerAssaultSpreadDeg=5,shkvalGuidanceCost=300,shkvalGuidanceSeconds=30,shkvalGuidanceRange=16, startingCredits=500, incomePeriodSeconds=5, buildingCancellationRefundRatio=.75d, unitCancellationRefundRatio=1d, headquartersHealth=400, headquartersBuildSeconds=25, headquartersCreditCost=600, headquartersIncomePerPeriod=20, headquartersFootprintRadius=2.05d, headquartersModelHeightMeters=4.6d, headquartersModelScale=.7d, factoryHealth=250, factoryBuildSeconds=15, factoryCreditCost=300, factoryFootprintRadius=1.45d, factoryModelHeightMeters=2.5d, factoryModelScale=.7d, refineryHealth=200, refineryBuildSeconds=10, refineryCreditCost=200, refineryIncomePerPeriod=10, refineryFootprintRadius=1.35d, refineryModelHeightMeters=2.6d, refineryModelScale=.8d,
+                scienceHealth=250, scienceBuildSeconds=20, scienceVisionRange=14, scienceFootprintRadius=1.45, scienceCreditCost=300, scienceModelHeightMeters=1.6407, scienceModelScale=0.8, refineryUpgradeCost=250, refineryUpgradeSeconds=20, refineryUpgradedIncome=20, refineryTurbineSpeed=90,tankChassisGlowIntensity=1.2,tankChassisCost=300,tankChassisSeconds=30,tankChassisSpeed=6,explorerAssaultCost=300,explorerAssaultSeconds=30,explorerAssaultBurstSize=6,explorerAssaultSpreadDeg=5,shkvalGuidanceCost=300,shkvalGuidanceSeconds=30,shkvalGuidanceRange=16, startingCredits=500, incomePeriodSeconds=5, buildingCancellationRefundRatio=.75d, unitCancellationRefundRatio=1d, headquartersHealth=400, headquartersBuildSeconds=25, headquartersCreditCost=500, headquartersIncomePerPeriod=20, headquartersFootprintRadius=2.05d, headquartersModelHeightMeters=4.6d, headquartersModelScale=.7d, factoryHealth=250, factoryBuildSeconds=15, factoryCreditCost=300, factoryFootprintRadius=1.45d, factoryModelHeightMeters=2.5d, factoryModelScale=.7d, refineryHealth=200, refineryBuildSeconds=10, refineryCreditCost=200, refineryIncomePerPeriod=10, refineryFootprintRadius=1.35d, refineryModelHeightMeters=2.6d, refineryModelScale=.8d,
                 arenaHalfExtent=32d, playerHeadquartersX=-21d, enemyHeadquartersX=21d, headquartersZ=0d, playerFactoryPadX=-15d, playerFactoryPadZ=-9d, playerRefineryPadX=-15d, playerRefineryPadZ=9d, enemyFactoryPadX=15d, enemyFactoryPadZ=9d, enemyRefineryPadX=15d, enemyRefineryPadZ=-9d, centralObstacleHalfWidth=3d, centralObstacleHalfDepth=24d, passageHalfWidth=4d, enemyAdvanceDelaySeconds=180d, attackApproachRangeRatio=.85d, attackRepathSeconds=.5d, factoryExitDistance=3d, defaultRallyDistance=7d, targetPickRadiusMultiplier=1.8d, buildingPickRadius=2.3d, navigationRequestsPerFrame=4, renderTargetFramesPerSecond=60, cameraOrthoSize=9.6d, cameraHeight=26d, cameraOffsetX=0d, cameraOffsetZ=-37d, cameraPanSpeed=12d, cameraMinZoom=2.135d, cameraMaxZoom=25.6d, cameraZoomSpeed=.013d, selectionDragPixels=6d
             };
         }
@@ -1439,7 +1447,7 @@ HawkMissileRadius=data.hawkMissileRadius;
             new PlayableProfileField("vision.fogTintG","Fog presentation","Fog green","Green component of unexplored terrain tint.","ratio",0,1,0.005,p=>p.fogTintG,nameof(PlayableProfileData.fogTintG)),
             new PlayableProfileField("vision.fogTintB","Fog presentation","Fog blue","Blue component of unexplored terrain tint.","ratio",0,1,0.005,p=>p.fogTintB,nameof(PlayableProfileData.fogTintB)),
             new PlayableProfileField("vision.fogMemoryBrightness","Fog presentation","Memory brightness","Relative brightness of confirmed building memory.","ratio",0.05,1,0.01,p=>p.fogMemoryBrightness,nameof(PlayableProfileData.fogMemoryBrightness)),
-            new PlayableProfileField("vision.fogMemoryDesaturation","Fog presentation","Memory desaturation","Desaturation distinguishing static building memories from live actors.","ratio",0,1,0.01,p=>p.fogMemoryDesaturation,nameof(PlayableProfileData.fogMemoryDesaturation)),
+            new PlayableProfileField("vision.fogMemoryDesaturation","Fog presentation","Memory desaturation","Desaturation of non-team memory surfaces; confirmed owner paint remains colored.","ratio",0,1,0.01,p=>p.fogMemoryDesaturation,nameof(PlayableProfileData.fogMemoryDesaturation)),
 
             new PlayableProfileField("vision.headquartersVisionRange","Vision and map","HeadquartersVisionRange","Imported buildings.headquarters.vision; controls native team vision or fog/map readability.","m",1,128,0.1,p=>p.headquartersVisionRange,nameof(PlayableProfileData.headquartersVisionRange)),
             new PlayableProfileField("vision.outpostVisionRange","Vision and map","OutpostVisionRange","Imported buildings.outpost.vision; controls native team vision or fog/map readability.","m",1,128,0.1,p=>p.outpostVisionRange,nameof(PlayableProfileData.outpostVisionRange)),
@@ -1449,6 +1457,7 @@ HawkMissileRadius=data.hawkMissileRadius;
             new PlayableProfileField("vision.constructionVisionMultiplier","Vision and map","ConstructionVisionMultiplier","Imported construction.visionMultiplier; controls native team vision or fog/map readability.","ratio",0.01,1,0.01,p=>p.constructionVisionMultiplier,nameof(PlayableProfileData.constructionVisionMultiplier)),
             new PlayableProfileField("vision.visionCellSize","Vision and map","VisionCellSize","Imported map.visionCellSize; controls native team vision or fog/map readability.","m",0.25,32,0.25,p=>p.visionCellSize,nameof(PlayableProfileData.visionCellSize)),
             new PlayableProfileField("vision.fogRevealMs","Vision and map","FogRevealMs","Imported system.fogRevealMs; controls native team vision or fog/map readability.","ms",1,10000,1,p=>p.fogRevealMs,nameof(PlayableProfileData.fogRevealMs)),
+            new PlayableProfileField("vision.lingeringSeconds","Остаточный обзор · lingering-team-vision-v1","Время сужения обзора после потери источника","Линейное сужение прежнего радиуса до нуля после уничтожения или нейтрализации. Ноль отключает остаточный обзор.","с",0,10,.1,p=>p.lingeringVisionSeconds,nameof(PlayableProfileData.lingeringVisionSeconds)),
             new PlayableProfileField("vision.fogConcealMs","Vision and map","FogConcealMs","Imported system.fogConcealMs; controls native team vision or fog/map readability.","ms",1,10000,1,p=>p.fogConcealMs,nameof(PlayableProfileData.fogConcealMs)),
             new PlayableProfileField("vision.fogEdgeFeather","Vision and map","FogEdgeFeather","Imported system.fogEdgeFeather; controls native team vision or fog/map readability.","m",0.01,16,0.01,p=>p.fogEdgeFeather,nameof(PlayableProfileData.fogEdgeFeather)),
             new PlayableProfileField("vision.fogExploredOpacity","Vision and map","FogExploredOpacity","Imported system.fogExploredOpacity; controls native team vision or fog/map readability.","ratio",0.01,0.99,0.01,p=>p.fogExploredOpacity,nameof(PlayableProfileData.fogExploredOpacity)),
@@ -1479,6 +1488,7 @@ HawkMissileRadius=data.hawkMissileRadius;
             new PlayableProfileField("relay.incomePerPeriod","Relay towers","Relay income","Independent credits per economy period; unrelated to refinery upgrades.","credits",0,1000,1,p=>p.relayIncomePerPeriod,nameof(PlayableProfileData.relayIncomePerPeriod)),
             new PlayableProfileField("relay.captureRadius","Relay towers","Nearby capture radius","Units may stand beside the circular platform.","m",2,8,.1,p=>p.relayCaptureRadius,nameof(PlayableProfileData.relayCaptureRadius)),
             new PlayableProfileField("relay.captureSeconds","Relay towers","Capture/neutralization time","Time for one full capture or neutralization phase.","s",.1,60,.1,p=>p.relayCaptureSeconds,nameof(PlayableProfileData.relayCaptureSeconds)),
+            new PlayableProfileField("relay.visionRange","Relay towers","Обзор захваченной вышки","Радиус командного обзора после полного захвата и до полной нейтрализации. Независим от обзора танка.","m",1,128,.1,p=>p.relayVisionRange,nameof(PlayableProfileData.relayVisionRange)),
             new PlayableProfileField("relay.footprintRadius","Relay towers","Solid pedestal radius","Fixed central pole obstacle; surrounding platform remains traversable.","m",.5,1.2,.05,p=>p.relayFootprintRadius,nameof(PlayableProfileData.relayFootprintRadius)),
             new PlayableProfileField("territory.mineCaptureSeconds","Capture","Mine capture seconds","Time to capture or remove full progress; unit count does not accelerate.","s",0.1,60,0.1,p=>p.mineCaptureSeconds,nameof(PlayableProfileData.mineCaptureSeconds)),
             new PlayableProfileField("territory.headquartersSlots","Slots","Headquarters slots","Ordinary slots around ready HQ.","slots",1,8,1,p=>p.headquartersSlots,nameof(PlayableProfileData.headquartersSlots)),
@@ -1514,8 +1524,8 @@ HawkMissileRadius=data.hawkMissileRadius;
             new PlayableProfileField("artillery.productionDurationSec", "Юниты · Шквал", "Время производства", "Сколько времени совместимое здание производит один юнит.", "с", 0.1, 300, 0.5, p=>p.shkvalProductionDurationSec,nameof(PlayableProfileData.shkvalProductionDurationSec)),
             new PlayableProfileField("artillery.damage", "Юниты · Шквал", "Урон по площади", "Базовый урон открытым жертвам взрыва, кроме физически задетого тела.", "HP", 0, 1000, 1, p=>p.shkvalDamage,nameof(PlayableProfileData.shkvalDamage)),
             new PlayableProfileField("artillery.fireIntervalMs", "Ракета и взрыв", "Интервал огня", "Пауза между одиночными ракетами.", "мс", 10, 10000, 10, p=>p.shkvalFireIntervalMs,nameof(PlayableProfileData.shkvalFireIntervalMs)),
-            new PlayableProfileField("artillery.projectileSpeed", "Юниты · Шквал", "Скорость снаряда", "Скорость физического снаряда; влияет на упреждение и время до попадания.", "м/с", 0.1, 200, 0.5, p=>p.shkvalProjectileSpeed,nameof(PlayableProfileData.shkvalProjectileSpeed)),
-            new PlayableProfileField("artillery.arcHeight", "Ракета и взрыв", "Высота дуги", "Подъём над прямой между запуском и приземлением; меняет время полёта и упреждение.", "м", 0.1, 30, 0.1, p=>p.shkvalArcHeight,nameof(PlayableProfileData.shkvalArcHeight)),
+            new PlayableProfileField("artillery.projectileSpeed", "Юниты · Шквал", "Скорость снаряда", "Скорость физического снаряда; определяет время до попадания.", "м/с", 0.1, 200, 0.5, p=>p.shkvalProjectileSpeed,nameof(PlayableProfileData.shkvalProjectileSpeed)),
+            new PlayableProfileField("artillery.arcHeight", "Ракета и взрыв", "Высота дуги", "Подъём над прямой между запуском и приземлением; меняет время полёта.", "м", 0.1, 30, 0.1, p=>p.shkvalArcHeight,nameof(PlayableProfileData.shkvalArcHeight)),
             new PlayableProfileField("artillery.blastRadius", "Ракета и взрыв", "Радиус взрыва после Наведения", "Полный радиус после исследования; базовый Шквал использует профильный множитель. Урон включает союзников.", "м", 0.1, 10, 0.1, p=>p.shkvalBlastRadius,nameof(PlayableProfileData.shkvalBlastRadius)),
             new PlayableProfileField("artillery.markerStartRadius", "Ракета и взрыв", "Начальный радиус маркера", "Круг сужается от этого радиуса до радиуса взрыва.", "м", 0.1, 15, 0.1, p=>p.shkvalMarkerStartRadius,nameof(PlayableProfileData.shkvalMarkerStartRadius)),
             new PlayableProfileField("artillery.markerOpacity", "Ракета и взрыв", "Прозрачность заливки", "Видимость полупрозрачной зоны попадания.", "доля", 0.01, 0.8, 0.01, p=>p.shkvalMarkerOpacity,nameof(PlayableProfileData.shkvalMarkerOpacity)),
@@ -1668,6 +1678,7 @@ new PlayableProfileField("hawk.modelScale","Ястреб · hawk-match-v1","Ма
         public static readonly IReadOnlyList<PlayableProfileField> HawkVisualFields=new[]{
 new PlayableProfileField("hawk.missileVisualScale","Ястреб · hawk-match-v1","Масштаб модели ракеты","Масштаб корпуса и выхлопа ракеты только в отображении; физический радиус и боевые параметры не меняются.","×",0.1,2,0.05,p=>p.hawkMissileVisualScale,nameof(PlayableProfileData.hawkMissileVisualScale))};
         public static readonly IReadOnlyList<PlayableProfileField> WreckFields=new[]{
+            new PlayableProfileField("wrecks.spawnProtectionSeconds","Бой · Остовы и эффекты","Неуязвимость нового остова","Защита после видимого появления или приземления; до появления остов также защищён. Попадания поглощаются без отложенного урона.","с",0,10,.1,p=>p.wreckSpawnProtectionSeconds,nameof(PlayableProfileData.wreckSpawnProtectionSeconds)),
             new PlayableProfileField("wrecks.wreckSinkSeconds","Бой · Остовы и эффекты","Погружение остова","Время плавного исчезновения после выдержки.","с",0.1,10,0.1,p=>p.wreckSinkSeconds,nameof(PlayableProfileData.wreckSinkSeconds)),
             new PlayableProfileField("wrecks.wreckBurialMin","Бой · Остовы и эффекты","Минимальная глубина посадки","Небольшая начальная посадка модели в поверхность.","м",0,1,0.01,p=>p.wreckBurialMin,nameof(PlayableProfileData.wreckBurialMin)),
             new PlayableProfileField("wrecks.wreckBurialMax","Бой · Остовы и эффекты","Максимальная глубина посадки","Случайная глубина фиксируется при создании.","м",0,1,0.01,p=>p.wreckBurialMax,nameof(PlayableProfileData.wreckBurialMax)),

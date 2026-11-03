@@ -22,6 +22,39 @@ public sealed class PlayableBattleHudTests
     [SetUp] public void Setup(){host=new GameObject("battle HUD test");hud=host.AddComponent<PlayableBootstrap>();hud.enabled=false;Set("profile",PlayableProfile.Default);Call("CreateHud");}
     [TearDown] public void Cleanup(){Get<PlayableRuntime>("runtime")?.RequestStop();UnityEngine.Object.DestroyImmediate(host);}
     PlayableSnapshot Snapshot(PlayableEntitySnapshot[] units=null,PlayableBuildingSnapshot[] buildings=null,int credits=1000)=>new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,credits,null,units??Array.Empty<PlayableEntitySnapshot>(),buildings??Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(4,3,100),activeProfile:PlayableProfile.Default);
+    [UnityTest] public IEnumerator HoldFeedbackDoesNotPaintQuickTapsInEitherRing()
+    {
+        var root=Get<VisualElement>("root");var panel=host.GetComponent<UIDocument>().panelSettings;
+        var factory=new PlayableBuildingSnapshot(7,PlayableOwner.Player,PlayableBuildingKind.Factory,default,250,1,0,0,default);
+        Set("view",Snapshot(buildings:new[]{factory}));Get<HashSet<int>>("selection").Add(7);Call("UpdateHud");var actions=Get<OfflinePadAction[]>("battleActions");var action=actions.First(a=>a.Sector.Hold=="repeat"&&a.Sector.Enabled);
+        var ring=Get<OrbitalBattleRing>("battleRing");ring.RemoveFromHierarchy();root.Clear();root.style.width=Screen.width;root.style.height=Screen.height;root.style.backgroundColor=OrbitalTheme.Background;root.Add(ring);
+        ring.Resize(Mathf.Min(360,Screen.width*.4f));ring.style.left=20;ring.style.top=40;ring.style.display=DisplayStyle.Flex;ring.ConfigureInput(true);
+        var classic=new OfflinePadRing();root.Add(classic);
+        var profile=JsonUtility.FromJson<NativeLocalInputProfile>(Resources.Load<TextAsset>("NativeLocalInputProfile").text);profile.Validate();
+        var gesture=new OfflinePadGestures();gesture.SetMode("buildingWheel");gesture.StepDetailed(0,0,true,true,profile,sector:action.Sector);gesture.StepDetailed(10,1,true,true,profile,sector:action.Sector);
+        var texture=new RenderTexture(Screen.width,Screen.height,24);texture.Create();panel.targetTexture=texture;var pixels=new Texture2D(Screen.width,Screen.height,TextureFormat.RGBA32,false);Color32[] idle=null;int changed=0;
+        var folder=Environment.GetEnvironmentVariable("SPACEWARS_HOLD_FEEDBACK_EVIDENCE");if(!string.IsNullOrEmpty(folder))System.IO.Directory.CreateDirectory(folder);
+        try{
+            foreach(string state in new[]{"idle","quick-tap","hold","before-quick-tap"}){
+                double feedback=0;
+                if(state=="quick-tap"){gesture.StepDetailed(10+profile.holdFeedbackDelayMs/2,1,true,true,profile,sector:action.Sector);feedback=gesture.Progress;Assert.Zero(feedback);}
+                if(state=="hold"){gesture.StepDetailed(10+(profile.holdFeedbackDelayMs+profile.holdMs)/2,1,true,true,profile,sector:action.Sector);feedback=gesture.Progress;Assert.AreEqual(.5,feedback,.00001);}
+                if(state=="before-quick-tap")feedback=(profile.holdFeedbackDelayMs/2)/profile.holdMs;
+                // Ordinary HUDs set the ring every frame; do the same until retained
+                // layout/artwork positions settle, instead of comparing first-layout pixels.
+                for(int frame=0;frame<8;frame++){
+                    ring.Set(actions,"Фабрика",action.Sector.Id,feedback,"factory");classic.Set(actions,action.Sector.Id,"buildingWheel",0,1,false,feedback,180);
+                    ((VisualElement)typeof(OrbitalBattleRing).GetField("detailFrame",Flags).GetValue(ring)).style.display=DisplayStyle.None;
+                    yield return null;
+                }
+                var previous=RenderTexture.active;RenderTexture.active=texture;pixels.ReadPixels(new Rect(0,0,Screen.width,Screen.height),0,0);pixels.Apply();RenderTexture.active=previous;var sample=pixels.GetPixels32();
+                if(!string.IsNullOrEmpty(folder))System.IO.File.WriteAllBytes(System.IO.Path.Combine(folder,state+".png"),pixels.EncodeToPNG());
+                if(state=="idle")idle=sample;if(state=="quick-tap")CollectionAssert.AreEqual(idle,sample,"Quick tap must paint exactly the same ring pixels as the unpressed highlighted state.");
+                if(state=="hold"){changed=sample.Where((c,i)=>!c.Equals(idle[i])).Count();Assert.Greater(changed,100,"Real hold feedback must remain visibly painted.");}
+            }
+            if(!string.IsNullOrEmpty(folder))System.IO.File.WriteAllText(System.IO.Path.Combine(folder,"result.txt"),"delayMs="+profile.holdFeedbackDelayMs+" actionMs="+profile.holdMs+" quickPixelsEqual=true holdChangedPixels="+changed);
+        }finally{panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);UnityEngine.Object.DestroyImmediate(pixels);}
+    }
     [Test] public void RoutineStatusesStayQuietButErrorsAndDisconnectStayVisible()
     {
         foreach(var status in new[]{PlayableCommandStatus.Accepted,PlayableCommandStatus.Applied,PlayableCommandStatus.Cancelled})

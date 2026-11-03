@@ -25,18 +25,18 @@ namespace Spacewars.Simulation
         public static IReadOnlyList<PlayableMapMark> Marks(PlayableSnapshot view)
         {
             var result=new List<PlayableMapMark>();
-            foreach(var site in view.DiscoveredSites)
+            foreach(var site in view.PublicSites)
             {
                 if(site.Kind==PlayableBuildingKind.RelayTower)
-                {var relay=view.Sites.FirstOrDefault(s=>s.Site.Id==site.Id);result.Add(new PlayableMapMark(-site.Id,site.Position,site.Kind,relay?.Owner.HasValue==true?MapMarkState.Ready:MapMarkState.Empty,relay?.Owner));continue;}
+                {var relay=view.Sites.FirstOrDefault(s=>s.Site.Id==site.Id);var known=view.Vision?.KnownRelays.FirstOrDefault(r=>r.SiteId==site.Id);result.Add(new PlayableMapMark(-site.Id,site.Position,site.Kind,relay!=null?(relay.Owner.HasValue?MapMarkState.Ready:MapMarkState.Empty):known!=null?MapMarkState.Memory:MapMarkState.Empty,relay!=null?relay.Owner:known?.Owner));continue;}
                 var live=view.Buildings.FirstOrDefault(b=>b.SiteId==site.Id&&b.SlotId==0&&b.Phase!=ConstructionPhase.Pending);
                 var memory=view.Vision?.KnownBuildings.FirstOrDefault(b=>b.Position.Equals(site.Position)&&!view.Vision.IsVisible(b.Position));
-                result.Add(new PlayableMapMark(live?.Id??memory?.Id??0,site.Position,site.Kind,live!=null?(live.Phase==ConstructionPhase.Ready?MapMarkState.Ready:MapMarkState.Construction):memory!=null?MapMarkState.Memory:MapMarkState.Empty,live?.Owner??memory?.Owner,site.Kind==PlayableBuildingKind.Headquarters?site.Id:0));
+                result.Add(new PlayableMapMark(live?.Id??memory?.Id??-site.Id,site.Position,site.Kind,live!=null?(live.Phase==ConstructionPhase.Ready?MapMarkState.Ready:MapMarkState.Construction):memory!=null?MapMarkState.Memory:MapMarkState.Empty,live?.Owner??memory?.Owner,site.Kind==PlayableBuildingKind.Headquarters?site.Id:0));
             }
             foreach(var b in view.Buildings)if(b.SlotId!=0&&b.Phase!=ConstructionPhase.Pending)
                 result.Add(new PlayableMapMark(b.Id,b.Position,b.Kind,b.Phase==ConstructionPhase.Ready?MapMarkState.Ready:MapMarkState.Construction,b.Owner));
             if(view.Vision!=null)foreach(var b in view.Vision.KnownBuildings)
-                if(!view.Vision.IsVisible(b.Position)&&!view.DiscoveredSites.Any(s=>s.Position.Equals(b.Position)))result.Add(new PlayableMapMark(b.Id,b.Position,b.Kind,MapMarkState.Memory,b.Owner));
+                if(!view.Vision.IsVisible(b.Position)&&!view.PublicSites.Any(s=>s.Position.Equals(b.Position)))result.Add(new PlayableMapMark(b.Id,b.Position,b.Kind,MapMarkState.Memory,b.Owner));
             foreach(var e in view.Entities)result.Add(new PlayableMapMark(e.Id,e.Position,default(PlayableBuildingKind),MapMarkState.Unit,e.Owner));
             return result.AsReadOnly();
         }

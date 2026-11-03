@@ -9,6 +9,17 @@ namespace Spacewars.Runtime
             internal NavigationLiveGroupObservation Source;
             internal NavigationAuthorityGroup Next,Retired;
             internal int Writes;
+            internal bool HasRemovalEdits;
+            internal GroupOrderState RemovalInput;
+            internal NavigationAuthorityMember[] RemovalEdits;
+            internal IDisposable RemovalScratch;
+
+            internal void ReleaseDraft()
+            {
+                if(RemovalEdits!=null)foreach(var member in RemovalEdits)member?.ReleaseStorage();
+                RemovalEdits=null;RemovalInput=null;
+                RemovalScratch?.Dispose();RemovalScratch=null;
+            }
         }
         private struct RebindDrain
         {
@@ -36,6 +47,12 @@ namespace Spacewars.Runtime
             internal NavOwnedStorage RetiredPending,RetiredOrders,RetiredReservations,RetiredGoals,RetiredFailures,RetiredProbes;
             internal void SealOrdinaryDestinations(){for(int i=0;i<Actors.Length;i++)if(Actors[i].NextInstalled!=null){Actors[i].NextInstalled.Retain();Actors[i].InstalledDestination=true;}Core.Retain();coreDestination=true;Identities.Retain();identityDestination=true;NextPending.Retain();NextOrders.Retain();NextReservations.Retain();NextGoals.Retain();NextFailures.Retain();NextProbes?.Retain();NextLedger?.Retain();NextArrival?.Retain();if(Allocating!=null){Allocating.Retain();allocatingDestination=true;}if(RemovalIds==null)for(int i=0;i<GroupCount;i++)RebindGroups[i].Next.Retain();SealRemovalDestinations();ordinaryDestinations=true;mailboxDestinations=true;for(int i=0;i<Retries.Length;i++){var row=Retries[i];if(!row.Assigned&&!row.GeometryRejected&&!row.GeometryCarried&&!row.Removed)row.Next.Retain();mailboxRetainedPrefix=i+1;}}
             internal void TransferOrdinaryNoThrow(){TransferRemovalDestinations();ordinaryDestinations=mailboxDestinations=false;}
+            internal void ReleaseRemovalDrafts()
+            {
+                if(RemovalIds==null)return;
+                for(int i=0;i<GroupCount;i++)RebindGroups[i].ReleaseDraft();
+            }
+
             internal void ReleaseOrdinaryEdges(){
                 ReleaseRemovalEdges();
                 SourceBarrier?.Release();RetiredBarrier?.Release();foreach(var edge in RetiredAnswers)edge?.Release();foreach(var edge in RetiredRequests)edge?.Release();foreach(var request in QueuedRequests)request?.StorageOwner?.Release();foreach(var row in Drains){row.Payload?.Release();row.RetiredTracking?.Release();row.RetiredTransport?.Release();}
@@ -131,11 +148,24 @@ namespace Spacewars.Runtime
                         }
                         if(c.NextLedger!=null&&!PrepareRebindCancellation(c,row.Entity,scope))return null;
                         ref var group=ref c.RebindGroups[row.GroupIndex];var actor=c.Actors[row.ActorIndex];var old=row.Source?.Request;GroupOrderState metadata;GroupMemberState member;
-                        using(EnterTransport()){if(!OrdinaryRebindSourceCurrent(c))return false;metadata=groups[c.Actors[row.ActorIndex].Version.Data.GroupId].CopyHeader();member=metadata.Members[row.MemberIndex].Copy();}
+                        if(c.RemovalIds!=null){
+                            PrepareRemovalDraft(c,ref group,r);
+                            metadata=group.RemovalInput;member=metadata.Members[row.MemberIndex].Copy();
+                        }else{
+                            using(EnterTransport()){
+                                if(!OrdinaryRebindSourceCurrent(c))return false;
+                                metadata=groups[c.Actors[row.ActorIndex].Version.Data.GroupId].CopyHeader();
+                                member=metadata.Members[row.MemberIndex].Copy();
+                            }
+                        }
                         NavLocation goalLocation;bool goalValid;
                         if(UsesRecastGroundRoutes&&member.GoalLocation.HasValue){
                             goalLocation=member.GoalLocation.Value;
-                            goalValid=goalLocation.Position.Equals(row.Goal)&&terrain!=null&&terrain.IsValidLocation(goalLocation,actor.Radius);
+                            // Flat Recast matches own a typed flat endpoint without an authored map.
+                            // Validate its saved layer just as strictly when rebuilding after an obstacle change.
+                            goalValid=goalLocation.Position.Equals(row.Goal)&&(terrain!=null
+                                ? terrain.IsValidLocation(goalLocation,actor.Radius)
+                                : goalLocation.SurfaceId==NavLocation.FlatSurface);
                         }else goalValid=Crowd.Locate(row.Goal,actor.Radius,out goalLocation);
                         if(!goalValid||!basis.IsFree(row.Goal,actor.Radius)||c.GeometryChange&&geometryQueued+registered>=RouteRequestCapacity){
                             if(!c.GeometryChange)return null;row.GeometryRejected=true;c.OrdinaryCount--;if(old!=null){c.NextFailures.Remove(row.Entity);int nameIndex=c.PreparedBacking.CrowdNames.Find(row.Entity);if(nameIndex<0)return false;row.ArrivalFailureNames=NavigationPreparedCrowdNameWrite.CreateOwned(c.PreparedBacking.CrowdNames,nameIndex,old,r);}continue;
@@ -143,7 +173,10 @@ namespace Spacewars.Runtime
                         row.Next=NavigationHostRequest.CreateOwned(Generation,checked(++c.NextSequence),row.Entity,checked(c.SourceOrders[row.Entity]+1),nextProfile.ForUnit(actor.Radius,actor.TargetSpeed,actor.TargetTurn),RebindMovementGeometry(c,actor,basis),actor.Position,row.Goal,basis,RebindHeldIdentity(c,actor),new NavigationMemberIdentity(actor.Incarnation,actor.Mobility,metadata.GroupId,member.OrderRevision,RemovalMembership(c,metadata.GroupId,metadata.MembershipRevision)),actor.Location,goalLocation,null,r);
                         if(c.GeometryChange)geometryQueued++;member.Goal=row.Goal;member.GoalLocation=goalLocation;member.HasGoal=true;member.MobilityRevision=actor.Mobility;member.Reservation=row.Entity;member.Phase=actor.Held?GroupMemberPhase.Held:member.FormationReleased?GroupMemberPhase.Combat:GroupMemberPhase.PendingRoute;
                         var prior=group.Next??group.Source.Version;var changed=NavigationAuthorityMember.CopyWithValuesOwned((NavigationAuthorityMember)prior.Members[row.MemberIndex],new NavigationAuthorityMember.Values(member),r);
-                        try{var version=NavigationAuthorityGroup.CopyWithMemberAndMarchOwned(prior,row.MemberIndex,changed,new NavigationAuthorityGroup.Values(metadata),r);group.Next?.ReleaseStorage();group.Next=version;}finally{changed.ReleaseStorage();}
+                        if(c.RemovalIds!=null)StageRemovalMember(ref group,row.MemberIndex,changed);
+                        else{
+                            try{var version=NavigationAuthorityGroup.CopyWithMemberAndMarchOwned(prior,row.MemberIndex,changed,new NavigationAuthorityGroup.Values(metadata),r);group.Next?.ReleaseStorage();group.Next=version;}finally{changed.ReleaseStorage();}
+                        }
                         c.NextPending.AddPreparing(row.Entity,row.Next.Request,row.Next);c.NextOrders.SetPreparing(row.Entity,row.Next.Request.Order);c.NextReservations.SetPreparing(row.Entity,row.Goal);c.NextGoals.SetPreparing(row.Entity,row.Goal);c.NextFailures.Remove(row.Entity);c.Identities.SetPreparing(row.Entity,row.Next.Request.HeldIdentity,row.Next.HeldIdentityOwner);
                     }
                     if(c.GeometryChange){if(!PrepareRebindRetainedPrune(c,scope))return false;PrepareGeometryGroupResets(c,r);}
@@ -170,7 +203,7 @@ namespace Spacewars.Runtime
                     foreach(var row in c.Retries)if(!row.Assigned&&!row.GeometryRejected&&!row.GeometryCarried&&!row.Removed)mailbox.AppendOneNoThrow(row.Next.Request,row.Next);requestSequence=c.NextSequence;if(PublishAdmissionOwnerNoThrow(c.Admission))c.Admission=null;authorityOperationIdentity=c.Operation+(c.BalanceDomain==null?1:2);OwnedRebindPublications++;c.TransferNoThrow();LastOwnedRebindPublicationAllocatedBytes=GC.GetAllocatedBytesForCurrentThread()-before;
                 }};
                 using(EnterTransport())scope.Publish(c,publish);scope.ResolveCommitted();NavArrivalDiagnostic.Buffer?.Transition(c.GeometryChange?"geometry-rebind":"profile-rebind",((NavGeometry)c.SourceCore.Geometry.Facade).Revision,geometry.Revision,c.Operation,c.NextSequence,c.AllocatingRows,c.Sequence,((long)((NavigationProfile)c.SourceCore.Profile.Facade).Revision<<32)|(uint)profile.Revision);FinishPreparedBalance(c);foreach(var row in c.Retries){if(row.Removed){MovementCancelled?.Invoke(row.Entity);continue;}if(row.GeometryCarried)continue;if(row.GeometryRejected){if(row.Source!=null)RouteFailed?.Invoke(row.Source.Request,NavigationOutcome.Rejected);MovementCancelled?.Invoke(row.Entity);}else if(row.Assigned)EndpointAssigned?.Invoke(row.Next.Request);else RouteRequested?.Invoke(row.Next.Request);}SignalHost();return true;
-            }catch(InvalidOperationException error){if(c?.Published==true)throw;if(geometryTarget!=null)LastGeometryPreparationFailure=error;return false;}finally{c?.Dispose();}}
+            }catch(InvalidOperationException error){if(c?.Published==true)throw;if(geometryTarget!=null)LastGeometryPreparationFailure=error;return false;}finally{c?.ReleaseRemovalDrafts();c?.Dispose();}}
         }
     }
 }

@@ -39,8 +39,60 @@ namespace Spacewars.Tests.EditMode
             var g=new NavGeometry(144,Array.Empty<NavObstacle>(),1);var p=PlayableProfile.Default.Navigation;
             Assert.True(new NavCrowd(g,p).StableSelectClearance);var a=new NavCrowd(g,p,new AiTestMap());Assert.True(a.StableSelectClearance);
             var crossings=new NavCrowd(g,p,new ThreeCrossingsMap(new ThreeCrossingsProfileData()));Assert.True(crossings.StableSelectClearance);
+            var proving=new NavCrowd(g,p,new ProvingGroundMap());Assert.True(proving.StableSelectClearance);
             Assert.False(new NavCrowd(g,p,new NullDockMap()).StableSelectClearance,"uncertified terrain remains an ordinary callback");
-            var before=TerrainLocations.IndexedCutCandidateForTests;try{TerrainLocations.IndexedCutCandidateForTests=_=>{};Assert.False(a.StableSelectClearance);Assert.False(crossings.StableSelectClearance);}finally{TerrainLocations.IndexedCutCandidateForTests=before;}
+            var before=TerrainLocations.IndexedCutCandidateForTests;try{TerrainLocations.IndexedCutCandidateForTests=_=>{};Assert.False(a.StableSelectClearance);Assert.False(crossings.StableSelectClearance);Assert.False(proving.StableSelectClearance);}finally{TerrainLocations.IndexedCutCandidateForTests=before;}
+        }
+        [Test] public void ProvingGroundQueriesMatchAuthoredPartitionAcrossEdgesAndCorners()
+        {
+            var map=new ProvingGroundMap();
+            var partition=((INavArrivalPointTerrain)map).ArrivalLocations;
+            var points=new[]{new NavPoint(0,0),new NavPoint(-63.5,63.5),new NavPoint(63.50000001,0),
+                new NavPoint(64,-64),new NavPoint(-64,0),new NavPoint(-64.000001,0)};
+            foreach(double radius in new[]{0,.5,1,64,-1,double.NaN})
+            foreach(var point in points){
+                Assert.AreEqual(partition.TryLocate(point,radius,out var expected),map.TryLocate(point,radius,out var actual));
+                Assert.AreEqual(expected,actual);
+                foreach(var surface in new[]{"open-ground","flat"}){
+                    var from=new NavLocation(point,surface);
+                    Assert.AreEqual(partition.Valid(from,radius),map.IsValidLocation(from,radius));
+                    foreach(var to in points){
+                        Assert.AreEqual(partition.Traverse(from,to,radius,out expected),map.TryTraverse(from,to,radius,out actual));
+                        Assert.AreEqual(expected,actual);
+                    }
+                }
+            }
+        }
+        [Test] public void SweptPeerQueryMatchesEveryLiveDiscOnLongAndShortSegments()
+        {
+            var session=new NavigationSession(1,new NavGeometry(64,Array.Empty<NavObstacle>(),1),PlayableProfile.Default.Navigation);
+            try{
+                var crowd=session.Crowd;
+                for(int i=0;i<40;i++)crowd.Add(i+1,new NavPoint(i%8*6-21,i/8*6-12),.5+i%3*.25,4,4);
+                var self=crowd.Units[0];
+                var method=typeof(NavCrowd).GetMethod("UnitFree",BindingFlags.Instance|BindingFlags.NonPublic);
+                var query=(Func<NavUnit,NavPoint,NavPoint,double,bool>)method.CreateDelegate(typeof(Func<NavUnit,NavPoint,NavPoint,double,bool>),crowd);
+                var random=new Random(7103);
+                void Check(NavPoint a,NavPoint b){
+                    double dx=b.X-a.X,dz=b.Z-a.Z,length=dx*dx+dz*dz;
+                    bool expected=true;
+                    foreach(var peer in crowd.Units){
+                        if(peer==self)continue;
+                        double t=length==0?0:Math.Max(0,Math.Min(1,((peer.Position.X-a.X)*dx+(peer.Position.Z-a.Z)*dz)/length));
+                        double x=peer.Position.X-(a.X+t*dx),z=peer.Position.Z-(a.Z+t*dz),r=self.Radius+peer.Radius;
+                        if(x*x+z*z<r*r-1e-9){expected=false;break;}
+                    }
+                    Assert.AreEqual(expected,query(self,a,b,0));
+                }
+                Check(new NavPoint(-40,-13.25),new NavPoint(40,-13.25));
+                Check(new NavPoint(-15,-12),new NavPoint(-15,-12));
+                for(int i=0;i<500;i++){
+                    var start=new NavPoint(random.Next(-50,51),random.Next(-50,51));
+                    double scale=i%2==0?.025:1;
+                    var end=new NavPoint(start.X+random.Next(-40,41)*scale,start.Z+random.Next(-40,41)*scale);
+                    Check(start,end);Check(end,start);
+                }
+            }finally{Destroy(session);}
         }
         [TestCase(0)][TestCase(1)][TestCase(2)] public void ActualProductionCurrentSaveHoldCancelReverseAndNextStepAreExact(int scenario)
         {

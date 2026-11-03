@@ -5,7 +5,7 @@ namespace Spacewars.Simulation
 {
     [Serializable] public sealed class CrimsonGroveProfileData
     {
-        public string id="crimson-grove-v1"; public int revision=1;
+        public string id="crimson-grove-v1"; public int revision=2;
         public double scale=1, terraceHeight=3, ridgeHeight=7;
     }
     public sealed class CrimsonGroveField
@@ -104,7 +104,7 @@ namespace Spacewars.Simulation
             for(int i=0;i<8;i++)sites.Add(new TerritorySite(i+9,PlayableBuildingKind.Mine,Polar(16.5+45*i,145),p));
             for(int i=0;i<8;i++)sites.Add(new TerritorySite(i+17,PlayableBuildingKind.Outpost,Polar(42.5+45*i,112),p,Math.PI/2-(42.5+45*i+180)*Math.PI/180));
             for(int i=0;i<4;i++)sites.Add(new TerritorySite(i+25,PlayableBuildingKind.Outpost,Polar(90*i,54),p,Math.PI/2-(90*i+180)*Math.PI/180));
-            for(int i=0;i<4;i++)sites.Add(new TerritorySite(i+29,PlayableBuildingKind.Mine,Polar(45+90*i,62),p));
+            for(int i=0;i<4;i++)sites.Add(new TerritorySite(i+29,PlayableBuildingKind.RelayTower,Polar(45+90*i,62),p));
             return sites.ToArray();
         }
         public OfflineMatchConfiguration Configuration(PlayableProfile p,int seed,OfflineParticipant[] roster){

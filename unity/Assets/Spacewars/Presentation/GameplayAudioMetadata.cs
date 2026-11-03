@@ -14,7 +14,8 @@ namespace Spacewars.Presentation
         public void Write(GameplayAudioProfile p,double value)
         {
             Validate(value);
-            field.SetValue(p,Convert.ChangeType(value,field.FieldType));
+            double snapped=Math.Max(Minimum,Math.Min(Maximum,Minimum+Math.Round((value-Minimum)/Step,MidpointRounding.AwayFromZero)*Step));
+            field.SetValue(p,Convert.ChangeType(snapped,field.FieldType));
         }
         public void Validate(double v)
         {if(double.IsNaN(v)||double.IsInfinity(v)||v<Minimum-Step*1e-5||v>Maximum+Step*1e-5)throw new ArgumentOutOfRangeException(Path);}
@@ -23,6 +24,10 @@ namespace Spacewars.Presentation
     public static class GameplayAudioMetadata
     {
         public static readonly GameplayAudioField[] Fields={
+            new GameplayAudioField("speechGain","Уровень голоса","Уровень записанных реплик до личной настройки громкости голоса.","уровень",.05,1,.05),
+            new GameplayAudioField("speechMaxAgeSeconds","Свежесть речи","Предельный возраст события и ожидающей реплики без догоняющей озвучки.","с",.5,5,.1),
+            new GameplayAudioField("speechRepeatSeconds","Повтор речи","Минимальный интервал повторения одной фразы на устройстве.","с",.5,15,.5),
+            new GameplayAudioField("speechQueueLimit","Очередь речи","Максимум ожидающих реплик; срочные события вытесняют менее важные.","шт",1,8,1),
             new GameplayAudioField("near","Ближняя зона","Расстояние полного уровня от точки обзора камеры.","м",0,30,1),
             new GameplayAudioField("far","Дальность слышимости","На этом расстоянии эффект плавно исчезает.","м",31,160,1),
             new GameplayAudioField("mergeDistance","Объединение повторов","Размер области отбора похожих звуков.","м",1,30,1),

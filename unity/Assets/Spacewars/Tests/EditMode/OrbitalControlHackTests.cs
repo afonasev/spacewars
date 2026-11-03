@@ -65,7 +65,7 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(PlayableOwner.Player,u.Owner);Assert.AreEqual(u.MaxHealth*.4,u.ExactHealth.Value,1e-9);Assert.Greater(u.DefensiveSystemsLevel,0);Assert.Greater(u.WeaponSystemsLevel,0);Assert.Null(u.CurrentOrder);Assert.AreEqual(PlayableOwner.Player,u.OrderStamp.Owner);Assert.AreEqual(PlayableCommandKind.Stop,u.OrderStamp.Kind);Assert.False(u.Held);Assert.False(u.Moving);
             Assert.Greater(View().Population.Living,View().Population.Capacity,"capture permits overflow");Assert.AreEqual(PlayableCommandStatus.InvalidEntity,Send(PlayableCommandKind.Stop,id,"player-2"));
             var former=View(PlayableOwner.Enemy);Assert.AreEqual(MatchEventKind.UnitCaptured,former.MatchEvents.Last().Kind);Assert.False(View().MatchEvents.Any(e=>e.Kind==MatchEventKind.UnitCaptured));
-            var n=new NativeMatchNotifications();n.Update(former,false,0,profile);Assert.AreEqual("Ваш юнит захвачен",n.Latest.Text);
+            var n=new NativeMatchNotifications();n.Update(former,false,0,profile);Assert.AreEqual("Юнит захвачен",n.Latest.Text);
             var bytes=(byte[])Call("CaptureWorldBytes",7,config.SourceIdentity);var restored=OfflineParticipantAuthority.Restore(bytes,config);CollectionAssert.AreEqual(bytes,restored.CaptureBytes());Assert.IsEmpty(restored.View("player-2").MatchEvents,"restoring does not replay transient notifications");
         }
         [Test] public void SharedAlliedScanProvidesVisibilityAndStaleHealthIsRechecked()
@@ -120,7 +120,7 @@ namespace Spacewars.Tests.EditMode
             Call("Damage",own,100000);Spawn(PlayableOwner.Enemy,new NavPoint(-5,0),PlayableEntityKind.Explorer);
             for(int i=0;i<180;i++)Call("AdvanceCapture",1d/30);
             Assert.Null(View().Sites.Single(x=>x.Site.Id==4).Owner);Assert.AreEqual(1,View().MatchEvents.Count(e=>e.Kind==MatchEventKind.RelayControlLost));
-            var n=new NativeMatchNotifications();n.Update(View(),false,0,profile);Assert.AreEqual("Вы потеряли контроль над вышкой связи",n.Latest.Text);Assert.AreEqual(default(NavPoint),n.Focus(false,0,profile).Value);
+            var n=new NativeMatchNotifications();n.Update(View(),false,0,profile);Assert.AreEqual("Вышка потеряна",n.Latest.Text);Assert.AreEqual(default(NavPoint),n.Focus(false,0,profile).Value);
             for(int i=0;i<180;i++)Call("AdvanceCapture",1d/30);
             Assert.AreEqual(PlayableOwner.Enemy,View().Sites.Single(x=>x.Site.Id==4).Owner);Assert.AreEqual(1,View().MatchEvents.Count(e=>e.Kind==MatchEventKind.RelayControlLost));
         }

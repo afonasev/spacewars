@@ -8,7 +8,7 @@ namespace Spacewars.Simulation
     // Renderer meshes, decorative SurfaceProfile and observed/hidden units are absent.
     public sealed class RecastAuthorityGeometry
     {
-        public const int Version=2;
+        public const int Version=3;
         public const string Upstream="6dc1667f580357e8a2154c28b7867bea7e8ad3a7";
         internal bool IsLayered=>terrain is ILayeredPlayableTerrain;
         internal NavLocation NativeEndpoint(NavLocation endpoint,NavLocation other)=>(terrain as IRecastPhysicalTerrain)?.NativeEndpoint(endpoint,other)??endpoint;
@@ -22,7 +22,7 @@ namespace Spacewars.Simulation
         internal double SupportHalfExtent {get;}
         internal NavOwnedStorage SourceStorageRoot=>sourceGeometry?.StorageRoot;
         internal bool DirectPhysical(NavLocation from,NavLocation to)=>terrain is StackedRampQualificationMap physical&&from.SurfaceId=="ramp-support"&&to.SurfaceId=="ramp-support"&&physical.Provider.CanSweep(from,to,new NavClearanceProfile("ground",1,"ground",0,Radius))&&(sourceGeometry==null||sourceGeometry.SegmentFree(from.Position,to.Position,Radius));
-        internal readonly float CellSize,CellHeight,Radius;
+        internal readonly float CellSize,CellHeight,Radius,RasterClimb;
         public string Binding{get;}
         public int TriangleCount=>Areas.Length;
         private RecastAuthorityGeometry(IPlayableTerrain terrain,Dictionary<string,byte> ids,float[] vertices,int[] triangles,byte[] areas,byte[] directed,NavigationProfile profile,int visibleGeometryRevision,float[] links,byte[] linkAreas,byte[] linkDirections,uint[] linkIds,NavGeometry sourceGeometry)
@@ -32,8 +32,13 @@ namespace Spacewars.Simulation
             this.terrain=terrain;areaIds=ids.OrderBy(x=>x.Value).Select(x=>x.Key).ToArray();Vertices=vertices;Triangles=triangles;Areas=areas;Directed=directed;
             // Raster precision derives from the existing local geometry resolution.
             CellSize=(float)profile.LocalGridCell;CellHeight=CellSize/4;Radius=(float)profile.Radius;
-            Binding=NavContract.Digest(w=>{w.Write("recast-authority-v2");w.Write(Upstream);w.Write(terrain?.Id??NavLocation.FlatSurface);w.Write(terrain?.Revision??1);w.Write(terrain?.SurfaceSemanticsVersion??1);w.Write(visibleGeometryRevision);w.Write(profile.ProfileId);w.Write(profile.Revision);
-                w.Write(CellSize);w.Write(CellHeight);w.Write(Radius);foreach(var pair in ids.OrderBy(x=>x.Value)){w.Write(pair.Key);w.Write(pair.Value);}
+            // rcFilterLedgeSpans compares the full opposite-neighbor height range,
+            // not just one neighbor step. Add one quantization band to that authored
+            // slope range. TryTraverse remains the authority for actual movement.
+            double gradient=0;if(terrain!=null&&!(terrain is ILayeredPlayableTerrain))foreach(var support in terrain.Supports)gradient=Math.Max(gradient,Math.Abs(support.Gradient.X)+Math.Abs(support.Gradient.Z));
+            RasterClimb=(float)(Math.Ceiling(Math.Max(2*CellHeight,2*CellSize*gradient+CellHeight)/CellHeight)*CellHeight);
+            Binding=NavContract.Digest(w=>{w.Write("recast-authority-v3");w.Write(Upstream);w.Write(terrain?.Id??NavLocation.FlatSurface);w.Write(terrain?.Revision??1);w.Write(terrain?.SurfaceSemanticsVersion??1);w.Write(visibleGeometryRevision);w.Write(profile.ProfileId);w.Write(profile.Revision);
+                w.Write(CellSize);w.Write(CellHeight);w.Write(Radius);w.Write(RasterClimb);foreach(var pair in ids.OrderBy(x=>x.Value)){w.Write(pair.Key);w.Write(pair.Value);}
                 w.Write(vertices.Length);foreach(float x in vertices)w.Write(x);w.Write(triangles.Length);foreach(int x in triangles)w.Write(x);foreach(byte x in areas)w.Write(x);foreach(byte x in directed)w.Write(x);w.Write(Links.Length);foreach(float x in Links)w.Write(x);foreach(byte x in LinkAreas)w.Write(x);foreach(byte x in LinkDirections)w.Write(x);foreach(uint x in LinkIds)w.Write(x);});
         }
         internal string Surface(byte area)=>area>0&&area<=areaIds.Length?areaIds[area-1]:throw new ArgumentException("Unknown authority area.");
@@ -55,20 +60,21 @@ namespace Spacewars.Simulation
         internal bool UsedFoundation {get;private set;}
         internal long PayloadBytes=>checked(NavStorageLayout.ObjectBytesBound(typeof(RecastAuthorityGeometry))+128+4L*Vertices.Length+4L*Triangles.Length+Areas.Length+Directed.Length+4L*Links.Length+LinkAreas.Length+LinkDirections.Length+4L*LinkIds.Length+8L*areaIds.Length+24+2L*Binding.Length);
         // The construction reservation covers live list capacities, copied output,
-        // digest stream and both clipping generations under the existing limits.
+        // digest stream. Clipping generations are admitted separately from their actual input shape.
         internal static long ScratchBound(IPlayableTerrain terrain,NavGeometry geometry,bool foundation){
             long sources=terrain==null?2:terrain.Supports.Sum(x=>(long)x.Bounds.Footprint.Triangles.Count/3);
-            long points=checked(3+3*sources);
-            long clipping=foundation?checked(4L*ClipPartCapacity*(64+16*points)+4L*65536*8+6L*(64+32*points)):0;
+            long clipping=foundation?checked(256*sources+4L*65536*8):0;
             long source=checked(64L*(SourceTriangleCapacity+2));
             long obstacle=geometry.Obstacles.Sum(o=>128L+256L*(o.CircleRadius>0?32:o.Polygon?.Vertices.Count??4));
             return checked(4*source+clipping+obstacle+8192);
         }
         public static RecastAuthorityGeometry Prepare(IPlayableTerrain terrain,NavGeometry visibleGeometry,NavigationProfile profile,Func<bool> cancelled=null)
-            =>PrepareCore(terrain,visibleGeometry,profile,null,cancelled);
-        internal static RecastAuthorityGeometry PrepareFromFoundation(IPlayableTerrain terrain,NavGeometry visibleGeometry,NavigationProfile profile,RecastAuthorityGeometry foundation,Func<bool> cancelled=null)
-            =>PrepareCore(terrain,visibleGeometry,profile,foundation,cancelled);
-        private static RecastAuthorityGeometry PrepareCore(IPlayableTerrain terrain,NavGeometry visibleGeometry,NavigationProfile profile,RecastAuthorityGeometry foundation,Func<bool> cancelled)
+            =>PrepareCore(terrain,visibleGeometry,profile,null,cancelled,null);
+        internal static RecastAuthorityGeometry PrepareOwned(IPlayableTerrain terrain,NavGeometry visibleGeometry,NavigationProfile profile,Func<bool> cancelled,INavStorageReservation reservation)
+            =>PrepareCore(terrain,visibleGeometry,profile,null,cancelled,reservation);
+        internal static RecastAuthorityGeometry PrepareFromFoundation(IPlayableTerrain terrain,NavGeometry visibleGeometry,NavigationProfile profile,RecastAuthorityGeometry foundation,Func<bool> cancelled=null,INavStorageReservation reservation=null)
+            =>PrepareCore(terrain,visibleGeometry,profile,foundation,cancelled,reservation);
+        private static RecastAuthorityGeometry PrepareCore(IPlayableTerrain terrain,NavGeometry visibleGeometry,NavigationProfile profile,RecastAuthorityGeometry foundation,Func<bool> cancelled,INavStorageReservation reservation)
         {
             if(visibleGeometry==null||profile==null)throw new ArgumentNullException();
             if(cancelled?.Invoke()==true)throw new OperationCanceledException();
@@ -113,13 +119,27 @@ namespace Spacewars.Simulation
                 if(layered!=null&&support.SurfaceId!=priorSurface)earlier.Clear();priorSurface=support.SurfaceId;
                 var poly=support.Bounds.Footprint;
                 for(int i=0;i<poly.Triangles.Count;i+=3){
-                    var parts=new List<NavPoint[]>{new[]{poly.Vertices[poly.Triangles[i]],poly.Vertices[poly.Triangles[i+1]],poly.Vertices[poly.Triangles[i+2]]}};
-                    foreach(var cutter in earlier){var next=new List<NavPoint[]>();foreach(var part in parts)Subtract(part,cutter,next);parts=next;Check();if(parts.Count==0)break;if(parts.Count>ClipPartCapacity)throw new InvalidOperationException("Recast clipping capacity exceeded.");}
+                    IDisposable generation=null;
+                    var original=new[]{poly.Vertices[poly.Triangles[i]],poly.Vertices[poly.Triangles[i+1]],poly.Vertices[poly.Triangles[i+2]]};
+                    var parts=new List<NavPoint[]>{original};
+                    // A subtraction clips each convex input against three half-planes.
+                    // Each clip has at most n+3 vertices, lists grow below 2x, and
+                    // both old/new generations remain paid until replacement.
+                    void Cut(NavPoint[] cutter){
+                        if(!Overlap(original[0],original[1],original[2],cutter[0],cutter[1],cutter[2]))return;
+                        long points=parts.Sum(part=>(long)part.Length);
+                        var nextMemory=reservation==null?null:NavStorageScratch.Reserve(reservation,checked(2048+1024*(points+9L*parts.Count)));
+                        try{var next=new List<NavPoint[]>();foreach(var part in parts)Subtract(part,cutter,next);parts=next;generation?.Dispose();generation=nextMemory;nextMemory=null;}
+                        finally{nextMemory?.Dispose();}
+                    }
+                    try{
+                    foreach(var cutter in earlier){Cut(cutter);Check();if(parts.Count==0)break;if(parts.Count>ClipPartCapacity)throw new InvalidOperationException("Recast clipping capacity exceeded.");}
                     if(layered!=null){
                         var declaration=layered.Surfaces.Single(s=>s.Id==support.SurfaceId);
-                        foreach(var obstacle in declaration.Area.Blockers){var boundary=obstacle.Footprint;for(int k=0;k<boundary.Triangles.Count;k+=3){var cutter=new[]{boundary.Vertices[boundary.Triangles[k]],boundary.Vertices[boundary.Triangles[k+1]],boundary.Vertices[boundary.Triangles[k+2]]};var next=new List<NavPoint[]>();foreach(var part in parts)Subtract(part,cutter,next);parts=next;Check();if(parts.Count>ClipPartCapacity)throw new InvalidOperationException("Recast clipping capacity exceeded.");}}
+                        foreach(var obstacle in declaration.Area.Blockers){var boundary=obstacle.Footprint;for(int k=0;k<boundary.Triangles.Count;k+=3){var cutter=new[]{boundary.Vertices[boundary.Triangles[k]],boundary.Vertices[boundary.Triangles[k+1]],boundary.Vertices[boundary.Triangles[k+2]]};Cut(cutter);Check();if(parts.Count>ClipPartCapacity)throw new InvalidOperationException("Recast clipping capacity exceeded.");}}
                     }
                     foreach(var part in parts)for(int j=1;j<part.Length-1;j++)if(Math.Abs(Cross(part[0],part[j],part[j+1]))>1e-10)Triangle(part[0],part[j],part[j+1],support.HeightAt,ids[support.SurfaceId]);
+                    }finally{generation?.Dispose();}
                 }
                 for(int i=0;i<poly.Triangles.Count;i+=3)earlier.Add(new[]{poly.Vertices[poly.Triangles[i]],poly.Vertices[poly.Triangles[i+1]],poly.Vertices[poly.Triangles[i+2]]});
             }
@@ -129,16 +149,48 @@ namespace Spacewars.Simulation
             // matching current NavGeometry's XZ obstacle semantics.
             var heights=supports.SelectMany(s=>s.Bounds.Footprint.Vertices.Select(s.HeightAt)).ToArray();
             double top=heights.Max()+2,bottom=heights.Min()-2;
+            // Recast's voxel climb admits small steps. The game's partition has a
+            // stronger rule: an incident edge is open only when heights match along
+            // its entire span. Rasterize those closed seams once in the foundation,
+            // including the ramp flanks; leave both equal-height approaches open.
+            if(foundation==null&&terrain is BasaltCrownMap basalt){
+                foreach(var seam in basalt.PreparationSeams){
+                    if(seam.Allowed)continue;
+                    var a=seam.From;var b=seam.To;int n=vertices.Count/3;
+                    foreach(var pair in new[]{Tuple.Create(a,bottom),Tuple.Create(b,bottom),Tuple.Create(b,top),Tuple.Create(a,top)}){
+                        vertices.Add((float)pair.Item1.X);vertices.Add((float)pair.Item2);vertices.Add((float)pair.Item1.Z);
+                    }
+                    triangles.AddRange(new[]{n,n+1,n+2,n,n+2,n+3});areas.Add(0);areas.Add(0);Check();
+                }
+            }
             foreach(var obstacle in visibleGeometry.Obstacles){
                 NavPolygon p;
                 if(obstacle.CircleRadius>0){var pts=new List<NavPoint>();for(int i=0;i<32;i++){double angle=2*Math.PI*i/32;double r=obstacle.CircleRadius/Math.Cos(Math.PI/32);pts.Add(new NavPoint(obstacle.CircleCenter.X+Math.Cos(angle)*r,obstacle.CircleCenter.Z+Math.Sin(angle)*r));}p=new NavPolygon(pts);}
                 else p=obstacle.Footprint;
-                for(int i=0;i<p.Triangles.Count;i+=3)Triangle(p.Vertices[p.Triangles[i]],p.Vertices[p.Triangles[i+1]],p.Vertices[p.Triangles[i+2]],_=>top,0);
-                for(int i=0;i<p.Vertices.Count;i++){var a=p.Vertices[i];var b=p.Vertices[(i+1)%p.Vertices.Count];
-                    int n=vertices.Count/3;foreach(var pair in new[]{Tuple.Create(a,bottom),Tuple.Create(b,bottom),Tuple.Create(b,top),Tuple.Create(a,top)}){vertices.Add((float)pair.Item1.X);vertices.Add((float)pair.Item2);vertices.Add((float)pair.Item1.Z);}triangles.AddRange(new[]{n,n+1,n+2,n,n+2,n+3});areas.Add(0);areas.Add(0);Check();}
+                // NavGeometry rejects everything outside this same public arena.
+                // Remote decorative barrier tails must not enlarge the native tile grid.
+                if(p.MinX>=-visibleGeometry.HalfExtent&&p.MaxX<=visibleGeometry.HalfExtent&&p.MinZ>=-visibleGeometry.HalfExtent&&p.MaxZ<=visibleGeometry.HalfExtent)Obstacle(p.Vertices);
+                else for(int i=0;i<p.Triangles.Count;i+=3){
+                    var clipped=new[]{p.Vertices[p.Triangles[i]],p.Vertices[p.Triangles[i+1]],p.Vertices[p.Triangles[i+2]]};double h=visibleGeometry.HalfExtent;
+                    clipped=Clip(clipped,new NavPoint(-h,-h),new NavPoint(h,-h),true);
+                    clipped=Clip(clipped,new NavPoint(h,-h),new NavPoint(h,h),true);
+                    clipped=Clip(clipped,new NavPoint(h,h),new NavPoint(-h,h),true);
+                    clipped=Clip(clipped,new NavPoint(-h,h),new NavPoint(-h,-h),true);
+                    if(clipped.Length>=3)Obstacle(clipped);
+                }
+                void Obstacle(IReadOnlyList<NavPoint> ring){
+                    if(ReferenceEquals(ring,p.Vertices)){for(int i=0;i<p.Triangles.Count;i+=3)Triangle(p.Vertices[p.Triangles[i]],p.Vertices[p.Triangles[i+1]],p.Vertices[p.Triangles[i+2]],_=>top,0);}
+                    else for(int i=1;i<ring.Count-1;i++)if(Math.Abs(Cross(ring[0],ring[i],ring[i+1]))>1e-10)Triangle(ring[0],ring[i],ring[i+1],_=>top,0);
+                    for(int i=0;i<ring.Count;i++){var a=ring[i];var b=ring[(i+1)%ring.Count];if(a.Equals(b))continue;
+                        int n=vertices.Count/3;foreach(var pair in new[]{Tuple.Create(a,bottom),Tuple.Create(b,bottom),Tuple.Create(b,top),Tuple.Create(a,top)}){vertices.Add((float)pair.Item1.X);vertices.Add((float)pair.Item2);vertices.Add((float)pair.Item1.Z);}triangles.AddRange(new[]{n,n+1,n+2,n,n+2,n+3});areas.Add(0);areas.Add(0);Check();}
+                }
             }
             return new RecastAuthorityGeometry(terrain,ids,vertices.ToArray(),triangles.ToArray(),areas.ToArray(),directed,profile,visibleGeometry.Revision,links.ToArray(),linkAreas.ToArray(),linkDirections.ToArray(),linkIds.ToArray(),visibleGeometry){UsedFoundation=foundation!=null};
         }
+        // Separating axes of two CCW triangles; touching alone subtracts no area.
+        private static bool Outside(NavPoint a,NavPoint b,NavPoint x,NavPoint y,NavPoint z)=>Cross(a,b,x)<=0&&Cross(a,b,y)<=0&&Cross(a,b,z)<=0;
+        private static bool Overlap(NavPoint a,NavPoint b,NavPoint c,NavPoint x,NavPoint y,NavPoint z)=>
+            !Outside(a,b,x,y,z)&&!Outside(b,c,x,y,z)&&!Outside(c,a,x,y,z)&&!Outside(x,y,a,b,c)&&!Outside(y,z,a,b,c)&&!Outside(z,x,a,b,c);
         private static double Cross(NavPoint a,NavPoint b,NavPoint p)=>(b.X-a.X)*(p.Z-a.Z)-(b.Z-a.Z)*(p.X-a.X);
         private static NavPoint[] Clip(NavPoint[] polygon,NavPoint a,NavPoint b,bool inside)
         {

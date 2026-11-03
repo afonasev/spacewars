@@ -27,5 +27,9 @@
   "notificationSeconds": 0.25,
   "baseRepeatSeconds": 0.4,
   "motionRepeatSeconds": 0.8,
-  "heavyDamageRatio": 0.35
+  "heavyDamageRatio": 0.35,
+  "speechGain": 0.55,
+  "speechMaxAgeSeconds": 2,
+  "speechRepeatSeconds": 3,
+  "speechQueueLimit": 4
 }

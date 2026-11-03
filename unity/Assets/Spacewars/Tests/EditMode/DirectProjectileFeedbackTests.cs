@@ -31,6 +31,33 @@ namespace Spacewars.Tests.EditMode
             Set("Kind",kind);Set("Speed",15d);Set("Remaining",10d);Set("Damage",1d);Set("DirectionX",1d);
             ((IList)Domain.GetField("projectiles",Flags).GetValue(domain)).Add(p);
         }
+        [TestCase(false,PlayableEntityKind.Explorer)][TestCase(false,PlayableEntityKind.Hawk)]
+        [TestCase(true,PlayableEntityKind.Explorer)][TestCase(true,PlayableEntityKind.Hawk)]
+        public void SpatialShotsPassThroughFriendlyUnitAndHeadquartersToHitEnemy(bool allied,PlayableEntityKind kind)
+        {
+            var friendly=PlayableOwner.Player;
+            if(allied){
+                Nav.ReleaseCommittedHostRoot();Nav.DestroyNavigationAuthority();
+                var authority=new OfflineParticipantAuthority(OfflineParticipantAuthorityTests.Config(),2);
+                domain=OfflineParticipantAuthorityTests.Domain(authority);friendly=(PlayableOwner)2;
+                var units=(IDictionary)Domain.GetField("units",Flags).GetValue(domain);
+                foreach(int id in units.Keys.Cast<int>().ToArray()){Nav.Remove(id);units.Remove(id);}
+            }
+            var home=View().Buildings.Single(b=>b.Owner==PlayableOwner.Player&&b.Kind==PlayableBuildingKind.Headquarters);
+            var cover=((IDictionary)Domain.GetField("buildings",Flags).GetValue(domain))[home.Id];cover.GetType().GetField("Owner").SetValue(cover,friendly);
+            var from=new BallisticPoint(home.Position.X-8,.5,home.Position.Z);
+            int friend=(int)Call("SpawnUnit",new NavPoint(home.Position.X-6,home.Position.Z),friendly,PlayableEntityKind.Tank);
+            int target=(int)Call("SpawnUnit",new NavPoint(home.Position.X+5,home.Position.Z),PlayableOwner.Enemy,PlayableEntityKind.Tank);
+            var type=Domain.GetNestedType("Projectile",BindingFlags.NonPublic);var shot=Activator.CreateInstance(type);
+            void Set(string field,object value)=>type.GetField(field).SetValue(shot,value);
+            Set("Id",201);Set("Faction",PlayableOwner.Player);Set("Position",from.Ground);Set("Height",from.Y);
+            Set("Kind",kind);Set("Speed",20d);Set("Remaining",20d);Set("Damage",1d);Set("DirectionX",1d);Set("Spatial",true);Set("Target",target);
+            ((IList)Domain.GetField("projectiles",Flags).GetValue(domain)).Add(shot);Call("RefreshVision");Call("AdvanceProjectiles",1d);
+            var view=View();Assert.AreEqual(PlayableProfile.Default.TankHealth-1,view.Entities.Single(e=>e.Id==target).Health);
+            Assert.AreEqual(PlayableProfile.Default.TankHealth,view.Entities.Single(e=>e.Id==friend).Health);
+            Assert.AreEqual(home.Health,view.Buildings.Single(b=>b.Id==home.Id).Health);Assert.IsEmpty(view.Projectiles);
+            Assert.AreEqual(target,view.Sounds.Single(e=>e.Kind==PlayableSoundKind.Impact).Contact.TargetId);
+        }
         [TestCase(PlayableEntityKind.Tank)][TestCase(PlayableEntityKind.Explorer)]
         public void EveryActualHitCarriesOneTerminalContactAndUnchangedDamage(PlayableEntityKind kind)
         {

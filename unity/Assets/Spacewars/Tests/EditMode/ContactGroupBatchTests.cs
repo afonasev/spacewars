@@ -11,6 +11,53 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed partial class NavigationPhysicalBodyTests
     {
+        private sealed class CountedMembers : IReadOnlyList<NavOwnedStorage>
+        {
+            private readonly IReadOnlyList<NavOwnedStorage> members;
+            internal CountedMembers(IReadOnlyList<NavOwnedStorage> members){this.members=members;}
+            internal int Reads{get;private set;}
+            public int Count=>members.Count;
+            public NavOwnedStorage this[int index]{get{Reads++;return members[index];}}
+            public IEnumerator<NavOwnedStorage> GetEnumerator(){for(int i=0;i<Count;i++)yield return this[i];}
+            System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()=>GetEnumerator();
+        }
+        [Test] public void FormationReconcileKeepsLiveBindingsAcrossHolesAndTombstones()
+        {
+            var budget=new NavigationRetentionBudget();
+            var group=CowSource(budget,40);
+            try{
+                Assert.True(budget.TryOpenScope(NavigationPreparationKind.Projection,1,2,out var scope));
+                using(scope){
+                    var r=scope.OwnedReservation();
+                    var plan=RecastFormationPlan.Collect(group.Data,group.Members,r);
+                    RecastFormationPlan smaller=null;
+                    try{
+                        var intact=new CountedMembers(group.Members);
+                        Assert.IsNull(plan.Reconcile(group.Data,intact,r));
+                        Assert.AreEqual(40,intact.Reads,"Each surviving member is read once.");
+                        var kept=group.Members.Where((m,i)=>i!=0&&i!=17&&i!=39).ToArray();
+                        smaller=plan.Reconcile(group.Data,kept,r);
+                        Assert.NotNull(smaller);
+                        CollectionAssert.AreEqual(new[]{1,18,40},smaller.Entries.Where(e=>e.Stage==RecastPassageStage.Tombstone).Select(e=>e.Entity));
+                        smaller.ValidateGroup(group.Data,kept);
+                        Assert.IsNull(smaller.Reconcile(group.Data,kept,r));
+                        var altered=NavigationAuthorityMember.CopyOwned(new GroupMemberState{Entity=18,Slot=17,Incarnation=2,OrderRevision=1,MobilityRevision=1},r);
+                        try{
+                            var rebound=group.Members.ToArray();rebound[17]=altered;
+                            Assert.Throws<ArgumentException>(()=>plan.ValidateGroup(group.Data,rebound));
+                            var reconciled=plan.Reconcile(group.Data,rebound,r);
+                            try{
+                                CollectionAssert.AreEqual(new[]{18},reconciled.Entries.Where(e=>e.Stage==RecastPassageStage.Tombstone).Select(e=>e.Entity));
+                                reconciled.ValidateGroup(group.Data,rebound);
+                            }finally{reconciled.Release();}
+                        }finally{altered.ReleaseStorage();}
+                        Assert.AreEqual(plan.Seal,smaller.Seal);
+                        Assert.True(plan.Entries.All(e=>e.Stage==RecastPassageStage.Staging));
+                    }finally{smaller?.Release();plan.Release();}
+                }
+            }finally{group.ReleaseStorage();}
+            Assert.Zero(budget.PhysicalBytes);Assert.Zero(budget.HeldBytes);
+        }
         [Test] public void Q9GroupOwnershipAllNthRollbackAndChargedPeak()
         {
             Contact30Source(true,(config,views,profile)=>{

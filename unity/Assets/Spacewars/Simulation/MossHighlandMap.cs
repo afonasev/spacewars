@@ -5,7 +5,7 @@ namespace Spacewars.Simulation
 {
     [Serializable] public sealed class MossHighlandProfileData
     {
-        public string id="moss-highland-native-v1";public int revision=4;public double outpostOffset=6;
+        public string id="moss-highland-native-v1";public int revision=5;public double outpostOffset=6;
     }
     public sealed class MossHighlandPlacementField
     {
@@ -80,7 +80,7 @@ namespace Spacewars.Simulation
             var blockers=new List<NavObstacle>(solids);blockers.AddRange(BorderRivers);
             // The central cliffs are visible support edges. Zero-thickness segments
             // use a numerical width solely for the geometry's polygon contract.
-            const double epsilon=.00001;
+            const double epsilon=.00001; // NavPolygon now compares squared lengths to squared tolerance.
             foreach(var s in supports.Where(s=>s.Id=="plateau")){
                 var b=s.Bounds;
                 AddEdge(new NavPoint(b.MinX,b.MinZ),new NavPoint(b.MaxX,b.MinZ));
@@ -127,13 +127,15 @@ namespace Spacewars.Simulation
         public bool CompatibleCombatSurface(NavLocation a,NavLocation b)=>locations.Combat(a,b);
         public NavPoint Headquarters(PlayableOwner owner){int i=(int)owner;if(i<0||i>=4)throw new ArgumentOutOfRangeException(nameof(owner));return new NavPoint(MossHighlandLayout.Sites[i,0],MossHighlandLayout.Sites[i,1]);}
         public TerritorySite[] Sites(PlayableProfile p){
-            var sites=new TerritorySite[13];
-            for(int i=0;i<sites.Length;i++){
+            var sites=new TerritorySite[17];
+            for(int i=0;i<13;i++){
                 double x=MossHighlandLayout.Sites[i,0],z=MossHighlandLayout.Sites[i,1];
                 // Native revision 3 moves complete side sites; retained web source stays immutable.
                 if(i>=8&&i<12){x+=Math.Sign(x)*OutpostOffset;z+=Math.Sign(z)*OutpostOffset;}
                 sites[i]=new TerritorySite(i+1,i<4?PlayableBuildingKind.Headquarters:i<8?PlayableBuildingKind.Mine:PlayableBuildingKind.Outpost,new NavPoint(x,z),p,(i>=8?90:MossHighlandLayout.Sites[i,2])*Math.PI/180);
             }
+            var relays=new[]{new NavPoint(0,-22),new NavPoint(22,0),new NavPoint(0,22),new NavPoint(-22,0)};
+            for(int i=0;i<relays.Length;i++)sites[13+i]=new TerritorySite(14+i,PlayableBuildingKind.RelayTower,relays[i],p);
             return sites;
         }
         public OfflineMatchConfiguration Configuration(PlayableProfile p,int seed,OfflineParticipant[] roster){

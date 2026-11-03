@@ -26,7 +26,7 @@ namespace Spacewars.Tests.EditMode
         // Rapid-fire/cell fixtures start already aimed; preparation has its own contract below.
         private void Align(int gun,int target){
             var e=View().Entities.Single(x=>x.Id==gun);var t=View().Entities.Single(x=>x.Id==target);
-            ShkvalLaunchGeometry.Aim(new BallisticPoint(e.Position.X,0,e.Position.Z),e.HullHeading,e.Upgraded,e.WeaponSequence,p.ShkvalModelRadius*p.ShkvalModelScale/2.05,p.ShkvalProjectileLength,default,new BallisticPoint(t.Position.X,0,t.Position.Z),p.ShkvalArcHeight,out double yaw,out double pitch);
+            ShkvalLaunchGeometry.Aim(new BallisticPoint(e.Position.X,0,e.Position.Z),e.HullHeading,e.Upgraded,e.WeaponSequence,p.ShkvalModelRadius*p.ShkvalModelScale/2.05,p.ShkvalProjectileLength,default,new BallisticPoint(t.Position.X,PlayableUnitRules.Radius(p,t.Kind),t.Position.Z),p.ShkvalArcHeight,out double yaw,out double pitch);
             Set(gun,"Turret",yaw);Set(gun,"ShkvalPitch",pitch);
         }
         private int Factory(){Call("AddCredits",PlayableOwner.Player,10000d);Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,1,PlayableBuildingKind.Factory,1,PlayableOwner.Player,null));Call("AdvanceFoundations");Call("AdvanceBuildings",100d);Assert.AreEqual(PlayableCommandStatus.Applied,Call("BuildAt",1,2,PlayableBuildingKind.ScientificCenter,1,PlayableOwner.Player,null));Call("AdvanceFoundations");Call("AdvanceBuildings",100d);return View().Buildings.Single(b=>b.Kind==PlayableBuildingKind.Factory).Id;}
@@ -115,15 +115,26 @@ namespace Spacewars.Tests.EditMode
         [Test]public void MissileSurvivesSourceAndFrozenEndpointDoesNotHome()
         {
             int id=Spawn(PlayableOwner.Player,PlayableEntityKind.Shkval,-12,0);int target=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-4,0);Set(target,"Reload",999d);Combat(55);
-            var shot=View().Projectiles.Single(x=>x.Kind==PlayableEntityKind.Shkval);Assert.NotNull(shot.Marker);double endpoint=shot.Marker.Position.X;
+            var shot=View().Projectiles.Single(x=>x.Kind==PlayableEntityKind.Shkval);Assert.NotNull(shot.Marker);double endpoint=shot.Marker.Position.X;Assert.AreEqual(-4,endpoint);
             Call("Damage",id,999);Nav.Remove(target);Units.Remove(target);Combat(2);var later=View().Projectiles.Single(x=>x.Kind==PlayableEntityKind.Shkval);Assert.AreEqual(endpoint,later.Marker.Position.X);Assert.Greater(later.Age,shot.Age);Assert.AreNotEqual(later.Position.X,shot.Position.X);
             Combat(60);Assert.IsEmpty(View().Projectiles.Where(x=>x.Kind==PlayableEntityKind.Shkval));
         }
-        [Test]public void ExplicitShotOverridesFriendlyPenaltyAndAoEDamagesBoth()
+        [Test]public void AutomaticShotDamagesClosestEnemyAndNearbyAlly()
         {
             int id=Spawn(PlayableOwner.Player,PlayableEntityKind.Shkval,-12,0),target=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-5,0),friend=Spawn(PlayableOwner.Player,PlayableEntityKind.Tank,-5,1.5);
-            Set(friend,"Reload",999d);Set(target,"Reload",999d);Combat(60);Assert.IsEmpty(View().Projectiles);Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.Attack,id,target:target));Combat(45);
+            Set(friend,"Reload",999d);Set(target,"Reload",999d);Combat(105);
             Assert.AreEqual(p.TankHealth-p.ShkvalDamage,Get<double>(friend,"Health"));Assert.AreEqual(p.TankHealth-p.ShkvalDirectHitDamage,Get<double>(target,"Health"));
+        }
+        [Test]public void AutomaticFirePrefersNearestOverClusterAndExplicitOrderCanPickAnother()
+        {
+            int gun=Spawn(PlayableOwner.Player,PlayableEntityKind.Shkval,-12,0);
+            int near=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-6,0);
+            int far=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-5,-2);
+            int other=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-5,-4);
+            foreach(int id in new[]{near,far,other})Set(id,"Reload",999d);
+            Combat(1);Assert.AreEqual(near,Get<int>(gun,"Target"));
+            Assert.AreEqual(PlayableCommandStatus.Applied,Send(PlayableCommandKind.Attack,gun,target:far));
+            Combat(1);Assert.AreEqual(far,Get<int>(gun,"Target"));
         }
         [Test]public void HiddenEntitiesCannotChangeAutomaticChoice()
         {
@@ -161,6 +172,42 @@ namespace Spacewars.Tests.EditMode
             foreach(var pair in new[]{("Rocket",rocket),("Id",(object)1),("Owner",(object)source),("Target",(object)target),("Faction",(object)PlayableOwner.Player),("Kind",(object)PlayableEntityKind.Shkval),("Damage",(object)splash)})FieldSet(shot,pair.Item1,pair.Item2);
             return shot;
         }
+        [Test]public void EightSimultaneousShkvalLossesUpdateAllObstaclesInTheSameTick()
+        {
+            Nav.ReleaseCommittedHostRoot();((PlayableDomain)domain).DestroyOwnedNavigation();
+            var setup=new ProvingGroundSetup(PlayableProfile.RecastGroupCorridorDefault);
+            for(int side=0;side<2;side++)for(int i=0;i<20;i++)
+                Assert.IsNull(setup.PlaceUnit(side,PlayableEntityKind.Shkval,new NavPoint((side==0?-1:1)*(4+4*(i%4)),4*(i/4-2))));
+            var config=setup.Configuration();p=config.Profile;
+            var world=new PlayableDomain(p,1,config);domain=world;
+            try{
+                world.PrepareStartingCombatGeometry(()=>false);
+                world.StartProvingGroundBattle();
+                var opening=world.Snapshot(1,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+                Assert.AreEqual(40,opening.Entities.Count);
+                var targets=opening.Entities.Where(e=>e.Owner==PlayableOwner.Enemy).OrderBy(e=>e.Id).Take(8).ToArray();
+                int gun=opening.Entities.First(e=>e.Owner==PlayableOwner.Player).Id;
+                var shots=(IList)Domain.GetField("projectiles",Flags).GetValue(world);
+                var nextId=Domain.GetField("nextProjectile",Flags);int id=(int)nextId.GetValue(world);
+                foreach(var victim in targets){
+                    var center=new BallisticPoint(victim.Position.X,.5,victim.Position.Z);
+                    var flight=new BallisticFlight(new BallisticPoint(center.X-1.4,center.Y,center.Z),center,0,12);
+                    var rocket=InjectRocket(gun,victim.Id,flight,direct:victim.Health+1);
+                    FieldSet(rocket,"Id",id++);shots.Add(rocket);
+                }
+                nextId.SetValue(world,id);
+                int revision=world.Geometry.Revision;
+                Call("AdvanceProjectiles",.25d);
+                var result=world.Snapshot(2,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+                Assert.AreEqual(32,result.Entities.Count);Assert.AreEqual(revision+8,world.Geometry.Revision);
+                CollectionAssert.AreEquivalent(targets.Select(e=>e.Id),result.Wrecks.Select(w=>w.Id));
+                foreach(var victim in targets)Assert.False(world.Geometry.IsFree(victim.Position,.01));
+                var bytes=world.CaptureWorldBytes(config.Seed,config.SourceIdentity);
+                using(var hash=System.Security.Cryptography.SHA256.Create())
+                    TestContext.WriteLine("SALVO8_WORLD "+BitConverter.ToString(hash.ComputeHash(bytes)).Replace("-",""));
+            }finally{world.Navigation.ReleaseCommittedHostRoot();world.DestroyOwnedNavigation();}
+        }
+
         [TestCase(false)][TestCase(true)]public void PhysicalBodyGetsDirectTotalAndNeighborGetsSplashIncludingLethalGeometry(bool lethal)
         {
             int source=Spawn(PlayableOwner.Player,PlayableEntityKind.Shkval,-12,0),contact=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-4,0),neighbor=Spawn(PlayableOwner.Player,PlayableEntityKind.Tank,-4,1.5);

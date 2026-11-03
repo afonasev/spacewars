@@ -58,14 +58,16 @@ namespace Spacewars.Presentation
             const float gutter=8;
             var parent=table.parent;float width=parent.resolvedStyle.width;
             table.style.left=gutter;table.style.top=gutter;
-            if(width>0)table.style.maxWidth=Mathf.Max(0,width-2*gutter);
+            var resources=root.Q("match-header");
+            float reserved=resources!=null&&resources.resolvedStyle.display!=DisplayStyle.None?Mathf.Max(0,resources.resolvedStyle.width)+gutter:0;
+            if(width>0)table.style.maxWidth=Mathf.Max(220,width-2*gutter-reserved);
             var controls=table.Q("spectator-controls");if(controls==null)return;
             fps.style.left=root.WorldToLocal(controls.worldBound.min).x+gutter;
             // Reserve the same inner gutter before FPS and between FPS and speeds.
             controls.style.paddingLeft=NativeDevicePreferences.ShowFps?DeviceFpsWidth+2*gutter:gutter;
             if(NativeDevicePreferences.ShowFps&&controls.worldBound.height>0)
                 fps.style.top=root.WorldToLocal(controls.worldBound.center).y-fps.resolvedStyle.height/2;
-            var resources=root.Q("match-header");float rightPadding=gutter;
+            float rightPadding=gutter;
             if(resources!=null&&resources.resolvedStyle.display!=DisplayStyle.None&&resources.worldBound.height>0
                 &&resources.worldBound.Overlaps(controls.worldBound))
                 rightPadding=Mathf.Max(gutter,controls.worldBound.xMax-resources.worldBound.xMin+gutter);

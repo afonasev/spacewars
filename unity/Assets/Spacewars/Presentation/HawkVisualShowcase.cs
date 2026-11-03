@@ -90,7 +90,7 @@ namespace Spacewars.Presentation
             var socket=craft[lane].GetComponentsInChildren<Transform>(true).Single(t=>t.name==(side==0?"muzzleLeft":"muzzleRight"));var p=socket.position;var target=centers[lane]+new Vector3(0,2.8f,6);var d=(target-p).normalized;
             var rocket=lane==0?visuals.Rocket(transform,(float)gameplay.HawkMissileRadius,(float)gameplay.HawkMissileLength,Color.cyan):visuals.HawkRocket(transform,(float)gameplay.HawkMissileRadius,(float)gameplay.HawkMissileLength,new Color(.12f,.5f,.7f));
             Layer(rocket,20+lane);rocket.transform.localScale=Vector3.one*(float)gameplay.HawkMissileVisualScale;
-            visuals.Exhaust(rocket,(float)gameplay.HawkMissileLength*(lane==0?1:tuning.exhaustLength),(float)gameplay.HawkMissileRadius*(lane==0?1:tuning.exhaustWidth),(float)gameplay.WeaponMuzzleCoreRatio,(float)gameplay.ShkvalExhaustOpacity);
+            visuals.Exhaust(rocket,(float)gameplay.HawkMissileLength*(lane==0?1:tuning.exhaustLength),(float)gameplay.HawkMissileRadius*(lane==0?1:tuning.exhaustWidth),(float)gameplay.WeaponMuzzleCoreRatio,(float)(lane==0?gameplay.ShkvalExhaustOpacity:tuning.exhaustOpacity));
             shots.Add(new Shot{model=rocket,lane=lane,flight=new HawkRocketFlight(1,new BallisticPoint(p.x,p.y,p.z),new BallisticPoint(d.x,d.y,d.z),gameplay.HawkMissileSpeed,0,5)});LaunchCount++;if(art[lane])art[lane].Trigger(side,Clock);
         }
         void Present()

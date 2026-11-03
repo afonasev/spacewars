@@ -12,6 +12,8 @@ namespace Spacewars.Runtime
         internal readonly NavTypedLeg[] Legs;
         internal readonly RecastSpineProposal Spine;
         internal readonly int Join,Exit,OriginLegs,TerminalLeg;
+        internal RecastMemberRoute(RecastRoutePoint[] waypoints,NavTypedLeg[] legs,RecastSpineProposal spine,int join,int exit,int origin,int terminal,bool adopt)
+        {if(!adopt||waypoints.Length==0||waypoints.Length>4096||legs.Length>16384)throw new InvalidOperationException("Recast branch capacity exceeded.");Spine=spine;Join=join;Exit=exit;OriginLegs=origin;TerminalLeg=terminal;Waypoints=waypoints;Legs=legs;}
         internal RecastMemberRoute(IEnumerable<RecastRoutePoint> waypoints,IEnumerable<NavTypedLeg> legs,RecastSpineProposal spine=null,int join=0,int exit=0,int origin=0,int terminal=0)
         {Spine=spine;Join=join;Exit=exit;OriginLegs=origin;TerminalLeg=terminal;Waypoints=waypoints.ToArray();Legs=legs.ToArray();if(Waypoints.Length==0||Waypoints.Length>4096||Legs.Length>16384)throw new InvalidOperationException("Recast branch capacity exceeded.");}
     }

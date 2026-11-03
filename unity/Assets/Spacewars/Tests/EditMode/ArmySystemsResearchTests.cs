@@ -121,8 +121,8 @@ namespace Spacewars.Tests.EditMode
             if(kind==PlayableEntityKind.Shkval)
             {
                 object[] actorArgs={shooter,null};Assert.True((bool)Call("TryActor",actorArgs));var actor=(NavUnit)actorArgs[1];
-                var flight=(BallisticFlight)Call("BaselineFlight",actor.Position,new NavPoint(-16,-16));
-                ShkvalLaunchGeometry.Aim(new BallisticPoint(actor.Position.X,0,actor.Position.Z),actor.Heading,false,0,p.ShkvalModelRadius*p.ShkvalModelScale/2.05,p.ShkvalProjectileLength,default(NavPoint),flight.End,p.ShkvalArcHeight,out double heading,out double pitch);
+                var aimPoint=new BallisticPoint(-16,PlayableUnitRules.Radius(p,PlayableEntityKind.Tank),-16);
+                ShkvalLaunchGeometry.Aim(new BallisticPoint(actor.Position.X,0,actor.Position.Z),actor.Heading,false,0,p.ShkvalModelRadius*p.ShkvalModelScale/2.05,p.ShkvalProjectileLength,default(NavPoint),aimPoint,p.ShkvalArcHeight,out double heading,out double pitch);
                 Set("Turret",heading);Set("ShkvalPitch",pitch);
             }
             Call("AdvanceCombat",.01d);

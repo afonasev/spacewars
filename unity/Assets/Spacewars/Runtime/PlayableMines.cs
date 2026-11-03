@@ -79,8 +79,16 @@ namespace Spacewars.Runtime
             var removedActors=prospective.Values.Where(w=>w.Kind!=PlayableEntityKind.Hawk).Select(w=>w.Id).ToArray();
             bool geometryChange=removals.Count>0||removedActors.Length>0||prospective.Values.Any(w=>w.Blocks(Tick));
             if(geometryChange&&!TryRebuildGeometry(removals:removals,additionalWrecks:prospective.Values,removedActors:removedActors.Length==0?null:removedActors))return;
-            foreach(var mine in burst){mines.Remove(mine);mineBlasts.Add(new OrbitalMineBlastSnapshot(mine.Id,mine.Owner,mine.Point,mine.Radius,Tick,mine.Duration));Sound(PlayableSoundKind.Impact,mine.Point,PlayableEntityKind.Shkval);}
-            foreach(var hit in hits)TryDamagePrepared(hit.id,hit.damage,0,hit.mine.Owner,null,default(NavPoint),null,prospective);
+            foreach(var mine in burst){AddLingeringVision(mine.Owner,mine.Point,mine.Vision);mines.Remove(mine);mineBlasts.Add(new OrbitalMineBlastSnapshot(mine.Id,mine.Owner,mine.Point,mine.Radius,Tick,mine.Duration));Sound(PlayableSoundKind.Impact,mine.Point,PlayableEntityKind.Shkval);MatchEvent(MatchEventKind.MineTriggered,mine.Owner,mine.Point,mine.Id);}
+            var notified=new HashSet<(int mine,PlayableOwner owner)>();
+            foreach(var hit in hits)
+            {
+                PlayableOwner? damaged=units.TryGetValue(hit.id,out var victim)&&victim.Health>0?victim.Owner:
+                    buildings.TryGetValue(hit.id,out var structure)&&structure.Health>0?(PlayableOwner?)structure.Owner:null;
+                bool applied=TryDamagePrepared(hit.id,hit.damage,0,hit.mine.Owner,null,default(NavPoint),null,prospective);
+                if(applied&&hit.damage>0&&damaged.HasValue&&notified.Add((hit.mine.Id,damaged.Value)))
+                    MatchEvent(MatchEventKind.MineHit,damaged.Value,hit.mine.Point,hit.mine.Id);
+            }
             visionInputProfile=null;
             if(geometryChange){ReconcileWreckRoutes();RetryWreckWaits();}
         }

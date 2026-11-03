@@ -21,18 +21,24 @@ public sealed class NativeWreckLabTests
             var view=new NativeBalanceView(root,navigation,store,()=>closed=true);
             yield return null;view.Page.Q<TextField>("lab-search").value="Время жизни остова";yield return null;
             var lifetime=view.Page.Q<TextField>("lab-field-unitWreckLifetimeSeconds");Assert.NotNull(lifetime);
+            view.Page.Q<TextField>("lab-search").value="Неуязвимость нового остова";yield return null;
+            var protection=view.Page.Q<TextField>("lab-field-wreckSpawnProtectionSeconds");Assert.NotNull(protection);Assert.AreEqual("1",protection.value);protection.value="1.5";
+            view.Page.Q<TextField>("lab-search").value="Время жизни остова";yield return null;
+            lifetime=view.Page.Q<TextField>("lab-field-unitWreckLifetimeSeconds");Assert.NotNull(lifetime);
             Assert.Greater(lifetime.worldBound.width,150);Assert.Greater(lifetime.worldBound.height,0);Assert.LessOrEqual(lifetime.worldBound.xMax,1280);
             Assert.AreEqual("30",lifetime.value);lifetime.value="2.5";
             view.Page.Q<Button>("lab-save").Focus();navigation.Activate();yield return null;
             int revision=(int)store.State["revisions"][store.State["revisions"].Count()-1]["revision"];
-            var saved=new NativeBalanceStore(baseline,path).Resolve(revision);Assert.That(saved.UnitWreckLifetimeSeconds,Is.EqualTo(2.5));
+            var saved=new NativeBalanceStore(baseline,path).Resolve(revision);Assert.That(saved.UnitWreckLifetimeSeconds,Is.EqualTo(2.5));Assert.That(saved.WreckSpawnProtectionSeconds,Is.EqualTo(1.5));
             store.Select(revision);var reopened=new NativeBalanceStore(baseline,path);Assert.That(reopened.Selected.UnitWreckLifetimeSeconds,Is.EqualTo(2.5),"Reopening preserves the selected saved revision.");reopened.ResetRelease();Assert.That(reopened.Selected.UnitWreckLifetimeSeconds,Is.EqualTo(30),"Explicit release reset restores the packaged default without deleting the experiment.");
             var old=(Newtonsoft.Json.Linq.JObject)store.State["revisions"][0];((Newtonsoft.Json.Linq.JObject)old["data"]).Remove("unitWreckLifetimeSeconds");Assert.AreEqual(30,store.Compile(old).UnitWreckLifetimeSeconds,"Rows without an explicit value use the current initial profile.");
+            ((Newtonsoft.Json.Linq.JObject)old["data"]).Remove("wreckSpawnProtectionSeconds");Assert.AreEqual(1,store.Compile(old).WreckSpawnProtectionSeconds,"Missing protection uses current initial profile");
             Assert.AreEqual(revision,store.Active.Revision);
+            view.Page.Q<TextField>("lab-search").value="Неуязвимость нового остова";
             yield return null;yield return null;
             var folder=Path.Combine(Environment.GetEnvironmentVariable("SPACEWARS_LAB_EVIDENCE")??directory,"wreck");Directory.CreateDirectory(folder);
             var previous=RenderTexture.active;var pixels=new Texture2D(texture.width,texture.height,TextureFormat.RGB24,false);
-            try{RenderTexture.active=texture;pixels.ReadPixels(new Rect(0,0,texture.width,texture.height),0,0);pixels.Apply();File.WriteAllBytes(Path.Combine(folder,"lifetime-controls.png"),pixels.EncodeToPNG());}finally{RenderTexture.active=previous;UnityEngine.Object.DestroyImmediate(pixels);}
+            try{RenderTexture.active=texture;pixels.ReadPixels(new Rect(0,0,texture.width,texture.height),0,0);pixels.Apply();File.WriteAllBytes(Path.Combine(folder,"wreck-protection-controls.png"),pixels.EncodeToPNG());}finally{RenderTexture.active=previous;UnityEngine.Object.DestroyImmediate(pixels);}
             view.Page.Q<Button>("lab-back").Focus();navigation.Activate();Assert.True(closed);Assert.AreEqual(revision,store.Active.Revision);Assert.IsNull(NativeBalanceFields.ValidateLiveDifference(baseline,store.Active));
         }finally{navigation.Dispose();panel.targetTexture=null;texture.Release();UnityEngine.Object.DestroyImmediate(texture);UnityEngine.Object.DestroyImmediate(host);UnityEngine.Object.DestroyImmediate(panel);Directory.Delete(directory,true);}
     }

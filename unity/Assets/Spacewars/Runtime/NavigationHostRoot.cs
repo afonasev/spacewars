@@ -616,6 +616,8 @@ namespace Spacewars.Runtime
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.InstalledExecution))?NavigationInstalledExecutionOwner.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityCatalogTerrain))?NavigationAuthorityOwners.ReadPhysicalBody(reader,true,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityCatalog))?NavigationAuthorityOwners.ReadPhysicalBody(reader,true):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityGroup,value:NavPhysicalValueKind.RecastFormationGroupV1))?NavigationAuthorityGroup.ReadPhysicalBody(reader,true):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityGroup,value:NavPhysicalValueKind.RecastFormationPlanV1))?RecastFormationPlan.Read(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityGroup))?NavigationAuthorityGroup.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityMember,value:NavPhysicalValueKind.RecastMemberProgressV1))?throw new ArgumentException("Historical Recast progress v1 is not current."):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityMember,value:NavPhysicalValueKind.RecastMemberProgressV2))?NavigationAuthorityMember.ReadPhysicalBody(reader,true,true):

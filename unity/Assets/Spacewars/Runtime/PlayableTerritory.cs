@@ -73,6 +73,7 @@ namespace Spacewars.Runtime
         private void RemoveBuildingWithAttacker(Building b,bool cancellation,PlayableOwner? attacker)
         {
             if(!buildings.Remove(b.Id))return;
+            if(!cancellation&&b.Sale==null&&b.Phase!=ConstructionPhase.Pending)AddLingeringVision(b.Owner,b.Position,PlayableVision.BuildingRadius(profile,b.Kind,b.Phase));
             if(b.Ready)RecordBuildingCount(b.Owner,b.Kind);
             if(!cancellation&&b.Sale==null&&b.Phase!=ConstructionPhase.Pending)BeginBuildingDestruction(b);
             if(!cancellation&&b.Sale==null)Fact(b.Owner,MatchFactKind.BuildingLost,0,(int)b.Kind);

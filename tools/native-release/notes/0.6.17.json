@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "category_ru": "Карты",
+      "category_en": "Maps",
+      "ru": "Башни ретрансляции размещены на всех девяти картах лобби.",
+      "en": "Relay towers are placed across all nine lobby maps.",
+      "images": [
+        {
+          "path": "tools/native-release/notes/media/relay-tower-basalt.png",
+          "source_commit": "e9c6e625ef9dd66cf8078878b2fe36e188ac4ccc",
+          "ru": "Башни ретрансляции на карте Базальт",
+          "en": "Relay towers on the Basalt map"
+        }
+      ]
+    }
+  ]
+}

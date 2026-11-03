@@ -53,7 +53,7 @@ namespace Spacewars.Input.Tests
             camera.orthographicSize=20;camera.transform.position=world.Point(home)+new Vector3(0,30,-24);camera.transform.LookAt(world.Point(home));
             var goal=new NavPoint(0,-80);float height=camera.transform.position.y;var rotation=camera.transform.rotation;float zoom=camera.orthographicSize;
             var setup=Get<NativeLobbyConfiguration>(app,"matchSetup");
-            Assert.True((bool)Call(app,"PresentAiCommunication",new AiCommunication(20001,view.Generation,view.Tick,"foundry-5",setup.Participants[4].Team,"Выдвигаюсь к отмеченной позиции.",goal,TeamSignalKind.Attack,true)));
+            Assert.True((bool)Call(app,"PresentAiCommunication",new AiCommunication(20001,view.Generation,view.Tick,"player-1",setup.Participants[0].Team,"Выдвигаюсь к отмеченной позиции.",goal,TeamSignalKind.Attack,true)));
             Call(app,"UpdateFrame");yield return null;
             var row=Get<VisualElement>(app,"chatFeed").Query<Label>("chat-message").ToList().Single(l=>l.text.Contains("Выдвигаюсь к отмеченной позиции."));
             var perspective=Get<PlayableOwner?>(app,"spectatorPerspective");var selection=Selection(app).ToArray();
@@ -71,12 +71,12 @@ namespace Spacewars.Input.Tests
             Call(app,"CreateSpectatorHud");Call(app,"UpdateFrame");
             var runtime=Runtime;var chat=Get<NativeMatchChat>(app,"matchChat");
             Assert.True(Get<bool>(app,"spectatorMode"));
+            Call(app,"SetSpectatorPerspective",PlayableOwner.Player);Call(app,"UpdateFrame");
             yield return Wait(()=>runtime.AiCommunications(PlayableRuntime.LocalSpectatorId).Select(e=>e.Team).Distinct().Count()>=2,"AI openings");
             Call(app,"UpdateFrame");
             var initial=chat.Visible(-1,true,Time.unscaledTimeAsDouble).Where(m=>m.IsAi).ToArray();
-            Assert.GreaterOrEqual(initial.Select(m=>m.Team).Distinct().Count(),2,"Both teams must reach the spectator");
-            Call(app,"SetSpectatorPerspective",PlayableOwner.Player);Call(app,"UpdateFrame");
-            Assert.GreaterOrEqual(chat.Visible(-1,true,Time.unscaledTimeAsDouble).Where(m=>m.IsAi).Select(m=>m.Team).Distinct().Count(),2);
+            Assert.GreaterOrEqual(initial.Length,1,"Selected team's announcements reach the spectator");
+            Assert.True(initial.All(m=>m.Team==Get<PlayableSnapshot>(app,"view").Team),"No opposing team announcement enters the selected signal feed");
             runtime.SetSpectatorSpeed(PlayableRuntime.LocalSpectatorId,4);
             float end=Time.realtimeSinceStartup+300;const long endTick=6000;NativeMatchChat.Message target=null;
             long startTick=runtime.Latest.Tick;

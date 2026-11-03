@@ -254,10 +254,12 @@ public sealed class DirectProjectilePresentationTests
             effective.Invoke(null,new object[]{writer,p});writer.Flush();return bytes.ToArray();
         }
         var priorExtension=Extension(previous);var currentExtension=Extension(profile);
-        CollectionAssert.AreEqual(priorExtension,before.Skip(before.Length-priorExtension.Length).ToArray());
-        CollectionAssert.AreEqual(currentExtension,after.Skip(after.Length-currentExtension.Length).ToArray());
-        CollectionAssert.AreEqual(before.Take(before.Length-priorExtension.Length).ToArray(),after.Take(after.Length-currentExtension.Length).ToArray(),
-            "A visual scale must not alter the gameplay binding prefix");
+        // EPB1 is followed by other profile bindings, so it is not a wire suffix.
+        // Locate its complete exact payload and preserve both surrounding byte ranges.
+        int Offset(byte[] wire,byte[] extension)=>Enumerable.Range(0,wire.Length-extension.Length+1).Single(i=>wire.Skip(i).Take(extension.Length).SequenceEqual(extension));
+        int beforeOffset=Offset(before,priorExtension),afterOffset=Offset(after,currentExtension);Assert.AreEqual(beforeOffset,afterOffset);
+        CollectionAssert.AreEqual(before.Take(beforeOffset).ToArray(),after.Take(afterOffset).ToArray(),"A visual scale must not alter the gameplay binding prefix");
+        CollectionAssert.AreEqual(before.Skip(beforeOffset+priorExtension.Length).ToArray(),after.Skip(afterOffset+currentExtension.Length).ToArray(),"A visual scale must not alter following profile bindings");
         CollectionAssert.AreNotEqual(before,after,"EPB1 must still distinguish different effective visual profiles");
         foreach(double value in new[]{field.Minimum-.01,field.Maximum+.01,double.NaN,double.PositiveInfinity})
         {data=profile.CopyData();data.hawkMissileVisualScale=value;Assert.Throws<ArgumentException>(()=>PlayableProfile.Create(data));}
@@ -272,16 +274,180 @@ public sealed class DirectProjectilePresentationTests
         foreach(double opacity in new[]{.1,.9})
         {
             var data=profile.CopyData();data.shkvalExhaustOpacity=opacity;profile=PlayableProfile.Create(data);Set("profile",profile);
-            Render(30,shots:new[]{new PlayableProjectileSnapshot(301,3,0,default,PlayableEntityKind.Hawk,height:3)});
+            Render(30,shots:new[]{new PlayableProjectileSnapshot(301,3,0,default,PlayableEntityKind.Hawk,height:3),new PlayableProjectileSnapshot(302,4,0,new NavPoint(4,0),PlayableEntityKind.Shkval,height:3)});
             var shells=(IDictionary)typeof(PlayableBootstrap).GetField("shells",Flags).GetValue(hud);
             var shell=(GameObject)shells[301];var exhaust=shell.transform.Find("rocket-exhaust");
             foreach(var renderer in exhaust.GetComponentsInChildren<Renderer>())
             {
                 var block=new MaterialPropertyBlock();renderer.GetPropertyBlock(block);
+                Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha,renderer.sharedMaterial.GetFloat("_DstBlend"),"Hawk flames must not add white energy over the missile body.");
                 Assert.AreEqual(HawkVisualProfile.Load().exhaustOpacity,block.GetColor("_BaseColor").a,.0001f,
                     "Changing artillery flame tuning must not wash out a Hawk missile");
             }
+            var artillery=((GameObject)shells[302]).transform.Find("rocket-exhaust");
+            foreach(var renderer in artillery.GetComponentsInChildren<Renderer>())Assert.AreEqual((float)UnityEngine.Rendering.BlendMode.One,renderer.sharedMaterial.GetFloat("_DstBlend"),"Shkval keeps its existing additive flame.");
             Assert.AreEqual(Vector3.one*(float)profile.HawkMissileVisualScale,shell.transform.localScale);
+            var output=Environment.GetEnvironmentVariable("SPACEWARS_HAWK_PROJECTILE_EVIDENCE");
+            if(!string.IsNullOrEmpty(output))
+            {
+                System.IO.Directory.CreateDirectory(output);
+                var renderers=shell.GetComponentsInChildren<Renderer>();var meshes=shell.GetComponentsInChildren<MeshFilter>().Select(f=>f.sharedMesh).Distinct().ToArray();
+                var cost=new HawkRocketCost{renderers=renderers.Length,materialSlots=renderers.Sum(r=>r.sharedMaterials.Length),materials=renderers.SelectMany(r=>r.sharedMaterials).Distinct().Count(),meshes=meshes.Length,vertices=meshes.Sum(m=>m.vertexCount),triangles=meshes.Sum(m=>m.triangles.Length/3),meshBytes=meshes.Sum(m=>UnityEngine.Profiling.Profiler.GetRuntimeMemorySizeLong(m))};
+                System.IO.File.WriteAllText(System.IO.Path.Combine(output,"rocket-cost.json"),JsonUtility.ToJson(cost,true));
+            }
+        }
+    }
+    [Serializable] private sealed class HawkRocketCost { public int renderers,materialSlots,materials,meshes,vertices,triangles;public long meshBytes; }
+    [Test] public void HawkFinsHaveNonzeroLightingNormalsAndUseDoubleSidedMaterial()
+    {
+        Render(30,shots:new[]{new PlayableProjectileSnapshot(301,3,0,default,PlayableEntityKind.Hawk,height:3)});
+        var shells=(IDictionary)typeof(PlayableBootstrap).GetField("shells",Flags).GetValue(hud);
+        var fins=((GameObject)shells[301]).GetComponentsInChildren<MeshFilter>().Where(f=>f.name=="hawk-fin").ToArray();Assert.AreEqual(4,fins.Length);
+        foreach(var fin in fins){foreach(var normal in fin.sharedMesh.normals)Assert.AreEqual(1,normal.magnitude,.001f,"Opposing triangles must not cancel lighting normals.");Assert.AreEqual((float)UnityEngine.Rendering.CullMode.Off,fin.GetComponent<Renderer>().sharedMaterial.GetFloat("_Cull"));}
+    }
+    [UnityTest] public IEnumerator HawkBloomPipelinePositiveControl()
+    {
+        world.Remove(1);world.Remove(2);world.Fog.ShowPublic();
+        var camera=new GameObject("Bloom positive control camera").AddComponent<Camera>();camera.transform.SetParent(host.transform,false);
+        camera.orthographic=true;camera.orthographicSize=6;camera.cullingMask=1<<8;camera.backgroundColor=new Color(.06f,.08f,.1f);
+        camera.transform.position=new Vector3(-10,9,5);camera.transform.LookAt(new Vector3(-6,3,15));
+        var glow=camera.gameObject.AddComponent<ActorGlowCamera>();glow.Configure(ActorMaterialProfile.Load());Assert.True(glow.Profile.TryGet<UnityEngine.Rendering.Universal.Bloom>(out var bloom));
+        var probe=GameObject.CreatePrimitive(PrimitiveType.Sphere);probe.transform.SetParent(host.transform,false);probe.transform.position=new Vector3(-6,3,15);probe.transform.localScale=Vector3.one*.3f;probe.layer=8;probe.GetComponent<Collider>().enabled=false;
+        // Deliberately over-threshold HDR input validates the camera's bloom path.
+        var material=new Material(Shader.Find("Universal Render Pipeline/Unlit"));material.SetColor("_BaseColor",new Color(8,8,8));probe.GetComponent<Renderer>().sharedMaterial=material;
+        var image=new RenderTexture(640,400,24,RenderTextureFormat.ARGBHalf);image.Create();camera.targetTexture=image;var readback=new RenderTexture(640,400,0,RenderTextureFormat.ARGB32);readback.Create();var pixels=new Texture2D(640,400,TextureFormat.RGB24,false);
+        string folder=Environment.GetEnvironmentVariable("SPACEWARS_HAWK_PROJECTILE_EVIDENCE");long on=0,off=0;Color32[] onPixels=null;int changedPixels=0;
+        try
+        {
+            yield return null;yield return null;
+            foreach(bool active in new[]{true,false})
+            {
+                bloom.active=active;var data=camera.GetComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>();var manager=UnityEngine.Rendering.VolumeManager.instance;manager.Update(data.volumeStack??manager.stack,camera.transform,data.volumeLayerMask);
+                camera.Render();Graphics.Blit(image,readback);var previous=RenderTexture.active;RenderTexture.active=readback;pixels.ReadPixels(new Rect(0,0,640,400),0,0);pixels.Apply();RenderTexture.active=previous;
+                var samples=pixels.GetPixels32();long signal=samples.Sum(c=>(long)c.r+c.g+c.b);if(active){on=signal;onPixels=samples;}else{off=signal;changedPixels=samples.Where((c,i)=>Math.Abs(c.r-onPixels[i].r)+Math.Abs(c.g-onPixels[i].g)+Math.Abs(c.b-onPixels[i].b)>=6).Count();}
+                if(!string.IsNullOrEmpty(folder)){System.IO.Directory.CreateDirectory(folder);System.IO.File.WriteAllBytes(System.IO.Path.Combine(folder,"bloom-positive-"+(active?"on":"off")+".png"),pixels.EncodeToPNG());}
+            }
+            if(!string.IsNullOrEmpty(folder))System.IO.File.WriteAllText(System.IO.Path.Combine(folder,"bloom-positive.txt"),"intensity="+bloom.intensity.value+" threshold="+bloom.threshold.value+" on="+on+" off="+off+" visibleChangedPixels="+changedPixels+" target="+image.graphicsFormat);
+            Assert.Greater(changedPixels,32,"The positive control must produce a visible halo, not only subpixel rounding differences.");
+            Assert.Greater(on,off,"An HDR positive control must visibly change pixels when bloom is enabled; a no-op pipeline cannot justify a negative result.");
+        }
+        finally{camera.targetTexture=null;image.Release();readback.Release();UnityEngine.Object.DestroyImmediate(readback);UnityEngine.Object.DestroyImmediate(image);UnityEngine.Object.DestroyImmediate(pixels);UnityEngine.Object.DestroyImmediate(material);}
+    }
+    [UnityTest] public IEnumerator HawkMovingFlightEffectIsolation()
+    {
+        var folder=Environment.GetEnvironmentVariable("SPACEWARS_HAWK_PROJECTILE_EVIDENCE");
+        bool capture=!string.IsNullOrEmpty(folder);
+        var visual=HawkVisualProfile.Load();ColorUtility.TryParseHtmlString("#b8c1c8",out var legacyBody);ColorUtility.TryParseHtmlString("#"+ColorUtility.ToHtmlStringRGB(legacyBody*visual.missileBodyBrightness),out var currentBody);
+        var variants=new[]{"current","no-exhaust","no-bloom","neither","before","before-no-bloom"};
+        if(capture)foreach(string variant in variants)System.IO.Directory.CreateDirectory(System.IO.Path.Combine(folder,variant));
+        world.Remove(1);world.Remove(2);world.Fog.ShowPublic();
+        var domainType=typeof(Spacewars.Runtime.PlayableRuntime).Assembly.GetType("Spacewars.Runtime.PlayableDomain",true);
+        var sites=new[]{new TerritorySite(1,PlayableBuildingKind.Headquarters,new NavPoint(-16,-14),Array.Empty<TerritorySlot>()),new TerritorySite(2,PlayableBuildingKind.Headquarters,new NavPoint(16,14),Array.Empty<TerritorySlot>())};
+        var starts=sites.Select((site,i)=>new OfflineStart("start-"+i,site.Id,site.Position,new NavPoint(site.Position.X+5,site.Position.Z),pin:i+1)).ToArray();
+        var roster=new[]{new OfflineParticipant("player-1",1,1,OfflineControl.Human),new OfflineParticipant("player-2",2,2,OfflineControl.Human)};
+        var configuration=new OfflineMatchConfiguration(profile,"hawk-effect-flat-v1","hawk-effect-flat","diagnostic flat surface",7,roster,starts,sites,Array.Empty<NavObstacle>(),new double[,]{{0,40},{40,0}});
+        var domain=Activator.CreateInstance(domainType,Flags,null,new object[]{profile,1L,configuration},null);
+        object Call(string name,params object[] args)=>domainType.GetMethod(name,Flags).Invoke(domain,args);
+        var units=(IDictionary)domainType.GetField("units",Flags).GetValue(domain);
+        foreach(int id in units.Keys.Cast<int>().ToArray()){var navigation=domainType.GetProperty("Navigation",Flags).GetValue(domain);navigation.GetType().GetMethod("Remove",Flags|BindingFlags.Public).Invoke(navigation,new object[]{id});units.Remove(id);}
+        int shooter=(int)Call("SpawnUnit",new NavPoint(-10,15),PlayableOwner.Player,PlayableEntityKind.Hawk);
+        int target=(int)Call("SpawnUnit",new NavPoint(-2,15),PlayableOwner.Enemy,PlayableEntityKind.Tank);
+        units[target].GetType().GetField("Reload").SetValue(units[target],1000d);
+        PlayableSnapshot Snapshot()=>(PlayableSnapshot)Call("Snapshot",1L,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+        Call("Step",1d/30); // Publish normal vision inputs before issuing the player's attack.
+        int initialTargetHealth=Snapshot().Entities.Single(e=>e.Id==target).Health;
+        Assert.AreEqual(PlayableCommandStatus.Applied,Call("Apply",new PlayableCommand(1,1,"player-1",PlayableCommandKind.Attack,new[]{shooter},targetId:target),null));
+        var camera=new GameObject("Moving Hawk effect camera").AddComponent<Camera>();camera.transform.SetParent(host.transform,false);
+        camera.orthographic=true;camera.orthographicSize=6;camera.cullingMask=1<<8;camera.backgroundColor=new Color(.06f,.08f,.1f);
+        camera.transform.position=new Vector3(-10,9,5);camera.transform.LookAt(new Vector3(-6,3,15));
+        var glow=camera.gameObject.AddComponent<ActorGlowCamera>();glow.Configure(ActorMaterialProfile.Load());
+        Assert.True(glow.Profile.TryGet<UnityEngine.Rendering.Universal.Bloom>(out var bloom));
+        var light=new GameObject("Moving Hawk light").AddComponent<Light>();light.transform.SetParent(host.transform,false);light.type=LightType.Directional;light.intensity=2;light.transform.rotation=Quaternion.Euler(45,-30,0);
+        var image=new RenderTexture(640,400,24,RenderTextureFormat.ARGBHalf);image.Create();camera.targetTexture=image;var readback=new RenderTexture(640,400,0,RenderTextureFormat.ARGB32);readback.Create();var pixels=new Texture2D(640,400,TextureFormat.RGB24,false);
+        var telemetry=new System.Collections.Generic.List<string>{"frame,tick,projectiles,shots,impacts,targetHealth"};bool flight=false,contact=false;int maxWhite=0,maxBeforeWhite=0;
+        var validFins=new System.Collections.Generic.Dictionary<MeshFilter,Mesh>();var brokenFins=new System.Collections.Generic.Dictionary<MeshFilter,Mesh>();
+        try
+        {
+            int warmup=0;while(warmup++<240&&!Snapshot().Projectiles.Any(p=>p.Kind==PlayableEntityKind.Hawk))Call("Step",1d/30);
+            Assert.True(Snapshot().Projectiles.Any(p=>p.Kind==PlayableEntityKind.Hawk),"Actual domain must launch within the bounded preparation horizon.");
+            for(int frame=0;frame<90;frame++)
+            {
+                var snapshot=Snapshot();Set("view",snapshot);world.AdvanceAircraftAnimation(snapshot,snapshot.Tick/30d);
+                foreach(var entity in snapshot.Entities.Where(e=>e.Id==shooter||e.Id==target))
+                {
+                    if(!world.Actors.TryGetValue(entity.Id,out var actor))actor=world.Tank(entity.Id,entity.Owner==PlayableOwner.Player,entity.Kind);
+                    if(entity.Kind==PlayableEntityKind.Hawk)world.UpdateAircraft(actor,entity,snapshot);
+                    else{actor.Root.position=world.Point(entity.Position);actor.Hull.localRotation=Quaternion.Euler(0,90-(float)entity.HullHeading*Mathf.Rad2Deg,0);}
+                    actor.Health.parent.gameObject.SetActive(false);
+                }
+                typeof(PlayableBootstrap).GetMethod("RenderDirectContacts",Flags).Invoke(hud,null);typeof(PlayableBootstrap).GetMethod("RenderProjectiles",Flags).Invoke(hud,null);
+                var shells=(IDictionary)typeof(PlayableBootstrap).GetField("shells",Flags).GetValue(hud);
+                flight|=snapshot.Projectiles.Any(p=>p.Kind==PlayableEntityKind.Hawk);contact|=snapshot.Sounds.Any(e=>e.Kind==PlayableSoundKind.Impact&&e.Weapon==PlayableEntityKind.Hawk);
+                telemetry.Add(frame+","+snapshot.Tick+","+snapshot.Projectiles.Count+","+snapshot.Sounds.Count(e=>e.Kind==PlayableSoundKind.Shot)+","+snapshot.Sounds.Count(e=>e.Kind==PlayableSoundKind.Impact)+","+snapshot.Entities.Single(e=>e.Id==target).Health);
+                yield return null;
+                var visibleRenderers=host.GetComponentsInChildren<Renderer>(true).ToDictionary(r=>r,r=>r.enabled);
+                var flightRockets=shells.Values.Cast<GameObject>().ToArray();
+                var rockets=flightRockets.Concat(Hits.Values.Cast<object>().Select(hit=>Field(hit,"Trail") as GameObject).Where(g=>g&&g.name=="Terminal Hawk missile")).Distinct().ToArray();
+                foreach(string variant in capture?variants:new[]{"current","no-bloom","before"})
+                {
+                    foreach(var entry in visibleRenderers)if(entry.Key)entry.Key.enabled=entry.Value;
+                    bool legacy=variant.StartsWith("legacy",StringComparison.Ordinal),neither=variant.EndsWith("neither",StringComparison.Ordinal);
+                    bloom.active=!variant.Contains("no-bloom")&&!neither;
+                    foreach(GameObject shell in rockets)
+                    {
+                        foreach(var filter in shell.GetComponentsInChildren<MeshFilter>(true).Where(f=>f.name=="hawk-fin"))
+                        {
+                            if(!validFins.TryGetValue(filter,out var valid))
+                            {
+                                valid=filter.sharedMesh;validFins.Add(filter,valid);
+                                var broken=UnityEngine.Object.Instantiate(valid);broken.triangles=new[]{0,1,2,2,1,0};broken.RecalculateNormals();brokenFins.Add(filter,broken);
+                            }
+                            filter.sharedMesh=variant.StartsWith("before",StringComparison.Ordinal)?brokenFins[filter]:valid;
+                        }
+                        var exhaust=shell.transform.Find("rocket-exhaust");exhaust.gameObject.SetActive(flightRockets.Contains(shell)&&!variant.Contains("no-exhaust")&&!neither);
+                        foreach(var renderer in exhaust.GetComponentsInChildren<Renderer>(true))
+                        {
+                            renderer.sharedMaterial.SetFloat("_DstBlend",(float)(legacy?UnityEngine.Rendering.BlendMode.One:UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha));
+                            var block=new MaterialPropertyBlock();renderer.GetPropertyBlock(block);var color=renderer.sharedMaterial.GetColor("_BaseColor");color.a=legacy?.3f:visual.exhaustOpacity;block.SetColor("_BaseColor",color);renderer.SetPropertyBlock(block);
+                        }
+                        var body=shell.transform.Find("rocket-body").GetComponent<Renderer>();
+                        body.sharedMaterial.SetColor("_BaseColor",legacy?legacyBody:currentBody);body.sharedMaterial.SetFloat("_Smoothness",legacy?.6f:1-visual.missileRoughness);
+                    }
+                    var data=camera.GetComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>();var manager=UnityEngine.Rendering.VolumeManager.instance;
+                    manager.Update(data.volumeStack??manager.stack,camera.transform,data.volumeLayerMask);
+                    camera.Render();Assert.AreEqual(bloom.active?bloom.intensity.value:0,(data.volumeStack??manager.stack).GetComponent<UnityEngine.Rendering.Universal.Bloom>().intensity.value,.0001f,"Each ablation must reach the actual camera volume stack.");
+                    Graphics.Blit(image,readback);var previous=RenderTexture.active;RenderTexture.active=readback;pixels.ReadPixels(new Rect(0,0,640,400),0,0);pixels.Apply();RenderTexture.active=previous;
+                    // Resolution-specific regression guard: the previous white ball covered thousands
+                    // of pixels; a small missile/highlight must never become a 128-pixel white patch.
+                    int white=pixels.GetPixels32().Count(c=>c.r>=245&&c.g>=245&&c.b>=245);
+                    if(variant=="current")maxWhite=Math.Max(maxWhite,white);
+                    if(variant=="before")maxBeforeWhite=Math.Max(maxBeforeWhite,white);
+                    if(capture)System.IO.File.WriteAllBytes(System.IO.Path.Combine(folder,variant,"frame-"+frame.ToString("D3")+".png"),pixels.EncodeToPNG());
+                }
+                // Restore cached shared materials before the next simulation publication,
+                // including terminal missile instances created by the impact renderer.
+                bloom.active=true;
+                foreach(var entry in validFins)if(entry.Key)entry.Key.sharedMesh=entry.Value;
+                foreach(var entry in visibleRenderers)if(entry.Key)entry.Key.enabled=entry.Value;
+                foreach(GameObject shell in rockets)
+                {
+                    var exhaust=shell.transform.Find("rocket-exhaust");exhaust.gameObject.SetActive(flightRockets.Contains(shell));
+                    foreach(var renderer in exhaust.GetComponentsInChildren<Renderer>(true))renderer.sharedMaterial.SetFloat("_DstBlend",(float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                    var body=shell.transform.Find("rocket-body").GetComponent<Renderer>();body.sharedMaterial.SetColor("_BaseColor",currentBody);body.sharedMaterial.SetFloat("_Smoothness",1-visual.missileRoughness);
+                }
+                Call("Step",1d/30);
+            }
+            Assert.True(flight);Assert.True(contact,"The replay must include actual impact facts, not only floating projectile geometry.");
+            Assert.Less(Snapshot().Entities.Single(e=>e.Id==target).Health,initialTargetHealth);
+            if(capture){System.IO.File.WriteAllLines(System.IO.Path.Combine(folder,"telemetry.csv"),telemetry);System.IO.File.WriteAllText(System.IO.Path.Combine(folder,"white-pixels.txt"),"currentMax="+maxWhite+" beforeMax="+maxBeforeWhite+" bloomIntensity="+bloom.intensity.value+" threshold="+bloom.threshold.value);}
+            Assert.Greater(maxBeforeWhite,128,"Control must reproduce the pre-fix white ball with the same bloom and flight.");
+            Assert.Less(maxWhite,128,"Bloom must stay active without inflating a Hawk missile into a white ball.");
+        }
+        finally
+        {
+            var navigation=domainType.GetProperty("Navigation",Flags).GetValue(domain);navigation.GetType().GetMethod("ReleaseCommittedHostRoot",Flags).Invoke(navigation,null);Call("DestroyOwnedNavigation");
+            foreach(var mesh in brokenFins.Values)UnityEngine.Object.DestroyImmediate(mesh);
+            camera.targetTexture=null;image.Release();readback.Release();UnityEngine.Object.DestroyImmediate(readback);UnityEngine.Object.DestroyImmediate(image);UnityEngine.Object.DestroyImmediate(pixels);
         }
     }
     [UnityTest] public IEnumerator HawkLaunchAndContactFrames()
@@ -291,8 +457,10 @@ public sealed class DirectProjectilePresentationTests
         vision.Refresh(new[]{new VisionSource(default,80)},Array.Empty<KnownBuilding>());world.Fog.Update(vision.Snapshot(),1);
         var lighting=new GameObject("Hawk evidence light");lighting.transform.SetParent(host.transform,false);var light=lighting.AddComponent<Light>();light.type=LightType.Directional;light.intensity=2;lighting.transform.rotation=Quaternion.Euler(45,-30,0);
         var cameraHost=new GameObject("Hawk evidence camera");cameraHost.transform.SetParent(host.transform,false);var camera=cameraHost.AddComponent<Camera>();camera.orthographic=true;camera.cullingMask=1<<8;camera.clearFlags=CameraClearFlags.SolidColor;camera.backgroundColor=new Color(.06f,.08f,.1f);
+        camera.gameObject.AddComponent<ActorGlowCamera>().Configure(ActorMaterialProfile.Load());
         var texture=new RenderTexture(1600,1000,24);texture.Create();camera.targetTexture=texture;
-        string folder=System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath,"../../.local/qa/hawk-contact/frames"));System.IO.Directory.CreateDirectory(folder);
+        string folder=Environment.GetEnvironmentVariable("SPACEWARS_HAWK_PROJECTILE_EVIDENCE");
+        if(string.IsNullOrEmpty(folder))folder=System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath,"../../.local/qa/hawk-contact/frames"));System.IO.Directory.CreateDirectory(folder);
         try
         {
             var hawk=world.Tank(3,true,PlayableEntityKind.Hawk);

@@ -59,8 +59,8 @@ namespace Spacewars.Tests.EditMode
             var data=PlayableProfile.Default.CopyData();data.aiChatObserverLimit=2.5;Assert.Throws<ArgumentException>(()=>PlayableProfile.Create(data));
             data=PlayableProfile.Default.CopyData();data.aiChatMaxAgeSeconds=0;Assert.Throws<ArgumentException>(()=>PlayableProfile.Create(data));
         }
-        PlayableSnapshot Snapshot(long tick,PlayableEntitySnapshot unit=null)=>new PlayableSnapshot("release",1,71,7,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,100,null,
-            unit==null?Array.Empty<PlayableEntitySnapshot>():new[]{unit},Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),null,null,ownerId:"player-1",team:1);
+        PlayableSnapshot Snapshot(long tick,PlayableEntitySnapshot unit=null,PlayableSoundEvent[] sounds=null)=>new PlayableSnapshot("release",1,71,7,tick,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,100,null,
+            unit==null?Array.Empty<PlayableEntitySnapshot>():new[]{unit},Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),null,null,ownerId:"player-1",team:1,sounds:sounds);
         PlayableAiOwnerCheckpoint Checkpoint(PlayableProfile profile,AiArmyState army=null)=>new PlayableAiOwnerCheckpoint("player-1",PlayableAiOpeningComposition.SourceIdentity,profile.ProfileId,profile.Revision,7,71,0,0,0,0,0,null,null,
             PlayableAiOpeningComposition.Initialize(7,"player-1"),null,null,null,Array.Empty<PlayableAiTraceRecord>()).BindArmies(new AiArmyRegistryState{OwnerId="player-1",Generation=71,Armies=army==null?Array.Empty<AiArmyState>():new[]{army}});
         PlayableEntitySnapshot Unit(double x,bool moving,bool valid=true)=>new PlayableEntitySnapshot(1,PlayableOwner.Player,PlayableEntityKind.Tank,new NavPoint(x,0),100,moving,0,0,0,
@@ -92,6 +92,42 @@ namespace Spacewars.Tests.EditMode
             var army=new AiArmyState{Id=1,OwnerId="player-1",Role=AiArmyRole.Attack,Phase=AiArmyPhase.Advancing,Members=new[]{1},TacticalOwner=AiArmyPlanner.Policy};var ai=Checkpoint(profile,army);
             narrator.Observe(Snapshot(10,Unit(0,true)),ai,profile);narrator.Observe(Snapshot(11,Unit(1,true)),ai,profile);
             Assert.False(narrator.Snapshot.Any(e=>e.Point.HasValue));narrator.Observe(Snapshot(1000,Unit(2,true)),ai,profile);Assert.False(narrator.Snapshot.Any(e=>e.Point.HasValue));
+        }
+        [Test] public void HistoricalOpeningNamesNeverPromiseUnconfirmedTroopTypesOrRetiredExpansion()
+        {
+            foreach(PlayableAiOpening opening in Enum.GetValues(typeof(PlayableAiOpening)))
+            {
+                string text=AiCommunicationNarrator.OpeningText(opening);StringAssert.StartsWith("План:",text);
+                StringAssert.DoesNotContain("танков",text);StringAssert.DoesNotContain("две шахты",text);StringAssert.DoesNotContain("исследовател",text);
+            }
+            var profile=PlayableProfile.Default;var narrator=new AiCommunicationNarrator();
+            narrator.Observe(Snapshot(10),Checkpoint(profile),profile);
+            Assert.True(narrator.Snapshot.All(e=>e.VoiceKey==null&&e.Point==null),"A selected opening alone is neither departure nor speech");
+        }
+        [Test] public void StationaryArmyAnnouncesCombatOnlyAfterItsOwnCausalShot()
+        {
+            var data=PlayableProfile.Default.CopyData();data.aiChatAuthorSeconds=0;data.aiChatTeamSeconds=0;var p=PlayableProfile.Create(data);
+            var n=new AiCommunicationNarrator();var army=new AiArmyState{Id=1,OwnerId="player-1",Role=AiArmyRole.Attack,Phase=AiArmyPhase.Engaging,Members=new[]{1},TacticalOwner=AiArmyPlanner.Policy};var ai=Checkpoint(p,army);
+            n.Observe(Snapshot(10,Unit(0,false)),ai,p);n.Observe(Snapshot(11,Unit(0,false)),ai,p);
+            Assert.False(n.Snapshot.Any(e=>e.VoiceKey!=null),"Engaging flag alone is not firing");
+            var unrelated=new PlayableSoundEvent(10,12,PlayableSoundKind.Shot,default,PlayableEntityKind.Tank,unitId:2,owner:PlayableOwner.Player);
+            n.Observe(Snapshot(12,Unit(0,false),new[]{unrelated}),ai,p);Assert.False(n.Snapshot.Any(e=>e.VoiceKey!=null));
+            var shot=new PlayableSoundEvent(11,13,PlayableSoundKind.Shot,default,PlayableEntityKind.Tank,unitId:1,owner:PlayableOwner.Player);
+            n.Observe(Snapshot(13,Unit(0,false),new[]{shot}),ai,p);
+            var spoken=n.Snapshot.Single(e=>e.VoiceKey!=null);Assert.AreEqual("ally-engage",spoken.VoiceKey);StringAssert.StartsWith("Вступил в бой с противником!",spoken.Text);
+            n.Observe(Snapshot(14,Unit(0,false),new[]{shot}),ai,p);Assert.AreEqual(1,n.Snapshot.Count(e=>e.VoiceKey!=null));
+        }
+        [Test] public void RetreatPhaseDoesNotAnnounceAnOldAttackOrderAsWithdrawal()
+        {
+            var data=PlayableProfile.Default.CopyData();data.aiChatAuthorSeconds=0;data.aiChatTeamSeconds=0;var p=PlayableProfile.Create(data);
+            var n=new AiCommunicationNarrator();var army=new AiArmyState{Id=1,OwnerId="player-1",Role=AiArmyRole.Attack,Phase=AiArmyPhase.Retreating,Members=new[]{1},TacticalOwner=AiArmyPlanner.Policy};var ai=Checkpoint(p,army);
+            n.Observe(Snapshot(10,Unit(0,true)),ai,p);n.Observe(Snapshot(11,Unit(1,true)),ai,p);
+            Assert.False(n.Snapshot.Any(e=>e.VoiceKey=="ally-retreat"),"Retreat requires the applied withdrawal, not the old attack movement");
+        }
+        [Test] public void AnnouncedQuadrantsUseTheMinimapsNorthPositiveZConvention()
+        {
+            StringAssert.Contains("северо-восточной",AiCommunicationNarrator.Location(new NavPoint(1,1)));
+            StringAssert.Contains("юго-западной",AiCommunicationNarrator.Location(new NavPoint(-1,-1)));
         }
     }
 }

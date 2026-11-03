@@ -131,7 +131,12 @@ namespace Spacewars.Runtime
                 using(EnterTransport()){if(!ProbeSourceCurrent(c))throw new InvalidOperationException("Producer probe map changed.");if(c.SourceOwned!=null)c.Probes.CopyPreparedFrom(c.SourceOwned);}
                 long sequence=c.Sequence;
                 if(cancel)c.Probes.Remove(-producer);
-                else{c.Request=NavigationHostRequest.CreateOwned(Generation,checked(++sequence),-producer,order,typed,(NavGeometry)c.Core.NavigationGeometry.Facade,start,goal,(NavGeometry)c.Core.NavigationGeometry.Facade,null,null,null,null,null,r);c.Probes.SetPreparing(-producer,c.Request.Request,c.Request);}
+                else{
+                    // Producer probes need the same typed surface endpoints as unit moves.
+                    // Coordinates alone are insufficient for Recast (including flat maps).
+                    bool hasStart=Crowd.Locate(start,typed.Radius,out var startLocation),hasGoal=Crowd.Locate(goal,typed.Radius,out var goalLocation);
+                    c.Request=NavigationHostRequest.CreateOwned(Generation,checked(++sequence),-producer,order,typed,(NavGeometry)c.Core.NavigationGeometry.Facade,start,goal,(NavGeometry)c.Core.NavigationGeometry.Facade,null,null,hasStart?(NavLocation?)startLocation:null,hasGoal?(NavLocation?)goalLocation:null,null,r);c.Probes.SetPreparing(-producer,c.Request.Request,c.Request);
+                }
                 c.Probes.Seal();var sourceGroups=c.Bootstrap==null?groups:c.Bootstrap.Groups;var sourcePending=c.Bootstrap==null?pending:c.Bootstrap.Pending;
                 c.Admission=PrepareAdmissionProjection(sourceGroups,sourcePending,sequence,checked(c.Publication+1),c.Operation,scope,c.SourceAdmission,sourceProbes:c.Probes);
                 c.SealDestinations();scope.Attach(c);

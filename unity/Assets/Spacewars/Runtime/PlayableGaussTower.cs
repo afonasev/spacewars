@@ -48,18 +48,18 @@ namespace Spacewars.Runtime
             var hits=new List<(int id,double t)>();
             foreach(var u in units.Values)
             {
-                if(u.Air!=null||u.Kind==PlayableEntityKind.Hawk||!TryActor(u.Id,out var n))continue;
+                if(!Hostile(u.Owner,b.Owner)||u.Air!=null||u.Kind==PlayableEntityKind.Hawk||!TryActor(u.Id,out var n))continue;
                 // Reuse the current native ground-body contact volume, independent of renderer/LOD.
                 double radius=PlayableUnitRules.Radius(profile,u.Kind),r=radius+profile.GaussBeamRadius;
                 var center=new BallisticPoint(n.Position.X,GroundHeight(n.Position)+radius,n.Position.Z);
                 if(!HawkRocketFlight.Contact(from,to,center,center,r,out double t)||t>stop)continue;
-                if(Hostile(u.Owner,b.Owner))hits.Add((u.Id,t));else stop=Math.Min(stop,t);
+                hits.Add((u.Id,t));
             }
             foreach(var other in buildings.Values)
             {
-                if(other.Id==b.Id||other.Phase==ConstructionPhase.Pending)continue;
+                if(other.Id==b.Id||other.Phase==ConstructionPhase.Pending||!Hostile(other.Owner,b.Owner))continue;
                 if(!BuildingCombat(other).Segment(from,to,profile.GaussBeamRadius,out double t,out _)||t>stop)continue;
-                if(Hostile(other.Owner,b.Owner))hits.Add((other.Id,t));else stop=Math.Min(stop,t);
+                hits.Add((other.Id,t));
             }
             var ordered=hits.Where(h=>h.t<stop).OrderBy(h=>h.t).ThenBy(h=>h.id).ToArray();
             double damage=WeaponDamage(b.Owner,profile.GaussDamage);

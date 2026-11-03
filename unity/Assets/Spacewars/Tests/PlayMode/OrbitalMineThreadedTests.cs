@@ -23,11 +23,17 @@ namespace Spacewars.Tests.PlayMode
                 Wait(()=>runtime.IsPrepared&&runtime.Latest.Paused);runtime.RequestPause(false);Wait(()=>runtime.Latest.Orbital.Level==1);
                 Assert.True(runtime.TrySubmit(new PlayableCommand(902,1,"player-1",PlayableCommandKind.ChooseOrbital,null,targetId:2)).Accepted);Wait(()=>runtime.Latest.Orbital.Abilities.Count==1);
                 Assert.True(runtime.TrySubmit(new PlayableCommand(902,2,"player-1",PlayableCommandKind.UseOrbital,null,new NavPoint(-6,1),targetId:2)).Accepted);Wait(()=>runtime.Latest.Mines.Count==1);
+                var speech=new NativeSpeechPlan(new GameplayAudioProfile());
+                GameplayAudioScreen[] Screens()=>new[]{new GameplayAudioScreen(runtime.ParticipantView("player-1"),default,new NavPoint(1,0)),new GameplayAudioScreen(runtime.ParticipantView("player-2"),default,new NavPoint(1,0))};
+                speech.Observe(Screens(),0,true);
                 var enemy=runtime.Latest.Entities.Single(e=>e.Owner==PlayableOwner.Enemy&&e.Kind==PlayableEntityKind.Tank);int before=enemy.Health;
                 Assert.True(runtime.TrySubmit(new PlayableCommand(902,1,"player-2",PlayableCommandKind.Move,new[]{enemy.Id},new NavPoint(-6,1))).Accepted);
                 Wait(()=>runtime.Latest.Entities.Any(e=>e.Id==enemy.Id&&Math.Abs(e.Position.X-enemy.Position.X)>.1));
                 Wait(()=>runtime.Latest.Mines.Count==0&&runtime.Latest.MineBlasts.Count==1);
                 Assert.AreEqual(before-80,runtime.Latest.Entities.Single(e=>e.Id==enemy.Id).Health,"primary is not hit by its own splash");Assert.AreEqual(1.4,runtime.Latest.MineBlasts[0].Radius);
+                speech.Observe(Screens(),1,true);Assert.AreEqual("system-mine-hit",speech.Next(1,false)?.Key,"Real host must route only the victim voice on one device");
+                Assert.True(runtime.ParticipantView("player-1").MatchEvents.Any(e=>e.Kind==MatchEventKind.MineTriggered));
+                Assert.True(runtime.ParticipantView("player-2").MatchEvents.Any(e=>e.Kind==MatchEventKind.MineHit));
                 runtime.RequestPause(true);Wait(()=>runtime.Latest.Paused);long tick=runtime.Latest.Tick;var burst=runtime.Latest.MineBlasts[0];Thread.Sleep(100);host.Service(runtime,profile.NavigationRequestsPerFrame);Assert.AreEqual(tick,runtime.Latest.Tick);Assert.AreEqual(burst.Tick,runtime.Latest.MineBlasts[0].Tick);
             }finally{runtime.RequestStop();while(!runtime.IsStopped&&clock.Elapsed.TotalSeconds<40){host.Service(runtime,profile.NavigationRequestsPerFrame);Thread.Sleep(1);}runtime.Dispose();host.Dispose();}
         }

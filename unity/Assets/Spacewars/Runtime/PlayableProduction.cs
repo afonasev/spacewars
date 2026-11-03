@@ -175,8 +175,11 @@ namespace Spacewars.Runtime
             if(b.Orders.Count>0&&!b.Orders[0].Active&&b.LaunchPhase==0)reason="capacity";
             else if(b.RepeatTank&&b.Orders.Count==0)reason=Population(b.Owner).Living+Population(b.Owner).Reserved+PlayableUnitRules.Population(profile,b.RepeatKind)>profile.ArmyCapacity?"capacity":!CanAfford(b.Owner,PlayableUnitRules.Cost(profile,b.RepeatKind))?"credits":"";
             else if(b.Orders.Count>0&&b.Orders[0].Remaining<=1e-9&&!TryFactoryExit(b,b.Orders[0].Kind,out _))reason="exit";
-            if(soundProductionLimits.TryGetValue(b.Id,out var previous)&&previous!=reason&&reason.Length>0)
+            if(reason.Length>0&&(!soundProductionLimits.TryGetValue(b.Id,out var previous)||previous!=reason))
+            {
                 Sound(PlayableSoundKind.ProductionLimited,b.Position,b.RepeatKind,b.Owner,true);
+                MatchEvent(reason=="capacity"?MatchEventKind.ProductionCapacity:reason=="credits"?MatchEventKind.ProductionCredits:MatchEventKind.ProductionExit,b.Owner,b.Position);
+            }
             soundProductionLimits[b.Id]=reason;
             foreach(var id in soundProductionLimits.Keys.Where(id=>!buildings.ContainsKey(id)).ToArray())soundProductionLimits.Remove(id);
         }

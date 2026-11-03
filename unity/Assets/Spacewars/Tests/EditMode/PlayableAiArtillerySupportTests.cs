@@ -24,17 +24,18 @@ namespace Spacewars.Tests.EditMode
             domain=Activator.CreateInstance(Domain,Flags,null,new object[]{profile,1L},null);
             foreach(int id in Units.Keys.Cast<int>().ToArray()){Nav.Remove(id);Units.Remove(id);}
         }
-        [Test]public void UsefulShotUsesVisibleBodiesAndFriendlyFireScore()
+        [Test]public void UsefulShotRequiresVisibleGroundEnemyInRangeRegardlessOfNearbyAlly()
         {
             var gun=Spawn(PlayableOwner.Player,PlayableEntityKind.Shkval,-12,0);
             Spawn(PlayableOwner.Player,PlayableEntityKind.Tank,-9,0);
+            Assert.False(View().ArtillerySupport.Single(x=>x.UnitId==gun).UsefulShot);
             Spawn(PlayableOwner.Enemy,PlayableEntityKind.Tank,-4,0);
             var safe=View();var fact=safe.ArtillerySupport.Single(x=>x.UnitId==gun);
             Assert.True(fact.Supported);Assert.True(fact.UsefulShot);Assert.False(fact.Threatened);
             Spawn(PlayableOwner.Enemy,PlayableEntityKind.Shkval,25,25);
             Assert.True(View().ArtillerySupport.Single(x=>x.UnitId==gun).UsefulShot);
             Spawn(PlayableOwner.Player,PlayableEntityKind.Tank,-4,1.5);
-            Assert.False(View().ArtillerySupport.Single(x=>x.UnitId==gun).UsefulShot);
+            Assert.True(View().ArtillerySupport.Single(x=>x.UnitId==gun).UsefulShot);
             Assert.True(View(PlayableOwner.Enemy).ArtillerySupport.All(x=>x.UnitId!=gun),"Enemy support facts cannot reference a player gun.");
         }
         [Test]public void ReachablePositionAndReceiptBoundMovement()

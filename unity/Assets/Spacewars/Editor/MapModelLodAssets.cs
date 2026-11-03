@@ -62,12 +62,21 @@ namespace Spacewars.Editor
             var inventory=JArray.Parse(File.ReadAllText(Path.Combine(Input,"inventory.json")));var rows=new List<object>();var generated=new Dictionary<string,ModelDetailCatalog.Entry>();
             foreach(var group in inventory.GroupBy(v=>v.Value<string>("group"))){
                 var entries=new List<ModelDetailCatalog.Entry>();var exemptions=new List<ModelDetailCatalog.SourceException>();
+                var retainedCatalog=AssetDatabase.LoadAssetAtPath<ModelDetailCatalog>(Folder+group.Key+".asset");
                 void Exempt(JToken item,string reason)=>exemptions.Add(new ModelDetailCatalog.SourceException{hash=item.Value<string>("hash"),reason=reason,vertices=item.Value<int>("vertices"),indices=item.Value<int>("triangles")*3,submeshes=item.Value<int>("submeshes")});
                 foreach(var item in group.Where(v=>v.Value<bool>("modeled")&&!v.Value<bool>("existingLod")).GroupBy(v=>v.Value<string>("hash")).Select(g=>g.First())){
                     string hash=item.Value<string>("hash");long full=item.Value<long>("triangles");
                     if(full==0){rows.Add(new{group=group.Key,hash,triangles=full,status="EMPTY_AUTHORED_PART_NO_RENDERED_GEOMETRY"});continue;}
                     if(full<100){Exempt(item,"already-small-protected-solids");rows.Add(new{group=group.Key,hash,triangles=full,status="SOURCE_ALREADY_SMALL_NO_SAFE_SOLID_REDUCTION"});continue;}
                     if(generated.TryGetValue(hash,out var previous)){entries.Add(previous);continue;}
+                    // A scoped layout bake keeps approved tiers for identical expanded
+                    // source geometry. Only new hashes need reduction candidates.
+                    if(!File.Exists(Path.Combine(Input,"reduced",hash+"-normal.json"))&&retainedCatalog){
+                        var keep=retainedCatalog.entries.FirstOrDefault(e=>e.hash==hash&&e.normal&&e.far);
+                        if(keep!=null){var retainedEntry=new ModelDetailCatalog.Entry{hash=hash,vertices=item.Value<int>("vertices"),indices=checked((int)full*3),submeshes=item.Value<int>("submeshes"),normal=keep.normal,far=keep.far,compactBounds=keep.compactBounds};entries.Add(retainedEntry);generated.Add(hash,retainedEntry);rows.Add(new{group=group.Key,hash,status="RETAINED_APPROVED_IDENTICAL_SOURCE"});continue;}
+                        var exemption=retainedCatalog.exemptions.FirstOrDefault(e=>e.hash==hash);
+                        if(exemption!=null){Exempt(item,exemption.reason);rows.Add(new{group=group.Key,hash,status="RETAINED_MEASURED_SOURCE_EXCEPTION"});continue;}
+                    }
                     var source=JObject.Parse(File.ReadAllText(Path.Combine(Input,"source",hash+".json")));var normal=Read(hash,"normal",approved);var far=Read(hash,"far",approved);
                     long Tri(JObject data)=>data["submeshes"].Sum(s=>(long)((JArray)s).Count/3);
                     long n=Tri(normal),f=Tri(far);if(!(full>=n&&n>=f&&f>0))throw new InvalidOperationException("LOD order "+hash);

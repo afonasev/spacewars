@@ -73,6 +73,17 @@ namespace Spacewars.Runtime
                 if(next==null)continue;if(group<0){group=c.GroupCount++;c.GroupSources[group]=observation;}else c.PreMarchGroups[group]=c.Groups[group];c.Groups[group]=next;c.MarchWrites[group]=true;
             }
             c.Traffic=NavigationTrafficAuthority.Prepare(c.SourceTraffic,c.Frame,c.ProjectedInstalled,c.ProjectedDetached,c.SourceMembers,terrain,scope.OwnedReservation());
+            // An arrival can require result-batch cleanup even without a new
+            // route result. In that case this movement frame has the same
+            // pinned routes as ordinary movement. Its per-actor proof still
+            // checks the exact backing, ledger, provider and physical suffix.
+            if(dt>0 && c.MarchConfigured && c.Operations.Length==0 && physicalHostBudget.AllocationAdmission==null){
+                bool unchanged=true;
+                foreach(var held in c.HeldRows)if(held.Changed||held.Eligible){unchanged=false;break;}
+                for(int i=0;unchanged && i<c.Installed.Length;i++)
+                    unchanged=ReferenceEquals(c.Installed[i],c.ProjectedInstalled[i]) && c.Detached[i]==c.ProjectedDetached[i];
+                c.Frame.AllowRepairCertificateReuse=unchanged;
+            }
             if(dt>0)using(NavStorageScratch.Reserve(scope.OwnedReservation(),RebindStagingScratchBound(c.Actors.Length,c.Operations.Length,navigationGeometry.Obstacles.Count))){MarkTerminalContactComponents(c.Frame,c.MarchSources,c.MarchSources.Length,c.ProjectedInstalled,c.ProjectedDetached,c.NextPending??c.Pending,c.Allocating);c.Frame.Compute(dt);
                 if(UsesRecastGroundRoutes)foreach(var observation in c.MarchSources){int group=-1;for(int j=0;j<c.GroupCount;j++)if(ReferenceEquals(c.GroupSources[j].Owner,observation.Owner)){group=j;break;}var current=group<0?observation.Version:c.Groups[group];var completed=GroupMarch.CompleteRecastOwned(c.Frame,current,scope.OwnedReservation());if(completed!=null){if(group<0){group=c.GroupCount++;c.GroupSources[group]=observation;}else c.Groups[group]?.ReleaseStorage();c.Groups[group]=completed;c.MarchWrites[group]=true;}}
                 CaptureMovementDelay(2,c.Frame.Motion,c.Frame.Proposals,c.Frame.Preferred);}

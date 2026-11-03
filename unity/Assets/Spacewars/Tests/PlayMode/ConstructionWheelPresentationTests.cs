@@ -1,12 +1,49 @@
 using System;
 using System.Linq;
 using NUnit.Framework;
+using Spacewars.Input;
+using UnityEngine;
 using Spacewars.Presentation;
 using Spacewars.Simulation;
 using UnityEngine.UIElements;
 
 public sealed class ConstructionWheelPresentationTests
 {
+    [TestCase(true)] [TestCase(false)]
+    public void CapturedMineStartsFocusedAndARespectsAvailability(bool affordable)
+    {
+        var profile=PlayableProfile.Default;
+        var site=TerritoryRules.Sites(profile).First(s=>s.Kind==PlayableBuildingKind.Mine);
+        int credits=affordable?TerritoryRules.Cost(profile,PlayableBuildingKind.Mine):0;
+        var view=new PlayableSnapshot(profile.ProfileId,profile.Revision,1,7,1,1,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,credits,null,Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),null,null,sites:new[]{new TerritorySiteSnapshot(site,PlayableOwner.Player,null,1,false,0,false)},activeProfile:profile);
+        var actions=OfflinePadWorldActions.Build(view,profile,site.Id,0);
+        Assert.AreEqual(1,actions.Length);
+        var index=OfflinePadWorldActions.RingSector(actions,0,0,.25);
+        Assert.AreEqual(0,index,"Construction is focused without moving the stick");
+        var action=actions[index.Value];
+        Assert.AreEqual(affordable,action.Sector.Enabled);
+        var input=JsonUtility.FromJson<NativeLocalInputProfile>(Resources.Load<TextAsset>("NativeLocalInputProfile").text);
+        var gestures=new OfflinePadGestures();gestures.SetMode("buildingWheel");
+        Assert.IsEmpty(gestures.StepDetailed(0,0,true,true,input,sector:action.Sector));
+        Assert.IsEmpty(gestures.StepDetailed(10,1,true,true,input,sector:action.Sector));
+        var intents=gestures.StepDetailed(20,0,true,true,input,sector:action.Sector);
+        if(affordable)
+        {
+            Assert.AreEqual("activate",intents.Single().Kind);
+            Assert.AreEqual(action.Sector.Id,intents.Single().Id);
+            Assert.AreEqual(PlayableCommandKind.BuildAt,action.Command.Kind);
+            Assert.AreEqual(site.Id,action.Command.Site);
+        }
+        else {Assert.IsEmpty(intents);Assert.IsNull(action.Command);}
+    }
+    [Test] public void OtherWheelsStillRequireDirection()
+    {
+        Assert.IsNull(OfflinePadWorldActions.RingSector(Array.Empty<OfflinePadAction>(),0,0,.25));
+        Assert.IsNull(OfflinePadWorldActions.RingSector(new[]{new OfflinePadAction("group:1","Group",true)},0,0,.25));
+        var actions=Actions(0,"ready");
+        Assert.IsNull(OfflinePadWorldActions.RingSector(actions,0,0,.25));
+        Assert.AreEqual(0,OfflinePadWorldActions.RingSector(actions,0,-1,.25));
+    }
     static OfflinePadAction[] Actions(double deficit,string science,bool free=false,bool defense=true,PlayableBuildingKind? producer=null,string producerState="ready")
     {
         var p=PlayableProfile.Default;var site=TerritoryRules.Sites(p).First(s=>s.Kind==PlayableBuildingKind.Headquarters);

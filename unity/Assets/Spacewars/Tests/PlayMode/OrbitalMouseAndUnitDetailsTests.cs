@@ -26,6 +26,52 @@ namespace Spacewars.Input.Tests
             Call(first,"ToggleSelectionRoster",false);Assert.True(Get<bool>(first,"selectionRosterExpanded"));CompactContext(2,reset:true);Selection(first).Clear();Selection(first).Add(20001);Call(first,"UpdateHud");Assert.False(Get<bool>(first,"selectionRosterExpanded"),"replacement starts collapsed");
             Assert.AreEqual(receipts,Runtime.OfflineFrame.Receipts.Count);Runtime.RequestStop();yield return Wait(()=>Runtime.IsStopped,"stop");
         }
+        [UnityTest] public IEnumerator RtSingleDetailsKeepCameraAndCursorMoving()=>RtCardKeepsStickMotion(1);
+        [UnityTest] public IEnumerator RtGroupRosterKeepsCameraAndCursorMoving()=>RtCardKeepsStickMotion(50);
+        private IEnumerator RtCardKeepsStickMotion(int count)
+        {
+            compactBases.Clear();yield return StartOrdinary(2);CompactContext(count,reset:true);
+            // The pad-only seat avoids unrelated keyboard-seat mouse edge panning.
+            var seat=Seats[1];var other=Seats[0];var pad=pads[1];var camera=Get<Camera>(seat,"cameraView");
+            var otherCamera=Get<Camera>(other,"cameraView").transform.position;var otherCursor=Get<Vector2>(other,"battleCursor");
+            var selection=Selection(seat).ToArray();long sequence=Get<long>(seat,"sequence");float zoom=camera.orthographicSize;
+            PadCursor(seat,(NavPoint)Call(seat,"Ground",camera.pixelRect.center+new Vector2(-60,40)));
+            Press(pad.rightTrigger);InputSystem.Update();Call(seat,"PollOrdinaryPad");Release(pad.rightTrigger);InputSystem.Update();Call(seat,"PollOrdinaryPad");
+            Assert.True(Get<bool>(seat,"selectionRosterPadFocus"));Assert.True(Get<bool>(seat,"selectionRosterExpanded"));
+            var start=camera.transform.position;var cursor=Get<Vector2>(seat,"battleCursor");
+            Set(pad.leftStick,Vector2.right);Set(pad.rightStick,Vector2.up);InputSystem.Update();
+            for(int i=0;i<3;i++){yield return null;Call(seat,"PollOrdinaryPad");}
+            Assert.Greater(Vector3.Distance(start,camera.transform.position),.01f,"LS must pan while RT card is focused");
+            Assert.Greater(Vector2.Distance(cursor,Get<Vector2>(seat,"battleCursor")),1,"RS must move the field cursor while card is focused");
+            Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(seat,"battleCursorVisual").style.display.value,"cursor must be rendered at its new position");
+            Assert.True(Get<bool>(seat,"selectionRosterPadFocus"));Assert.AreEqual(zoom,camera.orthographicSize);
+            CollectionAssert.AreEqual(selection,Selection(seat));Assert.AreEqual(sequence,Get<long>(seat,"sequence"));
+            yield return Capture("rt-card-motion-"+count,()=>Call(seat,"PollOrdinaryPad"),1600,1000,captureChecks:()=>
+            {
+                Assert.True(Get<bool>(seat,"selectionRosterExpanded"));Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>(seat,"battleCursorVisual").style.display.value);
+            },refreshWorld:false);
+            // Keep both sticks held across B, its release gate, and the next field frame.
+            start=camera.transform.position;Press(pad.buttonEast);InputSystem.Update();Call(seat,"PollOrdinaryPad");
+            Assert.False(Get<bool>(seat,"selectionRosterPadFocus"));Release(pad.buttonEast);InputSystem.Update();Call(seat,"PollOrdinaryPad");
+            for(int i=0;i<3;i++){yield return null;Call(seat,"PollOrdinaryPad");}
+            Assert.Greater(Vector3.Distance(start,camera.transform.position),.01f,"closing must not wait for neutral sticks");
+            Assert.False(Get<OfflinePadGestures>(seat,"battleGestures").Blocked,"real neutral buttons rearm field gestures even while panning");
+            Assert.AreEqual(sequence,Get<long>(seat,"sequence"),"B/release cannot issue Stop or any field command");
+            // Reopen then close with RT while the same sticks remain held.
+            Press(pad.rightTrigger);InputSystem.Update();Call(seat,"PollOrdinaryPad");Release(pad.rightTrigger);InputSystem.Update();Call(seat,"PollOrdinaryPad");
+            Assert.False(Get<bool>(seat,"selectionRosterExpanded"));start=camera.transform.position;
+            for(int i=0;i<3;i++){yield return null;Call(seat,"PollOrdinaryPad");}
+            Assert.Greater(Vector3.Distance(start,camera.transform.position),.01f);Assert.AreEqual(sequence,Get<long>(seat,"sequence"));
+            Assert.AreEqual(otherCamera,Get<Camera>(other,"cameraView").transform.position);Assert.AreEqual(otherCursor,Get<Vector2>(other,"battleCursor"));
+            // A real focus loss still cancels card ownership and preserves the
+            // normal neutral-stick gate; it must not use the card-close shortcut.
+            Press(pad.rightTrigger);InputSystem.Update();Call(seat,"PollOrdinaryPad");Release(pad.rightTrigger);InputSystem.Update();Call(seat,"PollOrdinaryPad");
+            Assert.True(Get<bool>(seat,"selectionRosterPadFocus"));Put(seat,"localInputFocused",false);start=camera.transform.position;Call(seat,"PollOrdinaryPad");
+            Assert.AreEqual(start,camera.transform.position);Assert.False(Get<bool>(seat,"selectionRosterPadFocus"));Assert.False(Get<bool>(seat,"selectionRosterReleaseGate"));
+            Put(seat,"localInputFocused",true);Call(seat,"PollOrdinaryPad");Assert.AreEqual(start,camera.transform.position);Assert.True(Get<OfflinePadGestures>(seat,"battleGestures").Blocked);
+            Set(pad.leftStick,Vector2.zero);Set(pad.rightStick,Vector2.zero);InputSystem.Update();Call(seat,"PollOrdinaryPad");
+            Assert.False(Get<OfflinePadGestures>(seat,"battleGestures").Blocked);Assert.AreEqual(sequence,Get<long>(seat,"sequence"));
+        }
         [UnityTest] public IEnumerator MouseUsesIconDirectlyAndLevelOpensOnlyPendingCards()
         {
             yield return StartOrdinary(2,configureRoster:d=>d.Participants[0].DeviceId=0);var seat=Seats[0];var other=Seats[1];var initial=Get<PlayableSnapshot>(seat,"view");var selected=Selection(seat).ToArray();

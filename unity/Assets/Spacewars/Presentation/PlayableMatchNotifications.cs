@@ -18,8 +18,8 @@ namespace Spacewars.Presentation
                 root.RegisterCallback<GeometryChangedEvent>(_=>PositionMatchNotification());
                 compactMap?.parent.RegisterCallback<GeometryChangedEvent>(_=>PositionMatchNotification());
             }
-            bool visible=!inLobby&&!preparing&&!paused&&!MenuOwnsInput&&!ResultsVisible;
-            if(!visible){matchNotification.style.display=DisplayStyle.None;return;}
+            bool visible=SignalPerspectiveActive&&!inLobby&&!preparing&&!paused&&!MenuOwnsInput&&!ResultsVisible;
+            if(!visible){matchNotification.style.display=DisplayStyle.None;if(!SignalPerspectiveActive)matchNotifications.Reset();return;}
             var data=matchNotifications.Settings(profile);matchNotifications.Update(view,spectatorMode&&!spectatorPerspective.HasValue,Time.unscaledTimeAsDouble,profile);
             var entry=matchNotifications.Visible(Time.unscaledTimeAsDouble,profile);
             PositionMatchNotification();
@@ -45,7 +45,7 @@ namespace Spacewars.Presentation
         private void FocusMatchNotification(bool previous)
         {
             if(BotCameraLocked)return;
-            if(view==null||cameraView==null||chatOpen||paused||MenuOwnsInput||ResultsVisible||inLobby||preparing||signalWheelOpen||PadAuxiliaryWheel||battleGestures.Mode=="buildingWheel"||!localInputFocused||input?.HasFocus!=true)return;
+            if(!SignalPerspectiveActive||view==null||cameraView==null||chatOpen||paused||MenuOwnsInput||ResultsVisible||inLobby||preparing||signalWheelOpen||PadAuxiliaryWheel||battleGestures.Mode=="buildingWheel"||!localInputFocused||input?.HasFocus!=true)return;
             var point=matchNotifications.Focus(previous,Time.unscaledTimeAsDouble,profile);if(!point.HasValue)return;
             var center=Ground(SeatScreenCenter);cameraView.transform.position+=new Vector3((float)(point.Value.X-center.X),0,(float)(point.Value.Z-center.Z));
             padCursorGround=Ground(SeatScreenCenter);battleCursor=SeatScreenCenter;

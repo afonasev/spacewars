@@ -71,7 +71,7 @@ namespace Spacewars.Simulation
                 using(var input=NavStorageScratch.Reserve(r,8192)){
                     var empty=new NavGeometry(halfExtent,null,terrain?.Revision??1);
                     using(var scratch=NavStorageScratch.Reserve(r,RecastAuthorityGeometry.ScratchBound(terrain,empty,true))){
-                        var value=RecastAuthorityGeometry.Prepare(terrain,empty,profile,cancelled);GeometryDigests++;
+                        var value=RecastAuthorityGeometry.PrepareOwned(terrain,empty,profile,cancelled,r);GeometryDigests++;
                         payload=RecastPayload.Allocate(r,value.PayloadBytes);payload.Value=value;
                     }
                 }
@@ -112,7 +112,7 @@ namespace Spacewars.Simulation
                 next=Entry.Create(r,terrain,geometry,profile,held);
                 RecastAuthorityGeometry input;
                 using(var scratch=NavStorageScratch.Reserve(r,RecastAuthorityGeometry.ScratchBound(terrain,geometry,false))){
-                    PrepareCount++;input=RecastAuthorityGeometry.PrepareFromFoundation(terrain,geometry,profile,foundation,cancelled);GeometryDigests++;FoundationReuses++;
+                    PrepareCount++;input=RecastAuthorityGeometry.PrepareFromFoundation(terrain,geometry,profile,foundation,cancelled,r);GeometryDigests++;FoundationReuses++;
                     long bytes=checked(input.PayloadBytes+NavStorageLayout.ObjectBytesBound(typeof(RecastNavigationMap))+NavStorageLayout.ObjectBytesBound(typeof(RecastMapHandle)));
                     payload=RecastPayload.Allocate(r,bytes);payload.Value=input;payload.DependOn(input.SourceStorageRoot);
                 }

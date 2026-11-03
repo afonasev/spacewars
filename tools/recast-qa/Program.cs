@@ -6,6 +6,51 @@ using Spacewars.Runtime;
 class Program{
 static int Main(string[] args){try{return Run(args);}catch(Exception error){Console.Error.WriteLine(error);return 1;}}
 static int Run(string[] args){
+if(args.Contains("--formation-actual-pocket-current")){TerminalDonorComponentChecks.RunActualPocketCurrent();return 0;}
+if(args.Contains("--formation-ingress-aim")){TerminalDonorComponentChecks.RunIngressAim();return 0;}
+if(args.Contains("--native-idle-current")){NativeIdleCurrentChecks.Run();return 0;}
+if(args.Contains("--formation-opposing-data")){FormationOpposingData.Run();return 0;}
+if(args.Contains("--terminal-donor-captured50")){TerminalDonorComponentChecks.RunCaptured50();return 0;}
+if(args.Contains("--formation-captured-boundary")){TerminalDonorComponentChecks.RunCaptured47Boundary();return 0;}
+if(args.Contains("--formation-captured47-boundary")){TerminalDonorComponentChecks.RunCaptured47Boundary();return 0;}
+if(args.Contains("--terminal-donor-sparse-component")){TerminalDonorComponentChecks.Run(evidenceOnly:true,sparseOnly:true);return 0;}
+if(args.Contains("--terminal-donor-evidence-continuation")){TerminalDonorComponentChecks.Run(evidenceOnly:true);return 0;}
+if(args.Contains("--terminal-donor-baseline-inspector")){TerminalDonorComponentChecks.Run(baselineOnly:true);return 0;}
+if(args.Contains("--terminal-donor-component")){TerminalDonorComponentChecks.Run();return 0;}
+#if RECAST_ATTACHMENT_PHASE_AUDIT
+if(args.Contains("--formation-prep-phase-audit")){RecastAttachmentPhaseAudit.Begin();FormationPreflight.Run(cadence:true);RecastAttachmentPhaseAudit.Finish();return 0;}
+#endif
+
+if(args.Contains("--formation-paid-spine-completion")){FormationSavedRequestDiscriminant.Run(savedCorridor:true,paidSpine:true);return 0;}
+if(args.Contains("--formation-saved-chord-facts")){FormationSavedRequestDiscriminant.Run(physicalFactsOnly:true);return 0;}
+if(args.Contains("--formation-saved-corridor-repair-check")){FormationSavedRequestDiscriminant.Run(savedCorridor:true);return 0;}
+if(args.Contains("--formation-saved-request-discriminant")){FormationSavedRequestDiscriminant.Run();return 0;}
+if(args.Contains("--formation-current-surface-audit")){FormationContinuationChecks.AuditAuthoredSurface();return 0;}
+if(args.Contains("--formation-current-failure-diagnostic")){FormationContinuationChecks.RestoreCurrent(failureAudit:true);return 0;}
+if(args.Contains("--formation-current-normal-restore")){FormationContinuationChecks.RestoreCurrent();return 0;}
+if(args.Contains("--formation-continuation-qualification")){FormationContinuationChecks.Run();return 0;}
+if(args.Contains("--formation-bank-qualification")){FormationBankPreparation.Run();return 0;}
+if(args.Contains("--formation-wide-staging")){FormationFeedingReplay.Run(wide:true);return 0;}
+if(args.Contains("--formation-feeding-changed")){FormationFeedingReplay.Run(true);return 0;}
+if(args.Contains("--formation-feeding-replay")){FormationFeedingReplay.Run();return 0;}
+if(args.Contains("--formation-composed")){FormationControllerChecks.Run(composed:true);return 0;}
+if(args.Contains("--formation-boundaries")){FormationBoundaryChecks.Run();return 0;}
+if(args.Contains("--formation-consumers")){FormationControllerChecks.Run(false,true);return 0;}
+if(args.Contains("--formation-current-state")){FormationControllerChecks.Run(true);return 0;}
+if(args.Contains("--formation-controller")){FormationControllerChecks.Run();return 0;}
+if(args.Contains("--formation-detour-offline")){FormationDetourOffline.Run();return 0;}
+if(args.Contains("--formation-async-diagnostic")){FormationAsyncDiagnostic.Run();return 0;}
+if(args.Contains("--formation-prep-cadence")){FormationPreflight.Run(false,false,false,true);return 0;}
+if(args.Contains("--formation-service-small")){FormationServiceChecks.Run();return 0;}
+if(args.Contains("--formation-bent-recovery")){FormationPreflight.Run(false,false,true);return 0;}
+if(args.Contains("--formation-bent-offline")){FormationPreflight.BentOffline();return 0;}
+if(args.Contains("--formation-shared-denial")){FormationSharedChecks.Run(true);return 0;}
+if(args.Contains("--formation-shared-components")){FormationSharedChecks.Run();return 0;}
+if(args.Contains("--formation-local-components")){FormationLocalChecks.Run();return 0;}
+if(args.Contains("--formation-connectivity")){FormationPreflight.Run(true,true);return 0;}
+if(args.Contains("--formation-attach-diagnostic")){FormationPreflight.Run(true);return 0;}
+if(args.Contains("--formation-roster")){FormationPreflight.ObserveRoster();return 0;}
+if(args.Contains("--formation-preflight")){FormationPreflight.Run();return 0;}
 if(args.Contains("--air-motion")){AirMotionChecks.Run();return 0;}
 if(args.Contains("--normal-request-captured")){FlatRecastChecks.CapturedAuthoredRequest();return 0;}
 if(args.Contains("--normal-world-cold-inspect")){FlatRecastChecks.InspectSavedWorld();return 0;}

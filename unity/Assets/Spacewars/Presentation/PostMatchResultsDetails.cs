@@ -153,7 +153,6 @@ namespace Spacewars.Presentation
                 if(Result.TeamsVisible)Cell(row,(player.Team+(Result.Players.Any(p=>p.Team==0)?1:0)).ToString(),65,OrbitalTheme.Muted);Cell(row,playerName(player),180,playerColor(player));
                 foreach(int c in mapping){string value=player.Column(c).ToString("0");if(c==2&&player.BuildingsUpgraded>0)value+=" / +"+player.BuildingsUpgraded;Cell(row,(Result.IsMaximum(player,c)?"★ ":"")+value,110,c==0||c==5?new Color(.95f,.76f,.43f):OrbitalTheme.Ink,player,c);}
             }
-            scroll.Add(Text("Здания / улучшения: постройки и отдельно улучшения. Очки — вклад экономики и стоимости сущностей.",11,OrbitalTheme.Muted));
         }
         private void OpenTotal(VisualElement anchor,MatchResultPlayer player,int column)
         {
