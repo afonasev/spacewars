@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "category_ru": "Орбитальные способности",
+      "category_en": "Orbital abilities",
+      "ru": "При выборе способности показаны её название, подходящие цели, радиус под курсором и кнопки применения и отмены.",
+      "en": "Selected abilities show their name, eligible targets, cursor radius, and apply/cancel controls.",
+      "images": [
+        {
+          "path": "tools/native-release/notes/media/0.6.18-ability-targeting.png",
+          "source_commit": "80ddefc5285f837178667fb78f57eb5f6277378b",
+          "ru": "Выбор места установки мины: радиус и управление; автоматический кадр Editor",
+          "en": "Mine placement: radius and controls; automated Editor capture"
+        }
+      ]
+    },
+    {
+      "category_ru": "Орбитальные способности",
+      "category_en": "Orbital abilities",
+      "ru": "Сканирование, установка мины и взлом получили разные короткие технические звуки; для взлома выбран вариант «цифровой ключ».",
+      "en": "Scanning, mine placement and hacking have distinct short technical sounds; hacking uses the digital-key variant."
+    },
+    {
+      "category_ru": "Орбитальные способности",
+      "category_en": "Orbital abilities",
+      "ru": "Успешную установку мины и взлом сопровождают новые визуальные эффекты.",
+      "en": "Successful mine placement and hacking have new visual effects."
+    },
+    {
+      "category_ru": "Орбитальные способности",
+      "category_en": "Orbital abilities",
+      "ru": "Системный сбой временно останавливает операции зданий; применять его можно только к цели в текущем обзоре команды.",
+      "en": "System failure temporarily freezes building operations and requires a target in current team vision."
+    },
+    {
+      "category_ru": "Звук",
+      "category_en": "Audio",
+      "ru": "Исправлено пространственное воспроизведение голосовых сигналов.",
+      "en": "Fixed spatial playback of spoken signals."
+    },
+    {
+      "category_ru": "Сборка macOS",
+      "category_en": "macOS build",
+      "ru": "В macOS-сборку включена универсальная библиотека навигации Recast с корректной подписью внутри приложения.",
+      "en": "The macOS build includes the universal Recast navigation library, signed inside the application bundle."
+    }
+  ]
+}

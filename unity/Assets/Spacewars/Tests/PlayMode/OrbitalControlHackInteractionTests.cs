@@ -40,13 +40,25 @@ namespace Spacewars.Input.Tests
             var otherCamera=Get<Camera>(other,"cameraView").transform.position;
             if(pad){Assert.True((bool)Call(seat,"OpenOrbital",true));Call(seat,"SubmitOrbital",false,OrbitalAbilities.ControlHack);}
             else Call(seat,"ApplyOrbitalFromHud",OrbitalAbilities.ControlHack);
-            Assert.True(Get<bool>(seat,"scanTargeting"));Assert.True((bool)Call(seat,"CancelScanTarget"));Assert.Zero(Get<PlayableSnapshot>(seat,"view").Orbital.Abilities[0].Remaining);
-            if(pad){Assert.True((bool)Call(seat,"OpenOrbital",true));Call(seat,"SubmitOrbital",false,OrbitalAbilities.ControlHack);Put(seat,"padCursorGround",point);Call(seat,"PollScanTargetPad",pads[0]);Press(pads[0].buttonSouth);InputSystem.Update();Call(seat,"PollScanTargetPad",pads[0]);Release(pads[0].buttonSouth);InputSystem.Update();}
+            Assert.True(Get<bool>(seat,"scanTargeting"));
+            Call(seat,"UpdateScanPresentation");var targetRoot=Get<VisualElement>(seat,"root");
+            StringAssert.Contains("Взлом управления",targetRoot.Q<Label>("ability-target-title").text);
+            StringAssert.Contains(pad?"Отменить":"ПКМ",targetRoot.Q<Label>("ability-target-cancel").text);
+            Assert.True((bool)Call(seat,"CancelScanTarget"));Assert.Zero(Get<PlayableSnapshot>(seat,"view").Orbital.Abilities[0].Remaining);
+            if(pad){Assert.True((bool)Call(seat,"OpenOrbital",true));Call(seat,"SubmitOrbital",false,OrbitalAbilities.ControlHack);PadCursor(seat,point);Call(seat,"UpdateScanPresentation");
+                yield return Capture("hack-target-valid",()=>{PadCursor(seat,point);Call(seat,"UpdateScanPresentation");},captureWidth:1600,captureHeight:1000,captureChecks:()=>{Assert.AreEqual(DisplayStyle.None,Get<Label>(seat,"noticeLabel").style.display.value);Assert.True(Get<bool>(seat,"abilityTargetValid"));StringAssert.Contains("можно захватить",targetRoot.Q<Label>("ability-target-status").text);});
+                Call(seat,"PollScanTargetPad",pads[0]);Press(pads[0].buttonSouth);InputSystem.Update();Call(seat,"PollScanTargetPad",pads[0]);Release(pads[0].buttonSouth);InputSystem.Update();}
             else {Call(seat,"ApplyOrbitalFromHud",OrbitalAbilities.ControlHack);var entity=Get<PlayableSnapshot>(seat,"view").Entities.Single(e=>e.Id==id);var at=(Vector2)Get<Camera>(seat,"cameraView").WorldToScreenPoint(Get<PlayableWorld>(seat,"world").EntityPoint(entity)+Vector3.up*.5f);Assert.True((bool)Call(seat,"ScanPointer",at,true,true,false));}
             yield return Wait(()=>Get<PlayableSnapshot>(seat,"view").Entities.Any(e=>e.Id==id&&e.Owner==initial.Owner),"hack live owner transfer");
             Assert.Greater(Get<PlayableSnapshot>(seat,"view").Orbital.Abilities[0].Remaining,0);Assert.AreEqual(otherCamera,Get<Camera>(other,"cameraView").transform.position);
             yield return Wait(()=>Get<NativeMatchNotifications>(other,"matchNotifications").Latest?.Text=="Юнит захвачен","former owner ordinary notice");
+            var effectTick=Get<PlayableSnapshot>(seat,"view").Sounds.Single(e=>e.Kind==PlayableSoundKind.OrbitalControlHacked&&e.UnitId==id).Tick;
+            yield return Wait(()=>Get<PlayableSnapshot>(seat,"view").Tick>=effectTick+10,"hack effect midpoint");Runtime.RequestPause(true);yield return Wait(()=>Runtime.Latest.Paused,"freeze hack feedback");
+            Assert.Greater(Get<PlayableWorld>(seat,"world").AbilityEffectCount,0,"successful capture creates VFX");
             yield return Capture(pad?"hack-pad-captured":"hack-mouse-captured",captureWidth:1600,captureHeight:1000,captureChecks:()=>Assert.Greater(Get<PlayableSnapshot>(seat,"view").Orbital.Abilities[0].Remaining,0));
+            var effectWorld=Get<PlayableWorld>(seat,"world");var observed=Get<PlayableSnapshot>(seat,"view");
+            int count=effectWorld.AbilityEffectCount;effectWorld.RenderAbilityEffects(observed,Get<Camera>(seat,"cameraView"));Assert.AreEqual(count,effectWorld.AbilityEffectCount,"same snapshot cannot duplicate effects");
+            typeof(PlayableWorld).GetMethod("ClearAbilityEffects",F).Invoke(effectWorld,null);effectWorld.RenderAbilityEffects(observed,Get<Camera>(seat,"cameraView"));Assert.Zero(effectWorld.AbilityEffectCount,"initial binding must not replay a historical capture");
             Runtime.RequestStop();yield return Wait(()=>Runtime.IsStopped,"hack stop");
         }
     }

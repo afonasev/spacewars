@@ -24,12 +24,19 @@ public sealed class PlayableProductionHudTests
         Call("CreateProductionHud",root);
     }
     [TearDown] public void Cleanup()=>UnityEngine.Object.DestroyImmediate(host);
-    private void Show(long[] ids,bool paused=false,PlayableEntityKind kind=PlayableEntityKind.Tank,bool hangar=false,int phase=0,bool repeat=false,bool science=true)
+    private void Show(long[] ids,bool paused=false,PlayableEntityKind kind=PlayableEntityKind.Tank,bool hangar=false,int phase=0,bool repeat=false,bool science=true,bool disabled=false)
     {
         var orders=ids.Select((id,i)=>new PlayableProductionOrderSnapshot(id,kind,150,3,15,i==0?7.5:15,i==0)).ToArray();
-        var factory=new PlayableBuildingSnapshot(5,PlayableOwner.Player,hangar?PlayableBuildingKind.Hangar:PlayableBuildingKind.Factory,default,250,1,ids.Length,0.5,default,orders:orders,launchPhase:phase,repeat:repeat,repeatKind:kind);
+        var factory=new PlayableBuildingSnapshot(5,PlayableOwner.Player,hangar?PlayableBuildingKind.Hangar:PlayableBuildingKind.Factory,default,250,1,ids.Length,0.5,default,orders:orders,launchPhase:phase,repeat:repeat,repeatKind:kind,systemFailureRemaining:disabled?20:0);
         var view=new PlayableSnapshot(PlayableProfile.RequiredProfileId,1,1,7,1,1,RuntimeStatus.Running,paused,PlayableMatchOutcome.Playing,900,null,Array.Empty<PlayableEntitySnapshot>(),science?new[]{factory,new PlayableBuildingSnapshot(6,PlayableOwner.Player,PlayableBuildingKind.ScientificCenter,default,250,1,0,0,default)}:new[]{factory},Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,population:new PlayablePopulationSnapshot(9,ids.Length>0?3:0,100));
         Set("view",view);Set("paused",paused);((Label)Get("selectionLabel")).text="ФАБРИКА";Call("UpdateProductionHud",factory);
+    }
+    [Test] public void DisabledFactoryQueueRetainsProgressAndHasNoActions()
+    {
+        Show(new long[]{20,21},disabled:true);var slots=root.Query<Button>().ToList();
+        Assert.AreEqual("50%\n8с",slots[0].text);Assert.AreEqual("Ждёт",slots[1].text);Assert.True(slots.All(s=>!s.enabledSelf));
+        Assert.False(((Button)Get("tankButton")).enabledSelf);Assert.IsEmpty(OfflinePadWorldActions.Building((PlayableSnapshot)Get("view"),PlayableProfile.Default,5));
+        Assert.That(slots[0].tooltip,Does.Not.Contain("отменить"));
     }
     [Test] public void HangarShowsHawkIconAndActualReleasePhase()
     {

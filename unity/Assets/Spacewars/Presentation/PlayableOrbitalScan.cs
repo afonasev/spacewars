@@ -11,7 +11,7 @@ namespace Spacewars.Presentation
     public sealed partial class PlayableBootstrap
     {
         private int scanTargetAbility=1;
-        private double TargetPreviewRadius=>scanTargetAbility==2?ScanData.orbitalMineBlastRadius:ScanData.orbitalScanRadius;
+        private double TargetPreviewRadius=>scanTargetAbility==OrbitalAbilities.SystemFailure?ScanData.orbitalSystemFailureRadius:scanTargetAbility==2?ScanData.orbitalMineBlastRadius:ScanData.orbitalScanRadius;
         private bool scanTargeting,scanTargetPad,scanReleased,scanPendingTab;
         private long scanPendingSequence=-1,scanAppliedTick=-1,scanGeneration=-1;
         private NavPoint scanPendingPoint;
@@ -22,14 +22,14 @@ namespace Spacewars.Presentation
         private void BeginScanTarget(bool pad)=>BeginOrbitalTarget(pad,1);
         private void BeginOrbitalTarget(bool pad,int ability)
         {
-            scanTargetAbility=ability;scanTargetPad=pad;scanTargeting=true;scanReleased=false;scanGeneration=generation;
+            abilityTargetFailure=null;abilityCompletionUntil=0;scanTargetAbility=ability;scanTargetPad=pad;scanTargeting=true;scanReleased=false;scanGeneration=generation;
             if(orbitalOpen)CloseOrbital();input.ClearMode();battleGestures.Cancel();battleRing.style.display=DisplayStyle.None;root.Focus();
-            notice=scanTargetAbility==OrbitalAbilities.ControlHack?"Взлом управления · выберите вражескую шахту или юнита":scanTargetAbility==2?"Мина-ловушка · выберите видимую точку":"Сканирование · выберите точку";
+            notice=""; // The persistent targeting header owns ability instructions.
         }
         private void BeginMineTarget(bool pad)=>BeginOrbitalTarget(pad,2);
         private bool CancelScanTarget()
         {
-            if(!scanTargeting)return false;scanTargeting=false;scanPendingSequence=-1;scanAppliedTick=-1;notice="";
+            if(!scanTargeting)return false;abilityTargetFailure=null;abilityCompletionUntil=0;scanTargeting=false;scanPendingSequence=-1;scanAppliedTick=-1;notice="";
             compactMap?.SetScanPreview(null,0);tacticalMap?.SetScanPreview(null,0);return true;
         }
         private bool ScanPointer(Vector2 at,bool left,bool down,bool alt)
@@ -51,7 +51,13 @@ namespace Spacewars.Presentation
         {
             if(!scanTargeting||scanPendingSequence>=0||!CanOrbital)return;
             if(scanTargetAbility==OrbitalAbilities.ControlHack&&entityId==0)entityId=HackTargetAt(point);
-            if(scanTargetAbility==OrbitalAbilities.ControlHack&&entityId==0){notice="Нужна видимая вражеская шахта или юнит";return;}
+            if(scanTargetAbility==OrbitalAbilities.ControlHack&&entityId==0){notice="Нужна видимая вражеская шахта или юнит";abilityTargetFailure=notice;return;}
+            if(scanTargetAbility==OrbitalAbilities.ControlHack){
+                string feedback=HackTargetFeedback(entityId,out bool valid);
+                if(!valid){notice=feedback;abilityTargetFailure=feedback;return;}
+            }
+            if(scanTargetAbility==OrbitalAbilities.SystemFailure&&!view.Vision.IsVisible(point)){notice="Сбой систем — только в текущем обзоре";abilityTargetFailure=notice;return;}
+            abilityTargetFailure=null;
             long next=++sequence;
             var result=runtime.TrySubmit(new PlayableCommand(generation,next,LocalOwnerId,PlayableCommandKind.UseOrbital,scanTargetAbility==OrbitalAbilities.ControlHack?new[]{entityId}:null,target:point,targetId:scanTargetAbility).AsHuman());
             if(!result.Accepted){notice=Friendly(result.Status);return;}
@@ -61,7 +67,7 @@ namespace Spacewars.Presentation
         {
             if(scanPendingSequence<0)return;
             var receipt=receipts.FirstOrDefault(r=>r.Sequence==scanPendingSequence&&r.OwnerId==LocalOwnerId);if(receipt==null)return;
-            if(receipt.Status!=PlayableCommandStatus.Applied){scanPendingSequence=-1;notice=Friendly(receipt.Status);return;}
+            if(receipt.Status!=PlayableCommandStatus.Applied){scanPendingSequence=-1;notice=scanTargetAbility==2?"Здесь нельзя установить мину":Friendly(receipt.Status);abilityTargetFailure=notice;return;}
             scanAppliedTick=receipt.AppliedTick;CompleteScanReceipt();
         }
         private void CompleteScanReceipt()
@@ -71,7 +77,7 @@ namespace Spacewars.Presentation
             if(scanAppliedTick<0||view==null||view.Tick<scanAppliedTick||!view.Orbital.Abilities.Any(a=>a.Id==scanTargetAbility&&a.Remaining>0))return;
             scanPendingSequence=scanAppliedTick=-1;
             if(scanPendingTab){CloseMap();if(scanTargetAbility!=OrbitalAbilities.ControlHack)FocusScanPoint(scanPendingPoint);}
-            scanTargeting=false;notice="";compactMap?.SetScanPreview(null,0);tacticalMap?.SetScanPreview(null,0);
+            abilityCompletionUntil=Time.unscaledTimeAsDouble+ScanData.orbitalUiPulseSeconds;abilityTargetFailure=null;scanTargeting=false;notice="";compactMap?.SetScanPreview(null,0);tacticalMap?.SetScanPreview(null,0);
         }
         private void FocusScanPoint(NavPoint point)
         {
@@ -96,8 +102,9 @@ namespace Spacewars.Presentation
             if(root==null||view==null)return;
             if(scanGeneration!=generation||!CanOrbital)CancelScanTarget();
             CompleteScanReceipt();
+            UpdateAbilityTargetingHud();
             if(scanLayer==null){scanLayer=new VisualElement{name="orbital-scan-world",pickingMode=PickingMode.Ignore};AbsoluteFill(scanLayer);scanLayer.style.overflow=Overflow.Hidden;scanLayer.generateVisualContent+=DrawScanWorld;root.Insert(0,scanLayer);}
-            NavPoint? preview=ScanPreviewPoint();bool paint=view.ScanTriangles.Count>0||view.ScanLines.Count>0||preview.HasValue;
+            NavPoint? preview=ScanPreviewPoint();bool paint=view.ScanTriangles.Count>0||view.ScanLines.Count>0||preview.HasValue||scanTargeting&&scanTargetAbility==OrbitalAbilities.ControlHack;
             bool show=paint&&!mapOpen&&!inLobby&&!preparing&&!MenuOwnsInput&&!ResultsVisible;
             scanLayer.style.display=show?DisplayStyle.Flex:DisplayStyle.None;if(show)scanLayer.MarkDirtyRepaint();if(!paint)scanProjectionCache.Clear();
             compactMap?.SetScanPreview(preview,TargetPreviewRadius);tacticalMap?.SetScanPreview(preview,TargetPreviewRadius);
@@ -115,11 +122,12 @@ namespace Spacewars.Presentation
             if(view==null||world==null||cameraView==null)return;
             Vector2 Project(NavPoint point){var v=cameraView.WorldToViewportPoint(world.Point(point));return new Vector2(v.x*root.contentRect.width,(1-v.y)*root.contentRect.height);}
             var painter=context.painter2D;
+            DrawHackTarget(context);
             DrawScanFaces(context,view.ScanTriangles,Project,scanProjectionCache);
             foreach(var segment in view.ScanLines)DrawScanLine(painter,Project(segment.From),Project(segment.To),(float)segment.Opacity,(float)ScanData.orbitalScanLineWidth);
-            var preview=ScanPreviewPoint();if(preview.HasValue)for(int i=0;i<128;i++){
+            var preview=ScanPreviewPoint();if(preview.HasValue&&scanTargetAbility==OrbitalAbilities.SystemFailure)DrawSystemFailureTargets(context,Project,preview.Value);if(preview.HasValue)for(int i=0;i<128;i++){
                 NavPoint At(int step)=>new NavPoint(preview.Value.X+Math.Cos(step*Math.PI/64)*TargetPreviewRadius,preview.Value.Z+Math.Sin(step*Math.PI/64)*TargetPreviewRadius);
-                if(scanTargetAbility==2){
+                if(scanTargetAbility==2||scanTargetAbility==OrbitalAbilities.SystemFailure){
                     painter.strokeColor=view.Vision.IsVisible(preview.Value)?OrbitalTheme.Cyan:new Color(1,.3f,.15f);painter.lineWidth=(float)ScanData.orbitalMinePreviewWidth;painter.BeginPath();painter.MoveTo(Project(At(i)));painter.LineTo(Project(At(i+1)));painter.Stroke();
                 }else DrawScanLine(painter,Project(At(i)),Project(At(i+1)),1,(float)ScanData.orbitalScanLineWidth);
             }

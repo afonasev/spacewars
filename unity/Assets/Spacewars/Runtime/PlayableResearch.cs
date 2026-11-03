@@ -32,6 +32,7 @@ namespace Spacewars.Runtime
         {
             message="Нужен готовый собственный Научный центр";
             if(!buildings.TryGetValue(centerId,out var center)||center.Owner!=owner||center.Kind!=PlayableBuildingKind.ScientificCenter||!center.Ready||center.Sale!=null)return PlayableCommandStatus.InvalidEntity;
+            if(SystemsDisabled(centerId)){message="Сбой систем";return PlayableCommandStatus.Rejected;}
             if(!Enum.IsDefined(typeof(PlayableResearchKind),kind)){message="Неизвестное исследование";return PlayableCommandStatus.Rejected;}
             if(!ResearchProducerReady(owner,kind)){message=PlayableResearchRules.ProducerRequirement(kind);return PlayableCommandStatus.Rejected;}
             if(PlayableResearchRules.CenterRequirement(kind,CenterUpgraded(centerId)) is string requirement){message=requirement;return PlayableCommandStatus.Rejected;}
@@ -77,6 +78,7 @@ namespace Spacewars.Runtime
             {
                 var previous=PlayableResearchRules.Previous(next.Kind);
                 if(previous.HasValue&&!HasResearch(owner,previous.Value))continue;
+                if(SystemsDisabled(next.CenterId))continue;
                 if(!LegalResearchCenter(next.CenterId,owner,next.Kind)||!ResearchProducerReady(owner,next.Kind))continue;
                 double cost=ResearchCost(next.Kind);if(!CanAfford(owner,cost))continue;
                 var center=buildings[next.CenterId];
@@ -95,6 +97,7 @@ namespace Spacewars.Runtime
                 // receives the elapsed time already credited to its predecessor.
                 foreach(var active in Research(owner).Where(o=>o.Active&&!o.Complete).OrderBy(o=>o.Id).ToArray())
                 {
+                    if(SystemsDisabled(active.CenterId))continue;
                     active.Elapsed=Math.Min(active.Duration,active.Elapsed+dt);
                     if(active.Duration-active.Elapsed>2.220446049250313e-16*active.Duration*128)continue;
                     active.Elapsed=active.Duration;

@@ -19,6 +19,8 @@ namespace Spacewars.Simulation
         public double orbitalPanelWidth=76,orbitalIconSize=36,orbitalLevelFontSize=32;
         public double orbitalThresholdMax=8000,orbitalUiMaxFontScale=.5;
         public double orbitalThreshold1=250,orbitalThreshold2=500,orbitalThreshold3=1000,orbitalThreshold4=2000,orbitalThreshold5=4000;
+        public double orbitalSystemFailureRadius=5,orbitalSystemFailureSeconds=20;
+        public int orbitalSystemFailureMaxTargets=2;
         public double orbitalBasicSeconds=30,orbitalAdvancedSeconds=60,orbitalUltimateSeconds=90,orbitalCommonSeconds=10,orbitalFinalSpeed=2;
 
         // Immutable technical backend selection; zero preserves existing profile contracts.

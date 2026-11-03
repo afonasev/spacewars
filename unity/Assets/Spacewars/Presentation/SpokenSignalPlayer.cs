@@ -7,7 +7,7 @@ namespace Spacewars.Presentation
     public sealed class SpokenSignalPlayer : MonoBehaviour
     {
         readonly Dictionary<string,AudioClip> clips=new Dictionary<string,AudioClip>();
-        NativeSpeechPlan plan;GameplayAudioProfile profile;AudioSource source;
+        NativeSpeechPlan plan;GameplayAudioProfile profile;AudioSource source;GameObject sourceHost;
         bool diagnosticSilent;
         double clock,speakingUntil=double.NegativeInfinity;
 #if UNITY_INCLUDE_TESTS
@@ -34,7 +34,8 @@ namespace Spacewars.Presentation
                 if(!clip)throw new InvalidOperationException("Missing spoken signal: "+key);
                 clip.LoadAudioData();clips[key]=clip;
             }
-            if(!source){source=NativeQuietStartup.AddSource(gameObject);source.playOnAwake=false;source.spatialBlend=0;source.dopplerLevel=0;source.priority=16;}
+            if(!sourceHost){sourceHost=new GameObject("Spoken signals");sourceHost.transform.SetParent(transform,false);}
+            if(!source){source=NativeQuietStartup.AddSource(sourceHost);source.playOnAwake=false;source.spatialBlend=0;source.dopplerLevel=0;source.priority=16;}
         }
         public void Tick(IReadOnlyList<GameplayAudioScreen> screens,bool active,double now)
         {
@@ -52,6 +53,6 @@ namespace Spacewars.Presentation
         }
         public void ResetSpeech(){speakingUntil=double.NegativeInfinity;plan?.Reset();if(source){source.Stop();source.clip=null;source.volume=0;}}
         void OnDisable()=>ResetSpeech();
-        void OnDestroy(){if(source)Destroy(source);}
+        void OnDestroy(){if(sourceHost)Destroy(sourceHost);else if(source)Destroy(source);}
     }
 }

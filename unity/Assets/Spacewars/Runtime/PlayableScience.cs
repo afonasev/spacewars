@@ -40,7 +40,7 @@ namespace Spacewars.Runtime
         {
             foreach(var b in buildings.Values)
             {
-                var u=b.Upgrade;if(eliminated.Contains(b.Owner)||u==null||u.Complete||b.Sale!=null||!b.Ready)continue;
+                var u=b.Upgrade;if(SystemsDisabled(b.Id))continue;if(eliminated.Contains(b.Owner)||u==null||u.Complete||b.Sale!=null||!b.Ready)continue;
                 u.Elapsed=Math.Min(u.Duration,u.Elapsed+dt);
                 if(u.Elapsed+1e-9>=u.Duration){u.Elapsed=u.Duration;u.Complete=true;Fact(b.Owner,MatchFactKind.RefineryUpgradeCompleted,u.PaidCost,(int)b.Kind,PlayableResearchRules.RefineryDescription(profile));Sound(PlayableSoundKind.UpgradeComplete,b.Position,PlayableEntityKind.Tank,b.Owner,true);}
             }

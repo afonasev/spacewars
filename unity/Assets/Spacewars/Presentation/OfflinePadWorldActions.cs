@@ -46,6 +46,7 @@ namespace Spacewars.Presentation
         private static OfflinePadActionCommand Command(PlayableCommandKind kind,int building,PlayableEntityKind unit=PlayableEntityKind.Tank,PlayableResearchKind research=PlayableResearchKind.TankChassis)=>new OfflinePadActionCommand{Kind=kind,Entities=new[]{building},Unit=unit,Research=research};
         public static OfflinePadAction[] Building(PlayableSnapshot view,PlayableProfile profile,int id,bool includeRally=true,bool freeEconomy=false)
         {
+            if(view.Buildings.Any(b=>b.Id==id&&b.SystemsDisabled))return Array.Empty<OfflinePadAction>();
             var b=view.Buildings.FirstOrDefault(x=>x.Id==id&&x.Owner==view.Owner);var actions=new List<OfflinePadAction>();
             if(b==null||b.Phase!=ConstructionPhase.Ready||b.PrivateState==null)return actions.ToArray();var state=b.PrivateState;var lifecycle=state.Lifecycle;
             // Only actions admitted by the current owner projection are offered.

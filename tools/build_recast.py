@@ -11,7 +11,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--build-dir', type=pathlib.Path, default=ROOT / '.local/recast-native')
-    p.add_argument('--target', choices=['macos-arm64', 'windows-x64'], default='macos-arm64')
+    p.add_argument('--target', choices=['macos-arm64', 'macos-universal', 'windows-x64'], default='macos-arm64')
     p.add_argument('--install', action='store_true', help='Copy the plugin into the target Unity Plugins folder')
     a = p.parse_args()
     options = []
@@ -27,10 +27,14 @@ def main():
         build_dir = a.build_dir / 'windows-x64'
     else:
         if platform.system() != 'Darwin' or platform.machine() != 'arm64':
-            p.error('macos-arm64 requires a macOS arm64 host')
+            p.error('macOS Recast builds require a macOS arm64 host')
         name = 'libspacewars_recast.dylib'
         folder = 'macOS'
-        build_dir = a.build_dir
+        if a.target == 'macos-universal':
+            options = ['-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64', '-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0']
+            build_dir = a.build_dir / 'macos-universal'
+        else:
+            build_dir = a.build_dir
     subprocess.run(['cmake', '-S', str(ROOT / 'native/recast'), '-B', str(build_dir),
                     '-DCMAKE_BUILD_TYPE=Release', *options], check=True)
     subprocess.run(['cmake', '--build', str(build_dir), '--config', 'Release', '-j', '4'], check=True)
@@ -39,6 +43,9 @@ def main():
         artifact = build_dir / 'Release' / name
     if a.target == 'windows-x64':
         validate_windows_recast(artifact)
+    elif a.target == 'macos-universal':
+        from native_plugins import validate_macos_recast
+        validate_macos_recast(artifact)
     if a.install:
         target = ROOT / 'unity/Assets/Spacewars/Plugins' / folder / name
         target.parent.mkdir(parents=True, exist_ok=True)

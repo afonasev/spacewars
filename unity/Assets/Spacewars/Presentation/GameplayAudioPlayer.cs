@@ -43,7 +43,7 @@ namespace Spacewars.Presentation
             if(voices!=null)return;
             profile=NativeGameplayAudioProfile.Current;profile.Validate();
             plan=new GameplayAudioPlan(profile);
-            foreach(var key in new[]{"tank-shot","burst-shot","impact","explosion","building-collapse","order","reject","movement-loop","construction","demolition","repair","motion-start","motion-stop","damage","queued","work-start","ready","cancel","warning","select","ui","match-start","pause","result"})
+            foreach(var key in new[]{"ability-system-failure","ability-scan","ability-mine","ability-hack","tank-shot","burst-shot","impact","explosion","building-collapse","order","reject","movement-loop","construction","demolition","repair","motion-start","motion-stop","damage","queued","work-start","ready","cancel","warning","select","ui","match-start","pause","result"})
             {
                 int n=key=="tank-shot"||key=="burst-shot"||key=="impact"||key=="explosion"||key=="construction"||key=="demolition"||key=="repair"||key=="damage"?3:1;
                 clips[key]=Enumerable.Range(1,n).Select(i=>Resources.Load<AudioClip>("Sfx/Hybrid/"+key+"-"+i)).ToArray();

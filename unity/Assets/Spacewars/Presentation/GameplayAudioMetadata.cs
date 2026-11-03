@@ -24,6 +24,7 @@ namespace Spacewars.Presentation
     public static class GameplayAudioMetadata
     {
         public static readonly GameplayAudioField[] Fields={
+            new GameplayAudioField("abilityGain","Уровень способностей","Уровень сканирования, установки мины и успешного взлома до затухания и общего микса.","уровень",.01,.4,.01),
             new GameplayAudioField("speechGain","Уровень голоса","Уровень записанных реплик до личной настройки громкости голоса.","уровень",.05,1,.05),
             new GameplayAudioField("speechMaxAgeSeconds","Свежесть речи","Предельный возраст события и ожидающей реплики без догоняющей озвучки.","с",.5,5,.1),
             new GameplayAudioField("speechRepeatSeconds","Повтор речи","Минимальный интервал повторения одной фразы на устройстве.","с",.5,15,.5),

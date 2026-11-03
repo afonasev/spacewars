@@ -16,6 +16,7 @@ namespace Spacewars.Presentation
         public float explorerImpactGain=.045f;
         public float effectsBudget=.38f,notificationGain=.12f,shotGain=.28f,impactGain=.14f,explosionGain=.30f,movementGain=.08f;
         public int voices=12,shots=6,impacts=4,explosions=3,movementGroups=3,freshTicks=6;
+        public float abilityGain=.20f;
         public float baseGain=.16f,damageGain=.18f,motionAccentGain=.08f;
         public double warningSeconds=6,notificationSeconds=.25,baseRepeatSeconds=.4,motionRepeatSeconds=.8,heavyDamageRatio=.35;
         public int baseVoices=3;
@@ -83,7 +84,8 @@ namespace Spacewars.Presentation
                     if(screen.Overview&&notification)continue;
                     if(e.Kind==PlayableSoundKind.HeavyDamage&&!HeavyDamage(view,e))continue;
                     float gain=1,pan=0;
-                    if(!notification&&!Spatial(screen,e.Position,out gain,out pan))continue;
+                    bool ability=e.Kind==PlayableSoundKind.OrbitalSystemsDisabled||e.Kind==PlayableSoundKind.OrbitalScanApplied||e.Kind==PlayableSoundKind.OrbitalMineInstalled||e.Kind==PlayableSoundKind.OrbitalControlHacked;
+                    if(!notification&&!(ability&&e.Owner==view.Owner)&&!Spatial(screen,e.Position,out gain,out pan))continue;
                     bool selected=screen.Selected!=null&&view.Entities.Any(u=>screen.Selected.Contains(u.Id)&&Distance(u.Position,e.Position)<3);
                     float baseGain=notification?profile.notificationGain:BaseGain(e);
                     var cue=new GameplayAudioCue{Key="event:"+e.Id,EventId=e.Id,Position=e.Position,Kind=e.Kind,Gain=gain*baseGain,BaseGain=baseGain,
@@ -134,11 +136,15 @@ namespace Spacewars.Presentation
             var p=view.ActiveProfile??PlayableProfile.Default;
             return e.Building?view.Buildings.Any(b=>Distance(b.Position,e.Position)<1&&b.Health>0&&b.Health<=TerritoryRules.MaximumHealth(p,b)*profile.heavyDamageRatio):view.Entities.Any(u=>Distance(u.Position,e.Position)<3&&u.Kind==e.Weapon&&u.Health>0&&u.Health<=PlayableUnitRules.MaximumHealth(p,u)*profile.heavyDamageRatio);
         }
-        private float BaseGain(PlayableSoundEvent e)=>e.Kind==PlayableSoundKind.HeavyDamage?profile.damageGain:e.Kind==PlayableSoundKind.MovementStarted||e.Kind==PlayableSoundKind.MovementStopped?profile.motionAccentGain:(int)e.Kind>2?profile.baseGain:e.Kind==PlayableSoundKind.Destroyed||e.Kind==PlayableSoundKind.Impact&&e.Weapon==PlayableEntityKind.Shkval?profile.explosionGain:e.Kind==PlayableSoundKind.Impact?(e.Weapon==PlayableEntityKind.Explorer?profile.explorerImpactGain:profile.impactGain):profile.shotGain;
+        private float BaseGain(PlayableSoundEvent e)=>e.Kind==PlayableSoundKind.OrbitalSystemsDisabled||e.Kind==PlayableSoundKind.OrbitalScanApplied||e.Kind==PlayableSoundKind.OrbitalMineInstalled||e.Kind==PlayableSoundKind.OrbitalControlHacked?profile.abilityGain:e.Kind==PlayableSoundKind.HeavyDamage?profile.damageGain:e.Kind==PlayableSoundKind.MovementStarted||e.Kind==PlayableSoundKind.MovementStopped?profile.motionAccentGain:(int)e.Kind>2?profile.baseGain:e.Kind==PlayableSoundKind.Destroyed||e.Kind==PlayableSoundKind.Impact&&e.Weapon==PlayableEntityKind.Shkval?profile.explosionGain:e.Kind==PlayableSoundKind.Impact?(e.Weapon==PlayableEntityKind.Explorer?profile.explorerImpactGain:profile.impactGain):profile.shotGain;
         private static string Clip(PlayableSoundEvent e)
         {
             switch(e.Kind)
             {
+                case PlayableSoundKind.OrbitalSystemsDisabled:return "ability-system-failure";
+                case PlayableSoundKind.OrbitalScanApplied:return "ability-scan";
+                case PlayableSoundKind.OrbitalMineInstalled:return "ability-mine";
+                case PlayableSoundKind.OrbitalControlHacked:return "ability-hack";
                 case PlayableSoundKind.ProductionQueued:case PlayableSoundKind.ResearchQueued:return "queued";
                 case PlayableSoundKind.ProductionStarted:case PlayableSoundKind.ResearchStarted:case PlayableSoundKind.UpgradeStarted:return "work-start";
                 case PlayableSoundKind.ProductionComplete:case PlayableSoundKind.ResearchComplete:case PlayableSoundKind.UpgradeComplete:return "ready";

@@ -489,7 +489,7 @@ namespace Spacewars.Presentation
                 foreach(var id in renderedRemoved){world.Remove(id);selection.Remove(id);}
             }
             using(PerformanceProfile.Measure(ProfileStage.WorldRemoval))unitMotion.KeepVisible(alive);
-            using(PerformanceProfile.Measure(ProfileStage.WorldWrecks))world.RenderMines(view,cameraView);world.RenderUnitWrecks(view);world.SelectEnvironmentDetail(cameraView);using(PerformanceProfile.Measure(ProfileStage.WorldTrails))world.RenderGroundTrails(view,cameraView);
+            using(PerformanceProfile.Measure(ProfileStage.WorldWrecks))world.RenderMines(view,cameraView);world.RenderAbilityEffects(view,cameraView);world.RenderUnitWrecks(view);world.SelectEnvironmentDetail(cameraView);using(PerformanceProfile.Measure(ProfileStage.WorldTrails))world.RenderGroundTrails(view,cameraView);
             world.RenderTowerRange(view,selection,primarySelection,!inLobby&&!preparing&&!restarting&&!quitting,relaySiteId:selectedSite);
             using(PerformanceProfile.Measure(ProfileStage.WorldRally))world.RenderRallyFlags(view,selection,matchSetup?.Spectator==true);
             using(PerformanceProfile.Measure(ProfileStage.WorldProjectiles))RenderProjectiles();

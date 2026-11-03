@@ -17,15 +17,18 @@ namespace Spacewars.Runtime
         private Building[] SaleGroup(Building b)=>new[]{b}.Concat(TerritoryRules.Center(b.Kind)?buildings.Values.Where(c=>c.ParentId==b.Id&&c.Sale==null).OrderBy(c=>c.Id):Enumerable.Empty<Building>()).ToArray();
         private string SaleBlocked(Building b)
         {
+            if(SystemsDisabled(b.Id))return "Сбой систем";
             if(!b.Ready||b.Health<=0)return "Здание не готово";
             if(b.Sale!=null)return "Демонтаж необратим";
             if(CombatLocked(b,profile.BuildingSaleCombatLockoutSec))return "Продажа запрещена: здание находится в бою";
             if(TerritoryRules.Center(b.Kind))foreach(var c in buildings.Values)
-                if(c.ParentId==b.Id&&c.Sale==null&&CombatLocked(c,profile.BuildingSaleCombatLockoutSec))return "Продажа запрещена: здание находится в бою";
+                if(c.ParentId==b.Id&&c.Sale==null&&SystemsDisabled(c.Id))return "Сбой систем: дочернее здание недоступно для продажи";
+                else if(c.ParentId==b.Id&&c.Sale==null&&CombatLocked(c,profile.BuildingSaleCombatLockoutSec))return "Продажа запрещена: здание находится в бою";
             return null;
         }
         private string RepairBlocked(Building b)
         {
+            if(SystemsDisabled(b.Id))return "Сбой систем";
             if(!b.Ready||b.Health<=0||b.Sale!=null)return "Здание недоступно";
             if(b.Repair!=null)return "Ремонт уже активен";
             if(b.Health>=BuildingMaximumHealth(b.Owner,b.Kind))return "Здание не повреждено";
@@ -80,7 +83,7 @@ namespace Spacewars.Runtime
                     if(b.Sale.Elapsed+1e-9>=b.Sale.Duration){Sound(PlayableSoundKind.Demolished,b.Position,PlayableEntityKind.Tank,b.Owner,true);RemoveBuilding(b,false);removed=true;}
                     continue;
                 }
-                var r=b.Repair;if(r==null)continue;
+                var r=b.Repair;if(r==null||SystemsDisabled(b.Id))continue;
                 r.SettlementElapsed+=dt;
                 // One second is the canonical settlement cadence, not a balance parameter.
                 while(r.SettlementElapsed+1e-9>=1&&b.Repair!=null)

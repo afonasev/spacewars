@@ -1,8 +1,10 @@
 """Validate mandatory native dependencies before binding or packaging a Player."""
 import pathlib
+import subprocess
 import struct
 
 WINDOWS_RECAST = pathlib.Path('Player_Data/Plugins/x86_64/spacewars_recast.dll')
+MACOS_RECAST_NAME = 'libspacewars_recast.dylib'
 RECAST_EXPORTS = {
     'sw_recast_abi', 'sw_recast_layer_abi', 'sw_recast_memory_abi',
     'sw_recast_memory_scope', 'sw_recast_build', 'sw_recast_build_layered',
@@ -60,3 +62,17 @@ def validate_windows_recast(path):
         return path
     except (struct.error, IndexError, UnicodeError) as error:
         raise ValueError('Truncated Windows Recast DLL') from error
+
+
+def validate_macos_recast(path):
+    path = pathlib.Path(path)
+    if not path.is_file():
+        raise ValueError('Required macOS Recast dylib missing: ' + str(path))
+    architectures = subprocess.check_output(['lipo', '-archs', str(path)], text=True).split()
+    if not {'arm64', 'x86_64'} <= set(architectures):
+        raise ValueError('macOS Recast must contain arm64 and x86_64 slices: ' + ', '.join(architectures))
+    output = subprocess.check_output(['nm', '-gU', str(path)], text=True, errors='replace')
+    exports = {line.split()[-1].lstrip('_') for line in output.splitlines() if line.split()}
+    if not RECAST_EXPORTS <= exports:
+        raise ValueError('macOS Recast ABI exports missing: ' + ', '.join(sorted(RECAST_EXPORTS-exports)))
+    return path

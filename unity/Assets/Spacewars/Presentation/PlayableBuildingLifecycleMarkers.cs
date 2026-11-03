@@ -34,6 +34,7 @@ namespace Spacewars.Presentation
         private void UpdateLifecycleMarkers()
         {
             if(root?.panel==null)return;
+            UpdateSystemFailureMarkers();
             var active=activeLifecycleMarkers;active.Clear();
             foreach(var b in view.Buildings)
             {

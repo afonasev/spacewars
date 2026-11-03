@@ -37,7 +37,10 @@ namespace Spacewars.Input.Tests
             Assert.AreEqual(1.4,(double)typeof(PlayableBootstrap).GetProperty("TargetPreviewRadius",F).GetValue(seat));
             yield return Capture("mine-preview-radius",captureWidth:1600,captureHeight:1000,captureChecks:()=>Assert.True(Get<bool>(seat,"scanTargeting")));
             Call(seat,"ScanPointer",screen,true,true,false);yield return Wait(()=>!Get<bool>(seat,"scanTargeting"),"mine placement receipt");
-            Assert.AreEqual(1,Get<PlayableSnapshot>(seat,"view").Mines.Count);Runtime.RequestPause(true);yield return Wait(()=>Runtime.Latest.Paused,"pause mine visual");
+            Assert.AreEqual(1,Get<PlayableSnapshot>(seat,"view").Mines.Count);
+            var effectTick=Get<PlayableSnapshot>(seat,"view").Sounds.Single(e=>e.Kind==PlayableSoundKind.OrbitalMineInstalled).Tick;
+            yield return Wait(()=>Get<PlayableSnapshot>(seat,"view").Tick>=effectTick+10,"mine activation pulse midpoint");
+            Assert.Greater(Get<PlayableWorld>(seat,"world").AbilityEffectCount,0,"successful installation creates pulse");Runtime.RequestPause(true);yield return Wait(()=>Runtime.Latest.Paused,"pause mine visual");
             yield return Capture("mine-b-normal",captureWidth:1600,captureHeight:1000,captureChecks:()=>Assert.AreEqual(1,Get<PlayableSnapshot>(seat,"view").Mines.Count));
             camera.orthographicSize=1.3f;camera.transform.position=world.Point(point)+new Vector3(0,1.8f,-1.8f);camera.transform.LookAt(world.Point(point));
             yield return Capture("mine-b-close",captureWidth:1600,captureHeight:1000,captureChecks:()=>Assert.AreEqual(1,Get<PlayableSnapshot>(seat,"view").Mines.Count));

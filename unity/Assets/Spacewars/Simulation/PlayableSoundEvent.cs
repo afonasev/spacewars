@@ -9,7 +9,8 @@ namespace Spacewars.Simulation
         ProductionQueued, ProductionCancelled, ProductionStarted, ProductionComplete,
         ResearchQueued, ResearchCancelled, ResearchStarted, ResearchComplete,
         UpgradeStarted, UpgradeCancelled, UpgradeComplete,
-        HeavyDamage, MovementStarted, MovementStopped, BaseThreat, ProductionLimited
+        HeavyDamage, MovementStarted, MovementStopped, BaseThreat, ProductionLimited,
+        OrbitalScanApplied, OrbitalMineInstalled, OrbitalControlHacked, OrbitalSystemsDisabled
     }
     public static class PlayableSoundPolicy
     {

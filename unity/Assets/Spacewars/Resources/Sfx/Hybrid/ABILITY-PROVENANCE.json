@@ -1,0 +1,70 @@
+{
+  "generator": "Stable Audio 3 local TFLite",
+  "generator_revision": "790793b89ddceea612be9ce42ff6830d18f6fa57",
+  "processing": "pitch-preserving tempo compression; HP100/LP5500, 20ms/90ms fades, peak<=.3 RMS<=.04",
+  "clips": [
+    {
+      "name": "mine-install",
+      "seconds": 0.45,
+      "peak": 0.3,
+      "rms": 0.017020337694925884,
+      "source_seconds": 1.1,
+      "tempo_factors": [
+        2,
+        1.2222222222222223
+      ],
+      "sha256": "3b3ec1f51daaa2a5403b4c59d496c212e39e2fea4f22c23d044b036fd2d6ae33",
+      "raw_sha256": "ecb6153330104a68a9695f330cf8c14d7529274d0854b705e4a4e552e30d9d32",
+      "ability": "mine",
+      "prompt": [
+        "mine-install",
+        "sm-sfx",
+        4401,
+        0.45,
+        "A compact mechanical device being gently set down and its small magnetic latch engaging. Short tactile damped contact, precise muted latch click, tiny quiet servo settling. Restrained realistic close-up Foley, clean dry recording, quick natural decay, moderate soft dynamics."
+      ]
+    },
+    {
+      "name": "radar-sweep",
+      "seconds": 0.9,
+      "peak": 0.2357226090257532,
+      "rms": 0.04,
+      "source_seconds": 1.5,
+      "tempo_factors": [
+        1.6666666666666665
+      ],
+      "sha256": "1202f2f41272a89604384689302863a6ca8b01bcc34db5110f35c4cbe95a817b",
+      "raw_sha256": "d05017f26798f495dd0c8564fa6e625b1f89f4a5a811963d14b8ed974778256b",
+      "ability": "scan",
+      "prompt": [
+        "radar-sweep",
+        "sm-music",
+        4402,
+        0.9,
+        "TrackType: Instrument, VocalType: Instrumental. A minimal precise electronic sonar instrument. One rounded neutral scanning tone smoothly rising slightly, a faint narrow airy electronic tail, clean cool restrained professional equipment interface, smooth attack, short dry decay, clear simple unison timbre."
+      ]
+    },
+    {
+      "name": "hack-a-key",
+      "seconds": 0.65,
+      "peak": 0.23577074074961188,
+      "rms": 0.04,
+      "source_seconds": 1.3,
+      "tempo_factors": [
+        2.0
+      ],
+      "sha256": "b782458490821a9033ef11828d11d1d7afc02413985ba00afd8bb8cc72450b82",
+      "raw_sha256": "17e41e085b919fc0c8df7d532420a041d0c5eb3b771f1ae051c033bd891987a6",
+      "ability": "hack",
+      "prompt": [
+        "hack-a-key",
+        "sm-music",
+        4403,
+        0.65,
+        "TrackType: Instrument, VocalType: Instrumental. An isolated short technical electronic access-key confirmation. Two quick precise muted rounded FM synthesizer pulses at a low-mid register, followed by one very brief stable tone. Neutral focused calm advanced computer interface, dry clean close sound, restrained soft dynamics."
+      ]
+    }
+  ],
+  "human_listening": "Approved exact r4 samples 2026-11-04; hack A digital key; mine and radar approved",
+  "evidence": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/add-ability-feedback-effects/technical-r4"
+}

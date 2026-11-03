@@ -7,9 +7,9 @@ namespace Spacewars.Simulation
     // Existing IDs remain stable; Control Hack is an additional basic ability at ID 8.
     public static class OrbitalAbilities
     {
-        public const int ControlHack=8;
+        public const int ControlHack=8,SystemFailure=3;
         public static int Tier(int id)=>id==ControlHack||id>=1&&id<=2?1:id>=3&&id<=5?2:id>=6&&id<=7?3:0;
-        public static string Name(int id)=>id==ControlHack?"Взлом управления":id==1?"Сканирование":id==2?"Мина-ловушка":"Поддержка "+(Tier(id)==1?"I":Tier(id)==2?"II":"III")+" · "+(id==1||id==3||id==6?"А":id==5?"В":"Б");
+        public static string Name(int id)=>id==SystemFailure?"Сбой систем":id==ControlHack?"Взлом управления":id==1?"Сканирование":id==2?"Мина-ловушка":"Поддержка "+(Tier(id)==1?"I":Tier(id)==2?"II":"III")+" · "+(id==1||id==3||id==6?"А":id==5?"В":"Б");
         public static double Duration(int id,PlayableProfileData p)=>id==ControlHack?p.orbitalHackSeconds:Tier(id)==1?p.orbitalBasicSeconds:Tier(id)==2?p.orbitalAdvancedSeconds:p.orbitalUltimateSeconds;
         public static double Threshold(int level,PlayableProfileData p)=>level==0?p.orbitalThreshold1:level==1?p.orbitalThreshold2:level==2?p.orbitalThreshold3:level==3?p.orbitalThreshold4:level==4?p.orbitalThreshold5:level==5?p.orbitalThresholdMax:0;
     }
@@ -81,6 +81,9 @@ namespace Spacewars.Simulation
         private static PlayableProfileField F(string name,string label,string unit,double min,double max,double step,Func<PlayableProfileData,double> read)=>new PlayableProfileField("orbital."+name,"Орбитальная поддержка · orbital-escalation-v1",label,"Параметр эскалации и восстановления орбитальной поддержки.",unit,min,max,step,read,name);
         private static PlayableProfileField V(string name,string label,string description,string unit,double min,double max,double step,Func<PlayableProfileData,double> read)=>new PlayableProfileField("orbital."+name,"Орбитальная поддержка · orbital-escalation-v1",label,description,unit,min,max,step,read,name);
         public static readonly IReadOnlyList<PlayableProfileField> Fields=new[]{
+            V("orbitalSystemFailureRadius","Сбой систем · радиус","Область поиска по центрам: два ближайших больших здания и все вражеские башни.","м",.1,20,.1,p=>p.orbitalSystemFailureRadius),
+            V("orbitalSystemFailureSeconds","Сбой систем · длительность","Время заморозки действий и прогресса здания.","с",.1,120,.1,p=>p.orbitalSystemFailureSeconds),
+            V("orbitalSystemFailureMaxTargets","Сбой систем · больших зданий","Максимум ближайших больших зданий; башни не входят в лимит.","шт",1,10,1,p=>p.orbitalSystemFailureMaxTargets),
             V("orbitalMineCapacity","Лимит мин","orbital-trap-mine-v1: Максимум одновременно установленных мин; новая заменяет старейшую.","шт",1,3,1,p=>p.orbitalMineCapacity),
             V("orbitalMineVision","Обзор мины","orbital-trap-mine-v1: Радиус постоянного обзора владельца и команды.","м",0.5,30,0.5,p=>p.orbitalMineVision),
             V("orbitalMineDirectDamage","Урон при наезде","orbital-trap-mine-v1: Полный урон сработавшему юниту; сплэш ему повторно не наносится.","HP",1,1000,1,p=>p.orbitalMineDirectDamage),

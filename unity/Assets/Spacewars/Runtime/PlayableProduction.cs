@@ -71,7 +71,7 @@ namespace Spacewars.Runtime
                 order?.Active==true?order.Duration:done?.Duration??ActionDuration(profile.ProducerUpgradeSeconds(b.Kind)),ProducerUpgradeBlocked(b));
         }
         private Building Producer(int id,PlayableOwner owner)
-            =>buildings.TryGetValue(id,out var b)&&b.Owner==owner&&(b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar)&&b.Ready&&b.Sale==null?b:null;
+            =>buildings.TryGetValue(id,out var b)&&b.Owner==owner&&(b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar)&&b.Ready&&b.Sale==null&&!SystemsDisabled(b.Id)?b:null;
         private ProductionOrder NewOrder(PlayableEntityKind kind,bool active)
             =>new ProductionOrder{TermsRevision=profile.Revision,Id=nextProductionSequence++,Kind=kind,PaidCost=PlayableUnitRules.Cost(profile,kind),
                 PopulationCost=PlayableUnitRules.Population(profile,kind),Duration=ActionDuration(PlayableUnitRules.Duration(profile,kind)),Remaining=ActionDuration(PlayableUnitRules.Duration(profile,kind)),Active=active};
@@ -122,7 +122,7 @@ namespace Spacewars.Runtime
             =>b.Orders.Select(o=>new PlayableProductionOrderSnapshot(o.Id,o.Kind,o.PaidCost,o.PopulationCost,o.Duration,o.Remaining,o.Active,o.IsUpgrade,ProductionWaitReason(b,o))).ToArray();
         private void AdvanceProduction(double dt)
         {
-            var factories=buildings.Values.Where(b=>(b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar)&&b.Ready&&b.Sale==null&&!eliminated.Contains(b.Owner)).OrderBy(b=>b.Id).ToArray();
+            var factories=buildings.Values.Where(b=>(b.Kind==PlayableBuildingKind.Factory||b.Kind==PlayableBuildingKind.Hangar)&&b.Ready&&b.Sale==null&&!SystemsDisabled(b.Id)&&!eliminated.Contains(b.Owner)).OrderBy(b=>b.Id).ToArray();
             var overflow=new HashSet<PlayableOwner>();
             foreach(PlayableOwner owner in Owners)
             {

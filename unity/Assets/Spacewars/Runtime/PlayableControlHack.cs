@@ -50,6 +50,8 @@ namespace Spacewars.Runtime
             }
             else return PlayableCommandStatus.InvalidTarget;
             Orbital(owner).Use(OrbitalAbilities.ControlHack,OrbitalData);
+            if(units.TryGetValue(id,out var captured)&&TryActor(id,out var capturedActor))Sound(PlayableSoundKind.OrbitalControlHacked,capturedActor.Position,captured.Kind,owner,unitId:id);
+            else if(buildings.TryGetValue(id,out var capturedMine))Sound(PlayableSoundKind.OrbitalControlHacked,capturedMine.Position,PlayableEntityKind.Tank,owner,building:true,unitId:id);
             visionInputProfile=null;RefreshVision();
             return PlayableCommandStatus.Applied;
         }

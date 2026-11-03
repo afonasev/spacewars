@@ -59,7 +59,7 @@ namespace Spacewars.Presentation
         {
             if(!CanOrbital||!fromHud&&!orbitalOpen||fromHud&&(!SeatUsesKeyboard||orbitalOpen))return;
             if(choose?!view.Orbital.Options.Contains(id):view.Orbital.CommonRemaining>1e-9||!view.Orbital.Abilities.Any(a=>a.Id==id&&a.Remaining<=1e-9))return;
-            if(!choose&&(id==1||id==2||id==OrbitalAbilities.ControlHack)){BeginOrbitalTarget(!fromHud&&orbitalMenuPad,id);return;}
+            if(!choose&&(id==1||id==2||id==OrbitalAbilities.SystemFailure||id==OrbitalAbilities.ControlHack)){BeginOrbitalTarget(!fromHud&&orbitalMenuPad,id);return;}
             var command=new PlayableCommand(generation,++sequence,LocalOwnerId,choose?PlayableCommandKind.ChooseOrbital:PlayableCommandKind.UseOrbital,null,targetId:id);
             var result=runtime.TrySubmit(command);noticeSequence=sequence;notice=result.Accepted?"":Friendly(result.Status);if(result.Accepted){if(orbitalOpen)CloseOrbital();else root.Focus();}
         }
@@ -119,8 +119,12 @@ namespace Spacewars.Presentation
                 var sweep=button.Q<OrbitalCooldownSweep>();sweep.Fraction=(float)(ability.Remaining>=state.CommonRemaining?1-ability.Recovery/Math.Max(.001,ability.Duration):1-state.CommonRemaining/Math.Max(.001,data.orbitalCommonSeconds));sweep.style.display=cooling?DisplayStyle.Flex:DisplayStyle.None;
                 button.Q("ability-artwork").style.opacity=cooling?(float)data.orbitalUiCoolingArtworkOpacity:1;
                 var seconds=button.Q<Label>("seconds");seconds.text=cooling?Math.Ceiling(wait).ToString():"";seconds.style.fontSize=icon*.45f;
-                var edge=cooling?OrbitalTheme.Line:Cyan;button.style.borderLeftColor=button.style.borderRightColor=button.style.borderTopColor=button.style.borderBottomColor=edge;
-                button.tooltip=OrbitalAbilities.Name(ability.Id)+(cooling?" · "+Math.Ceiling(wait)+" с":" · готова");
+                bool targeting=scanTargeting&&scanTargetAbility==ability.Id;
+                button.EnableInClassList("ability-targeting-active",targeting);
+                button.style.borderLeftWidth=button.style.borderRightWidth=button.style.borderTopWidth=button.style.borderBottomWidth=targeting?RadialCardProfile.Load().titleAccentWidth:1;
+                button.style.backgroundColor=targeting?Color.Lerp(OrbitalTheme.Panel,Cyan,RadialCardProfile.Load().opticalSelectionTint):OrbitalTheme.Panel;
+                var edge=targeting?OrbitalTheme.Ink:cooling?OrbitalTheme.Line:Cyan;button.style.borderLeftColor=button.style.borderRightColor=button.style.borderTopColor=button.style.borderBottomColor=edge;
+                button.tooltip=OrbitalAbilities.Name(ability.Id)+(targeting?" · выбор цели":cooling?" · "+Math.Ceiling(wait)+" с":" · готова");
             }
             orbitalPanel.style.left=right?new StyleLength(StyleKeyword.Auto):new StyleLength(6);orbitalPanel.style.right=right?new StyleLength(6):new StyleLength(StyleKeyword.Auto);orbitalPanel.style.bottom=Mathf.Max(6,h-bottomY);orbitalPanel.style.top=StyleKeyword.Auto;
             bool tooltip=orbitalLevelHovered&&!controller&&!orbitalOpen&&CanOrbital;orbitalXpTooltip.style.display=tooltip?DisplayStyle.Flex:DisplayStyle.None;
@@ -176,7 +180,7 @@ namespace Spacewars.Presentation
                     column.Q<Label>("orbital-choice-description").style.fontSize=art.textSize;
                 }
             }else if(orbitalMenuPad){
-                var actions=state.Abilities.Select(a=>new OfflinePadAction(a.Id.ToString(),OrbitalAbilities.Name(a.Id).Replace("Поддержка ",""),a.Remaining<=1e-9&&state.CommonRemaining<=1e-9,(a.Id==1||a.Id==2?"Выберите точку · ":a.Id==OrbitalAbilities.ControlHack?"Выберите шахту или юнита · ":"Заглушка · ")+Math.Ceiling(Math.Max(a.Remaining,state.CommonRemaining))+" с"){Presentation=new RadialActionPresentation{Title=OrbitalAbilities.Name(a.Id),Artwork="orbital:"+a.Id,Note=(a.Id==1||a.Id==2?"Выберите точку · ":a.Id==OrbitalAbilities.ControlHack?"Выберите шахту или юнита · ":"Заглушка · ")+(Math.Max(a.Remaining,state.CommonRemaining)>1e-9?Math.Ceiling(Math.Max(a.Remaining,state.CommonRemaining))+" с":"готова")}}).ToArray();
+                var actions=state.Abilities.Select(a=>new OfflinePadAction(a.Id.ToString(),OrbitalAbilities.Name(a.Id).Replace("Поддержка ",""),a.Remaining<=1e-9&&state.CommonRemaining<=1e-9,(a.Id==1||a.Id==2||a.Id==OrbitalAbilities.SystemFailure?"Выберите точку · ":a.Id==OrbitalAbilities.ControlHack?"Выберите шахту или юнита · ":"Заглушка · ")+Math.Ceiling(Math.Max(a.Remaining,state.CommonRemaining))+" с"){Presentation=new RadialActionPresentation{Title=OrbitalAbilities.Name(a.Id),Artwork="orbital:"+a.Id,Note=(a.Id==1||a.Id==2||a.Id==OrbitalAbilities.SystemFailure?"Выберите точку · ":a.Id==OrbitalAbilities.ControlHack?"Выберите шахту или юнита · ":"Заглушка · ")+(Math.Max(a.Remaining,state.CommonRemaining)>1e-9?Math.Ceiling(Math.Max(a.Remaining,state.CommonRemaining))+" с":"готова")}}).ToArray();
                 float size=Mathf.Min(280,Mathf.Min(w-28,h-135));orbitalRing.Resize(size);orbitalRing.style.left=(w-size)/2;orbitalRing.style.top=Mathf.Max(60,(h-size)/2);orbitalRing.ConfigureInput(true,SeatPad);
                 orbitalRing.Set(actions,"Поддержка",orbitalFocus>=0&&orbitalFocus<actions.Length?actions[orbitalFocus].Sector.Id:null,0,"");orbitalRing.FitAuxiliary(w,h);
                 if(actions.Length==0)orbitalHint.text="Наносите урон врагам, чтобы открыть поддержку";
@@ -218,6 +222,11 @@ namespace Spacewars.Presentation
         {
             if(abilityIcon!=null)return;
             var p=context.painter2D;var center=contentRect.center;float r=Mathf.Min(contentRect.width,contentRect.height)*.31f;
+            if(id==OrbitalAbilities.SystemFailure){
+                p.strokeColor=OrbitalTheme.Cyan;p.lineWidth=Mathf.Max(1,r/5);p.BeginPath();
+                for(int i=0;i<=24;i++){float a=(-60+300*i/24f)*Mathf.Deg2Rad;var at=center+new Vector2(Mathf.Cos(a),Mathf.Sin(a))*r;if(i==0)p.MoveTo(at);else p.LineTo(at);}p.Stroke();
+                p.BeginPath();p.MoveTo(center+new Vector2(0,-r*1.2f));p.LineTo(center);p.Stroke();return;
+            }
             if(id==2){
                 p.fillColor=new Color(.16f,.22f,.25f);p.strokeColor=OrbitalTheme.Cyan;p.lineWidth=2;p.BeginPath();
                 for(int i=0;i<6;i++){var v=center+new Vector2(Mathf.Cos(i*Mathf.PI/3),Mathf.Sin(i*Mathf.PI/3))*r;if(i==0)p.MoveTo(v);else p.LineTo(v);}p.ClosePath();p.Fill();p.Stroke();

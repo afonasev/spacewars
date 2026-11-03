@@ -1,0 +1,8 @@
+{
+  "source": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/add-orbital-system-failure/audio-v3/soft-air-fade.wav",
+  "sha256": "7ed1bac2bf75172885d40a3ae48908e2e59c8dd764eaa300cc29f725260b434c",
+  "model": "Stable Audio 3 Small-SFX / SAME-S",
+  "seed": 241201,
+  "human_choice": "2026-11-04, 1 ок; Воздушное затухание",
+  "manifest": "/Users/eaafonasev/.local/share/spacewars/artifacts/latest/evidence/add-orbital-system-failure/audio-v3/manifest.json"
+}

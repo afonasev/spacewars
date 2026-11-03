@@ -99,7 +99,7 @@ namespace Spacewars.Presentation
         internal static string Entity(PlayableProfileField f)
         {
             string section=Section(f);
-            if(section==Escalation){string name=f.FieldName??"";return name.StartsWith("orbitalMine",StringComparison.Ordinal)?"Мина-ловушка":name.StartsWith("orbitalHack",StringComparison.Ordinal)?"Взлом управления":name.StartsWith("orbitalScan",StringComparison.Ordinal)?"Сканирование":(name.StartsWith("orbitalThreshold",StringComparison.Ordinal))?"Пороги уровней":name.StartsWith("orbitalUi",StringComparison.Ordinal)||name.StartsWith("orbitalCard",StringComparison.Ordinal)||name=="orbitalPanelWidth"||name=="orbitalIconSize"||name=="orbitalLevelFontSize"?"Панель":"Перезарядка";}
+            if(section==Escalation){string name=f.FieldName??"";return name.StartsWith("orbitalSystemFailure",StringComparison.Ordinal)?"Сбой систем":name.StartsWith("orbitalMine",StringComparison.Ordinal)?"Мина-ловушка":name.StartsWith("orbitalHack",StringComparison.Ordinal)?"Взлом управления":name.StartsWith("orbitalScan",StringComparison.Ordinal)?"Сканирование":(name.StartsWith("orbitalThreshold",StringComparison.Ordinal))?"Пороги уровней":name.StartsWith("orbitalUi",StringComparison.Ordinal)||name.StartsWith("orbitalCard",StringComparison.Ordinal)||name=="orbitalPanelWidth"||name=="orbitalIconSize"||name=="orbitalLevelFontSize"?"Панель":"Перезарядка";}
             if(section==Research)return ResearchEntity(f)??"Прочие исследования";
             if(section=="ИИ")return f.Path.StartsWith("ai.research.")?"Исследования":"Боевое поведение";
             if(section==Mechanics)return SharedEntity(f);

@@ -1,0 +1,16 @@
+{
+  "id": "orbital-ability-feedback-v1",
+  "revision": 1,
+  "duration": 1.15,
+  "mineRadius": 0.85,
+  "hackRadiusScale": 2.8,
+  "opacity": 0.7,
+  "groundLift": 0.04,
+  "sparkHeight": 0.85,
+  "sparkWidth": 0.035,
+  "sparkCount": 8,
+  "maxEffects": 12,
+  "startScale": 0.8,
+  "sparkLength": 0.2,
+  "emissionGain": 1.8
+}

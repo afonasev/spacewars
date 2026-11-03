@@ -6,7 +6,7 @@ import importlib.util
 _state_spec=importlib.util.spec_from_file_location("release_build_state",pathlib.Path(__file__).with_name("build_state.py"));build_state=importlib.util.module_from_spec(_state_spec);_state_spec.loader.exec_module(build_state)
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'tools'))
-from native_plugins import WINDOWS_RECAST, validate_windows_recast
+from native_plugins import MACOS_RECAST_NAME, WINDOWS_RECAST, validate_macos_recast, validate_windows_recast
 def git(*args):return subprocess.check_output(['git',*args],cwd=ROOT)
 def inventory(folder):
  return {str(p.relative_to(folder)):{'size':p.stat().st_size,'sha256':hashfile(p)} for p in sorted(folder.rglob('*')) if p.is_file()}
@@ -51,10 +51,18 @@ def main():
  # Release generation changes scene/settings/material data only. Code changes while compiling are rejected.
  if git('diff','HEAD','--','unity/Assets/Spacewars/Presentation','unity/Assets/Spacewars/Editor')!=code_before:raise ValueError('code changed during build')
  folder=out/'Player.app' if a.platform=='macos-universal' else out
+ if a.platform=='macos-universal':
+  recast_source=ROOT/'unity/Assets/Spacewars/Plugins/macOS'/MACOS_RECAST_NAME
+  recast_target=folder/'Contents'/'PlugIns'/MACOS_RECAST_NAME
+  recast_target.parent.mkdir(parents=True,exist_ok=True)
+  shutil.copy2(recast_source,recast_target)
+  validate_macos_recast(recast_target)
  removed_debug_artifacts=clean_debug_artifacts(out)
- # Unity may already have sealed the nested macOS Player. Removing symbols
- # inside the bundle invalidates that seal; bind bytes only after re-signing.
- if a.platform=='macos-universal' and any(name.startswith('Player.app/') for name in removed_debug_artifacts):
+ # Unity may already have sealed the nested macOS Player. Staging Recast or
+ # removing symbols changes the bundle, so re-sign it before binding its bytes.
+ if a.platform=='macos-universal':
+  subprocess.check_call(['codesign','--force','--sign','-',str(recast_target)])
+  subprocess.check_call(['codesign','--verify','--strict',str(recast_target)])
   subprocess.check_call(['codesign','--force','--sign','-','--preserve-metadata=identifier,entitlements,flags',str(folder)])
   subprocess.check_call(['codesign','--verify','--strict',str(folder)])
  if a.platform=='windows-x64':validate_windows_recast(folder/WINDOWS_RECAST)

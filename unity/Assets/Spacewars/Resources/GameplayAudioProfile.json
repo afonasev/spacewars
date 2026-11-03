@@ -31,5 +31,6 @@
   "speechGain": 0.55,
   "speechMaxAgeSeconds": 2,
   "speechRepeatSeconds": 3,
-  "speechQueueLimit": 4
+  "speechQueueLimit": 4,
+  "abilityGain": 0.2
 }

@@ -65,13 +65,13 @@ namespace Spacewars.Presentation
             queueLabel.style.display=factory==null?DisplayStyle.None:DisplayStyle.Flex;
             var state=factory?.PrivateState;
             foreach(var item in new[]{(hawkButton,PlayableEntityKind.Hawk),(tankButton,PlayableEntityKind.Tank),(explorerButton,PlayableEntityKind.Explorer),(shkvalButton,PlayableEntityKind.Shkval)})item.Item1.tooltip=PlayableMenuDescriptions.Unit(profile,item.Item2,view.OwnerResearch,freeEconomy:provingGround!=null)+"\nЛКМ — разовый заказ. ПКМ — повтор.";
-            bool enabled=!spectatorMode&&factory!=null&&factory.Phase==ConstructionPhase.Ready&&state?.Lifecycle?.Selling!=true&&view.Outcome==PlayableMatchOutcome.Playing&&!paused&&!restarting;
+            bool enabled=!spectatorMode&&factory!=null&&!factory.SystemsDisabled&&factory.Phase==ConstructionPhase.Ready&&state?.Lifecycle?.Selling!=true&&view.Outcome==PlayableMatchOutcome.Playing&&!paused&&!restarting;
             hawkButton.SetEnabled(enabled);hawkButton.text="Ястреб · "+(provingGround!=null?"бесплатно":profile.HawkCreditCost.ToString())+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Hawk?" · Повтор ВКЛ":"");
             bool shkvalReady=OfflinePadWorldActions.ShkvalAvailable(view);
             shkvalButton.SetEnabled(enabled&&(shkvalReady||state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Shkval));
             if(!shkvalReady)shkvalButton.tooltip+="\nНужен готовый собственный Научный центр";shkvalButton.text="Шквал · "+(provingGround!=null?"бесплатно":profile.ShkvalCreditCost.ToString())+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Shkval?" · Повтор ВКЛ":"");
             explorerButton.SetEnabled(enabled);explorerButton.text="Исследователь · "+(provingGround!=null?"бесплатно":profile.ExplorerCreditCost.ToString())+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Explorer?" · Повтор ВКЛ":"");
-            tankButton.text="Танк · "+(provingGround!=null?"бесплатно":profile.TankCreditCost.ToString())+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Tank?" · Повтор ВКЛ":"");
+            tankButton.SetEnabled(enabled);tankButton.text="Танк · "+(provingGround!=null?"бесплатно":profile.TankCreditCost.ToString())+(state?.Repeat==true&&state.RepeatKind==PlayableEntityKind.Tank?" · Повтор ВКЛ":"");
             var population=view.Population;
             if(population!=null&&hudFocusButton==null)selectionLabel.text+=" · Армия: "+population.Living+" (+"+population.Reserved+") / "+population.Capacity;
             var orders=state?.Orders;
@@ -94,9 +94,9 @@ namespace Spacewars.Presentation
             {
                 var slot=productionSlots[i];var order=orders!=null&&i<orders.Count?orders[i]:null;
                 slot.Factory=productionFactory;slot.Order=order?.Id??0;
-                slot.Button.SetEnabled(enabled&&order!=null);
+                slot.Button.SetEnabled(enabled&&factory?.SystemsDisabled!=true&&order!=null);
                 slot.Button.text=order==null?"—":order.Active?(int)(order.Progress*100)+"%":"Ждёт";
-                slot.Button.tooltip=spectatorMode?(order==null?"Свободный слот":ProductionName(order)+" · осталось "+System.Math.Ceiling(order.Remaining)+" с"):order==null?"Свободный слот":ProductionName(order)+" · отменить заказ №"+order.Id+" · осталось "+System.Math.Ceiling(order.Remaining)+" с"+(provingGround!=null?"":" · возврат "+(int)(order.PaidCost*(order.IsUpgrade?1:profile.UnitCancellationRefundRatio)));
+                slot.Button.tooltip=spectatorMode||factory?.SystemsDisabled==true?(order==null?"Свободный слот":ProductionName(order)+" · осталось "+System.Math.Ceiling(order.Remaining)+" с"):order==null?"Свободный слот":ProductionName(order)+" · отменить заказ №"+order.Id+" · осталось "+System.Math.Ceiling(order.Remaining)+" с"+(provingGround!=null?"":" · возврат "+(int)(order.PaidCost*(order.IsUpgrade?1:profile.UnitCancellationRefundRatio)));
                 if(order!=null&&!order.IsUpgrade)slot.Button.tooltip=PlayableMenuDescriptions.Unit(profile,order.Kind,view.OwnerResearch,freeEconomy:provingGround!=null)+"\n\n"+slot.Button.tooltip;
                 OrbitalPrecision.QueueCard(slot.Button,order==null?(factory?.Kind==PlayableBuildingKind.Hangar?"hawk":"tank"):order.IsUpgrade?OrbitalPrecision.BuildingArtwork(factory.Kind,true):RadialActionPresentation.UnitArtwork(order.Kind,RadialActionPresentation.Upgraded(order.Kind,view.OwnerResearch)),order?.Active==true?order.Progress:-1,order!=null,order?.IsUpgrade!=true&&state?.Repeat==true&&state.RepeatKind==order?.Kind,order==null?null:ProductionName(order),order?.Active==true?System.Math.Ceiling(order.Remaining)+" с · "+(int)(order.Progress*100)+"%":null);
                 if(order?.IsUpgrade==true)slot.Button.tooltip+="\n"+(order.BlockedReason??"Ускоряет следующее производство");

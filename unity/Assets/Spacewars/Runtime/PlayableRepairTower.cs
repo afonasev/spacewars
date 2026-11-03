@@ -6,11 +6,11 @@ namespace Spacewars.Runtime
 {
     internal sealed partial class PlayableDomain
     {
-        private bool RepairTowerAvailable(Building b)=>b.Kind==PlayableBuildingKind.RepairTower&&b.Ready&&b.Health>0&&b.Sale==null&&!eliminated.Contains(b.Owner);
+        private bool RepairTowerAvailable(Building b)=>!SystemsDisabled(b.Id)&&b.Kind==PlayableBuildingKind.RepairTower&&b.Ready&&b.Health>0&&b.Sale==null&&!eliminated.Contains(b.Owner);
         private bool RepairTowerLegal(Building b,int id)=>units.TryGetValue(id,out var u)&&u.Owner==b.Owner&&u.Health>0&&u.Health<UnitMaximumHealth(u.Owner,u.Kind)&&!wrecks.ContainsKey(id)&&TryActor(id,out var actor)&&Distance(b.Position,actor.Position)<=TurretRange;
         private PlayableRepairTowerSnapshot RepairTowerSnapshot(Building b,PlayableOwner? observer=null)
         {
-            if(b.Kind!=PlayableBuildingKind.RepairTower)return null;
+            if(SystemsDisabled(b.Id)||b.Kind!=PlayableBuildingKind.RepairTower)return null;
             var state=b.Healing;int target=state!=null&&RepairTowerAvailable(b)&&RepairTowerLegal(b,state.Target)?state.Target:0;
             if(target!=0&&observer.HasValue&&TryActor(target,out var at)&&!Vision(observer.Value).IsVisible(at.Position))target=0;
             return new PlayableRepairTowerSnapshot(target,state?.Heading??Math.PI/2,state?.Pitch??0);

@@ -127,7 +127,7 @@ namespace Spacewars.Presentation
             if(building==null&&selectedSite!=0)selectionLabel.text=siteLabel.text;
             // Transactions move to the ring; queues and cancellations remain in context.
             var row=armyRegion.Q("production-actions");if(row!=null)row.style.display=DisplayStyle.None;
-            upgradeRefinery.style.display=upgradeProgress.style.display.value==DisplayStyle.Flex?DisplayStyle.Flex:DisplayStyle.None;
+            upgradeRefinery.style.display=building?.SystemsDisabled==true?DisplayStyle.None:upgradeProgress.style.display.value==DisplayStyle.Flex?DisplayStyle.Flex:DisplayStyle.None;
             foreach(var button in researchButtons)button.style.display=DisplayStyle.None;
             sellBuilding.style.display=repairBuilding.style.display=DisplayStyle.None;
             noticeLabel.text=notice;noticeLabel.style.display=string.IsNullOrEmpty(notice)?DisplayStyle.None:DisplayStyle.Flex;noticeLabel.style.maxWidth=Mathf.Min(320,root.resolvedStyle.width-12);

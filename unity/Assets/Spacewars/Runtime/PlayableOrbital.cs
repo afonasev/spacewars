@@ -28,17 +28,22 @@ namespace Spacewars.Runtime
         private readonly List<Scan> scans=new List<Scan>();
         private OrbitalScanSnapshot[] TeamOrbitalScans(PlayableOwner owner)=>scans.Where(s=>s.Remaining>0&&TeamOf(s.Owner)==TeamOf(owner)).Select(s=>new OrbitalScanSnapshot(s.Owner,s.Point,s.Radius)).ToArray();
         private void AdvanceOrbital(double dt)
-        {if(scans.Count>0)scanViews.Clear();foreach(var scan in scans)scan.Remaining=Math.Max(0,scan.Remaining-dt);if(scans.RemoveAll(s=>s.Remaining<=1e-9)>0)visionInputProfile=null;if(orbital.Count==0)return;var data=OrbitalData;foreach(var state in orbital.Values)state.Advance(dt,data);}
+        {foreach(int id in systemFailures.Where(p=>p.Value<=elapsed||!buildings.ContainsKey(p.Key)).Select(p=>p.Key).ToArray())systemFailures.Remove(id);if(scans.Count>0)scanViews.Clear();foreach(var scan in scans)scan.Remaining=Math.Max(0,scan.Remaining-dt);if(scans.RemoveAll(s=>s.Remaining<=1e-9)>0)visionInputProfile=null;if(orbital.Count==0)return;var data=OrbitalData;foreach(var state in orbital.Values)state.Advance(dt,data);}
         private OrbitalEscalationSnapshot OrbitalView(PlayableOwner owner)=>orbital.TryGetValue(owner,out var state)?state.Snapshot(OrbitalData):new OrbitalEscalationState().Snapshot(OrbitalData);
         private PlayableCommandStatus ChooseOrbital(PlayableOwner owner,int id)=>!eliminated.Contains(owner)&&Orbital(owner).Choose(id)?PlayableCommandStatus.Applied:PlayableCommandStatus.Rejected;
         private PlayableCommandStatus UseOrbital(PlayableOwner owner,int id,NavPoint target)
         {
             if(id==OrbitalAbilities.ControlHack)return PlayableCommandStatus.InvalidTarget;
-            if((id==1||id==2)&&(double.IsNaN(target.X)||double.IsNaN(target.Z)||double.IsInfinity(target.X)||double.IsInfinity(target.Z)||Math.Abs(target.X)>profile.ArenaHalfExtent||Math.Abs(target.Z)>profile.ArenaHalfExtent))return PlayableCommandStatus.InvalidTarget;
+            if((id==1||id==2||id==OrbitalAbilities.SystemFailure)&&(double.IsNaN(target.X)||double.IsNaN(target.Z)||double.IsInfinity(target.X)||double.IsInfinity(target.Z)||Math.Abs(target.X)>profile.ArenaHalfExtent||Math.Abs(target.Z)>profile.ArenaHalfExtent))return PlayableCommandStatus.InvalidTarget;
             if(id==2&&!ValidMinePlacement(owner,target))return PlayableCommandStatus.InvalidTarget;
+            if(id==OrbitalAbilities.SystemFailure){RefreshVision();if(!Vision(owner).IsVisible(target))return PlayableCommandStatus.InvalidTarget;}
+            var disabledTargets=id==OrbitalAbilities.SystemFailure?SystemFailureTargets(owner,target):null;
+            if(disabledTargets!=null&&disabledTargets.Length==0)return PlayableCommandStatus.InvalidTarget;
             if(eliminated.Contains(owner)||!Orbital(owner).Use(id,OrbitalData))return PlayableCommandStatus.Rejected;
             if(id==1){scanViews.Clear();scans.Add(new Scan{Owner=owner,Point=target,Radius=OrbitalData.orbitalScanRadius,Remaining=OrbitalData.orbitalScanSeconds,Duration=OrbitalData.orbitalScanSeconds});visionInputProfile=null;RefreshVision();}
             if(id==2)PlaceMine(owner,target);
+            if(disabledTargets!=null){foreach(int targetId in disabledTargets)systemFailures[targetId]=Math.Max(systemFailures.TryGetValue(targetId,out var until)?until:0,elapsed+OrbitalData.orbitalSystemFailureSeconds);Sound(PlayableSoundKind.OrbitalSystemsDisabled,target,PlayableEntityKind.Tank,owner);}
+            if(id==1||id==2)Sound(id==1?PlayableSoundKind.OrbitalScanApplied:PlayableSoundKind.OrbitalMineInstalled,target,PlayableEntityKind.Tank,owner);
             return PlayableCommandStatus.Applied;
         }
         private double ScanEnvelope(Scan scan)
@@ -123,16 +128,17 @@ namespace Spacewars.Runtime
         }
         private void WriteOrbital(BinaryWriter w)
         {
-            w.Write(0x4f524233);w.Write(orbital.Count);
+            w.Write(0x4f524234);w.Write(orbital.Count);
             foreach(var pair in orbital.OrderBy(x=>(int)x.Key)){
                 w.Write((int)pair.Key);w.Write(pair.Value.Level);WorldWire.Number(w,pair.Value.Progress);WorldWire.Number(w,pair.Value.CommonRemaining);
                 for(int i=0;i<OrbitalEscalationState.ChoiceCount;i++){w.Write(pair.Value.Choice(i));WorldWire.Number(w,pair.Value.Recovery(i));}
             }
             w.Write(scans.Count);foreach(var scan in scans){w.Write((int)scan.Owner);WorldWire.Number(w,scan.Point.X);WorldWire.Number(w,scan.Point.Z);WorldWire.Number(w,scan.Radius);WorldWire.Number(w,scan.Remaining);WorldWire.Number(w,scan.Duration);}
+            var disabled=systemFailures.Where(p=>buildings.ContainsKey(p.Key)&&p.Value>elapsed).OrderBy(p=>p.Key).ToArray();w.Write(disabled.Length);foreach(var pair in disabled){w.Write(pair.Key);WorldWire.Number(w,pair.Value);}
         }
         private void ReadOrbital(BinaryReader r)
         {
-            if(r.ReadInt32()!=0x4f524233)throw new ArgumentException("Missing orbital state.");
+            int format=r.ReadInt32();if(format!=0x4f524233&&format!=0x4f524234)throw new ArgumentException("Missing orbital state.");
             int count=r.ReadInt32();if(count<0||count>Owners.Count())throw new ArgumentException("Invalid orbital owner count.");
             for(int j=0;j<count;j++){
                 var owner=WorldWire.EnumValue<PlayableOwner>(r);if(!HasOwner(owner)||orbital.ContainsKey(owner))throw new ArgumentException("Invalid orbital owner.");
@@ -145,6 +151,7 @@ namespace Spacewars.Runtime
                 var scan=new Scan{Owner=WorldWire.EnumValue<PlayableOwner>(r),Point=new NavPoint(WorldWire.Number(r),WorldWire.Number(r)),Radius=WorldWire.Number(r),Remaining=WorldWire.Number(r),Duration=WorldWire.Number(r)};
                 if(!HasOwner(scan.Owner)||Math.Abs(scan.Point.X)>profile.ArenaHalfExtent||Math.Abs(scan.Point.Z)>profile.ArenaHalfExtent||scan.Radius<=0||scan.Remaining<=0||scan.Remaining>scan.Duration)throw new ArgumentException("Invalid scan state.");scans.Add(scan);
             }
+            if(format==0x4f524234){int disabled=r.ReadInt32();if(disabled<0||disabled>buildings.Count)throw new ArgumentException("Invalid system failure count.");for(int i=0;i<disabled;i++){int id=r.ReadInt32();double until=WorldWire.Number(r);if(!buildings.ContainsKey(id)||until<=elapsed||systemFailures.ContainsKey(id))throw new ArgumentException("Invalid system failure state.");systemFailures.Add(id,until);}}
             visionInputProfile=null;
         }
     }

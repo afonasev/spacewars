@@ -41,7 +41,7 @@ namespace Spacewars.Runtime
         {
             foreach(var b in buildings.Values.ToArray())
             {
-                if(!buildings.ContainsKey(b.Id)||!TerritoryRules.ArmedDefense(b.Kind)||!b.Ready||b.Health<=0||b.Sale!=null||eliminated.Contains(b.Owner))continue;
+                if(!buildings.ContainsKey(b.Id)||SystemsDisabled(b.Id)||!TerritoryRules.ArmedDefense(b.Kind)||!b.Ready||b.Health<=0||b.Sale!=null||eliminated.Contains(b.Owner))continue;
                 if(b.Kind==PlayableBuildingKind.GaussTower&&!AdvanceGaussPending(b,dt))continue;
                 var s=b.Weapon=b.Weapon??new SentryTurretState();s.Reload=Math.Max(0,s.Reload-dt);s.Delay=Math.Max(0,s.Delay-dt);
                 if(!TurretLegal(b,s.Target))
