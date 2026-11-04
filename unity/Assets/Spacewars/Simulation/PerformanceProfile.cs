@@ -10,8 +10,8 @@ namespace Spacewars.Simulation
     // Inclusive timings: children must never be added to their parent. CPU excludes waits/GC on other threads.
     public enum ProfileStage { Authority, Delivery, Domain, PlayerView, Ai, AiProjection, TeamBoard, TeamPublish,
         AiBudget, AiReview, AiRecord, Observation, Knowledge, Coverage, Vision, Snapshot, Routes, ObservedPath,
-        Artillery, Contacts, GroundFire, Movement, Firing, Projectiles, Queues, Economy, RosterAccess, RosterBuild, RouteWorker, ValueLayout, ObjectLayout, HostFork, HostSeal, HostPublish, PhysicalSolve, PhysicalArrival, PhysicalProjection, VisionRefresh, VisionReuse, SnapshotUnits, SnapshotBuildings, SnapshotPublic, SnapshotRequests, SnapshotEnvelope, ContactDetect, ContactPublish, SchedulerAdvance, ArrivalFork, ArrivalAdvance, ArrivalSeal, ArrivalFrontier, DemandBookkeeping, DemandGraph, DemandConnector, RetentionReserve, RetentionRegister, RetentionRelease, TreeMutation, ExactAdd, ExactSubtract, ExactCompare, GeometrySweep, GeometryTrace, ArrivalSchedulerAdvance, AiReviewGuard, AiReviewFinance, AiReviewArmies, AiReviewFunding, AiReviewExpansion, AiReviewOpening, AiReviewDecision, SnapshotPayload, CrowdNeighbors, CrowdScale, CrowdSelect, CrowdYield, CrowdJoint, Presentation, WorldFog, WorldMemories, WorldSites, UnitMotion, WorldAnimation, WorldUnits, WorldBuildings, WorldContacts, WorldDestruction, WorldRemoval, WorldWrecks, WorldTrails, WorldRally, WorldProjectiles, ContactOwnedTotal, ContactSource, ContactScopeAdmission, ContactScopeLifetime, ContactPrepareEnvelope, ContactDtoAndGuards, ContactMemberCopy, ContactGroupCow, ContactWriteCarrier, ContactAdmissionCheck, ContactAdmissionPrepare, ContactPublishEnvelope, ContactFinalGuards, ContactApply, ContactResolveRetire, ContactOwnerCleanup, ContactSourceRelease, FormationGuide, CrowdPreparation, CrowdExecution, CrowdCertificates, Count }
-    public enum ProfileWork { OrdinaryConsumed, ArrivalConsumed, ArrivalCandidate, ArrivalOccupancy, ArrivalDirect, SnapshotUnits, SnapshotBuildings, ContactMembers, ArrivalRouteConsumed, Count }
+        Artillery, Contacts, GroundFire, Movement, Firing, Projectiles, Queues, Economy, RosterAccess, RosterBuild, RouteWorker, ValueLayout, ObjectLayout, HostFork, HostSeal, HostPublish, PhysicalSolve, PhysicalArrival, PhysicalProjection, VisionRefresh, VisionReuse, SnapshotUnits, SnapshotBuildings, SnapshotPublic, SnapshotRequests, SnapshotEnvelope, ContactDetect, ContactPublish, SchedulerAdvance, ArrivalFork, ArrivalAdvance, ArrivalSeal, ArrivalFrontier, DemandBookkeeping, DemandGraph, DemandConnector, RetentionReserve, RetentionRegister, RetentionRelease, TreeMutation, ExactAdd, ExactSubtract, ExactCompare, GeometrySweep, GeometryTrace, ArrivalSchedulerAdvance, AiReviewGuard, AiReviewFinance, AiReviewArmies, AiReviewFunding, AiReviewExpansion, AiReviewOpening, AiReviewDecision, SnapshotPayload, CrowdNeighbors, CrowdScale, CrowdSelect, CrowdYield, CrowdJoint, Presentation, WorldFog, WorldMemories, WorldSites, UnitMotion, WorldAnimation, WorldUnits, WorldBuildings, WorldContacts, WorldDestruction, WorldRemoval, WorldWrecks, WorldTrails, WorldRally, WorldProjectiles, ContactOwnedTotal, ContactSource, ContactScopeAdmission, ContactScopeLifetime, ContactPrepareEnvelope, ContactDtoAndGuards, ContactMemberCopy, ContactGroupCow, ContactWriteCarrier, ContactAdmissionCheck, ContactAdmissionPrepare, ContactPublishEnvelope, ContactFinalGuards, ContactApply, ContactResolveRetire, ContactOwnerCleanup, ContactSourceRelease, FormationGuide, CrowdPreparation, CrowdExecution, CrowdCertificates, WreckGeometry, WreckRebind, WreckReconcile, WreckReachability, JournalCapture, ParticipantViews, WreckCarry, WreckAdmission, WreckCore, WreckMaps, WreckRemoval, WreckPublish, RuntimePublish, Count }
+    public enum ProfileWork { OrdinaryConsumed, ArrivalConsumed, ArrivalCandidate, ArrivalOccupancy, ArrivalDirect, SnapshotUnits, SnapshotBuildings, ContactMembers, ArrivalRouteConsumed, WreckScannedSlots, WreckQueries, WreckSearchCredits, WreckMaxQueueAge, WreckCarriedRoutes, WreckResetRoutes, Count }
     public static class PerformanceProfile
     {
         public static readonly bool Enabled=Environment.GetEnvironmentVariable("SPACEWARS_PRECISE_PROFILE")=="1";
@@ -75,6 +75,8 @@ namespace Spacewars.Simulation
                 Ms(ProfileStage.Projectiles),Ms(ProfileStage.Firing),Ms(ProfileStage.PlayerView)));
         }
 #endif
+        public static long ThreadCpuNanoseconds()=>Enabled?CpuNow():-1;
+        public static long ThreadWallTicks(ProfileStage stage)=>current?.Wall[(int)stage]??0;
         public static Scope Measure(ProfileStage stage)=>new Scope(stage);
         // First and every 1024th invocation per stage/thread. Report attempts
         // separately: measured CPU is sampled, never an all-call total.
@@ -87,6 +89,7 @@ namespace Spacewars.Simulation
         }
         public static void Add(ProfileWork work,long amount)
         {if(!Enabled)return;if(current==null)current=new Accumulator();current.Work[(int)work]+=amount;}
+        public static void Maximum(ProfileWork work,long amount){if(!Enabled)return;if(current==null)current=new Accumulator();current.Work[(int)work]=Math.Max(current.Work[(int)work],amount);}
         public static void Flush()
         {
             var a=current;if(!Enabled||a==null)return;long stamp=Stopwatch.GetTimestamp();a.NextDump=stamp+10*Stopwatch.Frequency;

@@ -31,15 +31,16 @@ namespace Spacewars.Runtime
             bool Own(int entity,long incarnation)=>Array.IndexOf(ids,entity)>=0&&Crowd.TryGet(entity,out var actor)&&actor.Incarnation==incarnation;
             bool Overlap(NavPoint a,double ar,NavPoint b,double br){double x=a.X-b.X,z=a.Z-b.Z;return x*x+z*z<(ar+br)*(ar+br)-1e-9;}
             for(int i=0;i<ids.Length;i++){
-                if(!Crowd.TryGet(ids[i],out var actor)||!geometry.IsFree(goals[i],actor.Radius)||!LocateCommandGoal(goals[i],actor.Radius,commandGroup,out _))return false;
-                for(int j=0;j<i;j++){if(!Crowd.TryGet(ids[j],out var peer)||Overlap(goals[i],actor.Radius,goals[j],peer.Radius))return false;}
-                foreach(var peer in Crowd.Units)if(!Own(peer.Id,peer.Incarnation)&&Overlap(goals[i],actor.Radius,peer.Position,peer.Radius))return false;
-                foreach(var row in arrivalLedger.Values)if(!Own((int)row.Entity,row.Incarnation)&&Overlap(goals[i],actor.Radius,row.Endpoint.Position,row.Radius))return false;
+                if(!Crowd.TryGet(ids[i],out var actor)){RefuseCommandAdmissionForQa("movement-recipient-missing");return false;}
+                if(!geometry.IsFree(goals[i],actor.Radius)||!LocateCommandGoal(goals[i],actor.Radius,commandGroup,out _)){RefuseCommandAdmissionForQa("movement-arrival-location");return false;}
+                for(int j=0;j<i;j++){if(!Crowd.TryGet(ids[j],out var peer)||Overlap(goals[i],actor.Radius,goals[j],peer.Radius)){RefuseCommandAdmissionForQa("movement-arrival-slots-overlap");return false;}}
+                foreach(var peer in Crowd.Units)if(!Own(peer.Id,peer.Incarnation)&&Overlap(goals[i],actor.Radius,peer.Position,peer.Radius)){RefuseCommandAdmissionForQa("movement-arrival-occupied");return false;}
+                foreach(var row in arrivalLedger.Values)if(!Own((int)row.Entity,row.Incarnation)&&Overlap(goals[i],actor.Radius,row.Endpoint.Position,row.Radius)){RefuseCommandAdmissionForQa("movement-arrival-reserved");return false;}
                 foreach(var row in reservations){
                     long incarnation=0;double radius=profile.Radius;
                     if(pending.TryGetValue(row.Key,out var pendingRequest)){incarnation=pendingRequest.MemberIdentity?.Incarnation??0;radius=pendingRequest.Profile.Radius;}
                     else if(installedExecutions.TryGetValue(row.Key,out var installed)){incarnation=installed.Corridor.Incarnation;radius=installed.Corridor.Radius;}
-                    if(!Own(row.Key,incarnation)&&Overlap(goals[i],actor.Radius,row.Value,radius))return false;
+                    if(!Own(row.Key,incarnation)&&Overlap(goals[i],actor.Radius,row.Value,radius)){RefuseCommandAdmissionForQa("movement-arrival-reserved");return false;}
                 }
             }
             return true;

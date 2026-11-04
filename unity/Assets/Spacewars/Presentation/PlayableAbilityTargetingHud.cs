@@ -109,7 +109,10 @@ namespace Spacewars.Presentation
             string action=scanTargetAbility==OrbitalAbilities.SystemFailure?"Отключить":scanTargetAbility==OrbitalAbilities.ControlHack?"Захватить":scanTargetAbility==2?"Установить":"Сканировать";
             abilityTargetApply.text=scanTargetPad?action:"ЛКМ — "+action;
             abilityTargetCancel.text=scanTargetPad?"Отменить":"ПКМ — отменить";
-            abilityApplyGlyph.style.display=abilityCancelGlyph.style.display=scanTargetPad?DisplayStyle.Flex:DisplayStyle.None;
+            // Persist the mode for each badge's recurring Refresh, rather than racing
+            // its scheduled display update with a temporary style override.
+            abilityApplyGlyph.SetMenuVisibility(scanTargetPad,SeatPad);
+            abilityCancelGlyph.SetMenuVisibility(scanTargetPad,SeatPad);
             abilityTargetApply.style.color=abilityTargetValid&&scanPendingSequence<0?OrbitalTheme.Ink:OrbitalTheme.Muted;
             var art=RadialCardProfile.Load();float gap=art.statColumnPadding,w=root.contentRect.width,h=root.contentRect.height;
             float width=Mathf.Max(0,Mathf.Min(art.dockWidth+art.utilityIconSize,w-gap*2));

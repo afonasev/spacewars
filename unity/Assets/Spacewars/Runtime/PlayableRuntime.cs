@@ -246,6 +246,7 @@ namespace Spacewars.Runtime
         }
         private void PublishParticipantViews(RuntimeStatus status,string failure,bool? publicationPaused=null)
         {
+            using var publicationTiming=PerformanceProfile.Measure(ProfileStage.RuntimePublish);
             long began=Stopwatch.GetTimestamp();
             Volatile.Write(ref diagnosticUnits,domain.DiagnosticUnitCount);Volatile.Write(ref diagnosticBuildings,domain.DiagnosticBuildingCount);
             try{PublishParticipantViewsCore(status,failure,publicationPaused);}
@@ -260,6 +261,7 @@ namespace Spacewars.Runtime
             Volatile.Write(ref botCameraActivities,domain.BotCameraActivities);
             bool framePaused=publicationPaused??(Volatile.Read(ref paused)!=0);
             PublishSpectatorFrame(status,failure,framePaused);
+            using var participantTiming=PerformanceProfile.Measure(ProfileStage.ParticipantViews);
             if(offlineConfiguration==null)return;var frameMetrics=Metrics(lastCpu,0);var views=new Dictionary<string,PlayableSnapshot>();foreach(var p in offlineConfiguration.Roster)views.Add(p.Id,spectatorFrame!=null?spectatorFrame.Perspective(domain.OwnerFor(p.Id)).WithTeamSignals(domain.ProjectTeamSignals(domain.OwnerFor(p.Id))):domain.PlayerSnapshot(snapshotSequence,status,framePaused,frameMetrics,failure,seed,domain.OwnerFor(p.Id)));OfflineReceipt[] history;long ordinal;lock(gate){history=offlineReceipts.ToArray();ordinal=receiptOrdinal;}Volatile.Write(ref offlineFrame,new OfflinePresentationFrame(views,history,ordinal,offlineFrame));
         }
         // Trusted local route service only; never a map/HUD or network view.
@@ -364,11 +366,23 @@ namespace Spacewars.Runtime
                     ApplyMatchActions(Volatile.Read(ref paused)!=0);
                     bool isPaused=Volatile.Read(ref paused)!=0;
                     double wait=pacing.WaitSeconds(now,Volatile.Read(ref spectatorSpeed),isPaused);
-                    if(wait>0){wake.WaitOne((int)Math.Min(20,Math.Ceiling(wait*1000)));continue;}
+                    if(wait>0){
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                        long sleepAt=earlyScoutProbe!=null?Stopwatch.GetTimestamp():0;
+#endif
+                        wake.WaitOne((int)Math.Min(20,Math.Ceiling(wait*1000)));
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                        if(sleepAt!=0)earlyScoutProbe.Sleep((Stopwatch.GetTimestamp()-sleepAt)*1000d/Stopwatch.Frequency);
+#endif
+                        continue;}
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                     PerformanceProfile.BeginBattleTick();
 #endif
                     var timer=Stopwatch.StartNew();
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    earlyScoutProbe?.BeginTick();
+                    long probeAllocated=earlyScoutProbe!=null?GC.GetAllocatedBytesForCurrentThread():0;
+#endif
                     if(!authorityTick.AwaitingRoutes){ApplyProvingGroundEdits(isPaused);ApplyRequestedBalance(isPaused);domain.SetRallyPaused(isPaused);ApplyCommands(isPaused);}
                     ApplyMatchActions(isPaused);isPaused=Volatile.Read(ref paused)!=0;
                     // Publish command-generated geometry before main-thread service admission.
@@ -387,6 +401,9 @@ namespace Spacewars.Runtime
                             lastPublishedRevision=revision;lastPublishedPause=isPaused;Interlocked.Increment(ref barrierPublications);
                         }else Interlocked.Increment(ref barrierReuses);
                         MaintainCampaignCheckpoint();CompleteCapture();
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                        earlyScoutProbe?.Barrier(timer.Elapsed.TotalMilliseconds);
+#endif
                         wake.WaitOne(1);continue;
                     }
                     JournalCapture(isPaused);snapshotSequence++;
@@ -399,6 +416,9 @@ namespace Spacewars.Runtime
                     PerformanceProfile.EndBattleTick(Generation,snapshot.Tick,DiagnosticGlobalUnits);
 #endif
                     pacing.Complete(clock.Elapsed.TotalSeconds);
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    earlyScoutProbe?.Tick(domain,timer.Elapsed.TotalMilliseconds,GC.GetAllocatedBytesForCurrentThread()-probeAllocated);
+#endif
                 }
             }
             catch(OperationCanceledException)when(IsStopRequested){}

@@ -36,8 +36,8 @@ func keygen(name string) error {
 	return nil
 }
 func pack(args []string) error {
-	if len(args) != 8 && len(args) != 9 {
-		return errors.New("pack INPUT OUTPUT PRIVATE_KEY PLATFORM ENTRY VERSION SEQUENCE COMMIT")
+	if len(args) < 8 || len(args) > 10 {
+		return errors.New("pack INPUT OUTPUT PRIVATE_KEY PLATFORM ENTRY VERSION SEQUENCE COMMIT [CHANNEL [RELEASE_DATE]]")
 	}
 	input, out, keyFile, platform, entry, version, seq, commit := args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]
 	kb, e := os.ReadFile(keyFile)
@@ -53,6 +53,9 @@ func pack(args []string) error {
 		return e
 	}
 	m := Manifest{Schema: 1, Sequence: sequence, Version: version, Platform: platform, Entry: entry, Commit: commit}
+	if len(args) == 10 {
+		m.ReleaseDate = args[9]
+	}
 	objects := filepath.Join(out, "objects")
 	if e = os.MkdirAll(objects, 0755); e != nil {
 		return e
@@ -119,7 +122,7 @@ func pack(args []string) error {
 		return e
 	}
 	sort.Slice(m.Files, func(i, j int) bool { return m.Files[i].Path < m.Files[j].Path })
-	if len(args) == 9 {
+	if len(args) >= 9 {
 		ch := args[8]
 		if ch != "test" && ch != "production" {
 			return errors.New("invalid channel")

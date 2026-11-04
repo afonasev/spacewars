@@ -134,8 +134,7 @@ namespace Spacewars.Runtime
                 if(a.Short&&a.Escape&&(a.ShortRemaining<=0||!frame.VisibleTarget(u.Owner,a.FacingTarget))){a.Short=false;a.Escape=false;}
                 double facing=desired;if(a.Short&&a.Escape&&frame.Target(a.FacingTarget,out var enemy,out _))facing=Math.Atan2(enemy.Z-n.Position.Z,enemy.X-n.Position.X);
                 bool aimExists=frame.Target(u.Target,out var aimPoint,out _);bool idleAim=!n.Moving&&aimExists&&frame.VisibleTarget(u.Owner,u.Target);if(idleAim&&Distance(n.Position,aimPoint)>1e-9)facing=Math.Atan2(aimPoint.Z-n.Position.Z,aimPoint.X-n.Position.X);else if(idleAim)facing=n.Heading;
-                double yawTarget=(n.Moving&&(!a.Short||a.Escape)||idleAim)?Math.Max(-profile.HawkYawSpeed,Math.Min(profile.HawkYawSpeed,Angle(facing-n.Heading)/dt)):0;
-                a.YawVelocity=ApproachAir(a.YawVelocity,yawTarget,profile.HawkYawAcceleration*dt);n.Heading=Angle(n.Heading+a.YawVelocity*dt);
+                AdvanceAirYaw(a,(n.Moving&&(!a.Short||a.Escape)||idleAim)?facing:n.Heading,dt);
                 double forward=0,right=0;
                 if(n.Moving&&distance>profile.Navigation.ArrivalTolerance)
                 {
@@ -191,8 +190,13 @@ namespace Spacewars.Runtime
         }
         private void AdvanceAirYaw(AirState a,double desired,double dt)
         {
-            double rate=Math.Max(-profile.HawkYawSpeed,Math.Min(profile.HawkYawSpeed,Angle(desired-a.Actor.Heading)/dt));
-            a.YawVelocity=ApproachAir(a.YawVelocity,rate,profile.HawkYawAcceleration*dt);a.Actor.Heading=Angle(a.Actor.Heading+a.YawVelocity*dt);
+            double error=Angle(desired-a.Actor.Heading),acceleration=profile.HawkYawAcceleration;
+            // Leave room for this step plus braking: |error| = speed*dt + speed²/(2*acceleration).
+            // Rationalization avoids cancellation near alignment; no extra tuning or firing tolerance.
+            double step=acceleration*dt;
+            double brakingRate=2*acceleration*Math.Abs(error)/(Math.Sqrt(step*step+2*acceleration*Math.Abs(error))+step);
+            double rate=Math.Sign(error)*Math.Min(profile.HawkYawSpeed,brakingRate);
+            a.YawVelocity=ApproachAir(a.YawVelocity,rate,step);a.Actor.Heading=Angle(a.Actor.Heading+a.YawVelocity*dt);
         }
         private bool AirSeparation(Unit self,NavPoint next,Unit[] all)
         {

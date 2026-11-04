@@ -28,11 +28,11 @@ namespace Spacewars.Runtime
             if(land<0)expire=Tick+Math.Max(WreckTicks(profile.UnitDeathSmokeSeconds),WreckTicks(profile.HawkDebrisSeconds));
             double burial=profile.WreckBurialMin+(profile.WreckBurialMax-profile.WreckBurialMin)*WreckChoice(u.Id,Tick,149^matchSeed);
             int variant=1+(int)(WreckChoice(u.Id,Tick,283^matchSeed)*(air?4:3));
-            return new PlayableWreckSnapshot(u.Id,u.Owner,u.Kind,actor.Position,actor.Heading,radius,u.Air?.Height??GroundHeight(actor.Position),burial,variant,Tick,land,reveal,sink,expire,upgraded:air?HawkSalvo(u.Owner):UnitUpgraded(u),invulnerableUntilTick:reveal+WreckTicks(profile.WreckSpawnProtectionSeconds));
+            return new PlayableWreckSnapshot(u.Id,u.Owner,u.Kind,actor.Position,actor.Heading,radius,u.Air?.Height??GroundHeight(actor.Position),burial,variant,Tick,land,reveal,sink,expire,upgraded:air?HawkSalvo(u.Owner):UnitUpgraded(u),invulnerableUntilTick:reveal+WreckTicks(profile.WreckSpawnProtectionSeconds),physicalLayer:navigation.Crowd.PhysicalLayer(actor.Location));
         }
         private bool VisibleWreck(PlayableOwner owner,int id)=>wrecks.TryGetValue(id,out var w)&&w.Blocks(Tick)&&Vision(owner).IsVisible(w.Position);
-        private bool WreckObstaclePublished(PlayableWreckSnapshot w)=>Geometry.Obstacles.Any(o=>o.GeometryEquals(new NavObstacle(w.Position,w.Radius)));
-        private IEnumerable<NavObstacle> WreckObstacles(int[] removed=null)=>wrecks.Values.Where(w=>w.Blocks(Tick)&&(w.Kind!=PlayableEntityKind.Hawk||WreckObstaclePublished(w))&&(removed==null||!removed.Contains(w.Id))).OrderBy(w=>w.Id).Select(w=>new NavObstacle(w.Position,w.Radius));
+        private bool WreckObstaclePublished(PlayableWreckSnapshot w)=>Geometry.Obstacles.Any(o=>o.GeometryEquals(new NavObstacle(w.Position,w.Radius,w.PhysicalLayer)));
+        private IEnumerable<NavObstacle> WreckObstacles(int[] removed=null)=>wrecks.Values.Where(w=>w.Blocks(Tick)&&(w.Kind!=PlayableEntityKind.Hawk||WreckObstaclePublished(w))&&(removed==null||!removed.Contains(w.Id))).OrderBy(w=>w.Id).Select(w=>new NavObstacle(w.Position,w.Radius,w.PhysicalLayer));
         private PlayableWreckSnapshot[] WreckSnapshots(PlayableOwner? owner=null)=>wrecks.Values.Where(w=>!owner.HasValue||Vision(owner.Value).IsVisible(w.Position)).OrderBy(w=>w.Id).ToArray();
         private bool DestroyWreck(int id,PlayableEntityKind weapon)
         {
@@ -53,7 +53,7 @@ namespace Spacewars.Runtime
         }
         private void AdvanceWrecks()
         {
-            tickWreckQueries=null;
+
             bool changed=false;Dictionary<int,PlayableWreckSnapshot> next=null;
             foreach(var w in wrecks.Values){
                 long end=w.DestroyedTick>=0?w.DestroyedTick+Math.Max(WreckTicks(profile.WreckHitSmokeSeconds),WreckTicks(profile.DirectImpactSeconds)):w.ExpireTick;
@@ -78,22 +78,22 @@ namespace Spacewars.Runtime
         }
         private void WriteWrecks(BinaryWriter writer)
         {
-            writer.Write(0x57524B33);WorldWire.Array(writer,wrecks.Values.OrderBy(w=>w.Id).ToArray(),w=>{
+            writer.Write(0x57524B34);WorldWire.Array(writer,wrecks.Values.OrderBy(w=>w.Id).ToArray(),w=>{
                 writer.Write(w.Id);writer.Write((int)w.Owner);writer.Write((int)w.Kind);WorldWire.Write(writer,w.Position);
                 WorldWire.Number(writer,w.Heading);WorldWire.Number(writer,w.Radius);WorldWire.Number(writer,w.DeathHeight);WorldWire.Number(writer,w.Burial);writer.Write(w.Variant);
-                writer.Write(w.DeathTick);writer.Write(w.LandTick);writer.Write(w.RevealTick);writer.Write(w.SinkTick);writer.Write(w.ExpireTick);writer.Write(w.DestroyedTick);writer.Write((int)w.ImpactKind);writer.Write(w.Upgraded);writer.Write(w.InvulnerableUntilTick);
+                writer.Write(w.DeathTick);writer.Write(w.LandTick);writer.Write(w.RevealTick);writer.Write(w.SinkTick);writer.Write(w.ExpireTick);writer.Write(w.DestroyedTick);writer.Write((int)w.ImpactKind);writer.Write(w.Upgraded);writer.Write(w.InvulnerableUntilTick);writer.Write(w.PhysicalLayer);
             });
         }
         private void ReadWrecks(BinaryReader r)
         {
-            int wreckVersion=r.ReadInt32();if(wreckVersion!=0x57524B31&&wreckVersion!=0x57524B32&&wreckVersion!=0x57524B33)throw new ArgumentException("Invalid wreck section.");
+            int wreckVersion=r.ReadInt32();if(wreckVersion!=0x57524B31&&wreckVersion!=0x57524B32&&wreckVersion!=0x57524B33&&wreckVersion!=0x57524B34)throw new ArgumentException("Invalid wreck section.");
             foreach(var w in WorldWire.Array(r,()=>{
                 int id=r.ReadInt32();var owner=WorldWire.EnumValue<PlayableOwner>(r);var kind=WorldWire.EnumValue<PlayableEntityKind>(r);var point=WorldWire.ReadPoint(r);
                 double heading=WorldWire.Number(r),radius=WorldWire.Number(r),height=WorldWire.Number(r),burial=WorldWire.Number(r);int variant=r.ReadInt32();
                 long death=r.ReadInt64(),land=r.ReadInt64(),reveal=r.ReadInt64(),sink=r.ReadInt64(),expire=r.ReadInt64(),destroyed=r.ReadInt64();var impact=WorldWire.EnumValue<PlayableEntityKind>(r);bool upgraded=wreckVersion>=0x57524B32&&r.ReadBoolean();
-                long protectedUntil=wreckVersion>=0x57524B33?r.ReadInt64():reveal+WreckTicks(profile.WreckSpawnProtectionSeconds);
-                if(id<1||id>=nextId||units.ContainsKey(id)||!HasOwner(owner)||death<0||death>Tick||land< -1||land>=0&&land<death||reveal<death||sink<reveal||expire<=death||radius<=0||burial<0||variant<1||variant>(kind==PlayableEntityKind.Hawk?4:3)||destroyed< -1||destroyed>Tick||protectedUntil<reveal)throw new ArgumentException("Invalid wreck state.");
-                return WorldWire.Record(r,()=>new PlayableWreckSnapshot(id,owner,kind,point,heading,radius,height,burial,variant,death,land,reveal,sink,expire,destroyed,impact,upgraded,protectedUntil));
+                long protectedUntil=wreckVersion>=0x57524B33?r.ReadInt64():reveal+WreckTicks(profile.WreckSpawnProtectionSeconds);int physicalLayer=wreckVersion>=0x57524B34?r.ReadInt32():-1;
+                if(id<1||id>=nextId||units.ContainsKey(id)||!HasOwner(owner)||death<0||death>Tick||land< -1||land>=0&&land<death||reveal<death||sink<reveal||expire<=death||radius<=0||burial<0||variant<1||variant>(kind==PlayableEntityKind.Hawk?4:3)||destroyed< -1||destroyed>Tick||protectedUntil<reveal||physicalLayer< -1||physicalLayer>=((profile.AuthoredMap as ILayeredPlayableTerrain)?.LayeredNavigation.Surfaces.Count??0))throw new ArgumentException("Invalid wreck state.");
+                return WorldWire.Record(r,()=>new PlayableWreckSnapshot(id,owner,kind,point,heading,radius,height,burial,variant,death,land,reveal,sink,expire,destroyed,impact,upgraded,protectedUntil,physicalLayer));
             }))if(wrecks.ContainsKey(w.Id))throw new ArgumentException("Duplicate wreck.");else wrecks.Add(w.Id,w);
         }
     }

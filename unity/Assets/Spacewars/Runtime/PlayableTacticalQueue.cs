@@ -86,7 +86,8 @@ namespace Spacewars.Runtime
         {
             QueueIssuance issuance=QueueKind(command.Kind)?NewIssuance(command,revision):null;
             foreach(int id in recipients){
-                ResetDefaultCombat(units[id]);
+                ResetDefaultCombat(units[id]);units[id].WreckObservedRevision=-1;
+                if(wrecks.Count>0)ScheduleWreckScan();
                 if(!QueueKind(command.Kind)){units[id].WreckWaiting=false;tacticalQueues.Remove(id);StageOriginalQueue(command,id,null);continue;}
                 var u=units[id];var q=QueueFor(id);q.Deferred.Clear();q.Completion=null;
                 var group=prepared==null?navigation.GroupFor(id):prepared.Groups[prepared.MemberGroups[id]];issuance.GroupId=group.GroupId;
@@ -163,6 +164,7 @@ namespace Spacewars.Runtime
         {
             if(!tacticalQueues.TryGetValue(r.Entity,out var q))return;var e=Matches(q.Pending,r)?q.Pending:Matches(q.Active,r)?q.Active:null;if(e==null)return;
             e.AttemptRequest=r.Request;e.AttemptOrder=r.Order;e.AttemptLocation=DomainLocation(r.GoalLocation);e.TerminalFailure=new TerminalRouteFailure{Request=r.Request,Order=r.Order,GroupId=r.MemberIdentity.GroupId,Revision=r.MemberIdentity.OrderRevision,Incarnation=r.MemberIdentity.Incarnation,Location=DomainLocation(r.GoalLocation),Outcome=outcome,Tick=Tick};
+            RevisitWreckFailure(r.Entity);
             if(ReferenceEquals(e,q.Pending))e.Failed=true;TraceOriginalQueue(r,OriginalGroupEvent.Terminal,(int)outcome);
         }
         private bool RetainsInstalledExecution(int id)=>tacticalQueues.TryGetValue(id,out var q)&&(q.Active!=null||units.TryGetValue(id,out var u)&&u.CurrentOrder!=null);

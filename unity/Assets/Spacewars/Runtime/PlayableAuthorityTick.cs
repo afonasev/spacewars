@@ -57,13 +57,35 @@ namespace Spacewars.Runtime
             if(domain.Tick!=0||savedConfiguration==null||stopping?.Invoke()==true)return 0;
             var detachedDomain=new PlayableDomain(savedConfiguration.Profile,Generation,savedConfiguration);
             PlayableAuthorityTick detached=null;
+            CertifiedRouteKernel detachedRoutes=null;
             try{
             var detachedScheduler=new AiAuthorityScheduler(scheduler.Owners.Select(o=>o.CreateStartupWarmup()));
             detached=new PlayableAuthorityTick(detachedDomain,detachedScheduler,seed,savedConfiguration,asynchronousRoutes:true);
-            long horizon=Math.Max(1,scheduler.Owners.Select(o=>o.StartupReviewTick).DefaultIfEmpty(1).Max());
+            // The first review only schedules opening actions. Warm their first
+            // delivery as well; otherwise first-use motion/publication code runs
+            // on the live clock when the explorers receive their initial order.
+            long horizon=Math.Max(1,detachedScheduler.Owners.Select(o=>o.StartupReviewTick).DefaultIfEmpty(1).Max());
             while(detached.Tick<horizon&&stopping?.Invoke()!=true)detached.TryAdvance();
+            // Reaction is deterministically spread per action; the configured
+            // minimum alone is not its actual due tick. Use the first scheduled
+            // publication rather than guessing a warmup duration.
+            horizon=Math.Max(horizon,detachedScheduler.Owners.Select(o=>o.StartupPendingDeliveryTick+1).DefaultIfEmpty(horizon).Max());
+            while(detached.Tick<horizon&&stopping?.Invoke()!=true)detached.TryAdvance();
+            // Delivery queues a solve; it does not exercise installed movement.
+            // Run the same certified provider/budget until its first real answer
+            // is installed, then Step executes first-use motion on this copy.
+            // Never manufacture a successful answer or touch live route state.
+            if(detachedDomain.Navigation.PendingCount>0&&stopping?.Invoke()!=true){
+                bool activated=false;
+                detachedDomain.Navigation.RouteActivated+=_=>activated=true;
+                detachedRoutes=new CertifiedRouteKernel{Continue=()=>stopping?.Invoke()!=true};
+                while(!activated&&detachedDomain.Navigation.PendingCount>0&&stopping?.Invoke()!=true){
+                    detachedRoutes.Pump(detached.NavigationBinding,savedConfiguration.Profile.NavigationRequestsPerFrame);
+                    detached.TryAdvance();
+                }
+            }
             return detached.Tick;
-            }finally{try{detached?.Stop();}finally{detachedDomain.Navigation.DestroyNavigationAuthority();}}
+            }finally{try{detachedRoutes?.Clear();}finally{try{detached?.Stop();}finally{detachedDomain.Navigation.DestroyNavigationAuthority();}}}
         }
         internal void PrepareNavigationViews(Func<bool> stopping=null)=>scheduler.PrepareNavigationViews(domain,seed,stopping);
         public NavMailbox<NavigationRequest> Requests=>domain.Navigation.Requests;

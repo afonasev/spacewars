@@ -9,11 +9,14 @@ editor=${UNITY_EDITOR:-/Applications/Unity/Hub/Editor/6000.3.23f1/Unity.app/Cont
 quiet=0
 has_engine_quiet=0
 has_app_quiet=0
+batch_editor=0
+has_burst_sync=0
 for argument in "$@"; do
   case "$argument" in
     -noaudio) quiet=1; has_engine_quiet=1 ;;
     -muted) quiet=1; has_app_quiet=1 ;;
-    -batchmode) quiet=1 ;;
+    -batchmode) quiet=1; batch_editor=1 ;;
+    --burst-force-sync-compilation) has_burst_sync=1 ;;
   esac
 done
 if [ "$quiet" = 1 ]; then
@@ -23,6 +26,11 @@ fi
 case "${1:-}" in
   shared|exclusive)
     mode=$1; shift
+    # Finish Editor JIT work before batch domain teardown. Keep Burst enabled;
+    # this option controls Editor compilation, not Player AOT or game quality.
+    if [ "$batch_editor" = 1 ] && [ "$has_burst_sync" = 0 ]; then
+      set -- "$@" --burst-force-sync-compilation
+    fi
     [ -d "$project_dir" ] || { echo "Missing Unity project: $project_dir" >&2; exit 2; }
     exec "$runner" "--$mode" --project "$project_dir" -- "$editor" -projectPath "$project_dir" "$@" ;;
   player)

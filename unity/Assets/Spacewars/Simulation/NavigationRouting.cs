@@ -273,6 +273,31 @@ namespace Spacewars.Simulation
             return FindPath(start,goal).Length!=0;
         }
 
+        // Tri-state bounded reachability: false means unfinished, never unreachable.
+        // Each credit expands at most four directed grid edges; attachments have a
+        // fixed 3x3 stencil. Repeated calls resume the exact immutable field frontier.
+        internal bool TryHasPath(NavPoint start,NavPoint goal,ref int credits,out bool reachable)
+        {
+            reachable=false;if(credits<=0)return false;
+            if(!geometry.IsFree(start,profile.Radius)||!geometry.IsFree(goal,profile.Radius))return true;
+            if(geometry.SegmentFreeBetweenFreeEndpoints(start,goal,profile.Radius)){reachable=true;return true;}
+            var starts=Attachments(start);var goals=Attachments(goal);
+            if(starts.Count==0||goals.Count==0)return true;
+            if(ClosedCannotReach(goals,starts))return true;
+            var field=GetCertifiedField(goals);
+            bool Found(){foreach(var origin in starts)if(field.Distance.ContainsKey(origin))return true;return false;}
+            while(credits>0&&field.Frontier.Count>0&&!Found()){
+                credits--;var cell=field.Frontier.Dequeue();ExpandedCells++;int distance=field.Distance[cell];
+                for(int direction=0;direction<4;direction++){
+                    var next=Neighbor(cell,direction);
+                    if(field.Distance.ContainsKey(next)||!IsFree(next)||!GridSegmentFreeDirected(cell,next,direction))continue;
+                    field.Distance[next]=distance+1;CachedCells++;field.Frontier.Enqueue(next);
+                }
+            }
+            reachable=Found();if(field.Frontier.Count==0)closedReachability=field.Distance;
+            return reachable||field.Frontier.Count==0;
+        }
+
         private bool ClearGridLeg(NavPoint a,NavPoint b)
         {
             // Reject even an overlapping obstacle bounding box. All grid centres and

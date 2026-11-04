@@ -26,6 +26,16 @@ class UnityQuietRoutes(unittest.TestCase):
         self.assertEqual(1, args.count("-muted"))
         self.assertIn("-batchmode", args)
 
+    def test_batch_completes_editor_burst_jit_without_disabling_it(self):
+        for mode in ["shared", "exclusive"]:
+            args = self.launch([mode, "-batchmode", "--burst-force-sync-compilation"])
+            self.assertEqual(1, args.count("--burst-force-sync-compilation"))
+            self.assertNotIn("--burst-disable-compilation", args)
+
+    def test_interactive_editor_and_player_do_not_inherit_batch_jit_policy(self):
+        for route in [["shared"], ["player", "/fake/Player", "-batchmode"]]:
+            self.assertNotIn("--burst-force-sync-compilation", self.launch(route))
+
     def test_player_couples_either_flag_and_retains_exact_parameters(self):
         for switch in ["-muted", "-noaudio"]:
             with self.subTest(switch=switch):

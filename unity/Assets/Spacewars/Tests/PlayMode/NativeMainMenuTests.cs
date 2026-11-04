@@ -43,7 +43,7 @@ public sealed class NativeMainMenuTests
         }
         finally{UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",saved);}
     }
-    [UnityTest] public IEnumerator MenuKeepsUpdateInFooterAndDoesNotStartMatch()
+    [UnityTest] public IEnumerator MenuHasNoUpdaterAndDoesNotStartMatch()
     {
         string endpoint=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT");Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",null);
         var go=new GameObject("main menu contract");var menu=go.AddComponent<NativeMainMenu>();bool played=false;menu.Play=()=>played=true;
@@ -52,16 +52,14 @@ public sealed class NativeMainMenuTests
         {
             var root=go.GetComponent<UIDocument>().rootVisualElement;
             var actions=root.Query<Button>().ToList();
-            CollectionAssert.AreEqual(new[]{"В бой!","Кампания","Сетевая игра","Настройки","Лаборатория геймдизайна","Выйти","Обновить","Отменить загрузку","Перезапустить"},actions.ConvertAll(b=>b.text));
-            Assert.False(actions[2].enabledSelf);Assert.That(root.Q<Button>("main-restart").style.display.value,Is.EqualTo(DisplayStyle.None));Assert.IsNull(root.Q<Button>("main-check"));
-            Assert.IsNull(root.Q(className:"orbital-hints"));
-            Assert.AreEqual(DisplayStyle.Flex,root.Q("main-update-panel").style.display.value,"Panel is visible before startup status is received");
-            Assert.AreEqual(DisplayStyle.None,root.Q<Button>("main-update").style.display.value);
-            Assert.True(root.Q<Button>("main-update").parent.parent.ClassListContains("orbital-menu-footer"));
+            CollectionAssert.AreEqual(new[]{"В бой!","Кампания","Сетевая игра","Настройки","Лаборатория геймдизайна","Выйти"},actions.ConvertAll(b=>b.text));
+            Assert.False(actions[2].enabledSelf);Assert.IsNull(root.Q(className:"orbital-hints"));
+            foreach(string name in new[]{"main-update-panel","main-update-status","main-update-spinner","main-update-progress","main-update","main-cancel-update","main-restart","main-check"})Assert.IsNull(root.Q(name),name);
+            Assert.False(root.Query<Label>().ToList().Exists(l=>l.text.IndexOf("обновлен",StringComparison.OrdinalIgnoreCase)>=0));
             Assert.False(root.Query<Label>().ToList().Exists(l=>l.text.Contains("ТЕРРИТОРИЯ")));
             Assert.That(played,Is.False,"Displaying the main menu must not start a match.");
-            Assert.That(root.Q<Button>("main-update").enabledSelf,Is.False,"A Player without the trusted installed launcher must not start updating.");
             Assert.That(actions[0].enabledSelf,Is.True,"Offline installed gameplay remains available.");
+            yield return Capture(menu,"launcher-only-main-menu");
         }
         finally{UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",endpoint);}
     }
@@ -82,81 +80,27 @@ public sealed class NativeMainMenuTests
         finally{listener.Stop();UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",saved);}
     }
 
-    [UnityTest] public IEnumerator DownloadAndPreparedUpdateKeepPlayAvailableUntilExplicitRestart()
-    {
-        var endpoint=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT");Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",null);
-        var go=new GameObject("update state test");var menu=go.AddComponent<NativeMainMenu>();yield return null;
-        try{
-            var type=typeof(NativeMainMenu);var stateType=type.GetNestedType("UpdateState",BindingFlags.NonPublic);
-            foreach(string state in new[]{"checking","offline","current","downloading","prepared"}){
-                var value=Activator.CreateInstance(stateType,true);stateType.GetField("state").SetValue(value,state);stateType.GetField("version").SetValue(value,"test");
-                type.GetField("current",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,value);type.GetMethod("ShowStatus",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(menu,null);
-                Assert.AreEqual(state=="current"?DisplayStyle.None:DisplayStyle.Flex,menu.ScreenRoot.Q("main-update-panel").style.display.value);
-                Assert.AreEqual(state=="checking"?DisplayStyle.Flex:DisplayStyle.None,menu.ScreenRoot.Q("main-update-spinner").style.display.value);
-                Assert.AreEqual(DisplayStyle.None,menu.ScreenRoot.Q<Button>("main-update").style.display.value);
-                Assert.True(menu.ScreenRoot.Q<Button>("main-play").enabledSelf);Assert.IsNull(menu.ScreenRoot.Q<Button>("main-check"));
-                Assert.AreEqual(state=="prepared"?DisplayStyle.Flex:DisplayStyle.None,menu.ScreenRoot.Q<Button>("main-restart").style.display.value);
-                if(state=="checking"||state=="offline"||state=="current")yield return Capture(menu,"update-"+state);
-            }
-        }finally{UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",endpoint);}
-    }
 
-    [UnityTest] public IEnumerator UpdateProgressAndRequestFailureRemainVisible()
-    {
-        var endpoint=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT");Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",null);
-        var go=new GameObject("update feedback test");var menu=go.AddComponent<NativeMainMenu>();yield return null;
-        try{
-            var type=typeof(NativeMainMenu);var stateType=type.GetNestedType("UpdateState",BindingFlags.NonPublic);
-            var value=Activator.CreateInstance(stateType,true);
-            stateType.GetField("state").SetValue(value,"downloading");stateType.GetField("version").SetValue(value,"test");
-            type.GetField("current",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,value);
-            var show=type.GetMethod("ShowStatus",BindingFlags.Instance|BindingFlags.NonPublic);
-            show.Invoke(menu,null);
-            var status=menu.ScreenRoot.Q<Label>("main-update-status");var progress=menu.ScreenRoot.Q<ProgressBar>("main-update-progress");
-            StringAssert.Contains("Подготовка файлов",status.text);Assert.AreEqual(DisplayStyle.Flex,progress.style.display.value);
-            stateType.GetField("total").SetValue(value,4L*1048576);stateType.GetField("done").SetValue(value,1048576L);show.Invoke(menu,null);
-            Assert.AreEqual(25,progress.value);StringAssert.Contains("25%",status.text);StringAssert.Contains("МБ",status.text);
-            stateType.GetField("done").SetValue(value,4L*1048576);show.Invoke(menu,null);StringAssert.Contains("Проверяем",status.text);
-            type.GetField("requestError",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,"Запрос отклонён: HTTP 409");
-            stateType.GetField("state").SetValue(value,"available");show.Invoke(menu,null);
-            Assert.AreEqual("Запрос отклонён: HTTP 409",status.text,"Polling must not erase the failed click.");Assert.True(menu.ScreenRoot.Q<Button>("main-update").enabledSelf);
-            Assert.AreEqual(DisplayStyle.None,progress.style.display.value);
-            Assert.AreEqual(DisplayStyle.Flex,menu.ScreenRoot.Q<Button>("main-update").style.display.value);
-            type.GetField("requestError",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,null);
-            stateType.GetField("available").SetValue(value,"1.0.1");show.Invoke(menu,null);yield return Capture(menu,"update-available");
-            stateType.GetField("available").SetValue(value,null);
-            type.GetField("requestError",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,null);
-            stateType.GetField("state").SetValue(value,"error");stateType.GetField("error").SetValue(value,"downloaded chunk rejected");show.Invoke(menu,null);
-            StringAssert.Contains("downloaded chunk rejected",status.text);Assert.False(menu.ScreenRoot.Q<Button>("main-update").enabledSelf,"Discovery failures cannot retry an absent candidate.");
-        }finally{UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",endpoint);}
-    }
 
-    [UnityTest] public IEnumerator FailedUpdateHttpRequestDoesNotRevertToAvailableText()
+
+    [UnityTest] public IEnumerator LauncherReadinessDoesNotExposeUpdatesOrPollStatus()
     {
-        var saved=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT");Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",null);
-        var go=new GameObject("update HTTP failure test");var menu=go.AddComponent<NativeMainMenu>();yield return null;
+        var saved=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT");var savedToken=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_TOKEN");
         var listener=new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);listener.Start();
-        var server=System.Threading.Tasks.Task.Run(()=>{
-            using(var client=listener.AcceptTcpClient())using(var stream=client.GetStream()){
-                var reader=new System.IO.StreamReader(stream);string line;while(!string.IsNullOrEmpty(line=reader.ReadLine())){}
-                var bytes=System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 409 Conflict\r\nContent-Length: 11\r\nConnection: close\r\n\r\nunavailable");stream.Write(bytes,0,bytes.Length);
-            }
-        });
+        Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT","http://127.0.0.1:"+((System.Net.IPEndPoint)listener.LocalEndpoint).Port);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_TOKEN","fixture-token");
+        string first=null,authorization=null;
+        var server=System.Threading.Tasks.Task.Run(()=>{using(var client=listener.AcceptTcpClient())using(var stream=client.GetStream()){
+            var reader=new System.IO.StreamReader(stream);first=reader.ReadLine();string line;while(!string.IsNullOrEmpty(line=reader.ReadLine()))if(line.StartsWith("Authorization:"))authorization=line;
+            var body="{\"state\":\"available\",\"available\":\"99.0\"}";var bytes=System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: "+body.Length+"\r\nConnection: close\r\n\r\n"+body);stream.Write(bytes,0,bytes.Length);
+        }});
+        var go=new GameObject("launcher readiness without updater UI");var menu=go.AddComponent<NativeMainMenu>();
         try{
-            var type=typeof(NativeMainMenu);var stateType=type.GetNestedType("UpdateState",BindingFlags.NonPublic);var value=Activator.CreateInstance(stateType,true);
-            stateType.GetField("state").SetValue(value,"available");stateType.GetField("available").SetValue(value,"1.0.1");
-            type.GetField("current",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,value);
-            type.GetField("endpoint",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,"http://127.0.0.1:"+((System.Net.IPEndPoint)listener.LocalEndpoint).Port);
-            type.GetField("token",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,"fixture-token");
-            menu.StartCoroutine((IEnumerator)type.GetMethod("UpdateGame",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(menu,null));
-            var status=menu.ScreenRoot.Q<Label>("main-update-status");StringAssert.Contains("Начинаем скачивание",status.text);Assert.False(menu.ScreenRoot.Q<Button>("main-update").enabledSelf);
-            var deadline=Time.realtimeSinceStartup+20;while((bool)type.GetField("busy",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(menu)&&Time.realtimeSinceStartup<deadline)yield return null;
-            Assert.False((bool)type.GetField("busy",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(menu));StringAssert.Contains("409",status.text);
-            type.GetMethod("ShowStatus",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(menu,null);StringAssert.Contains("409",status.text);
-            Assert.True(menu.ScreenRoot.Q<Button>("main-update").enabledSelf,"Failed update must allow retry");
-            while(!server.IsCompleted&&Time.realtimeSinceStartup<deadline)yield return null;
-            Assert.True(server.IsCompleted,"HTTP fixture must finish within the original request deadline");Assert.False(server.IsFaulted);
-        }finally{listener.Stop();UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",saved);}
+            double deadline=Time.realtimeSinceStartupAsDouble+15;while(!server.IsCompleted&&Time.realtimeSinceStartupAsDouble<deadline)yield return null;
+            Assert.True(server.IsCompleted&&!server.IsFaulted,server.Exception?.ToString());StringAssert.StartsWith("POST /ready ",first);Assert.AreEqual("Authorization: Bearer fixture-token",authorization);
+            yield return new WaitForSecondsRealtime(.65f);
+            Assert.False(listener.Pending(),"Game must not poll /status after readiness.");Assert.IsNull(menu.ScreenRoot.Q("main-update-panel"));Assert.True(menu.ScreenRoot.Q<Button>("main-play").enabledSelf);
+            Assert.False(menu.ScreenRoot.Query<Label>().ToList().Exists(l=>l.text.Contains("99.0")||l.text.IndexOf("обновлен",StringComparison.OrdinalIgnoreCase)>=0));
+        }finally{listener.Stop();UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",saved);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_TOKEN",savedToken);}
     }
 
     [UnityTest] public IEnumerator HistoryLoadsFromSettingsAndRestoresSettingsFocus()
@@ -208,36 +152,5 @@ public sealed class NativeMainMenuTests
         finally {listener.Stop();if(target){go.GetComponent<UIDocument>().panelSettings.targetTexture=null;target.Release();UnityEngine.Object.Destroy(target);}UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",saved);}
     }
 
-    [UnityTest] public IEnumerator StatusFailuresStopSpinnerAndRecoverAutomatically()
-    {
-        var saved=Environment.GetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT");Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",null);
-        var go=new GameObject("status recovery test");var menu=go.AddComponent<NativeMainMenu>();yield return null;
-        var listener=new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);listener.Start();
-        var server=System.Threading.Tasks.Task.Run(()=>{
-            foreach(var body in new[]{"unavailable","invalid JSON","{\"state\":\"current\",\"version\":\"test\"}"})
-            using(var client=listener.AcceptTcpClient())using(var stream=client.GetStream()){
-                var reader=new System.IO.StreamReader(stream);while(!string.IsNullOrEmpty(reader.ReadLine())){}
-                var bytes=System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 "+(body=="unavailable"?"503 Unavailable":"200 OK")+"\r\nContent-Length: "+body.Length+"\r\nConnection: close\r\n\r\n"+body);stream.Write(bytes,0,bytes.Length);
-            }
-        });
-        try
-        {
-            var type=typeof(NativeMainMenu);var stateType=type.GetNestedType("UpdateState",BindingFlags.NonPublic);var value=Activator.CreateInstance(stateType,true);
-            stateType.GetField("state").SetValue(value,"checking");type.GetField("current",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,value);
-            type.GetField("endpoint",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,"http://127.0.0.1:"+((System.Net.IPEndPoint)listener.LocalEndpoint).Port);
-            type.GetField("token",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(menu,"fixture-token");
-            var show=type.GetMethod("ShowStatus",BindingFlags.Instance|BindingFlags.NonPublic);show.Invoke(menu,null);
-            for(int i=0;i<3;i++)
-            {
-                // Invoke Request with a null callback; inspect/recover status through ShowStatus.
-                yield return (IEnumerator)type.GetMethod("Request",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(menu,new object[]{"/status","GET",null});
-                show.Invoke(menu,null);
-                Assert.AreEqual(DisplayStyle.Flex,menu.ScreenRoot.Q("main-update-panel").style.display.value,"Errors and ongoing checks remain visible");
-                if(i<2){StringAssert.Contains("Не удалось",menu.ScreenRoot.Q<Label>("main-update-status").text);Assert.AreEqual(DisplayStyle.None,menu.ScreenRoot.Q("main-update-spinner").style.display.value);}
-                else{StringAssert.Contains("Проверяем",menu.ScreenRoot.Q<Label>("main-update-status").text);Assert.AreEqual(DisplayStyle.Flex,menu.ScreenRoot.Q("main-update-spinner").style.display.value);}
-            }
-        }
-        finally{listener.Stop();UnityEngine.Object.DestroyImmediate(go);Environment.SetEnvironmentVariable("SPACEWARS_UPDATE_ENDPOINT",saved);}
-    }
 
 }

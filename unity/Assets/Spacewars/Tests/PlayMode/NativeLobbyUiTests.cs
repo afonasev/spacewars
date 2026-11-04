@@ -485,7 +485,7 @@ public sealed class NativeLobbyUiTests
         Assert.GreaterOrEqual(lobby.Q<Label>("lobby-mode-reason").worldBound.yMin,bind.worldBound.yMax-.5f,"Mode explanation must not overlap the participant toolbar");
         }
     }
-    [UnityTest] public IEnumerator InstalledMenuOpensLobbyAndRetainsUpdateOnReturn()
+    [UnityTest] public IEnumerator InstalledMenuOpensLobbyWithoutUpdaterOnReturn()
     {
         typeof(PlayableBootstrap).GetField("nativeMainMenuEnabled",Flags).SetValue(app,true);
         Call("ShowMainMenu");yield return null;
@@ -493,14 +493,14 @@ public sealed class NativeLobbyUiTests
         try
         {
             Assert.IsNull(Get<Spacewars.Runtime.PlayableRuntime>("runtime"));
-            Assert.IsNotNull(menu.ScreenRoot.Query<Button>().ToList().Single(b=>b.text=="Обновить"));
-            yield return (IEnumerator)typeof(NativeMainMenu).GetMethod("EnterGame",Flags).Invoke(menu,null);
+            Assert.IsNull(menu.ScreenRoot.Q("main-update-panel"));Assert.False(menu.ScreenRoot.Query<Button>().ToList().Any(b=>b.text=="Обновить"));
+            menu.Navigation.ActivateElement(menu.ScreenRoot.Q<Button>("main-play"));
             yield return null;
             Assert.AreEqual(DisplayStyle.Flex,Get<VisualElement>("lobbyScreen").style.display.value);
             Assert.IsNull(Get<Spacewars.Runtime.PlayableRuntime>("runtime"));
             Call("ShowMainMenu");yield return null;
             menu=Get<NativeMainMenu>("nativeMainMenu");
-            Assert.IsNotNull(menu.ScreenRoot.Query<Button>().ToList().Single(b=>b.text=="Обновить"));
+            Assert.IsNull(menu.ScreenRoot.Q("main-update-panel"));Assert.False(menu.ScreenRoot.Query<Button>().ToList().Any(b=>b.text=="Обновить"));
         }
         finally{if(menu!=null)UnityEngine.Object.DestroyImmediate(menu.gameObject);}
     }

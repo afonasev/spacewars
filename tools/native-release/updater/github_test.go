@@ -82,7 +82,7 @@ func TestPackageRoundtripWholeHashAndLegacyBootstrap(t *testing.T) {
 	publicKey = base64.StdEncoding.EncodeToString(pub)
 	os.WriteFile(keyFile, []byte(base64.StdEncoding.EncodeToString(key)), 0600)
 	os.WriteFile(filepath.Join(input, "Player.exe"), []byte("working game"), 0755)
-	if e := pack([]string{input, out, keyFile, "windows-x64", "Player.exe", "1.0.1", "2", "abc", "test"}); e != nil {
+	if e := pack([]string{input, out, keyFile, "windows-x64", "Player.exe", "1.0.1", "2", "abc", "test", "2026-11-04"}); e != nil {
 		t.Fatal(e)
 	}
 	raw := filepath.Join(out, "github", "Spacewars-1.0.1-windows-x64.json")
@@ -93,7 +93,7 @@ func TestPackageRoundtripWholeHashAndLegacyBootstrap(t *testing.T) {
 	// The original schema1 reader ignores optional transport while retaining trusted signature/files.
 	b, _ := os.ReadFile(raw)
 	m, e := verifyEnvelope(b, "windows-x64")
-	if e != nil || m.Schema != 1 {
+	if e != nil || m.Schema != 1 || m.ReleaseDate != "2026-11-04" {
 		t.Fatal("legacy schema broken", e)
 	}
 	os.WriteFile(packPath, []byte("not the game"), 0644)

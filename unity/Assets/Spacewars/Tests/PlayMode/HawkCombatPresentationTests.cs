@@ -4,6 +4,8 @@ using System.Collections;
 using UnityEngine.TestTools;
 using NUnit.Framework;
 using Spacewars.Presentation;
+using Spacewars.Runtime;
+using System.Reflection;
 using Spacewars.Simulation;
 using UnityEngine;
 public sealed class HawkCombatPresentationTests
@@ -12,6 +14,39 @@ public sealed class HawkCombatPresentationTests
     [SetUp] public void Setup(){p=PlayableProfile.Default;host=new GameObject("Hawk combat presentation");world=new PlayableWorld(host.transform,p,staged:true);}
     [TearDown] public void Cleanup(){world.Dispose();UnityEngine.Object.DestroyImmediate(host);}
     PlayableSnapshot Frame(long tick,PlayableSoundEvent[] events)=>new PlayableSnapshot(p.ProfileId,p.Revision,1,7,1,tick,RuntimeStatus.Running,false,PlayableMatchOutcome.Playing,0,null,Array.Empty<PlayableEntitySnapshot>(),Array.Empty<PlayableBuildingSnapshot>(),Array.Empty<PlayableProjectileSnapshot>(),new PlayableRuntimeMetrics(0,0,0,0,0),null,sounds:events,wrecks:events.Where(e=>e.Kind==PlayableSoundKind.Destroyed&&e.Weapon==PlayableEntityKind.Hawk).Select(e=>new PlayableWreckSnapshot(e.UnitId,e.Owner??PlayableOwner.Enemy,e.Weapon,e.Position,e.HullHeading,p.HawkRadius,e.Altitude,0,1,e.Tick,-1,e.Tick,e.Tick+60,e.Tick+60)).Where(w=>tick<w.ExpireTick).ToArray());
+    [UnityTest] public IEnumerator BrakingYawReachesPresentedAimBeforeFirstSalvo()
+    {
+        const BindingFlags hidden=BindingFlags.Instance|BindingFlags.NonPublic;
+        var domain=new PlayableDomain(p,811,false);
+        object Call(string method,params object[] args)=>typeof(PlayableDomain).GetMethod(method,hidden).Invoke(domain,args);
+        PlayableSnapshot View()=>domain.Snapshot(1,RuntimeStatus.Running,false,new PlayableRuntimeMetrics(0,0,0,0,0),null,7);
+        try
+        {
+            var units=(IDictionary)typeof(PlayableDomain).GetField("units",hidden).GetValue(domain);
+            foreach(int id in units.Keys.Cast<int>().ToArray()){domain.Navigation.Remove(id);units.Remove(id);}
+            int a=(int)Call("SpawnUnit",new NavPoint(-10,15),PlayableOwner.Player,PlayableEntityKind.Hawk);
+            int b=(int)Call("SpawnUnit",new NavPoint(-3,15),PlayableOwner.Enemy,PlayableEntityKind.Hawk);
+            var unit=units[a];var air=unit.GetType().GetField("Air").GetValue(unit);var actor=(NavUnit)air.GetType().GetField("Actor").GetValue(air);
+            typeof(NavUnit).GetProperty("Heading").SetValue(actor,-1.5);air.GetType().GetField("YawVelocity").SetValue(air,p.HawkYawSpeed);
+            air.GetType().GetField("Velocity").SetValue(air,new NavPoint(p.HawkSpeed,0));unit.GetType().GetField("Velocity").SetValue(unit,new NavPoint(p.HawkSpeed,0));
+            units[b].GetType().GetField("Reload").SetValue(units[b],1000d);Call("RefreshVision");
+            Assert.AreEqual(PlayableCommandStatus.Applied,domain.Apply(new PlayableCommand(811,1,"player-1",PlayableCommandKind.Attack,new[]{a},targetId:b),out _));
+            var rendered=world.Tank(a,true,PlayableEntityKind.Hawk);bool fired=false;int reversals=0,lastSign=1;double first=-1;
+            for(int tick=1;tick<=180;tick++)
+            {
+                domain.Step(1d/30);var view=View();var entity=view.Entities.Single(e=>e.Id==a);world.AdvanceAircraftAnimation(view,tick/30d);world.UpdateAircraft(rendered,entity,view);
+                double yaw=(double)air.GetType().GetField("YawVelocity").GetValue(air);
+                if(Math.Abs(yaw)>.01){int sign=Math.Sign(yaw);if(sign!=lastSign)reversals++;lastSign=sign;}
+                var expected=Quaternion.Euler((float)entity.Pitch,90-(float)entity.HullHeading*Mathf.Rad2Deg,(float)entity.Roll);
+                Assert.Less(Quaternion.Angle(expected,rendered.Hull.localRotation),.01f,"Presentation follows authoritative body pose");
+                if((int)unit.GetType().GetField("BurstSequence").GetValue(unit)>0){fired=true;first=tick/30d;break;}
+                if(tick%15==0)yield return null;
+            }
+            TestContext.WriteLine($"HAWK_PLAYMODE firstLaunch={first:R} reversals={reversals}");
+            Assert.True(fired);Assert.Zero(reversals);Assert.GreaterOrEqual(first,p.HawkPreparationSeconds);Assert.LessOrEqual(first,p.HawkPreparationSeconds+1.1);
+        }
+        finally{domain.Navigation.ReleaseCommittedHostRoot();domain.DestroyOwnedNavigation();}
+    }
     [Test] public void HawkUpgradeAndShotArticulationPreserveSocketsAndFreezeAtSameTime()
     {
         var a=world.Tank(3,true,PlayableEntityKind.Hawk);

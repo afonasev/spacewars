@@ -116,7 +116,7 @@ namespace Spacewars.Runtime
             }
         internal static BallisticPoint ReadBallisticPoint(BinaryReader r)=>new BallisticPoint(Number(r),Number(r),Number(r));
 
-        internal static void Write(BinaryWriter w,NavObstacle o){w.Write(o.CircleRadius>0?1:o.Polygon!=null?2:0);
+        internal static void Write(BinaryWriter w,NavObstacle o){w.Write(o.CircleRadius>0&&o.PhysicalLayer>=0?3:o.CircleRadius>0?1:o.Polygon!=null?2:0);if(o.PhysicalLayer>=0)w.Write(o.PhysicalLayer);
             Number(w,o.MinX);
             Number(w,o.MinZ);
             Number(w,o.MaxX);
@@ -129,13 +129,13 @@ namespace Spacewars.Runtime
             }
         private static void WriteObstacleView(BinaryWriter w,System.Collections.Generic.IReadOnlyList<NavObstacle> values)
         {w.Write(values.Count);for(int i=0;i<values.Count;i++)Write(w,values[i]);}
-        internal static NavObstacle ReadObstacle(BinaryReader r){int kind=r.ReadInt32();
+        internal static NavObstacle ReadObstacle(BinaryReader r){int kind=r.ReadInt32();int layer=kind==3?r.ReadInt32():-1;if(layer< -1)throw new ArgumentException("Invalid obstacle layer.");
             double minX=Number(r),minZ=Number(r),maxX=Number(r),maxZ=Number(r),radius=Number(r),bottom=Number(r),top=Boolean(r)?double.NaN:Number(r);
             if(minX>maxX||minZ>maxZ)throw new ArgumentException("Invalid obstacle.");
             if(kind==0){if(radius!=0||bottom!=0||!double.IsNaN(top))throw new ArgumentException("Invalid box tags.");
             return new NavObstacle(minX,minZ,maxX,maxZ);
-            }if(kind==1){if(bottom!=0||!double.IsNaN(top))throw new ArgumentException("Invalid circle tags.");
-            return NavObstacle.RestoreCircle(minX,minZ,maxX,maxZ,radius);
+            }if(kind==1||kind==3){if(bottom!=0||!double.IsNaN(top))throw new ArgumentException("Invalid circle tags.");
+            return NavObstacle.RestoreCircle(minX,minZ,maxX,maxZ,radius,layer);
             }if(kind!=2||radius!=0)throw new ArgumentException("Invalid obstacle tag.");
             var points=Array(r,()=>ReadPoint(r));
             var transaction=(r as NavigationAdmittedReader)?.Transaction;

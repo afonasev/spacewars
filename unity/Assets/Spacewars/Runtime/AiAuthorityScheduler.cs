@@ -79,6 +79,10 @@ namespace Spacewars.Runtime
         internal void Review(PlayableDomain domain,long sequence,RuntimeStatus status,bool paused,PlayableRuntimeMetrics metrics,int seed,Func<string,long> human)
         {
             using var measured=PerformanceProfile.Measure(ProfileStage.Ai);
+            // Human-only matches have no publications, assignments or pending
+            // reviews. Avoid constructing a default AI profile and empty team
+            // board on every authority tick (including paused publications).
+            if(owners.Length==0)return;
             bool hadReview=reviewWork!=null;
             CompleteReview(domain,human,paused);
             // A result settling after delivery must leave the next delivery phase

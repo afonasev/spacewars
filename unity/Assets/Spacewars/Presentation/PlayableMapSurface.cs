@@ -277,7 +277,6 @@ namespace Spacewars.Presentation
                 }
                 painter.strokeColor=new Color(.06f,.10f,.13f);painter.lineWidth=.8f;
                 if(m.State==MapMarkState.Construction){painter.BeginPath();painter.MoveTo(p+new Vector2(-radius,radius));painter.LineTo(p+new Vector2(radius,-radius));painter.Stroke();}
-                if(m.Start>0)ctx.DrawText(m.Start.ToString(),p-new Vector2(radius/2,radius),radius*1.6f,new Color(.08f,.13f,.14f),null);
             }
             foreach(var building in rallyBuildings)
             {

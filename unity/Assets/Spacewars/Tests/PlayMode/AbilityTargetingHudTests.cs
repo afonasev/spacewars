@@ -13,6 +13,30 @@ namespace Spacewars.Input.Tests
 {
     public sealed partial class OrdinaryLocalPadTests
     {
+        [UnityTest] public IEnumerator MouseAbilityHintsStayStableWithoutGamepad()
+        {
+            yield return StartOrdinary(1,configureRoster:d=>d.Participants[0].DeviceId=0);
+            foreach(var pad in UnityEngine.InputSystem.Gamepad.all.ToArray())UnityEngine.InputSystem.InputSystem.RemoveDevice(pad);
+            Assert.Zero(UnityEngine.InputSystem.Gamepad.all.Count,"Mouse scenario has no gamepad, including virtual devices.");
+            var seat=Seats[0];
+            Put(seat,"provingGround",new ProvingGroundSetup(Get<PlayableProfile>(seat,"profile")));
+            foreach(int ability in new[]{1,2,OrbitalAbilities.SystemFailure,OrbitalAbilities.ControlHack}){
+                Call(seat,"BeginOrbitalTarget",false,ability);Call(seat,"UpdateAbilityTargetingHud");
+                var root=Get<VisualElement>(seat,"root");var controls=root.Q("ability-target-controls");
+                Assert.AreEqual(DisplayStyle.Flex,controls.style.display.value);
+                var glyphs=controls.Query<NativeControllerGlyph>().ToList();Assert.AreEqual(2,glyphs.Count);
+                for(int frame=0;frame<3;frame++){
+                    // This is the same Refresh invoked by each badge's recurring 80 ms job.
+                    foreach(var glyph in glyphs)glyph.Refresh(null);
+                    yield return new WaitForSecondsRealtime(.1f);
+                    StringAssert.StartsWith("ЛКМ — ",root.Q<Label>("ability-target-apply").text);
+                    Assert.AreEqual("ПКМ — отменить",root.Q<Label>("ability-target-cancel").text);
+                    foreach(var glyph in glyphs)Assert.AreEqual(DisplayStyle.None,glyph.style.display.value,"Scheduled badge refresh must retain mouse visibility.");
+                }
+                Call(seat,"CancelScanTarget");
+            }
+            Runtime.RequestStop();yield return Wait(()=>Runtime.IsStopped,"mouse targeting stop");
+        }
         [UnityTest] public IEnumerator AbilityTargetingSingleViewport()=>AbilityTargetingLayout(1);
         [UnityTest] public IEnumerator AbilityTargetingFourViewports()=>AbilityTargetingLayout(4);
         private IEnumerator AbilityTargetingLayout(int count)

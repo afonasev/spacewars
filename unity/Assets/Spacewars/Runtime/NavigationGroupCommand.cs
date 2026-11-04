@@ -141,11 +141,13 @@ namespace Spacewars.Runtime
         internal bool CommandAdmissionDiagnosticsForQa;
         private long admissionDiagnosticSequence;
         private string admissionDiagnosticForQa;
+        internal string LastCommandAdmissionRefusal{get;private set;}
         internal void BeginCommandAdmissionForQa(long sequence)
-        { if(!CommandAdmissionDiagnosticsForQa)return;admissionDiagnosticSequence=sequence;admissionDiagnosticForQa=null; }
+        { LastCommandAdmissionRefusal=null;if(!CommandAdmissionDiagnosticsForQa)return;admissionDiagnosticSequence=sequence;admissionDiagnosticForQa=null; }
         internal string CommandAdmissionForQa(long sequence)=>CommandAdmissionDiagnosticsForQa&&sequence==admissionDiagnosticSequence?admissionDiagnosticForQa:null;
         internal void RefuseCommandAdmissionForQa(string reason,NavigationHostRoot before=null,int token=-1,NavigationGroupCommand candidate=null,NavigationRetentionBudget.Scope scope=null)
         {
+            LastCommandAdmissionRefusal=reason;
             if(!CommandAdmissionDiagnosticsForQa)return;
             using(EnterTransport()){
                 var current=committedHostRoot;
@@ -892,7 +894,7 @@ namespace Spacewars.Runtime
                 for(int i=0;i<ids.Length;i++)if(ids[i]!=(candidate.MetadataRecipients==null?candidate.Actors[i].Id:candidate.MetadataRecipients[i]))throw new InvalidOperationException("Prepared tactical recipients changed.");
                 payload.ValidateBeforeGate();candidate.RequireEdge(payload);payload.Retain();candidate.DomainCommit=payload;
                 if(candidate.IsStop)PublishPreparedStop(candidate,scope);else PublishPreparedGroup(candidate,scope,candidate.MetadataRecipients);
-            }catch(Exception error){if(payload.Phase==PlayableDomain.TacticalCommitPhase.NotCommitted&&NavigationCommandRefused.IsExpected(error,scope)){payload.Refusal=NavigationCommandRefused.Expected(error,scope);if(CommandAdmissionDiagnosticsForQa)refusalForQa="tactical-final:"+payload.Refusal.Reason+":"+payload.Refusal.Message;refused=true;}else failure=error;}
+            }catch(Exception error){if(payload.Phase==PlayableDomain.TacticalCommitPhase.NotCommitted&&NavigationCommandRefused.IsExpected(error,scope)){payload.Refusal=NavigationCommandRefused.Expected(error,scope);refusalForQa="tactical-final:"+payload.Refusal.Reason+":"+payload.Refusal.Message;refused=true;}else failure=error;}
             finally{
                 using(EnterTransport()){if(ReferenceEquals(preparedCommandGroup,candidate)){preparedCommandGroup=null;preparedCommandScope=null;commandGroup=null;commandActivationRevision=0;}}
                 try{scope.Dispose();}catch(Exception error){if(failure==null)failure=error;else PlayableDomain.PreserveTacticalSecondary(failure,error);}

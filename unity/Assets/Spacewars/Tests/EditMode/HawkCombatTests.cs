@@ -142,6 +142,75 @@ namespace Spacewars.Tests.EditMode
             Assert.AreEqual(2,launches);Assert.GreaterOrEqual(first,upgraded?p.HawkUpgradedPreparationSeconds:p.HawkPreparationSeconds);
             Assert.Greater(second,first);Assert.Greater(damage,first);Assert.Less(damage,10);
         }
+        [TestCase(false,1)] [TestCase(false,-1)] [TestCase(true,1)] [TestCase(true,-1)]
+        public void BrakingTurnSettlesWithoutReversalAndPreservesFirstSalvoPreparation(bool upgraded,int direction)
+        {
+            if(upgraded)CompleteSalvoResearch();
+            const double dt=1d/30;
+            int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);Set(b,"Reload",1000d);Tick();Set(a,"StoppedSeconds",0d);
+            var air=Get<object>(a,"Air");var actor=(NavUnit)Read(air,"Actor");
+            actor.Heading=-direction*1.5;Write(air,"YawVelocity",direction*p.HawkYawSpeed);
+            Write(air,"Velocity",new NavPoint(p.HawkSpeed,0));Set(a,"Velocity",new NavPoint(p.HawkSpeed,0));
+            Send(PlayableCommandKind.Attack,a,target:b);
+            double preparation=upgraded?p.HawkUpgradedPreparationSeconds:p.HawkPreparationSeconds;
+            double first=-1,readySince=-1,lastRate=direction*p.HawkYawSpeed,lastHeading=actor.Heading,travel=0;int reversals=0,lastSign=direction;
+            for(int tick=1;tick<=180;tick++)
+            {
+                Tick();double time=tick*dt,rate=(double)Read(air,"YawVelocity");
+                double step=Math.Atan2(Math.Sin(actor.Heading-lastHeading),Math.Cos(actor.Heading-lastHeading));travel+=Math.Abs(step);lastHeading=actor.Heading;
+                Assert.LessOrEqual(Math.Abs(rate-lastRate),p.HawkYawAcceleration*dt+1e-9,"Angular acceleration remains bounded");
+                Assert.LessOrEqual(Math.Abs(rate),p.HawkYawSpeed+1e-9);lastRate=rate;
+                if(Math.Abs(rate)>.01){int sign=Math.Sign(rate);if(sign!=lastSign)reversals++;lastSign=sign;}
+                var velocity=Get<NavPoint>(a,"Velocity");bool ready=Math.Abs(velocity.X)<=1e-5&&Math.Abs(velocity.Z)<=1e-5&&!actor.Moving&&Math.Abs(rate)<=p.HawkPreparationYawSpeed;
+                if(!ready)readySince=-1;else if(readySince<0)readySince=time-dt;
+                if(Get<int>(a,"BurstSequence")>0)
+                {
+                    first=time;
+                    Assert.True(ready);Assert.GreaterOrEqual(Get<double>(a,"StoppedSeconds"),preparation);
+                    double aim=Math.Atan2(Entity(b).Position.Z-actor.Position.Z,Entity(b).Position.X-actor.Position.X);
+                    Assert.LessOrEqual(Math.Abs(Math.Atan2(Math.Sin(aim-actor.Heading),Math.Cos(aim-actor.Heading))),p.HawkAimTolerance);
+                    Assert.GreaterOrEqual(first-readySince,preparation-1e-9,"Full continuous preparation before launch");
+                    break;
+                }
+            }
+            TestContext.WriteLine($"HAWK_BRAKING_SALVO upgraded={upgraded} direction={direction} firstLaunch={first:R} continuousReadySince={readySince:R} reversals={reversals} yawTravel={travel:R}");
+            Assert.Greater(first,0,"First rocket within fixed six-second horizon");
+            Assert.Zero(reversals,"A reachable stationary heading must not cause left/right nose oscillation");
+            Assert.LessOrEqual(first,preparation+1.1,"Braking and alignment overhead must stay bounded without shortening preparation");
+        }
+        [TestCase(false)] [TestCase(true)]
+        public void FirstSalvoStillRequiresAccuracyAndLowYawSpeed(bool upgraded)
+        {
+            if(upgraded)CompleteSalvoResearch();
+            int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);Set(b,"Reload",1000d);Tick();Set(a,"StoppedSeconds",0d);
+            var air=Get<object>(a,"Air");var actor=(NavUnit)Read(air,"Actor");Send(PlayableCommandKind.Attack,a,target:b);
+            double preparation=upgraded?p.HawkUpgradedPreparationSeconds:p.HawkPreparationSeconds;
+            Set(a,"StoppedSeconds",preparation+1);Write(air,"YawVelocity",p.HawkPreparationYawSpeed+.01);Call("AdvanceHawkCombat",Unit(a),1d/30);
+            Assert.Zero(Get<int>(a,"BurstSequence"));Assert.Zero(Get<double>(a,"StoppedSeconds"),"Turning still resets preparation");
+            Write(air,"YawVelocity",0d);actor.Heading=p.HawkAimTolerance+.01;Set(a,"StoppedSeconds",preparation+1);Call("AdvanceHawkCombat",Unit(a),1d/30);
+            Assert.Zero(Get<int>(a,"BurstSequence"),"Prepared but inaccurate aircraft still cannot fire");
+            actor.Heading=0;Set(a,"StoppedSeconds",0d);
+            int ticks=(int)Math.Ceiling(preparation*30);
+            for(int i=0;i<ticks-1;i++)Call("AdvanceHawkCombat",Unit(a),1d/30);
+            Assert.Zero(Get<int>(a,"BurstSequence"),"Alignment does not bypass preparation");
+            Call("AdvanceHawkCombat",Unit(a),1d/30);Call("AdvanceHawkCombat",Unit(a),1d/30);
+            Assert.AreEqual(1,Get<int>(a,"BurstSequence"));
+        }
+        [Test] public void CurrentFormatContinuesExactlyWhileYawIsBraking()
+        {
+            int a=Spawn(PlayableOwner.Player,PlayableEntityKind.Hawk,-10,15),b=Spawn(PlayableOwner.Enemy,PlayableEntityKind.Hawk,-3,15);Set(b,"Reload",1000d);Tick();Set(a,"StoppedSeconds",0d);
+            var air=Get<object>(a,"Air");var actor=(NavUnit)Read(air,"Actor");actor.Heading=-1.5;Write(air,"YawVelocity",p.HawkYawSpeed);
+            Send(PlayableCommandKind.Attack,a,target:b);Tick(8);
+            Assert.That(Math.Abs((double)Read(air,"YawVelocity")),Is.GreaterThan(0).And.LessThan(p.HawkYawSpeed));
+            var bytes=d.CaptureWorldBytes(7,"hawk-yaw-braking");var restored=PlayableDomain.RestoreWorldBytes(bytes,p,7,"hawk-yaw-braking");
+            try
+            {
+                CollectionAssert.AreEqual(bytes,restored.CaptureWorldBytes(7,"hawk-yaw-braking"));
+                for(int i=0;i<150;i++){d.Step(1d/30);restored.Step(1d/30);}
+                CollectionAssert.AreEqual(d.CaptureWorldBytes(7,"hawk-yaw-braking"),restored.CaptureWorldBytes(7,"hawk-yaw-braking"));
+            }
+            finally{restored.Navigation.ReleaseCommittedHostRoot();restored.DestroyOwnedNavigation();}
+        }
         void CompleteSalvoResearch()
         {
             Call("AddCredits",PlayableOwner.Player,10000d);

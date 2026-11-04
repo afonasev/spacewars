@@ -75,7 +75,7 @@ class UnityLauncherForwardingTests(unittest.TestCase):
         command = self.invoke_with_fake_runner(['shared', '-noaudio', '-muted', '-batchmode'])
         editor_argv = command[command.index('--') + 1:]
         self.assertEqual('/fake/Unity', editor_argv[0])
-        self.assertEqual(['-noaudio', '-muted', '-batchmode'], editor_argv[editor_argv.index('-noaudio'):])
+        self.assertEqual(['-noaudio', '-muted', '-batchmode', '--burst-force-sync-compilation'], editor_argv[editor_argv.index('-noaudio'):])
 
     def test_player_launcher_forwards_both_silent_parameters(self):
         command = self.invoke_with_fake_runner(['player', '/fake/Spacewars', '-noaudio', '-muted'])

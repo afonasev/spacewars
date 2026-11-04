@@ -10,20 +10,20 @@ namespace Spacewars.Simulation
         internal static void Write(NavPhysicalBodyWriter writer,NavObstacle value)
         {
             writer.Output.Write(value.MinX);writer.Output.Write(value.MinZ);writer.Output.Write(value.MaxX);writer.Output.Write(value.MaxZ);
-            writer.Output.Write(value.CircleRadius);writer.Output.Write(value.Bottom);writer.Output.Write(value.Top);writer.Edge(value.Polygon?.StorageRoot);
+            writer.Output.Write(value.PhysicalLayer);writer.Output.Write(value.CircleRadius);writer.Output.Write(value.Bottom);writer.Output.Write(value.Top);writer.Edge(value.Polygon?.StorageRoot);
             if(value.Polygon!=null&&value.Polygon.StorageRoot==null)throw new ArgumentException("Unowned physical polygon payload.");
         }
         internal static NavObstacle Read(NavPhysicalBodyReader reader)
         {
-            double minX=Number(reader),minZ=Number(reader),maxX=Number(reader),maxZ=Number(reader),radius=Number(reader),bottom=Number(reader),top=reader.Input.ReadDouble();
-            if(double.IsInfinity(top)||minX>maxX||minZ>maxZ)throw new ArgumentException("Invalid physical obstacle bounds.");
+            double minX=Number(reader),minZ=Number(reader),maxX=Number(reader),maxZ=Number(reader),radius=0,bottom=0,top=0;int layer=reader.Input.ReadInt32();radius=Number(reader);bottom=Number(reader);top=reader.Input.ReadDouble();
+            if(layer< -1||double.IsInfinity(top)||minX>maxX||minZ>maxZ)throw new ArgumentException("Invalid physical obstacle bounds.");
             var root=reader.Edge<NavPolygon.OwnedBuffers>();
             if(root!=null){
-                var polygon=root.Facade;if(polygon==null||radius!=0||minX!=polygon.MinX||minZ!=polygon.MinZ||maxX!=polygon.MaxX||maxZ!=polygon.MaxZ)throw new ArgumentException("Physical polygon bounds contradiction.");
+                var polygon=root.Facade;if(layer!=-1||polygon==null||radius!=0||minX!=polygon.MinX||minZ!=polygon.MinZ||maxX!=polygon.MaxX||maxZ!=polygon.MaxZ)throw new ArgumentException("Physical polygon bounds contradiction.");
                 return new NavObstacle(polygon,bottom,top);
             }
             if(bottom!=0||!double.IsNaN(top)||radius<0)throw new ArgumentException("Invalid physical obstacle shape tags.");
-            return radius==0?new NavObstacle(minX,minZ,maxX,maxZ):NavObstacle.RestoreCircle(minX,minZ,maxX,maxZ,radius);
+            if(radius==0&&layer!=-1)throw new ArgumentException("Layered box is not a wreck.");return radius==0?new NavObstacle(minX,minZ,maxX,maxZ):NavObstacle.RestoreCircle(minX,minZ,maxX,maxZ,radius,layer);
         }
     }
     public sealed partial class NavPolygon

@@ -101,6 +101,20 @@ namespace Spacewars.Simulation
         private readonly Dictionary<int,double> preferredMaxSpeed;
         private NavPreparedCrowdStep preparedStep;
         public NavCrowd(NavGeometry geometry, NavigationProfile profile,IPlayableTerrain terrain=null) { if (geometry == null || profile == null) throw new ArgumentNullException(); this.terrain=terrain;this.geometry = geometry; this.profile = profile;units=new Dictionary<int,NavUnit>();orderedUnits=new List<NavUnit>();preferredMaxSpeed=new Dictionary<int,double>();unitView=orderedUnits.AsReadOnly(); }
+        internal int PhysicalLayer(NavLocation location)
+        {
+            if(!(terrain is ILayeredPlayableTerrain layered))return -1;
+            for(int i=0;i<layered.LayeredNavigation.Surfaces.Count;i++)if(layered.LayeredNavigation.Surfaces[i].Id==location.SurfaceId)return i;
+            return -1;
+        }
+        private bool PhysicalSweep(NavLocation from,NavPoint to,double radius)
+        {
+            int layer=PhysicalLayer(from);
+            // A sweep crossing a portal uses the conservative all-layer check.
+            // Single-layer certificates never authorize skipping a destination blocker.
+            if(layer>=0&&(!terrain.TryTraverse(from,to,radius,out var reached)||reached.SurfaceId!=from.SurfaceId))layer=-1;
+            return geometry.SegmentFree(from.Position,to,radius,layer);
+        }
         internal NavGeometry Geometry=>geometry;
         internal NavigationProfile Profile=>profile;
         internal long MotionMembership=>nextIncarnation;
@@ -154,7 +168,7 @@ namespace Spacewars.Simulation
             var seen=new HashSet<int>();
             foreach(var u in state.Units)if(u==null||!seen.Add(u.Id)||u.Route==null||u.LocalRoute==null||
                 u.RouteIndex<0||u.RouteIndex>u.Route.Length||u.LocalIndex<0||u.LocalIndex>u.LocalRoute.Length||
-                !ValidReverse(u.ReverseDistance,u.ReverseSpeedRatio,u.ReverseConeRadians)||u.NoProgressTicks<0||u.BlockedSeconds<0||!geometry.IsFree(u.Position,u.Radius)||
+                !ValidReverse(u.ReverseDistance,u.ReverseSpeedRatio,u.ReverseConeRadians)||u.NoProgressTicks<0||u.BlockedSeconds<0||!geometry.IsFree(u.Position,u.Radius,PhysicalLayer(u.Location??new NavLocation(u.Position,NavLocation.FlatSurface)))||
                 u.Radius<=0||u.Speed<=0||u.TurnSpeed<=0||double.IsNaN(u.Heading+u.Speed+u.TurnSpeed+u.BlockedSeconds))
                 throw new ArgumentException("Invalid crowd unit save.",nameof(state));
             if(state.MaximumRadius<0||double.IsNaN(state.MaximumRadius)||double.IsInfinity(state.MaximumRadius)||System.Linq.Enumerable.Any(state.Units,u=>u.Radius>state.MaximumRadius)||state.NextIncarnation<0||state.RepairCount<0||state.RepairFailed<0||state.MaxNoProgressTicks<0||System.Linq.Enumerable.Any(state.Units,u=>u.Incarnation<1||u.Incarnation>state.NextIncarnation||u.MobilityRevision<0||!Enum.IsDefined(typeof(NavigationOutcome),u.Outcome)||u.Held&&u.Moving))throw new ArgumentException("Invalid crowd allocator/counters.");
@@ -251,7 +265,7 @@ namespace Spacewars.Simulation
         internal bool ValidatePhysicalTypedRoute(NavUnit unit,NavLocation start,NavPoint goal,NavTypedRoute route,NavLocation? assigned){
             if(!(terrain is StackedRampQualificationMap physical)||route==null||!route.Subscription.Origin.Equals(start)||!unit.Position.Equals(start.Position)||!assigned.HasValue||!route.Subscription.AssignedEndpoint.Equals(assigned.Value)||!assigned.Value.Position.Equals(goal))return false;
             var at=start;foreach(var leg in route.Legs){
-                if(!leg.From.Equals(at)||!physical.IsValidLocation(leg.From,unit.Radius)||!physical.IsValidLocation(leg.To,unit.Radius)||!geometry.SegmentFree(leg.From.Position,leg.To.Position,unit.Radius))return false;
+                if(!leg.From.Equals(at)||!physical.IsValidLocation(leg.From,unit.Radius)||!physical.IsValidLocation(leg.To,unit.Radius)||!PhysicalSweep(leg.From,leg.To.Position,unit.Radius))return false;
                 if(leg.Kind==NavTypedLegKind.Surface){if(!physical.TryTraverse(leg.From,leg.To,unit.Radius,out var end)||!end.Equals(leg.To))return false;}
                 else if(!leg.From.Position.Equals(leg.To.Position)||Math.Abs(physical.Height(leg.From)-physical.Height(leg.To))>1e-9)return false;
                 at=leg.To;
@@ -260,8 +274,8 @@ namespace Spacewars.Simulation
         }
         internal bool ValidateRoute(NavUnit unit,NavPoint position,NavLocation start,NavPoint goal,IReadOnlyList<NavPoint> route,NavLocation? assigned,out NavLocation terminal)
         {
-            terminal=start;if(route==null||route.Count==0||!geometry.IsFree(goal,unit.Radius)||Distance(route[route.Count-1],goal)>1e-4)return false;
-            var previous=position;for(int i=0;i<=route.Count;i++){var point=i==route.Count?goal:route[i];if(!geometry.IsFree(point,unit.Radius)||!geometry.SegmentFree(previous,point,unit.Radius)||!Traverse(terminal,point,unit.Radius,out terminal,unit.Id))return false;previous=point;}
+            terminal=start;if(route==null||route.Count==0||!geometry.IsFree(goal,unit.Radius,PhysicalLayer(unit.GoalLocation??unit.Location))||Distance(route[route.Count-1],goal)>1e-4)return false;
+            var previous=position;for(int i=0;i<=route.Count;i++){var point=i==route.Count?goal:route[i];if(!geometry.IsFree(point,unit.Radius,PhysicalLayer(terminal))||!geometry.SegmentFree(previous,point,unit.Radius,PhysicalLayer(terminal))||!Traverse(terminal,point,unit.Radius,out terminal,unit.Id))return false;previous=point;}
             return !assigned.HasValue||assigned.Value.Position.Equals(goal)&&CompatibleArrival(terminal,assigned.Value,unit.Radius);
         }
         public bool SetRoute(int id,NavPoint goal,NavPoint[] route,NavLocation? assigned=null)
@@ -334,7 +348,7 @@ namespace Spacewars.Simulation
             bool yielding=sampledMotion!=null&&sampledMotion[actor].Yielding;
             // Reject the pure geometric domain before paying for terrain traces.
             if(preparedStep!=null&&(sampledMotion==null||sampledMotion[actor].YieldLabel>=0)&&!(yielding&&sampledMotion[actor].YieldLabel>0)&&!RecastFormationMotion.DirectionalAllows(preparedStep.Formation[actor],preparedStep.RecastRoutes[actor],unit.Position,end))return false;
-            if(!geometry.SegmentFree(unit.Position,end,unit.Radius)||!Traverse(unit.Location,end,unit.Radius,out var moved,unit.Id))return false;
+            if(!PhysicalSweep(unit.Location,end,unit.Radius)||!Traverse(unit.Location,end,unit.Radius,out var moved,unit.Id))return false;
             // Flat Native rows also publish typed physical routes. Their next
             // corner must remain reachable after avoidance, just like terrain rows.
             if(terrain==null&&preparedStep?.RecastRoutes[actor]==null||!(yielding?sampledMotion[actor].OwnMoving:unit.Moving)||unit.Held)return true;
@@ -351,13 +365,13 @@ namespace Spacewars.Simulation
                 var target=preparedStep.Formation[actor].Target;
                 // A temporary lane target cannot discard the accepted route link.
                 // This query remains pure on parallel Select helpers.
-                if(!geometry.SegmentFree(end,target,unit.Radius)||!HeldSegmentFree(unit,end,target)||!Traverse(moved,target,unit.Radius,out _,unit.Id))return false;
+                if(!geometry.SegmentFree(end,target,unit.Radius,PhysicalLayer(moved))||!HeldSegmentFree(unit,end,target)||!Traverse(moved,target,unit.Radius,out _,unit.Id))return false;
                 var hint=preparedStep.Formation[actor];
                 // A recovering bank connector can precede the first currently
                 // reachable motor target. The owner certifies its complete
                 // remaining typed/HOLD prefix+suffix after the helper sweep.
                 if((hint.Flags&(NavFormationFrameHint.Directional|NavFormationFrameHint.Bound))==NavFormationFrameHint.Directional)return true;
-                return global<unit.route.Length&&geometry.SegmentFree(end,unit.route[global],unit.Radius)&&HeldSegmentFree(unit,end,unit.route[global])&&Traverse(moved,unit.route[global],unit.Radius,out _,unit.Id);
+                return global<unit.route.Length&&geometry.SegmentFree(end,unit.route[global],unit.Radius,PhysicalLayer(moved))&&HeldSegmentFree(unit,end,unit.route[global])&&Traverse(moved,unit.route[global],unit.Radius,out _,unit.Id);
             }
             return global>=unit.route.Length||Traverse(moved,unit.route[global],unit.Radius,out _,unit.Id);
         }
@@ -416,7 +430,7 @@ namespace Spacewars.Simulation
                             var hint=preparedStep.Formation[i];bool recovering=(hint.Flags&(NavFormationFrameHint.Directional|NavFormationFrameHint.Bound))==NavFormationFrameHint.Directional;
                             for(int candidate=unit.route.Length-1;candidate>=first;candidate--){
                                 if(recovering&&!RecastFormationMotion.DirectionalAllows(hint,preparedStep.RecastRoutes[i],unit.Position,unit.route[candidate]))continue;
-                                if(!NavRecastIntervals.CanTarget(preparedStep.RecastRoutes[i],preparedStep.RecastStates[i],unit.Location,candidate,preparedStep.Reservation,this,unit.Id)||!geometry.SegmentFree(unit.Position,unit.route[candidate],unit.Radius)||!TerrainClear(unit,unit.Position,unit.route[candidate])||!HeldSegmentFree(unit,unit.Position,unit.route[candidate]))continue;
+                                if(!NavRecastIntervals.CanTarget(preparedStep.RecastRoutes[i],preparedStep.RecastStates[i],unit.Location,candidate,preparedStep.Reservation,this,unit.Id)||!PhysicalSweep(unit.Location,unit.route[candidate],unit.Radius)||!TerrainClear(unit,unit.Position,unit.route[candidate])||!HeldSegmentFree(unit,unit.Position,unit.route[candidate]))continue;
                                 // Publish a motor handoff from this actual physical
                                 // state, never from the bank guide's forecast receipt.
                                 if(recovering&&(!unit.GoalLocation.HasValue||!NavRecastIntervals.TryContinuationRejoin(preparedStep.RecastRoutes[i],preparedStep.RecastStates[i],unit.Location,Array.Empty<NavPoint>(),0,unit.route,candidate,unit.GoalLocation.Value,preparedStep.Reservation,out int same,this,unit.Id,true)||same!=candidate))continue;
@@ -427,7 +441,7 @@ namespace Spacewars.Simulation
                             // certificate or an unreachable result. Keep ordinary
                             // Select/refusal/local repair alive for an around path;
                             // every actual step still needs the owner domain/trace.
-                        }else while(unit.routeIndex+1<unit.route.Length&&geometry.SegmentFree(unit.Position,unit.route[unit.routeIndex+1],unit.Radius)&&TerrainClear(unit,unit.Position,unit.route[unit.routeIndex+1])&&HeldSegmentFree(unit,unit.Position,unit.route[unit.routeIndex+1]))unit.routeIndex++;
+                        }else while(unit.routeIndex+1<unit.route.Length&&PhysicalSweep(unit.Location,unit.route[unit.routeIndex+1],unit.Radius)&&TerrainClear(unit,unit.Position,unit.route[unit.routeIndex+1])&&HeldSegmentFree(unit,unit.Position,unit.route[unit.routeIndex+1]))unit.routeIndex++;
                     }
                     bool local=unit.localIndex<unit.localRoute.Length;target=!active?unit.Position:local?unit.localRoute[unit.localIndex]:unit.route[unit.routeIndex];
                     // Intermediate global corners advance only through the full-sweep
@@ -644,7 +658,7 @@ namespace Spacewars.Simulation
                     // chain translation and receiver displacement below.
                     if(proposals[root].Refuse||!proposals[root].Position.Equals(own.Position)||!proposals[root].Velocity.Equals(default(NavPoint)))continue;
                     double turnStep=Math.Min(own.Speed*dt,Distance(own.Target,own.Position));var turnEnd=new NavPoint(own.Position.X+Math.Cos(heading)*turnStep,own.Position.Z+Math.Sin(heading)*turnStep);
-                    if(!geometry.SegmentFree(own.Position,turnEnd,own.Radius)||!Traverse(unitView[root].Location,turnEnd,own.Radius,out _,unitView[root].Id))continue;
+                    if(!geometry.SegmentFree(own.Position,turnEnd,own.Radius,PhysicalLayer(unitView[root].Location))||!Traverse(unitView[root].Location,turnEnd,own.Radius,out _,unitView[root].Id))continue;
                     bool allyObstruction=false,hardObstruction=false;
                     for(int peer=0;peer<count;peer++){
                         if(peer==root||SegmentPointDistanceSquared(bodies[peer].Position,own.Position,turnEnd)>=(own.Radius+bodies[peer].Radius)*(own.Radius+bodies[peer].Radius)-1e-9)continue;
@@ -671,7 +685,7 @@ namespace Spacewars.Simulation
                 for(int n=0;n<qt;n++)bodies[queue[n]].YieldLabel=group;
                 for(int n=0;n<qt;n++){
                     int row=queue[n];var actor=unitView[row];var end=new NavPoint(bodies[row].Position.X+direction.X*step,bodies[row].Position.Z+direction.Z*step);
-                    if(!geometry.SegmentFree(bodies[row].Position,end,bodies[row].Radius)||!Traverse(actor.Location,end,bodies[row].Radius,out _,actor.Id)||!UnitFreeYield(actor,bodies,bodies[row].Position,end)){clear=false;break;}
+                    if(!geometry.SegmentFree(bodies[row].Position,end,bodies[row].Radius,PhysicalLayer(actor.Location))||!Traverse(actor.Location,end,bodies[row].Radius,out _,actor.Id)||!UnitFreeYield(actor,bodies,bodies[row].Position,end)){clear=false;break;}
                     // Test the ACTUAL cohort displacement before consuming an
                     // independent stationary turn. Its own forward prediction
                     // can be legal while this root's different direction crosses
@@ -692,12 +706,12 @@ namespace Spacewars.Simulation
                 if(terrain is IRecastPhysicalTerrain physical)return physical.TracePhysical(from,to,radius,provider,route,cursor,r,out reached,out trace);
                 if(terrain!=null||!(provider is LayeredNavigationProvider flat)||flat.Id!="flat"||flat.SemanticsVersion!=1||flat.Surfaces.Count!=1||flat.Surfaces[0].Id!=NavLocation.FlatSurface||flat.Portals.Count!=0||from.SurfaceId!=NavLocation.FlatSurface)return false;
                 var end=new NavLocation(to,NavLocation.FlatSurface);
-                if(!geometry.SegmentFree(from.Position,to,radius)||!RecastLayerTrace.Try(provider,from,end,new NavClearanceProfile("ground",1,"ground",0,radius),out trace,r))return false;
+                if(!PhysicalSweep(from,to,radius)||!RecastLayerTrace.Try(provider,from,end,new NavClearanceProfile("ground",1,"ground",0,radius),out trace,r))return false;
                 reached=end;return true;
             }
         }
         bool INavRecastSweepAuthority.AllowsRecastSweep(int actor,NavLocation from,NavPoint to,double radius)
-        {int row=preparedStep==null?ActorIndex(actor):preparedStep.Find(actor);return row>=0&&geometry.SegmentFree(from.Position,to,radius)&&HeldSegmentFree(unitView[row],from.Position,to);}
+        {int row=preparedStep==null?ActorIndex(actor):preparedStep.Find(actor);return row>=0&&PhysicalSweep(from,to,radius)&&HeldSegmentFree(unitView[row],from.Position,to);}
         private static bool SharedExitHandoffSource(NavUnit actor,NavTypedRoute route,NavRecastStepState state,NavFormationFrameHint hint,string exit)
         {
             if(state.Phase!=1||actor.localRoute.Length==0||actor.localIndex<actor.localRoute.Length||hint.TargetLeg<0||hint.TargetLeg>=route.Legs.Count||route.Legs[hint.TargetLeg].Kind!=NavTypedLegKind.Portal)return false;
@@ -827,7 +841,7 @@ namespace Spacewars.Simulation
             // the temporary directional domain; it must not forbid saving a
             // physically reachable motor before that handoff is executed.
             var moved=new NavLocation(receipt.To,receipt.ToSurface);var route=preparedStep.RecastRoutes[row];var hint=preparedStep.Formation[row];
-            if(geometry.SegmentFree(moved.Position,unit.route[unit.routeIndex],unit.Radius)&&HeldSegmentFree(unit,moved.Position,unit.route[unit.routeIndex])&&NavRecastIntervals.CanTarget(route,receipt.After,moved,unit.routeIndex,preparedStep.Reservation,this,unit.Id)&&ContinuationTraverse(route,receipt.After,moved,unit.route[unit.routeIndex],unit.Radius,preparedStep.Reservation,out _))return true;
+            if(PhysicalSweep(moved,unit.route[unit.routeIndex],unit.Radius)&&HeldSegmentFree(unit,moved.Position,unit.route[unit.routeIndex])&&NavRecastIntervals.CanTarget(route,receipt.After,moved,unit.routeIndex,preparedStep.Reservation,this,unit.Id)&&ContinuationTraverse(route,receipt.After,moved,unit.route[unit.routeIndex],unit.Radius,preparedStep.Reservation,out _))return true;
             if(!unit.GoalLocation.HasValue)return false;
             for(int candidate=unit.route.Length-1;candidate>=NavRecastIntervals.FirstTargetSurface(route,receipt.After);candidate--){
                 if(!NavRecastIntervals.TryContinuationRejoin(route,receipt.After,moved,Array.Empty<NavPoint>(),0,unit.route,candidate,unit.GoalLocation.Value,preparedStep.Reservation,out int same,this,unit.Id,true)||same!=candidate)continue;
@@ -922,7 +936,7 @@ namespace Spacewars.Simulation
                 if(targetAllowed&&
                     !NavRecastIntervals.Advance(route,state,actor.Location,end,r,out _,this,actor.Id))return true;
             }
-            if(!geometry.SegmentFree(own.Position,end,own.Radius)||!Traverse(actor.Location,end,own.Radius,out _,actor.Id))return false;
+            if(!geometry.SegmentFree(own.Position,end,own.Radius,PhysicalLayer(actor.Location))||!Traverse(actor.Location,end,own.Radius,out _,actor.Id))return false;
             for(int peer=0;peer<bodies.Length;peer++){
                 var receiver=bodies[peer];var other=unitView[peer];
                 if(peer==root||!receiver.Active||!receiver.OwnMoving||receiver.Yielding||other.Held||!other.CanYield||other.Team!=actor.Team||receiver.TerminalSeed||!(receiver.Speed>0)||!Finite(receiver.Speed)||!PhysicalSupportContact(actor,other))continue;
@@ -966,7 +980,7 @@ namespace Spacewars.Simulation
             if(!valid)for(int n=0;n<count;n++){int row=queue[n];proposals[row].Position=bodies[row].Position;proposals[row].Velocity=default;}
             for(int n=0;n<count;n++){
                 int row=queue[n];var body=bodies[row];var next=proposals[row];
-                if(!next.Position.Equals(body.Target)&&!next.Position.Equals(body.Position)&&(!geometry.SegmentFree(body.Position,next.Position,body.Radius)||!Traverse(unitView[row].Location,next.Position,body.Radius,out _,unitView[row].Id)||!UnitFreeYield(unitView[row],bodies,body.Position,next.Position))){next.Position=body.Position;next.Velocity=default;next.Blocked=true;proposals[row]=next;}
+                if(!next.Position.Equals(body.Target)&&!next.Position.Equals(body.Position)&&(!geometry.SegmentFree(body.Position,next.Position,body.Radius,PhysicalLayer(unitView[row].Location))||!Traverse(unitView[row].Location,next.Position,body.Radius,out _,unitView[row].Id)||!UnitFreeYield(unitView[row],bodies,body.Position,next.Position))){next.Position=body.Position;next.Velocity=default;next.Blocked=true;proposals[row]=next;}
             }
         }
         private static double YieldSpeedDown(double value)=>value>0?BitConverter.Int64BitsToDouble(BitConverter.DoubleToInt64Bits(value)-1):0;
@@ -981,14 +995,14 @@ namespace Spacewars.Simulation
                 double distance=SegmentPointDistanceSquared(other.Position,from,to);if(distance<(radius+other.Radius)*(radius+other.Radius)-1e-9)return false;
             }return true;
         }
-        private bool Clear(NavUnit unit,NavPoint from,NavPoint to){return geometry.SegmentFree(from,to,unit.Radius)&&TerrainClear(unit,from,to)&&UnitFree(unit,from,to);}
+        private bool Clear(NavUnit unit,NavPoint from,NavPoint to){return geometry.SegmentFree(from,to,unit.Radius,PhysicalLayer(unit.Location))&&TerrainClear(unit,from,to)&&UnitFree(unit,from,to);}
         internal bool Locate(NavPoint point,double radius,out NavLocation location)
         {location=default;if(double.IsNaN(point.X)||double.IsInfinity(point.X)||double.IsNaN(point.Z)||double.IsInfinity(point.Z))return false;if(terrain!=null){if(!terrain.TryLocate(point,radius,out location))return false;location=OwnedLocation(location);return true;}location=new NavLocation(point,NavLocation.FlatSurface);return geometry.IsFree(point,radius);}
         internal bool ValidLocation(NavLocation location,double radius)=>terrain==null?location.SurfaceId==NavLocation.FlatSurface&&Math.Abs(location.Position.X)+radius<=geometry.HalfExtent&&Math.Abs(location.Position.Z)+radius<=geometry.HalfExtent:terrain.IsValidLocation(location,radius);
         internal bool Traverse(NavLocation from,NavPoint to,double radius,out NavLocation location,int actor=0)
         {
             if(actor!=0&&terrain is IRecastPhysicalTerrain physical&&preparedStep!=null){int row=preparedStep.Find(actor);if(row>=0&&preparedStep.RecastRoutes[row]!=null){if(!physical.TraverseAccepted(from,to,radius,preparedStep.RecastRoutes[row],preparedStep.RecastStates[row].Cursor,out location))return false;location=OwnedLocation(location);return true;}}
-            if(terrain!=null){if(!terrain.TryTraverse(from,to,radius,out location))return false;location=OwnedLocation(location);return true;}location=new NavLocation(to,NavLocation.FlatSurface);return from.SurfaceId==NavLocation.FlatSurface&&geometry.SegmentFree(from.Position,to,radius);}
+            if(terrain!=null){if(!terrain.TryTraverse(from,to,radius,out location))return false;location=OwnedLocation(location);return true;}location=new NavLocation(to,NavLocation.FlatSurface);return from.SurfaceId==NavLocation.FlatSurface&&PhysicalSweep(from,to,radius);}
         internal bool ContinuationTraverse(NavTypedRoute route,NavRecastStepState state,NavLocation from,NavPoint to,double radius,INavStorageReservation r,out NavLocation location)
         {
             if(!(terrain is IRecastPhysicalTerrain))return Traverse(from,to,radius,out location);
@@ -1006,7 +1020,7 @@ namespace Spacewars.Simulation
             return geometry.SegmentFree(from,goal,radius)&&HeldSegmentFree(unit,from,goal);
         }
         private bool ClearFrom(NavUnit unit,NavLocation from,NavPoint to,out NavLocation location)
-        {location=default;return geometry.SegmentFree(from.Position,to,unit.Radius)&&UnitFree(unit,from.Position,to)&&Traverse(from,to,unit.Radius,out location,unit.Id);}
+        {location=default;return PhysicalSweep(from,to,unit.Radius)&&UnitFree(unit,from.Position,to)&&Traverse(from,to,unit.Radius,out location,unit.Id);}
         private bool TerrainClear(NavUnit unit,NavPoint from,NavPoint to)
         {return Traverse(unit.Location,from,unit.Radius,out var start,unit.Id)&&Traverse(start,to,unit.Radius,out _,unit.Id);}
         internal bool CompatibleArrival(NavLocation actual,NavLocation assigned,double radius)

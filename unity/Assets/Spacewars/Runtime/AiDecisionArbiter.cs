@@ -73,7 +73,9 @@ namespace Spacewars.Runtime
                 if(reason!=null){rejections[p.Id]=reason;continue;}
                 candidates.Add(p);
             }
-            // C3 semantic bands: survival, accepted startup, overdue/aged, ordinary.
+            // Ordinary attention goes to useful unit production first. Urgent
+            // survival remains above it; resource commitments are checked below.
+            // Then: accepted startup, overdue/aged, ordinary.
             // Ordinary priority1 is a utility preference, not an exemption from aging.
 #if UNITY_INCLUDE_TESTS
             Dictionary<string,int> actualBands=null;List<string> actualOrder=null;
@@ -82,13 +84,17 @@ namespace Spacewars.Runtime
 #endif
             int Band(AiIntent p)
             {
-                int band=p.Priority>=2?4:p.ReservationId!=null&&!AiExpansionFinancial.IsFunding(budget?.ReservationEntry(p.ReservationId))?(AiTechnologyFunding.IsFunding(budget?.ReservationEntry(p.ReservationId))?2:3):p.Overdue||tick-history[p.Id].FirstTick>=aging?1:0;
+                int band=p.Priority>=2?5:p.Policy=="production"&&AiRosterCatalog.IsProduction(p.Action.Kind)?4:p.ReservationId!=null&&!AiExpansionFinancial.IsFunding(budget?.ReservationEntry(p.ReservationId))?(AiTechnologyFunding.IsFunding(budget?.ReservationEntry(p.ReservationId))?2:3):p.Overdue||tick-history[p.Id].FirstTick>=aging?1:0;
 #if UNITY_INCLUDE_TESTS
                 if(actualBands!=null)actualBands[p.Id]=band;
 #endif
                 return band;
             }
             var ordered=candidates.OrderByDescending(Band)
+                // Within the aged/overdue band, a stream of freshly overdue
+                // tactical orders must not outrank an older useful producer.
+                // Survival and accepted startup retain their existing bands.
+                .ThenBy(p=>Band(p)==1?history[p.Id].FirstTick:0)
                 .ThenByDescending(p=>p.Priority).ThenByDescending(p=>p.Utility).ThenBy(p=>history[p.Id].FirstTick).ThenBy(p=>p.Id,StringComparer.Ordinal);
             // Keep the deficit until this intent's own held amount is added back. Clamping
             // before that would let it spend money still promised to other reservations.

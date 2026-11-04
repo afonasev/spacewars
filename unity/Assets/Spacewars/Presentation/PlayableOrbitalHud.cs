@@ -129,7 +129,7 @@ namespace Spacewars.Presentation
             orbitalPanel.style.left=right?new StyleLength(StyleKeyword.Auto):new StyleLength(6);orbitalPanel.style.right=right?new StyleLength(6):new StyleLength(StyleKeyword.Auto);orbitalPanel.style.bottom=Mathf.Max(6,h-bottomY);orbitalPanel.style.top=StyleKeyword.Auto;
             bool tooltip=orbitalLevelHovered&&!controller&&!orbitalOpen&&CanOrbital;orbitalXpTooltip.style.display=tooltip?DisplayStyle.Flex:DisplayStyle.None;
             if(tooltip){
-                orbitalXpTooltip.text=state.Level==OrbitalEscalationState.MaxLevel?"MAX · максимум\nВосстановление ×"+data.orbitalFinalSpeed:"Уровень "+state.Level+"\n"+state.Progress.ToString("0.##")+" / "+state.Threshold.ToString("0.##")+" до следующего уровня";
+                orbitalXpTooltip.text=provingGround!=null?"Полигон · все умения доступны\nПерезарядка · "+data.provingGroundOrbitalSeconds.ToString("0.#")+" с":state.Level==OrbitalEscalationState.MaxLevel?"MAX · максимум\nВосстановление ×"+data.orbitalFinalSpeed:"Уровень "+state.Level+"\n"+state.Progress.ToString("0.##")+" / "+state.Threshold.ToString("0.##")+" до следующего уровня";
                 float tw=Mathf.Min(220,w-12),th=Mathf.Max(40,orbitalXpTooltip.resolvedStyle.height);var b=orbitalLevelButton.worldBound;b.position-=root.worldBound.position;orbitalXpTooltip.style.width=tw;orbitalXpTooltip.style.left=b.xMax+tw+gap<=w?b.xMax+gap:Mathf.Max(6,b.xMin-tw-gap);orbitalXpTooltip.style.top=Mathf.Clamp(b.center.y-th/2,6,Mathf.Max(6,h-th-6));orbitalXpTooltip.BringToFront();
             }
             if(orbitalOpen){orbitalModal.BringToFront();RefreshOrbitalMenu();}

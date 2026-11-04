@@ -8,6 +8,7 @@ namespace Spacewars.Simulation
     public static class OrbitalAbilities
     {
         public const int ControlHack=8,SystemFailure=3;
+        public static readonly IReadOnlyList<int> Implemented=Array.AsReadOnly(new[]{1,2,ControlHack,SystemFailure});
         public static int Tier(int id)=>id==ControlHack||id>=1&&id<=2?1:id>=3&&id<=5?2:id>=6&&id<=7?3:0;
         public static string Name(int id)=>id==SystemFailure?"Сбой систем":id==ControlHack?"Взлом управления":id==1?"Сканирование":id==2?"Мина-ловушка":"Поддержка "+(Tier(id)==1?"I":Tier(id)==2?"II":"III")+" · "+(id==1||id==3||id==6?"А":id==5?"В":"Б");
         public static double Duration(int id,PlayableProfileData p)=>id==ControlHack?p.orbitalHackSeconds:Tier(id)==1?p.orbitalBasicSeconds:Tier(id)==2?p.orbitalAdvancedSeconds:p.orbitalUltimateSeconds;
@@ -35,9 +36,17 @@ namespace Spacewars.Simulation
     {
         public const int MaxLevel=6,ChoiceCount=5;
         public int Level{get;private set;}public double Progress{get;private set;}public double CommonRemaining{get;private set;}
+        private readonly bool provingGround;
+        public OrbitalEscalationState(bool provingGround=false)
+        {
+            this.provingGround=provingGround;
+            if(provingGround){Level=MaxLevel;for(int i=0;i<OrbitalAbilities.Implemented.Count;i++)choices[i]=OrbitalAbilities.Implemented[i];}
+        }
+        private double Speed(PlayableProfileData p)=>!provingGround&&Level==MaxLevel?p.orbitalFinalSpeed:1;
+        private double Duration(int id,PlayableProfileData p)=>provingGround?p.provingGroundOrbitalSeconds:OrbitalAbilities.Duration(id,p);
         private readonly int[] choices=new int[ChoiceCount];private readonly double[] remaining=new double[ChoiceCount];
         public int Choice(int slot)=>choices[slot];public double Recovery(int slot)=>remaining[slot];
-        public int PendingLevel=>Enumerable.Range(0,Math.Min(Level,ChoiceCount)).Where(i=>choices[i]==0).Select(i=>i+1).FirstOrDefault();
+        public int PendingLevel=>provingGround?0:Enumerable.Range(0,Math.Min(Level,ChoiceCount)).Where(i=>choices[i]==0).Select(i=>i+1).FirstOrDefault();
         public int[] Options()
         {
             int stage=PendingLevel;
@@ -45,7 +54,7 @@ namespace Spacewars.Simulation
         }
         public void Damage(double amount,PlayableProfileData p)
         {
-            if(amount<=0||double.IsNaN(amount)||double.IsInfinity(amount)||Level==MaxLevel)return;
+            if(provingGround||amount<=0||double.IsNaN(amount)||double.IsInfinity(amount)||Level==MaxLevel)return;
             Progress+=amount;
             while(Level<MaxLevel&&Progress>=OrbitalAbilities.Threshold(Level,p)){Progress-=OrbitalAbilities.Threshold(Level,p);Level++;}
             if(Level==MaxLevel)Progress=0;
@@ -57,16 +66,21 @@ namespace Spacewars.Simulation
         {
             int slot=Array.IndexOf(choices,id);
             if(id==0||slot<0||CommonRemaining>1e-9||remaining[slot]>1e-9)return false;
-            remaining[slot]=OrbitalAbilities.Duration(id,p);CommonRemaining=p.orbitalCommonSeconds;return true;
+            remaining[slot]=Duration(id,p);CommonRemaining=provingGround?0:p.orbitalCommonSeconds;return true;
         }
         public void Advance(double dt,PlayableProfileData p)
-        {if(dt<=0)return;CommonRemaining=Math.Max(0,CommonRemaining-dt);for(int i=0;i<ChoiceCount;i++)remaining[i]=Math.Max(0,remaining[i]-dt*(Level==MaxLevel?p.orbitalFinalSpeed:1));}
+        {if(dt<=0)return;CommonRemaining=Math.Max(0,CommonRemaining-dt);for(int i=0;i<ChoiceCount;i++)remaining[i]=Math.Max(0,remaining[i]-dt*Speed(p));}
         public OrbitalEscalationSnapshot Snapshot(PlayableProfileData p)=>new OrbitalEscalationSnapshot(Level,Progress,OrbitalAbilities.Threshold(Level,p),PendingLevel,CommonRemaining,
-            Enumerable.Range(0,ChoiceCount).Where(i=>choices[i]!=0).Select(i=>new OrbitalAbilitySnapshot(choices[i],remaining[i],OrbitalAbilities.Duration(choices[i],p),Level==MaxLevel?p.orbitalFinalSpeed:1)).ToArray(),Options());
-        public static OrbitalEscalationState Restore(int level,double progress,double common,int[] ids,double[] cooldowns,PlayableProfileData p)
+            Enumerable.Range(0,ChoiceCount).Where(i=>choices[i]!=0).Select(i=>new OrbitalAbilitySnapshot(choices[i],remaining[i],Duration(choices[i],p),Speed(p))).ToArray(),Options());
+        public static OrbitalEscalationState Restore(int level,double progress,double common,int[] ids,double[] cooldowns,PlayableProfileData p,bool provingGround=false)
         {
             if(level<0||level>MaxLevel||!Finite(progress)||progress<0||level==MaxLevel&&progress!=0||level<MaxLevel&&progress>=OrbitalAbilities.Threshold(level,p)||!Finite(common)||common<0||ids.Length!=ChoiceCount||cooldowns.Length!=ChoiceCount)throw new ArgumentException("Invalid orbital state.");
-            var state=new OrbitalEscalationState{Level=level,Progress=progress,CommonRemaining=common};bool gap=false;
+            var state=new OrbitalEscalationState(provingGround){Level=level,Progress=progress,CommonRemaining=common};bool gap=false;
+            if(provingGround){
+                if(level!=MaxLevel||progress!=0||common!=0||!ids.SequenceEqual(Enumerable.Range(0,ChoiceCount).Select(state.Choice)))throw new ArgumentException("Invalid proving ground abilities.");
+                for(int i=0;i<ChoiceCount;i++){if(!Finite(cooldowns[i])||cooldowns[i]<0||ids[i]==0&&cooldowns[i]!=0)throw new ArgumentException("Invalid orbital timer.");state.remaining[i]=cooldowns[i];}
+                return state;
+            }
             for(int i=0;i<ChoiceCount;i++){
                 int id=ids[i];if(!Finite(cooldowns[i])||cooldowns[i]<0||id==0&&cooldowns[i]!=0)throw new ArgumentException("Invalid orbital timer.");
                 if(id==0){gap=true;continue;}

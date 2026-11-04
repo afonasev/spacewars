@@ -8,6 +8,34 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class HawkFlightTests
     {
+        [TestCase(0d,.02d,1d/30)] [TestCase(0d,.3d,1d/30)]
+        [TestCase(0d,1.5d,1d/30)] [TestCase(0d,-1.5d,1d/30)]
+        [TestCase(3.1d,-3.1d,1d/30)] [TestCase(-3.1d,3.1d,1d/30)]
+        [TestCase(0d,3d,1d/60)] [TestCase(0d,-3d,1d/15)]
+        public void YawBrakesToStationaryHeadingWithoutOvershoot(double start,double target,double dt)
+        {
+            const BindingFlags hidden=BindingFlags.Instance|BindingFlags.NonPublic;
+            var p=PlayableProfile.Default;var d=new PlayableDomain(p,1,false);
+            object Call(string name,params object[] args)=>typeof(PlayableDomain).GetMethod(name,hidden).Invoke(d,args);
+            double Angle(double value)=>Math.Atan2(Math.Sin(value),Math.Cos(value));
+            try
+            {
+                int id=(int)Call("SpawnUnit",new NavPoint(-10,15),PlayableOwner.Player,PlayableEntityKind.Hawk);
+                var units=(System.Collections.IDictionary)typeof(PlayableDomain).GetField("units",hidden).GetValue(d);var u=units[id];var air=u.GetType().GetField("Air").GetValue(u);
+                var actor=(NavUnit)air.GetType().GetField("Actor").GetValue(air);actor.Heading=start;
+                var yaw=air.GetType().GetField("YawVelocity");double lastRate=0,lastError=Angle(target-start),maxOvershoot=0;
+                for(int tick=0;tick<(int)Math.Ceiling(3/dt);tick++)
+                {
+                    Call("AdvanceAirYaw",air,target,dt);double rate=(double)yaw.GetValue(air),error=Angle(target-actor.Heading);
+                    Assert.LessOrEqual(Math.Abs(rate-lastRate),p.HawkYawAcceleration*dt+1e-9);Assert.LessOrEqual(Math.Abs(rate),p.HawkYawSpeed+1e-9);
+                    if(Math.Sign(error)!=Math.Sign(lastError)&&Math.Abs(lastError)>1e-9)maxOvershoot=Math.Max(maxOvershoot,Math.Abs(error));
+                    lastRate=rate;lastError=error;
+                }
+                TestContext.WriteLine($"HAWK_YAW start={start:R} target={target:R} dt={dt:R} error={lastError:R} rate={lastRate:R} overshoot={maxOvershoot:R}");
+                Assert.LessOrEqual(maxOvershoot,1e-9,"No heading crossing caused by late braking");Assert.Less(Math.Abs(lastError),1e-7);Assert.Less(Math.Abs(lastRate),1e-7);
+            }
+            finally{d.Navigation.ReleaseCommittedHostRoot();d.DestroyOwnedNavigation();}
+        }
         [Test] public void MatchProfileRegistersAirAndKeepsGroundProductionTyped()
         {
             var p=PlayableProfile.ThreeCrossingsDefault;

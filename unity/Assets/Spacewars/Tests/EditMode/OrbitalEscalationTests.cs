@@ -8,6 +8,21 @@ namespace Spacewars.Tests.EditMode
 {
     public sealed class OrbitalEscalationTests
     {
+        [Test] public void ProvingGroundUnlocksOnlyImplementedAbilitiesWithIndependentExactCooldowns()
+        {
+            var p=PlayableProfile.Default.CopyData();var state=new OrbitalEscalationState(provingGround:true);
+            CollectionAssert.AreEqual(new[]{1,2,8,3},state.Snapshot(p).Abilities.Select(a=>a.Id));
+            Assert.Zero(state.PendingLevel);Assert.IsEmpty(state.Options());Assert.False(state.Choose(4));
+            foreach(int id in new[]{1,2,8,3}){Assert.True(state.CanUse(id));Assert.True(state.Use(id,p));Assert.False(state.CanUse(id));}
+            foreach(int id in new[]{4,5,6,7})Assert.False(state.Use(id,p));
+            Assert.Zero(state.CommonRemaining);Assert.True(state.Snapshot(p).Abilities.All(a=>a.Duration==5&&a.Remaining==5));
+            state.Advance(4.999,p);Assert.True(state.Snapshot(p).Abilities.All(a=>a.Remaining>0));
+            var restored=OrbitalEscalationState.Restore(state.Level,state.Progress,state.CommonRemaining,Enumerable.Range(0,5).Select(state.Choice).ToArray(),Enumerable.Range(0,5).Select(state.Recovery).ToArray(),p,provingGround:true);
+            restored.Advance(.001,p);foreach(int id in new[]{1,2,8,3})Assert.True(restored.CanUse(id));
+            p.provingGroundOrbitalSeconds=7;Assert.True(restored.Use(8,p));Assert.AreEqual(7,restored.Snapshot(p).Abilities.Single(a=>a.Id==8).Remaining);
+            var field=PlayableProfileMetadata.Fields.Single(f=>f.FieldName=="provingGroundOrbitalSeconds");Assert.AreEqual("с",field.Unit);
+            p.provingGroundOrbitalSeconds=0;Assert.Throws<ArgumentException>(()=>PlayableProfile.Create(p));
+        }
         [Test] public void HackCooldownIsIndependentAndHasValidatedLaboratoryMetadata()
         {
             var data=PlayableProfile.Default.CopyData();data.orbitalHackSeconds=47;data.orbitalBasicSeconds=23;

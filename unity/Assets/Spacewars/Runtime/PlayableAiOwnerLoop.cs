@@ -1208,12 +1208,28 @@ namespace Spacewars.Runtime
             string conditions=(o.Credits>=cost)+":"+(o.Population!=null&&Math.Max(0,o.Population.Capacity-o.Population.Living-o.Population.Reserved)>=pop?1:0)+":"+
                 string.Join(",",o.Buildings.Where(b=>b.SiteId==action.SiteId||action.EntityIds.Contains(b.Id)).OrderBy(b=>b.Id).Select(b=>b.Id+"/"+b.Phase+"/"+(b.PrivateState?.QueueCount??0)+(policyName=="infrastructure"?"/"+b.Health+"/"+b.PrivateState?.Lifecycle?.RepairBlockedReason+"/"+b.PrivateState?.Lifecycle?.SaleBlockedReason:"")))+":"+
                 string.Join(",",o.Entities.Where(u=>action.EntityIds.Contains(u.Id)||u.Id==action.TargetId).OrderBy(u=>u.Id).Select(u=>u.Id+"/"+u.CurrentOrder?.Kind+"/"+u.CurrentOrder?.TargetId));
+            if(action.Kind==PlayableCommandKind.Move||action.Kind==PlayableCommandKind.AttackMove)conditions+=":"+MovementRetryConditions(o,action,profile);
             if(pendingRepairHandoff)conditions=AiCombatMicroPolicy.PendingRepairHandoff+conditions;
             long startup=policyName=="expansion"&&action.Kind==PlayableCommandKind.Move&&!expansion.HasFundingFor(action,budget)?(long)TerritoryRules.Cost(profile,action.BuildingKind):action.Kind==PlayableCommandKind.BuildAt&&action.BuildingKind==PlayableBuildingKind.Factory&&o.Buildings.Any(b=>b.Owner==o.Owner&&b.Kind==PlayableBuildingKind.Factory)?(long)nativeProfile.Value("economy.factoryLaunchCycles")*PlayableUnitRules.Cost(profile,action.UnitKind):0;
             double utility=policyName=="research"?TechnologyPlan.Branches.Single(b=>b.Descriptor.Kind==action.ResearchKind).Utility:
                 action.Kind==PlayableCommandKind.BuildAt&&action.BuildingKind==PlayableBuildingKind.ScientificCenter?TechnologyPlan.Infrastructure?.Utility??1:1;
             string reason=policyName=="research"||action.Kind==PlayableCommandKind.BuildAt&&action.BuildingKind==PlayableBuildingKind.ScientificCenter?TechnologyPlan.Reason:null;
             return new AiIntent(key,policyName,action,checked(o.Tick+DecisionIntervalTicks+ObservationDelayTicks),cost,pop,claims,priority,utility,conditions,reason,startupFund:startup,reservationId:technologyFunding.ReservationFor(action,budget,arbiter)??(policyName=="expansion"?expansionFinancial.ReservationFor(action,o,profile,budget,arbiter):null)??(policyName=="infrastructure"?infrastructure.ReservationFor(action,budget):policyName=="expansion"?expansion.ReservationFor(action,budget):launches.ReservationFor(action)),overdue:policyName=="production"&&priority==1&&launches.ReservationFor(action)==null||policyName==AiArmyPlanner.Policy&&o.Tick-armyPlanner.Capture().LastInitiativeTick>=AiProfile.SecondsToTicks(nativeProfile.Value("armies.offensiveOverdueSeconds"),30));
+        }
+        internal static string MovementRetryConditions(PlayableAiObservation o,PlayableAiAction action,PlayableProfile p)
+        {
+            // Retry only after a changed navigation admission condition. Tick,
+            // publication sequence and unrelated income cannot defeat the cap.
+            // Coarse existing local-grid cells ignore floating point jitter.
+            double cell=p.Navigation.LocalGridCell;
+            // Only geometry revisions already present in this owner's route
+            // proofs may reopen a retry; hidden world changes are not evidence.
+            string geometry=string.Join(",",o.RouteProofs.Where(r=>action.EntityIds.Contains(r.UnitId)).Select(r=>r.GeometryRevision).Distinct().OrderBy(r=>r));
+            double radius=o.Entities.Where(u=>u.Owner==o.Owner&&action.EntityIds.Contains(u.Id)).Select(u=>PlayableUnitRules.Radius(p,u.Kind)).DefaultIfEmpty(p.Navigation.Radius).Max();
+            string occupancy=string.Join(",",o.Entities.Where(u=>u.Health>0&&!action.EntityIds.Contains(u.Id)&&
+                Math.Pow(u.Position.X-action.Target.X,2)+Math.Pow(u.Position.Z-action.Target.Z,2)<=Math.Pow(radius+PlayableUnitRules.Radius(p,u.Kind)+p.Navigation.ArrivalTolerance,2)).OrderBy(u=>u.Id).Select(u=>u.Id));
+            return geometry+":"+occupancy+":"+string.Join(",",o.Entities.Where(u=>u.Owner==o.Owner&&action.EntityIds.Contains(u.Id)).OrderBy(u=>u.Id)
+                .Select(u=>u.Id+"/"+Math.Floor(u.Position.X/cell)+"/"+Math.Floor(u.Position.Z/cell)+"/"+u.Location?.SurfaceId+"/"+u.NavigationOutcome+"/"+u.Held+"/"+u.OrderStamp?.Revision+"/"+u.Queue?.Active?.IssuanceId+"/"+u.Queue?.Pending?.IssuanceId));
         }
         private static PlayableAiAction Reidentify(PlayableAiAction a,long id)=>new PlayableAiAction(id,a.PlayerId,a.ProfileId,a.ProfileRevision,a.Generation,a.SnapshotSequence,a.Kind,a.CopyEntityIds(),a.Target,a.SiteId,a.SlotId,a.BuildingKind,a.ParentId,a.TargetId,a.ProductionOrderId,a.UnitKind,a.ResearchKind,a.Seed,a.SourceIdentity);
         internal void Stop(long? tick=null){ReleaseExecutionAuthority();if(tick.HasValue)authorityTick=tick.Value;while(pending!=null)Cancel(PlayableAiDeliveryStatus.Stopped,"Runtime stopped.");combatMicro.Stop();budget.ReleaseAllReservations();arbiter.ClearFundingMemory();arbiter.ClearSiteFundingMemory();arbiter.ClearPositionSaving();launches.Clear(budget);expansion.Release("runtime stopped");infrastructure.Release("runtime stopped");armies.DisbandAll();armyPlanner.Stop();flankPlanner.Stop();defense.Stop();Checkpoint=Capture().BindNativeProfile(nativeProfile,nativeConfig);}

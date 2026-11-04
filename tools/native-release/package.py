@@ -105,13 +105,15 @@ def build_launcher_view(payload, platform):
  if platform=='windows-x64':
   shutil.copy2(source/'LauncherView.ps1',payload/'LauncherView.ps1')
   shutil.copy2(ROOT/'tools/native-release/icons/Spacewars.ico',payload/'Spacewars.ico')
+  shutil.copy2(ROOT/'unity/Assets/Spacewars/Content/Brand/Icon.png',payload/'LauncherLogo.png')
  else:
   bundle=payload/'LauncherView.app';contents=bundle/'Contents';binary=contents/'MacOS/LauncherView'
   binary.parent.mkdir(parents=True,exist_ok=True)
   (contents/'Info.plist').write_bytes(plistlib.dumps({'CFBundleName':'Spacewars','CFBundleDisplayName':'Spacewars','CFBundleIdentifier':'tech.afonasev.spacewars.launcherview','CFBundleExecutable':'LauncherView','CFBundleIconFile':'Spacewars.icns','CFBundlePackageType':'APPL','LSMinimumSystemVersion':'11.0','NSHighResolutionCapable':True}))
   (contents/'Resources').mkdir(exist_ok=True)
   shutil.copy2(ROOT/'tools/native-release/icons/Spacewars.icns',contents/'Resources/Spacewars.icns')
-  run(['clang','-fobjc-arc','-framework','Cocoa','-mmacosx-version-min=11.0',
+  shutil.copy2(ROOT/'unity/Assets/Spacewars/Content/Brand/Icon.png',contents/'Resources/LauncherLogo.png')
+  run(['clang','-fobjc-arc','-framework','Cocoa','-framework','QuartzCore','-mmacosx-version-min=11.0',
        '-arch','arm64','-arch','x86_64',source/'LauncherView.m','-o',binary])
   run(['codesign','--force','--sign','-',bundle])
 
@@ -162,7 +164,7 @@ def main():
   info=plistlib.loads((player/'Contents/Info.plist').read_bytes());entry='Player.app/Contents/MacOS/'+info['CFBundleExecutable']
  build_launcher_view(payload,a.platform)
  commit=identity['commit']
- feed=out/'public/native/v1';release=run(['go','run','.','--pack',payload,feed,key,a.platform,entry,a.version,a.sequence,commit,a.channel],cwd=UPDATER)
+ feed=out/'public/native/v1';release=run(['go','run','.','--pack',payload,feed,key,a.platform,entry,a.version,a.sequence,commit,a.channel,identity.get('release_date','')],cwd=UPDATER)
  raw=(feed/a.platform/'latest.json').read_bytes()
  if a.prepare_legacy_bridge:
   bridge_payload=out/('bridge-payload-'+a.platform)

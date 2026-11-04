@@ -49,6 +49,7 @@ namespace Spacewars.Tests.PlayMode
                 var start=new NavPoint(-10,3);int mover=(int)Call("SpawnUnit",start,PlayableOwner.Player,PlayableEntityKind.Tank);
                 var authority=new PlayableAuthorityTick(d,new AiAuthorityScheduler(Array.Empty<PlayableAiOwnerLoop>()),seed);
                 worker=new CertifiedRouteWorker(authority.NavigationBinding,p.NavigationRequestsPerFrame);
+                Assert.True(SpinWait.SpinUntil(()=>worker.IsWaiting||worker.Publication.Failure!=null,5000),"Threaded host startup must reach its idle admission point.");Assert.IsNull(worker.Publication.Failure);
                 Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(generation,1,"player-1",PlayableCommandKind.Move,new[]{mover},new NavPoint(10,3))).Status);
                 Assert.AreEqual(PlayableCommandStatus.Applied,authority.Apply(new PlayableCommand(generation,2,"player-1",PlayableCommandKind.Attack,new[]{gun},targetId:victim)).Status);
                 bool motion=false,shot=false,dead=false,arrived=false;var clock=Stopwatch.StartNew();

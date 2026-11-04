@@ -11,7 +11,7 @@ namespace Spacewars.Runtime
         private PlayableProfileData OrbitalData{get{if(!ReferenceEquals(orbitalProfile,profile)){orbitalProfile=profile;orbitalData=profile.CopyData();}return orbitalData;}}
         private readonly Dictionary<PlayableOwner,OrbitalEscalationState> orbital=new Dictionary<PlayableOwner,OrbitalEscalationState>();
         private OrbitalEscalationState Orbital(PlayableOwner owner)
-        {if(!orbital.TryGetValue(owner,out var value))orbital.Add(owner,value=new OrbitalEscalationState());return value;}
+        {if(!orbital.TryGetValue(owner,out var value))orbital.Add(owner,value=new OrbitalEscalationState(offline?.ProvingGround!=null));return value;}
         private void CreditOrbital(PlayableOwner? owner,PlayableOwner victim,double amount)
         {if(owner.HasValue&&HasOwner(owner.Value)&&Hostile(owner.Value,victim)&&amount>0)Orbital(owner.Value).Damage(amount,OrbitalData);}
         private sealed class Scan
@@ -29,7 +29,7 @@ namespace Spacewars.Runtime
         private OrbitalScanSnapshot[] TeamOrbitalScans(PlayableOwner owner)=>scans.Where(s=>s.Remaining>0&&TeamOf(s.Owner)==TeamOf(owner)).Select(s=>new OrbitalScanSnapshot(s.Owner,s.Point,s.Radius)).ToArray();
         private void AdvanceOrbital(double dt)
         {foreach(int id in systemFailures.Where(p=>p.Value<=elapsed||!buildings.ContainsKey(p.Key)).Select(p=>p.Key).ToArray())systemFailures.Remove(id);if(scans.Count>0)scanViews.Clear();foreach(var scan in scans)scan.Remaining=Math.Max(0,scan.Remaining-dt);if(scans.RemoveAll(s=>s.Remaining<=1e-9)>0)visionInputProfile=null;if(orbital.Count==0)return;var data=OrbitalData;foreach(var state in orbital.Values)state.Advance(dt,data);}
-        private OrbitalEscalationSnapshot OrbitalView(PlayableOwner owner)=>orbital.TryGetValue(owner,out var state)?state.Snapshot(OrbitalData):new OrbitalEscalationState().Snapshot(OrbitalData);
+        private OrbitalEscalationSnapshot OrbitalView(PlayableOwner owner)=>offline?.ProvingGround!=null?Orbital(owner).Snapshot(OrbitalData):orbital.TryGetValue(owner,out var state)?state.Snapshot(OrbitalData):new OrbitalEscalationState().Snapshot(OrbitalData);
         private PlayableCommandStatus ChooseOrbital(PlayableOwner owner,int id)=>!eliminated.Contains(owner)&&Orbital(owner).Choose(id)?PlayableCommandStatus.Applied:PlayableCommandStatus.Rejected;
         private PlayableCommandStatus UseOrbital(PlayableOwner owner,int id,NavPoint target)
         {
@@ -144,7 +144,7 @@ namespace Spacewars.Runtime
                 var owner=WorldWire.EnumValue<PlayableOwner>(r);if(!HasOwner(owner)||orbital.ContainsKey(owner))throw new ArgumentException("Invalid orbital owner.");
                 int level=r.ReadInt32();double progress=WorldWire.Number(r),common=WorldWire.Number(r);var ids=new int[OrbitalEscalationState.ChoiceCount];var times=new double[OrbitalEscalationState.ChoiceCount];
                 for(int i=0;i<OrbitalEscalationState.ChoiceCount;i++){ids[i]=r.ReadInt32();times[i]=WorldWire.Number(r);}
-                orbital.Add(owner,OrbitalEscalationState.Restore(level,progress,common,ids,times,OrbitalData));
+                orbital.Add(owner,OrbitalEscalationState.Restore(level,progress,common,ids,times,OrbitalData,offline?.ProvingGround!=null));
             }
             int scanCount=r.ReadInt32();if(scanCount<0||scanCount>10000)throw new ArgumentException("Invalid scan count.");
             for(int i=0;i<scanCount;i++){

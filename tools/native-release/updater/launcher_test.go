@@ -16,7 +16,7 @@ import (
 func TestLauncherMinimalStates(t *testing.T) {
 	for _, s := range []Status{{State: "current", Version: "1"}, {State: "offline", Version: "1", Error: "network"}, {State: "checking", Version: "1"}} {
 		v := launcherView(s, false)
-		if v.Primary != "Играть" || v.Secondary != "" || v.Busy {
+		if v.Primary != "Играть сейчас" || v.Secondary != "" || v.Busy {
 			t.Fatalf("installed game must remain playable: %+v", v)
 		}
 	}
@@ -25,12 +25,47 @@ func TestLauncherMinimalStates(t *testing.T) {
 		t.Fatal(v)
 	}
 	v = launcherView(Status{State: "prepared", Available: "2"}, false)
-	if v.Secondary != "Установить 2" {
+	if v.Secondary != "Установить" {
 		t.Fatal(v)
 	}
 	v = launcherView(Status{State: "available", Available: "2"}, true)
-	if !v.Busy || v.Secondary != "" || v.Message != "" {
+	if !v.Busy || v.Secondary != "" || v.Message != "Доступна новая версия 2 · дата не указана" {
 		t.Fatal(v)
+	}
+}
+func TestLauncherVersionDatesAndDiscoveryTruth(t *testing.T) {
+	for _, tt := range []struct{ state, message, title string }{
+		{"checking", "Проверка обновлений…", "Проверяем обновления"},
+		{"offline", "Не удалось проверить обновления", "Проверка недоступна"},
+		{"current", "Последняя версия — проверено", "Игра готова к запуску"},
+		{"available", "Доступна новая версия 1.0.1 от 04.11.2026", "Доступно обновление"},
+		{"prepared", "Готова к установке версия 1.0.1 от 04.11.2026", "Обновление готово"},
+	} {
+		for _, running := range []bool{false, true} {
+			v := launcherView(Status{State: tt.state, Version: "1.0.0", ReleaseDate: "2026-11-03", Available: "1.0.1", AvailableDate: "2026-11-04"}, running)
+			wantVersion := "Текущая версия 1.0.0 от 03.11.2026"
+			if channel == "test" {
+				wantVersion += " · test"
+			}
+			if v.Version != wantVersion || v.Message != tt.message {
+				t.Fatalf("%s running=%v: %+v", tt.state, running, v)
+			}
+			wantTitle := tt.title
+			if running {
+				wantTitle = "Spacewars запущена"
+			}
+			if v.Title != wantTitle {
+				t.Fatalf("%s: title %q", tt.state, v.Title)
+			}
+			if running && (!v.Busy || v.Secondary != "") {
+				t.Fatal(v)
+			}
+		}
+	}
+	for _, date := range []string{"", "not-a-date", "2026-02-30"} {
+		if got := launcherReleaseLabel("1", date); got != "1 · дата не указана" {
+			t.Fatal(got)
+		}
 	}
 }
 func TestLauncherHostPersistentAndCloseDuringPlayer(t *testing.T) {
@@ -204,7 +239,7 @@ for line in sys.stdin:
   print('secondary',flush=True);phase=2
  elif phase==2 and s['message'].startswith('Не удалось установить'):
   (p/'retry-verified').write_text('old version remains playable')
-  assert s['primary']=='Играть' and not s['busy']
+  assert s['primary']=='Играть сейчас' and not s['busy']
   print('secondary',flush=True);phase=3
 `
 	launcherForHost = func(string) (*desktopLauncher, error) {
@@ -222,5 +257,86 @@ for line in sys.stdin:
 	a, err := readActive(root)
 	if err != nil || a.ID != current.ID {
 		t.Fatal("host changed pointer outside privileged apply", err)
+	}
+}
+
+// A durable staged update must never apply before the native window asks.
+func TestLauncherPendingRequiresExplicitInstall(t *testing.T) {
+	oldLauncher, oldApply, oldChannel, oldKey := launcherForHost, applyForHost, channel, publicKey
+	defer func() {
+		launcherForHost = oldLauncher
+		applyForHost = oldApply
+		channel = oldChannel
+		publicKey = oldKey
+	}()
+	channel = "test"
+	root := t.TempDir()
+	t.Setenv("SPACEWARS_LAUNCHER_FIXTURE", root)
+	base, _ := os.UserCacheDir()
+	cache := filepath.Join(base, "Spacewars", storeNamespace(), digest([]byte(root)))
+	defer os.RemoveAll(cache)
+	pub, key, _ := ed25519.GenerateKey(rand.Reader)
+	publicKey = base64.StdEncoding.EncodeToString(pub)
+	current := sample()
+	current.Platform = platformID()
+	release := launcherRelease(root, current.ID)
+	os.MkdirAll(release, 0755)
+	os.WriteFile(filepath.Join(release, "manifest.json"), signWith(current, key), 0644)
+	atomicJSON(filepath.Join(root, "active.json"), Active{ID: current.ID})
+	next := transportSample()
+	next.Platform = platformID()
+	next.Sequence = current.Sequence + 1
+	next.Version = "1.0.1"
+	next.ID = digest([]byte("pending-launcher-update"))
+	next.Transport.Tag = "v1.0.1"
+	next.Transport.Asset = "Spacewars-1.0.1-" + next.Platform + ".pack"
+	raw := signWith(next, key)
+	stage := filepath.Join(cache, "staged", next.ID)
+	os.MkdirAll(stage, 0700)
+	os.WriteFile(filepath.Join(stage, "manifest.json"), raw, 0600)
+	if err := writePending(root, cache, stage, next, raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readPending(root, cache); err != nil {
+		t.Fatal("invalid pending fixture", err)
+	}
+	calls := 0
+	applyForHost = func(exe, stage string) error {
+		calls++
+		if _, err := os.Stat(filepath.Join(root, "consented")); err != nil {
+			t.Error("applied without visible consent")
+		}
+		return errors.New("denied UAC fixture")
+	}
+	driver := `import sys,json,pathlib,os
+p=pathlib.Path(os.environ['SPACEWARS_LAUNCHER_FIXTURE']);phase=0
+for line in sys.stdin:
+ s=json.loads(line)
+ if phase==0:
+  assert s['secondary']=='Установить' and not s['busy'],s
+  (p/'consented').write_text('explicit install')
+  print('secondary',flush=True);phase=1
+ elif s['message'].startswith('Не удалось установить'):
+  assert s['primary']=='Играть сейчас' and not s['busy']
+  (p/'retry-visible').write_text('ok');break
+`
+	launcherForHost = func(string) (*desktopLauncher, error) {
+		return startLauncherCommand(exec.Command("python3", "-u", "-c", driver))
+	}
+	if err := host(root, filepath.Join(release, "UpdateHost")); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("apply calls: %d", calls)
+	}
+	if _, err := os.Stat(filepath.Join(root, "retry-visible")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readPending(root, cache); err != nil {
+		t.Fatal("pending update lost", err)
+	}
+	a, err := readActive(root)
+	if err != nil || a.ID != current.ID {
+		t.Fatal("working release changed", err)
 	}
 }

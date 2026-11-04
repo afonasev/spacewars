@@ -41,8 +41,8 @@ namespace Spacewars.Runtime
             navigation.BeginCommandAdmissionForQa(command.Sequence);
             PreparedTacticalCommit payload=null;Exception primary=null;
             try{
-                try{payload=PreparedTacticalCommit.Create(this);}catch(InvalidOperationException e)when(e.Message=="Physical storage exceeds prepared reservation."){navigation.RefuseCommandAdmissionForQa("domain-storage:"+e.Message);return PlayableCommandStatus.Overflow;}
-                if(payload==null)return PlayableCommandStatus.Overflow;
+                try{payload=PreparedTacticalCommit.Create(this);}catch(InvalidOperationException e)when(e.Message=="Physical storage exceeds prepared reservation."){navigation.RefuseCommandAdmissionForQa("domain-storage:"+e.Message);message="Tactical preparation refused: "+navigation.LastCommandAdmissionRefusal;return PlayableCommandStatus.Overflow;}
+                if(payload==null){message="Tactical preparation refused: "+(navigation.LastCommandAdmissionRefusal??"domain admission unavailable");return PlayableCommandStatus.Overflow;}
                 navigation.PrepareCommandGroup(command,nextOrderRevision,Tick,TeamOf(OwnerFor(command.PlayerId)));payload.CaptureNavigationInputs();
                 HashSet<int> followed=null;PlayableCommandStatus status;
                 try{status=command.Kind==PlayableCommandKind.Follow?Follow(command.CopyEntityIds(),command.TargetId,command.Sequence,OwnerFor(command.PlayerId),out message,out followed,payload):ApplyCore(command,out message,payload);}
@@ -52,7 +52,7 @@ namespace Spacewars.Runtime
                 var candidate=navigation.PreparedTacticalCandidate;
                 if(candidate==null)throw new InvalidOperationException("Tactical command did not stage its Nav effects.");
                 payload.PrepareAcceptance(candidate,command,ids);AfterTacticalPreparationForQa?.Invoke(payload);
-                if(!navigation.FinishTacticalPreparation(payload,ids)){message="Tactical readset changed before commit.";return PlayableCommandStatus.Rejected;}
+                if(!navigation.FinishTacticalPreparation(payload,ids)){message="Tactical commit refused: "+(navigation.LastCommandAdmissionRefusal??"readset changed before commit");return PlayableCommandStatus.Rejected;}
                 committed=true;return PlayableCommandStatus.Applied;
             }catch(Exception error){
                 primary=error;

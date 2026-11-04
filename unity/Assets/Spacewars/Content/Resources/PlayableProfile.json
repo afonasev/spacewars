@@ -1,5 +1,9 @@
 {
   "groundRouteBackend": 1,
+  "wreckReconcileSlotsPerTick": 16,
+  "wreckReconcileCellsPerTick": 1024,
+  "wreckReconcileQueriesPerTick": 2,
+  "wreckResponseTicks": 30,
   "wreckSpawnProtectionSeconds": 1,
   "orbitalHackHealthPercent": 50,
   "orbitalHackSeconds": 30,

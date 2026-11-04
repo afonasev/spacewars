@@ -145,8 +145,7 @@ namespace Spacewars.Simulation
             }
             }
             // Every obstacle is from the published knowledge-scoped authority snapshot.
-            // A null-area prism removes its footprint on all supported gameplay layers,
-            // matching current NavGeometry's XZ obstacle semantics.
+            // Static solids span the support envelope; typed wrecks retain their physical layer.
             var heights=supports.SelectMany(s=>s.Bounds.Footprint.Vertices.Select(s.HeightAt)).ToArray();
             double top=heights.Max()+2,bottom=heights.Min()-2;
             // Recast's voxel climb admits small steps. The game's partition has a
@@ -164,6 +163,15 @@ namespace Spacewars.Simulation
                 }
             }
             foreach(var obstacle in visibleGeometry.Obstacles){
+                double obstacleBottom=bottom,obstacleTop=top;
+                if(obstacle.PhysicalLayer>=0){
+                    if(layered==null||obstacle.PhysicalLayer>=layered.Surfaces.Count)throw new ArgumentException("Unknown wreck physical layer.");
+                    var layer=layered.Surfaces[obstacle.PhysicalLayer];
+                    var selected=supports.Where(s=>s.SurfaceId==layer.Id).SelectMany(s=>s.Bounds.Footprint.Vertices.Select(s.HeightAt)).ToArray();
+                    if(selected.Length==0)throw new ArgumentException("Wreck layer has no physical support.");
+                    double low=selected.Min(),high=selected.Max();
+                    foreach(var other in layered.Surfaces){if(other.Id==layer.Id)continue;if(other.Height>high)obstacleTop=Math.Min(obstacleTop,(high+other.Height)/2);if(other.Height<low)obstacleBottom=Math.Max(obstacleBottom,(low+other.Height)/2);}
+                }
                 NavPolygon p;
                 if(obstacle.CircleRadius>0){var pts=new List<NavPoint>();for(int i=0;i<32;i++){double angle=2*Math.PI*i/32;double r=obstacle.CircleRadius/Math.Cos(Math.PI/32);pts.Add(new NavPoint(obstacle.CircleCenter.X+Math.Cos(angle)*r,obstacle.CircleCenter.Z+Math.Sin(angle)*r));}p=new NavPolygon(pts);}
                 else p=obstacle.Footprint;
@@ -179,10 +187,10 @@ namespace Spacewars.Simulation
                     if(clipped.Length>=3)Obstacle(clipped);
                 }
                 void Obstacle(IReadOnlyList<NavPoint> ring){
-                    if(ReferenceEquals(ring,p.Vertices)){for(int i=0;i<p.Triangles.Count;i+=3)Triangle(p.Vertices[p.Triangles[i]],p.Vertices[p.Triangles[i+1]],p.Vertices[p.Triangles[i+2]],_=>top,0);}
-                    else for(int i=1;i<ring.Count-1;i++)if(Math.Abs(Cross(ring[0],ring[i],ring[i+1]))>1e-10)Triangle(ring[0],ring[i],ring[i+1],_=>top,0);
+                    if(ReferenceEquals(ring,p.Vertices)){for(int i=0;i<p.Triangles.Count;i+=3)Triangle(p.Vertices[p.Triangles[i]],p.Vertices[p.Triangles[i+1]],p.Vertices[p.Triangles[i+2]],_=>obstacleTop,0);}
+                    else for(int i=1;i<ring.Count-1;i++)if(Math.Abs(Cross(ring[0],ring[i],ring[i+1]))>1e-10)Triangle(ring[0],ring[i],ring[i+1],_=>obstacleTop,0);
                     for(int i=0;i<ring.Count;i++){var a=ring[i];var b=ring[(i+1)%ring.Count];if(a.Equals(b))continue;
-                        int n=vertices.Count/3;foreach(var pair in new[]{Tuple.Create(a,bottom),Tuple.Create(b,bottom),Tuple.Create(b,top),Tuple.Create(a,top)}){vertices.Add((float)pair.Item1.X);vertices.Add((float)pair.Item2);vertices.Add((float)pair.Item1.Z);}triangles.AddRange(new[]{n,n+1,n+2,n,n+2,n+3});areas.Add(0);areas.Add(0);Check();}
+                        int n=vertices.Count/3;foreach(var pair in new[]{Tuple.Create(a,obstacleBottom),Tuple.Create(b,obstacleBottom),Tuple.Create(b,obstacleTop),Tuple.Create(a,obstacleTop)}){vertices.Add((float)pair.Item1.X);vertices.Add((float)pair.Item2);vertices.Add((float)pair.Item1.Z);}triangles.AddRange(new[]{n,n+1,n+2,n,n+2,n+3});areas.Add(0);areas.Add(0);Check();}
                 }
             }
             return new RecastAuthorityGeometry(terrain,ids,vertices.ToArray(),triangles.ToArray(),areas.ToArray(),directed,profile,visibleGeometry.Revision,links.ToArray(),linkAreas.ToArray(),linkDirections.ToArray(),linkIds.ToArray(),visibleGeometry){UsedFoundation=foundation!=null};

@@ -15,30 +15,32 @@ namespace Spacewars.Simulation
     {
         public readonly double MinX, MinZ, MaxX, MaxZ;
         public readonly double CircleRadius;
+        // Canonical layered-provider surface ordinal; -1 is an all-layer solid.
+        public readonly int PhysicalLayer;
         public NavPoint CircleCenter=>new NavPoint((MinX+MaxX)/2,(MinZ+MaxZ)/2);
         // Exact circle is the source unit footprint; no polygon inflation or new balance value.
-        public NavObstacle(NavPoint center,double radius){if(radius<=0||!Finite(radius)||!Finite(center.X)||!Finite(center.Z))throw new ArgumentException("Invalid circle.");CircleRadius=radius;MinX=center.X-radius;MaxX=center.X+radius;MinZ=center.Z-radius;MaxZ=center.Z+radius;Polygon=null;Bottom=0;Top=double.NaN;}
+        public NavObstacle(NavPoint center,double radius,int physicalLayer=-1){PhysicalLayer=physicalLayer;if(physicalLayer< -1)throw new ArgumentException("Invalid obstacle layer.");if(radius<=0||!Finite(radius)||!Finite(center.X)||!Finite(center.Z))throw new ArgumentException("Invalid circle.");CircleRadius=radius;MinX=center.X-radius;MaxX=center.X+radius;MinZ=center.Z-radius;MaxZ=center.Z+radius;Polygon=null;Bottom=0;Top=double.NaN;}
         public readonly NavPolygon Polygon; public readonly double Bottom, Top;
-        public NavObstacle(NavPolygon polygon,double bottom=0,double top=double.NaN){CircleRadius=0;Polygon=polygon??throw new ArgumentNullException(nameof(polygon));MinX=polygon.MinX;MinZ=polygon.MinZ;MaxX=polygon.MaxX;MaxZ=polygon.MaxZ;Bottom=bottom;Top=top;}
+        public NavObstacle(NavPolygon polygon,double bottom=0,double top=double.NaN){PhysicalLayer=-1;CircleRadius=0;Polygon=polygon??throw new ArgumentNullException(nameof(polygon));MinX=polygon.MinX;MinZ=polygon.MinZ;MaxX=polygon.MaxX;MaxZ=polygon.MaxZ;Bottom=bottom;Top=top;}
         public bool Contains(NavPoint p)=>Polygon!=null?Polygon.Contains(p):p.X>=MinX&&p.X<=MaxX&&p.Z>=MinZ&&p.Z<=MaxZ;
         public double DistanceSquared(NavPoint p){if(Polygon!=null)return Polygon.DistanceSquared(p);double x=Math.Max(MinX-p.X,Math.Max(0,p.X-MaxX)),z=Math.Max(MinZ-p.Z,Math.Max(0,p.Z-MaxZ));return x*x+z*z;}
         public double BoundaryDistanceSquared(NavPoint p)=>Polygon!=null?Polygon.BoundaryDistanceSquared(p):Contains(p)?Math.Pow(Math.Min(Math.Min(p.X-MinX,MaxX-p.X),Math.Min(p.Z-MinZ,MaxZ-p.Z)),2):DistanceSquared(p);
         // Structural identity for decoded polygon geometry; object identity is not wire identity.
         public bool GeometryEquals(NavObstacle other)
         {
-            if(MinX!=other.MinX||MinZ!=other.MinZ||MaxX!=other.MaxX||MaxZ!=other.MaxZ||CircleRadius!=other.CircleRadius||!Bottom.Equals(other.Bottom)||!Top.Equals(other.Top)||(Polygon==null)!=(other.Polygon==null))return false;
+            if(PhysicalLayer!=other.PhysicalLayer||MinX!=other.MinX||MinZ!=other.MinZ||MaxX!=other.MaxX||MaxZ!=other.MaxZ||CircleRadius!=other.CircleRadius||!Bottom.Equals(other.Bottom)||!Top.Equals(other.Top)||(Polygon==null)!=(other.Polygon==null))return false;
             if(Polygon!=null){if(Polygon.Vertices.Count!=other.Polygon.Vertices.Count)return false;for(int i=0;i<Polygon.Vertices.Count;i++)if(!Polygon.Vertices[i].Equals(other.Polygon.Vertices[i]))return false;}return true;
         }
         public NavPolygon Footprint=>Polygon??new NavPolygon(new[]{new NavPoint(MinX,MinZ),new NavPoint(MaxX,MinZ),new NavPoint(MaxX,MaxZ),new NavPoint(MinX,MaxZ)});
         public NavObstacle(double minX, double minZ, double maxX, double maxZ)
         {
             if (!Finite(minX) || !Finite(minZ) || !Finite(maxX) || !Finite(maxZ) || minX > maxX || minZ > maxZ) throw new ArgumentException("Invalid obstacle bounds.");
-            CircleRadius=0;MinX = minX; MinZ = minZ; MaxX = maxX; MaxZ = maxZ; Polygon=null;Bottom=0;Top=double.NaN;
+            PhysicalLayer=-1;CircleRadius=0;MinX = minX; MinZ = minZ; MaxX = maxX; MaxZ = maxZ; Polygon=null;Bottom=0;Top=double.NaN;
         }
         // Wire hydration retains exact bounds produced by the original center +/- radius
         // arithmetic. Midpoint reconstruction can change IEEE754 low bits.
-        public static NavObstacle RestoreCircle(double minX,double minZ,double maxX,double maxZ,double radius)
-        { if(!Finite(minX)||!Finite(minZ)||!Finite(maxX)||!Finite(maxZ)||!Finite(radius)||radius<=0||!CircleAxis(minX,maxX,radius)||!CircleAxis(minZ,maxZ,radius))throw new ArgumentException("Invalid saved circle bounds.");return new NavObstacle(minX,minZ,maxX,maxZ,radius); }
+        public static NavObstacle RestoreCircle(double minX,double minZ,double maxX,double maxZ,double radius,int physicalLayer=-1)
+        { if(physicalLayer< -1||!Finite(minX)||!Finite(minZ)||!Finite(maxX)||!Finite(maxZ)||!Finite(radius)||radius<=0||!CircleAxis(minX,maxX,radius)||!CircleAxis(minZ,maxZ,radius))throw new ArgumentException("Invalid saved circle bounds.");return new NavObstacle(minX,minZ,maxX,maxZ,radius,physicalLayer); }
         private static bool CircleAxis(double min,double max,double radius)
         {
             if(min>max)return false;
@@ -50,7 +52,7 @@ namespace Spacewars.Simulation
             }
             return false;
         }
-        private NavObstacle(double minX,double minZ,double maxX,double maxZ,double radius){MinX=minX;MinZ=minZ;MaxX=maxX;MaxZ=maxZ;CircleRadius=radius;Polygon=null;Bottom=0;Top=double.NaN;}
+        private NavObstacle(double minX,double minZ,double maxX,double maxZ,double radius,int physicalLayer){PhysicalLayer=physicalLayer;MinX=minX;MinZ=minZ;MaxX=maxX;MaxZ=maxZ;CircleRadius=radius;Polygon=null;Bottom=0;Top=double.NaN;}
         private static bool Finite(double value) { return !Double.IsNaN(value) && !Double.IsInfinity(value); }
     }
 
@@ -125,30 +127,30 @@ namespace Spacewars.Simulation
         public double HalfExtent { get; private set; }
         public int Revision { get; private set; }
         public IReadOnlyList<NavObstacle> Obstacles { get { return obstacleView; } }
-        public bool IsFree(NavPoint point, double radius)
+        public bool IsFree(NavPoint point, double radius,int physicalLayer=-1)
         {
             if (radius < 0d || Double.IsNaN(radius) || Double.IsInfinity(radius) || Double.IsNaN(point.X) || Double.IsInfinity(point.X) || Double.IsNaN(point.Z) || Double.IsInfinity(point.Z) || Math.Abs(point.X) + radius > HalfExtent || Math.Abs(point.Z) + radius > HalfExtent) return false;
-            bool Hit(int i)=>point.X+radius>=obstacles[i].MinX&&point.X-radius<=obstacles[i].MaxX&&point.Z+radius>=obstacles[i].MinZ&&point.Z-radius<=obstacles[i].MaxZ&&(obstacles[i].Polygon!=null?(obstacles[i].Polygon.Contains(point)||obstacles[i].Polygon.BoundaryWithin(point,radius)):PointRectDistanceSquared(point,obstacles[i])<=radius*radius);
+            bool Hit(int i)=>(physicalLayer<0||obstacles[i].PhysicalLayer<0||physicalLayer==obstacles[i].PhysicalLayer)&&point.X+radius>=obstacles[i].MinX&&point.X-radius<=obstacles[i].MaxX&&point.Z+radius>=obstacles[i].MinZ&&point.Z-radius<=obstacles[i].MaxZ&&(obstacles[i].Polygon!=null?(obstacles[i].Polygon.Contains(point)||obstacles[i].Polygon.BoundaryWithin(point,radius)):PointRectDistanceSquared(point,obstacles[i])<=radius*radius);
             if(spatial!=null&&SmallQuery(point.X-radius,point.Z-radius,point.X+radius,point.Z+radius,out int left,out int bottom,out int right,out int top)){
                 for(int x=left;x<=right;x++)for(int z=bottom;z<=top;z++){var ids=spatial[x*SpatialWidth+z];if(ids!=null)for(int n=0;n<ids.Length;n++)if(Hit(ids[n]))return false;}
             }else for(int i=0;i<obstacles.Length;i++)if(Hit(i))return false;
             return true;
         }
-        public bool SegmentFree(NavPoint from, NavPoint to, double radius)
-            =>SegmentFree(from,to,radius,out _);
-        internal bool SegmentFree(NavPoint from,NavPoint to,double radius,out int blocker)
+        public bool SegmentFree(NavPoint from, NavPoint to, double radius,int physicalLayer=-1)
+            =>SegmentFree(from,to,radius,out _,physicalLayer);
+        internal bool SegmentFree(NavPoint from,NavPoint to,double radius,out int blocker,int physicalLayer=-1)
         {
-            blocker=-1;if (!IsFree(from, radius) || !IsFree(to, radius)) return false;
-            return SegmentFreeBetweenFreeEndpoints(from,to,radius,out blocker);
+            blocker=-1;if (!IsFree(from, radius,physicalLayer) || !IsFree(to, radius,physicalLayer)) return false;
+            return SegmentFreeBetweenFreeEndpoints(from,to,radius,out blocker,physicalLayer);
         }
         // Internal callers must own exact free-footprint certificates for this immutable geometry.
         internal bool SegmentFreeBetweenFreeEndpoints(NavPoint from,NavPoint to,double radius)
             =>SegmentFreeBetweenFreeEndpoints(from,to,radius,out _);
-        internal bool SegmentFreeBetweenFreeEndpoints(NavPoint from,NavPoint to,double radius,out int blocker)
+        internal bool SegmentFreeBetweenFreeEndpoints(NavPoint from,NavPoint to,double radius,out int blocker,int physicalLayer=-1)
         {
             blocker=-1;
             double minX=Math.Min(from.X,to.X)-radius,minZ=Math.Min(from.Z,to.Z)-radius,maxX=Math.Max(from.X,to.X)+radius,maxZ=Math.Max(from.Z,to.Z)+radius;
-            bool Hit(int i)=>maxX>=obstacles[i].MinX&&minX<=obstacles[i].MaxX&&maxZ>=obstacles[i].MinZ&&minZ<=obstacles[i].MaxZ&&(obstacles[i].Polygon!=null?obstacles[i].Polygon.SweepWithin(from,to,radius):SegmentRectDistanceSquared(from,to,obstacles[i])<=radius*radius);
+            bool Hit(int i)=>(physicalLayer<0||obstacles[i].PhysicalLayer<0||physicalLayer==obstacles[i].PhysicalLayer)&&maxX>=obstacles[i].MinX&&minX<=obstacles[i].MaxX&&maxZ>=obstacles[i].MinZ&&minZ<=obstacles[i].MaxZ&&(obstacles[i].Polygon!=null?obstacles[i].Polygon.SweepWithin(from,to,radius):SegmentRectDistanceSquared(from,to,obstacles[i])<=radius*radius);
             if(spatial!=null&&SmallQuery(minX,minZ,maxX,maxZ,out int left,out int bottom,out int right,out int top)){
                 for(int x=left;x<=right;x++)for(int z=bottom;z<=top;z++){var ids=spatial[x*SpatialWidth+z];if(ids!=null)for(int n=0;n<ids.Length;n++)if(Hit(ids[n])){blocker=ids[n];return false;}}
             }else for(int i=0;i<obstacles.Length;i++)if(Hit(i)){blocker=i;return false;}

@@ -60,6 +60,7 @@ namespace Spacewars.Presentation
         private NativeBalanceStore balanceStore;
         private void EnsureBalanceStore(){if(balanceStore!=null)return;string path=null;
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if(earlyScoutOutput!=null)path=System.IO.Path.Combine(earlyScoutOutput,"native-balance.json");
             var detailArgs=System.Environment.GetCommandLineArgs();int detailIndex=System.Array.IndexOf(detailArgs,"-mapModelDetailEvidence");
             int yardIndex=System.Array.IndexOf(detailArgs,"-crossingYardEvidence");
             if(yardIndex>=0&&yardIndex+1<detailArgs.Length)path=System.IO.Path.Combine(detailArgs[yardIndex+1],"native-balance.json");

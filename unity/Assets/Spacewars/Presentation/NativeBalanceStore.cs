@@ -16,7 +16,7 @@ namespace Spacewars.Presentation
         public const string DefaultId="spacewars-default";
         public const string AiProfileId="ai-openings-midgame-v1";
         public const string NewMatchProfileId="spacewars-certified-group-corridor115-v1";
-        public const int NewMatchProfileVersion=3;
+        public const int NewMatchProfileVersion=4;
         public const string ProjectRelativePath="design/native-lab/profiles.json";
         private readonly AtomicStore disk;
         private readonly PlayableProfile baseline;

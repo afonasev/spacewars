@@ -121,8 +121,16 @@ namespace Spacewars.Simulation
             // seam cannot make an earlier bank target the next own destination.
             int start=PreviousPortal(route,state.Cursor)+1;if(typed<start)return false;
             if(typed>=route.RecastPlan.TerminalLeg&&state.Phase!=2&&!InTerminalFan(route,from))return false;
-            if(!Trace(route,state,from,route.Legs[typed].To.Position,r,out var reached,out _,out _,authority,actor))return false;
-            return reached.Equals(route.Legs[typed].To);
+            if(!Trace(route,state,from,route.Legs[typed].To.Position,r,out var reached,out _,out var receipt,authority,actor))return false;
+            if(reached.Equals(route.Legs[typed].To))return true;
+            // The physical sweep may cross an accepted seam AT its endpoint.
+            // That coordinate is still the current surface leg's target; its
+            // reached surface is the immediately following portal's exit.
+            // Require the exact owned portal and exact endpoint, never XZ-only
+            // equivalence between arbitrary surfaces or an unconsumed seam.
+            int portal=typed+1;
+            return portal<route.Legs.Count&&route.Legs[portal].Kind==NavTypedLegKind.Portal&&
+                receipt.LastPortalLeg==portal&&route.Legs[portal].From.Equals(route.Legs[typed].To)&&route.Legs[portal].To.Equals(reached);
         }
         internal static bool TryContinuationRejoin(NavTypedRoute route,NavRecastStepState before,NavLocation from,IReadOnlyList<NavPoint> local,int localIndex,IReadOnlyList<NavPoint> global,int currentIndex,NavLocation goal,INavStorageReservation r,out int selected,NavCrowd authority,int actor=0,bool exactTarget=false)
         {

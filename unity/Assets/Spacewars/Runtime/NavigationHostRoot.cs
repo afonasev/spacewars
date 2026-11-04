@@ -611,6 +611,8 @@ namespace Spacewars.Runtime
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.ArrivalProviderSnapshot))?NavigationArrivalProviderSnapshot.ReadPhysicalBody(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.AuthorityCatalogRoutes))?NavigationAuthorityOwners.ReadPhysicalBody(reader,true,true,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.InstalledExecution,value:NavPhysicalValueKind.InstalledGeometryMemberV2))?InstalledGeometryMemberV2.Read(reader):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.InstalledExecution,value:NavPhysicalValueKind.WreckGeometryMemberV1))?InstalledGeometryMemberV2.Read(reader,true):
+              tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.InstalledExecution,value:NavPhysicalValueKind.WreckGeometryCertificateV1))?InstalledGeometryCertificateV2.Read(reader,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.InstalledExecution,value:NavPhysicalValueKind.InstalledGeometryCertificateV2))?InstalledGeometryCertificateV2.Read(reader):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.InstalledExecution,value:NavPhysicalValueKind.InstalledExecutionV2))?NavigationInstalledExecutionOwner.ReadPhysicalBody(reader,true):
               tag.Equals(new NavPhysicalTag(NavPhysicalStorageKind.InstalledExecution))?NavigationInstalledExecutionOwner.ReadPhysicalBody(reader):

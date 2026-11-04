@@ -1,0 +1,105 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "category_ru": "Навигация и ИИ",
+      "category_en": "Navigation and AI",
+      "ru": "Снижены задержки первых приказов разведчикам: первые решения и их доставка прогреваются до запуска игрового времени.",
+      "en": "Reduced initial scout command latency by warming first decisions and their delivery before the match clock starts."
+    },
+    {
+      "category_ru": "Навигация и ИИ",
+      "category_en": "Navigation and AI",
+      "ru": "Появление обломков обновляет затронутые маршруты локально; повторная проверка неизменённых препятствий сокращена.",
+      "en": "Wreck creation updates affected routes locally, with less repeated validation of unchanged obstacles."
+    },
+    {
+      "category_ru": "Навигация и ИИ",
+      "category_en": "Navigation and AI",
+      "ru": "Исправлены остановки ИИ на стыках маршрутов и восстановление после отказа команды.",
+      "en": "Fixed AI stalls at route seams and recovery after rejected commands."
+    },
+    {
+      "category_ru": "Навигация и ИИ",
+      "category_en": "Navigation and AI",
+      "ru": "Полезное производство получает первый обычный слот внимания ИИ.",
+      "en": "Useful production receives the first ordinary AI attention slot."
+    },
+    {
+      "category_ru": "Навигация и ИИ",
+      "category_en": "Navigation and AI",
+      "ru": "Матчи без ИИ пропускают пустую координацию команд и создание ненужного профиля каждый тик.",
+      "en": "Human-only matches skip empty team coordination and unnecessary per-tick AI profile construction."
+    },
+    {
+      "category_ru": "Бой и баланс",
+      "category_en": "Combat and balance",
+      "ru": "«Ястреб» заранее тормозит поворот перед выравниванием, чтобы колебания курса не задерживали залп.",
+      "en": "Hawks brake their yaw before alignment so heading oscillations do not delay a salvo."
+    },
+    {
+      "category_ru": "Бой и баланс",
+      "category_en": "Combat and balance",
+      "ru": "Включён сохранённый баланс редакции 4: обновлены цены и дальности юнитов, подготовка и перезарядка «Ястреба», здоровье штабов и аванпостов, параметры турелей и скорость волны сканирования.",
+      "en": "Enabled saved balance revision 4, updating unit costs and ranges, Hawk preparation and reload, headquarters and outpost health, turret parameters and scan wave speed."
+    },
+    {
+      "category_ru": "Интерфейс",
+      "category_en": "Interface",
+      "ru": "Лаунчер получил компактное фирменное оформление, даты версий и отдельные состояния проверки, доступного обновления и ошибки.",
+      "en": "The launcher has a compact branded layout, version dates and distinct checking, update-available and failure states.",
+      "images": [
+        {
+          "path": "tools/native-release/notes/media/0.6.19-launcher.png",
+          "source_commit": "f5aa371b6f993530cd4c5735eeeb8a21a487ef18",
+          "ru": "Нативный лаунчер macOS; тестовые номера версий для проверки состояний.",
+          "en": "Native macOS launcher; fixture version numbers used to verify states."
+        }
+      ]
+    },
+    {
+      "category_ru": "Интерфейс",
+      "category_en": "Interface",
+      "ru": "Управление обновлениями и их статус перенесены в лаунчер перед запуском игры.",
+      "en": "Update controls and status are handled in the prelaunch launcher.",
+      "images": [
+        {
+          "path": "tools/native-release/notes/media/0.6.19-main-menu.png",
+          "source_commit": "52a13bd1c34ded73e065427704930e5af9c375a6",
+          "ru": "Главное меню после переноса обновлений в лаунчер; автоматический кадр Editor.",
+          "en": "Main menu after moving updates to the launcher; automated Editor capture."
+        }
+      ]
+    },
+    {
+      "category_ru": "Интерфейс",
+      "category_en": "Interface",
+      "ru": "В Windows лаунчер запускается без лишнего консольного окна; установка обновления требует явного согласия.",
+      "en": "On Windows the launcher opens without an extra console window, and installing an update requires explicit consent."
+    },
+    {
+      "category_ru": "Интерфейс",
+      "category_en": "Interface",
+      "ru": "С миникарты убраны числовые подписи баз.",
+      "en": "Removed numeric base labels from the minimap."
+    },
+    {
+      "category_ru": "Интерфейс",
+      "category_en": "Interface",
+      "ru": "Иконки выбора цели орбитальных способностей сохраняют видимость при обновлении интерфейса.",
+      "en": "Orbital ability targeting glyphs remain visible across interface refreshes."
+    },
+    {
+      "category_ru": "Полигон",
+      "category_en": "Proving ground",
+      "ru": "На полигоне доступны реализованные способности эскалации.",
+      "en": "Implemented escalation abilities are available in the proving ground."
+    },
+    {
+      "category_ru": "Полигон",
+      "category_en": "Proving ground",
+      "ru": "Цвет захваченного юнита обновляется по текущему владельцу.",
+      "en": "Captured units refresh their color to match their current owner."
+    }
+  ]
+}

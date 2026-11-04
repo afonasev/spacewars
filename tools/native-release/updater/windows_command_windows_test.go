@@ -6,7 +6,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"syscall"
 	"testing"
+	"time"
+	"unsafe"
 )
 
 // The test binary acts as the helper to inspect real Windows argv.
@@ -44,5 +47,63 @@ func TestWindowsApplyScriptRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(args, []string{"--apply", stage}) {
 		t.Fatalf("argv split/corrupted: %#v", args)
+	}
+}
+
+// Run on an interactive Windows desktop: this catches a hidden WinForms window,
+// script startup/encoding errors and broken redirected stdin together.
+func TestWindowsLauncherVisibleWithRedirectedPipes(t *testing.T) {
+	release := t.TempDir()
+	for dest, source := range map[string]string{"LauncherView.ps1": "../launcher/LauncherView.ps1", "Spacewars.ico": "../icons/Spacewars.ico"} {
+		b, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(filepath.Join(release, dest), b, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := nativeLauncherCommand(release)
+	if cmd.SysProcAttr.HideWindow || cmd.SysProcAttr.CreationFlags&0x08000000 == 0 {
+		t.Fatal("must hide console without hiding native window")
+	}
+	l, err := startLauncherCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.close()
+	if err = l.send(launcherView(Status{Version: "1.0.0", State: "downloading", Done: 6, Total: 10}, false)); err != nil {
+		t.Fatal(err)
+	}
+	user := syscall.NewLazyDLL("user32.dll")
+	enum := user.NewProc("EnumWindows")
+	pid := user.NewProc("GetWindowThreadProcessId")
+	visible := user.NewProc("IsWindowVisible")
+	found := false
+	callback := syscall.NewCallback(func(h, unused uintptr) uintptr {
+		var id uint32
+		pid.Call(h, uintptr(unsafe.Pointer(&id)))
+		if id == uint32(cmd.Process.Pid) {
+			if v, _, _ := visible.Call(h); v != 0 {
+				found = true
+			}
+		}
+		return 1
+	})
+	deadline := time.After(20 * time.Second)
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-l.closed:
+			t.Fatalf("launcher exited before showing UI: %v", l.err)
+		case <-deadline:
+			t.Fatal("no visible launcher on Windows desktop")
+		case <-tick.C:
+			enum.Call(callback, 0)
+			if found {
+				return
+			}
+		}
 	}
 }

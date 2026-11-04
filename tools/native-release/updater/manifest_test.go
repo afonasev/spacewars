@@ -51,6 +51,20 @@ func TestSignedManifestRejectsTamperAndWrongPlatform(t *testing.T) {
 		t.Fatal("tampered payload accepted")
 	}
 }
+func TestSignedManifestOptionalReleaseDate(t *testing.T) {
+	for _, date := range []string{"", "2026-11-04", "2024-02-29", "2026-02-30", "04.11.2026"} {
+		m := sample()
+		m.ReleaseDate = date
+		got, err := verifyEnvelope(signed(t, m), m.Platform)
+		valid := date == "" || date == "2026-11-04" || date == "2024-02-29"
+		if valid && (err != nil || got.ReleaseDate != date) {
+			t.Fatalf("date %q: %+v %v", date, got, err)
+		}
+		if !valid && err == nil {
+			t.Fatalf("invalid date accepted: %q", date)
+		}
+	}
+}
 func TestSignedManifestRejectsUnsafePathsAndCollisions(t *testing.T) {
 	for _, name := range []string{"../Player.exe", "/etc/file", "C:\\file", "folder/../file", "CON.txt", "dir\\file", "a.", "AUX"} {
 		m := sample()

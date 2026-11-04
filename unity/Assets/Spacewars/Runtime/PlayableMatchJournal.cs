@@ -48,7 +48,7 @@ namespace Spacewars.Runtime
             try{JournalFailureReported?.Invoke(error);}catch{/* Recorder failure cannot fail the match. */}
         }
         void JournalCapture(bool paused)
-        {if(matchJournal==null)return;try{matchJournal.Capture(authorityTick,paused);}catch(Exception error){JournalProblem(error);}}
+        {using var journalTiming=PerformanceProfile.Measure(ProfileStage.JournalCapture);if(matchJournal==null)return;try{matchJournal.Capture(authorityTick,paused);}catch(Exception error){JournalProblem(error);}}
         void JournalCommand(PlayableCommand command)
         {if(matchJournal==null)return;try{matchJournal.Command(command);}catch(Exception error){JournalProblem(error);}}
         void JournalReceipt(PlayableCommandReceipt receipt)

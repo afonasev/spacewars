@@ -180,13 +180,15 @@ func recoverPrevious(root string, a Active) error {
 }
 
 type Status struct {
-	Notice    string `json:"notice"`
-	Version   string `json:"version"`
-	Available string `json:"available"`
-	State     string `json:"state"`
-	Error     string `json:"error"`
-	Done      int64  `json:"done"`
-	Total     int64  `json:"total"`
+	Notice        string `json:"notice"`
+	Version       string `json:"version"`
+	ReleaseDate   string `json:"release_date,omitempty"`
+	Available     string `json:"available"`
+	AvailableDate string `json:"available_date,omitempty"`
+	State         string `json:"state"`
+	Error         string `json:"error"`
+	Done          int64  `json:"done"`
+	Total         int64  `json:"total"`
 }
 
 var discoverForHost = candidate
@@ -217,9 +219,16 @@ func host(root, exe string) error {
 		return crashAfterReady
 	}
 	defer releaseHost()
+	launcher, e := launcherForHost(launcherRelease(root, a.ID))
+	if e != nil {
+		return fmt.Errorf("launcher view: %w", e)
+	}
+	if launcher != nil {
+		defer launcher.close()
+	}
 	pendingStage := ""
 	if pending, e := readPending(root, cache); e == nil {
-		if _, skip := os.Stat(filepath.Join(cache, "skip-pending-once")); skip == nil {
+		if _, skip := os.Stat(filepath.Join(cache, "skip-pending-once")); skip == nil || launcher != nil {
 			_ = os.Remove(filepath.Join(cache, "skip-pending-once"))
 			pendingStage = pending
 		} else {
@@ -241,7 +250,7 @@ func host(root, exe string) error {
 		return e
 	}
 	var mu sync.Mutex
-	status := Status{Version: current.Version, State: "checking"}
+	status := Status{Version: current.Version, ReleaseDate: current.ReleaseDate, State: "checking"}
 	if _, e := os.Stat(filepath.Join(cache, "last-error.txt")); e == nil {
 		status.Notice = "Предыдущее обновление не удалось. Рабочая версия сохранена."
 		_ = os.Remove(filepath.Join(cache, "last-error.txt"))
@@ -254,6 +263,7 @@ func host(root, exe string) error {
 		if b, e := os.ReadFile(filepath.Join(stage, "manifest.json")); e == nil {
 			if m, e := verifyEnvelope(b, platform); e == nil {
 				status.Available = m.Version
+				status.AvailableDate = m.ReleaseDate
 			}
 		}
 	}
@@ -339,6 +349,7 @@ func host(root, exe string) error {
 			next = m
 			raw = b
 			status.Available = m.Version
+			status.AvailableDate = m.ReleaseDate
 			status.State = "available"
 		} else {
 			status.State = "current"
@@ -466,13 +477,8 @@ func host(root, exe string) error {
 	if status.State == "checking" {
 		go check()
 	}
-	launcher, e := launcherForHost(launcherRelease(root, a.ID))
-	if e != nil {
-		return fmt.Errorf("launcher view: %w", e)
-	}
 	running := false
 	if launcher != nil {
-		defer launcher.close()
 		viewStop := make(chan struct{})
 		defer close(viewStop)
 		go func() {

@@ -13,6 +13,7 @@ import (
 
 // The native view receives presentation only, never the IPC token or update paths.
 type LauncherView struct {
+	Title     string `json:"title"`
 	Version   string `json:"version"`
 	Message   string `json:"message"`
 	Primary   string `json:"primary"`
@@ -21,22 +22,33 @@ type LauncherView struct {
 	Busy      bool   `json:"busy"`
 }
 
+func launcherReleaseLabel(version, date string) string {
+	if parsed, err := time.Parse("2006-01-02", date); err == nil {
+		return version + " от " + parsed.Format("02.01.2006")
+	}
+	return version + " · дата не указана"
+}
+
 func launcherView(s Status, running bool) LauncherView {
-	v := LauncherView{Version: s.Version, Primary: "Играть", Progress: -1}
+	v := LauncherView{Title: "Игра готова к запуску", Version: "Текущая версия " + launcherReleaseLabel(s.Version, s.ReleaseDate), Primary: "Играть сейчас", Progress: -1}
 	if channel == "test" {
 		v.Version += " · test"
 	}
-	if running {
-		v.Primary = "Игра запущена"
-		v.Busy = true
-		return v
-	}
 	switch s.State {
 	case "checking":
+		v.Title = "Проверяем обновления"
 		v.Message = "Проверка обновлений…"
+	case "current":
+		v.Message = "Последняя версия — проверено"
+	case "offline":
+		v.Title = "Проверка недоступна"
+		v.Message = "Не удалось проверить обновления"
 	case "available":
-		v.Secondary = "Обновить до " + s.Available
+		v.Title = "Доступно обновление"
+		v.Message = "Доступна новая версия " + launcherReleaseLabel(s.Available, s.AvailableDate)
+		v.Secondary = "Обновить"
 	case "downloading":
+		v.Title = "Загружаем обновление"
 		v.Message = "Загрузка…"
 		v.Secondary = "Отменить"
 		if s.Total > 0 {
@@ -50,18 +62,32 @@ func launcherView(s Status, running bool) LauncherView {
 			v.Message = fmt.Sprintf("Загрузка · %d%%", v.Progress)
 		}
 	case "prepared":
-		v.Secondary = "Установить " + s.Available
+		v.Title = "Обновление готово"
+		v.Message = "Готова к установке версия " + launcherReleaseLabel(s.Available, s.AvailableDate)
+		v.Secondary = "Установить"
 	case "applying":
+		v.Title = "Устанавливаем обновление"
 		v.Message = "Установка…"
 		v.Busy = true
 	case "error":
+		v.Title = "Обновление прервалось"
 		v.Message = "Обновление не удалось"
 		if s.Available != "" {
 			v.Secondary = "Повторить"
 		}
 	}
-	if v.Message == "" && s.Notice != "" {
-		v.Message = s.Notice
+	if s.Notice != "" {
+		if v.Message != "" {
+			v.Message = s.Notice + "\n" + v.Message
+		} else {
+			v.Message = s.Notice
+		}
+	}
+	if running {
+		v.Title = "Spacewars запущена"
+		v.Primary = "Игра запущена"
+		v.Busy = true
+		v.Secondary = ""
 	}
 	return v
 }

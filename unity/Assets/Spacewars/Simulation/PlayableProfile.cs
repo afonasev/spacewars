@@ -86,6 +86,7 @@ namespace Spacewars.Simulation
         public double reinforcedConcreteCost=200, reinforcedConcreteSeconds=30, reinforcedConcreteBonusPercent=25;
         public double reinforcedConcreteLevel2Cost=200, reinforcedConcreteLevel2Seconds=30, reinforcedConcreteLevel2BonusPercent=50;
         public double provingGroundActionSeconds=5;
+        public double provingGroundOrbitalSeconds=5;
         public double provingGroundAttackRearLaneOffset=15;
         // match-events-v1: real-time readability/history and spatial battle admission.
         public double notificationBottomPixels=8;
@@ -362,6 +363,8 @@ namespace Spacewars.Simulation
         public double directImpactSparkWidth=.035,directImpactGlow=1.5,directImpactSmokeOpacity=.22;
         public double directImpactRadius=0.18, directImpactSeconds=0.16, directImpactSparkLength=0.45, explorerImpactScale=0.4;
         public double unitWreckLifetimeSeconds=30;
+        // local-wreck-navigation-v1; deterministic aggregate service quotas.
+        public int wreckReconcileSlotsPerTick=16,wreckReconcileCellsPerTick=1024,wreckReconcileQueriesPerTick=2,wreckResponseTicks=30;
         public double wreckSinkSeconds=2;
         public double wreckSpawnProtectionSeconds=1;
         public double wreckBurialMin=0.03;
@@ -450,6 +453,10 @@ namespace Spacewars.Simulation
 
     public sealed class PlayableProfile
     {
+        public int WreckReconcileSlotsPerTick=>sourceData.wreckReconcileSlotsPerTick;
+        public int WreckReconcileCellsPerTick=>sourceData.wreckReconcileCellsPerTick;
+        public int WreckReconcileQueriesPerTick=>sourceData.wreckReconcileQueriesPerTick;
+        public int WreckResponseTicks=>sourceData.wreckResponseTicks;
         public bool UsesRecastGroundRoutes=>sourceData.groundRouteBackend==1;
         public double MinimapCompactSize {get; private set;}
         public double MinimapTacticalSize {get; private set;}
@@ -1680,6 +1687,10 @@ new PlayableProfileField("hawk.modelScale","Ястреб · hawk-match-v1","Ма
         public static readonly IReadOnlyList<PlayableProfileField> HawkVisualFields=new[]{
 new PlayableProfileField("hawk.missileVisualScale","Ястреб · hawk-match-v1","Масштаб модели ракеты","Масштаб корпуса и выхлопа ракеты только в отображении; физический радиус и боевые параметры не меняются.","×",0.1,2,0.05,p=>p.hawkMissileVisualScale,nameof(PlayableProfileData.hawkMissileVisualScale))};
         public static readonly IReadOnlyList<PlayableProfileField> WreckFields=new[]{
+            new PlayableProfileField("wrecks.navigation.slotsPerTick","Навигация · local-wreck-navigation-v1","Проверки локальной очереди","Максимум слотов армии для отбора за тик; физическая безопасность проверяется всегда.","слот/тик",1,1024,1,p=>p.wreckReconcileSlotsPerTick,nameof(PlayableProfileData.wreckReconcileSlotsPerTick)),
+            new PlayableProfileField("wrecks.navigation.cellsPerTick","Навигация · local-wreck-navigation-v1","Бюджет достижимости","Общий максимум узлов поиска за тик для всех проверок ожидания. Исчерпание сохраняет незавершённый поиск.","узел/тик",1,65536,1,p=>p.wreckReconcileCellsPerTick,nameof(PlayableProfileData.wreckReconcileCellsPerTick)),
+            new PlayableProfileField("wrecks.navigation.queriesPerTick","Навигация · local-wreck-navigation-v1","Обслуживание ожиданий","Максимум проверок и применения результата за тик при общем бюджете поиска.","запрос/тик",1,64,1,p=>p.wreckReconcileQueriesPerTick,nameof(PlayableProfileData.wreckReconcileQueriesPerTick)),
+            new PlayableProfileField("wrecks.navigation.responseTicks","Навигация · local-wreck-navigation-v1","Ориентир локальной реакции","Целевой срок начала обслуживания в представительном сценарии; не задерживает смерть или физическое блокирование.","тик",1,300,1,p=>p.wreckResponseTicks,nameof(PlayableProfileData.wreckResponseTicks)),
             new PlayableProfileField("wrecks.spawnProtectionSeconds","Бой · Остовы и эффекты","Неуязвимость нового остова","Защита после видимого появления или приземления; до появления остов также защищён. Попадания поглощаются без отложенного урона.","с",0,10,.1,p=>p.wreckSpawnProtectionSeconds,nameof(PlayableProfileData.wreckSpawnProtectionSeconds)),
             new PlayableProfileField("wrecks.wreckSinkSeconds","Бой · Остовы и эффекты","Погружение остова","Время плавного исчезновения после выдержки.","с",0.1,10,0.1,p=>p.wreckSinkSeconds,nameof(PlayableProfileData.wreckSinkSeconds)),
             new PlayableProfileField("wrecks.wreckBurialMin","Бой · Остовы и эффекты","Минимальная глубина посадки","Небольшая начальная посадка модели в поверхность.","м",0,1,0.01,p=>p.wreckBurialMin,nameof(PlayableProfileData.wreckBurialMin)),
@@ -1702,7 +1713,7 @@ new PlayableProfileField("hawk.missileVisualScale","Ястреб · hawk-match-v
             new PlayableProfileField("research.reinforcedConcrete.level2.bonusPercent","Усиленный бетон · reinforced-concrete-v2","Суммарный бонус · уровень II","Параметр второго уровня бетона; бонус заменяет предыдущий суммарный эффект.","%",0,300,1,p=>p.reinforcedConcreteLevel2BonusPercent,nameof(PlayableProfileData.reinforcedConcreteLevel2BonusPercent)),
             new PlayableProfileField("research.reinforcedConcrete.cost","Усиленный бетон · reinforced-concrete-v2","Цена · уровень I","Списание при старте исследования усиленного бетона I.","credits",0,5000,10,p=>p.reinforcedConcreteCost,nameof(PlayableProfileData.reinforcedConcreteCost)),
             new PlayableProfileField("research.reinforcedConcrete.seconds","Усиленный бетон · reinforced-concrete-v2","Время · уровень I","Длительность исследования бетона I в обычном матче.","с",0.5,300,0.5,p=>p.reinforcedConcreteSeconds,nameof(PlayableProfileData.reinforcedConcreteSeconds)),
-            new PlayableProfileField("research.reinforcedConcrete.bonusPercent","Усиленный бетон · reinforced-concrete-v2","Суммарный бонус · уровень I","Увеличение максимального HP всех зданий владельца с сохранением процента здоровья.","%",0,500,1,p=>p.reinforcedConcreteBonusPercent,nameof(PlayableProfileData.reinforcedConcreteBonusPercent)),new PlayableProfileField("provingGround.actionSeconds","Полигон · balance-proving-ground-v1","Длительность действий","Время строительства, производства, исследований и улучшений только на полигоне. Выпуск юнитов сохраняет обычные физические ограничения.","с",.1,60,.1,p=>p.provingGroundActionSeconds,nameof(PlayableProfileData.provingGroundActionSeconds)),new PlayableProfileField("provingGround.attackRearLaneOffset","Полигон · balance-proving-ground-v1","Боковой отступ цели атаки за штабом","Цель остаётся позади вражеского штаба; боковой отступ открывает прямой подход между штабом и форпостом. Ноль требует обхода штаба обычной навигацией.","м",0,25,1,p=>p.provingGroundAttackRearLaneOffset,nameof(PlayableProfileData.provingGroundAttackRearLaneOffset)),new PlayableProfileField("provingGround.dividerWidth","Полигон · balance-proving-ground-v1","Ширина средней линии","Ширина визуальной границы половин полигона; не создаёт препятствий.","м",.05,1,.05,p=>p.provingGroundDividerWidth,nameof(PlayableProfileData.provingGroundDividerWidth))}).ToArray();
+            new PlayableProfileField("research.reinforcedConcrete.bonusPercent","Усиленный бетон · reinforced-concrete-v2","Суммарный бонус · уровень I","Увеличение максимального HP всех зданий владельца с сохранением процента здоровья.","%",0,500,1,p=>p.reinforcedConcreteBonusPercent,nameof(PlayableProfileData.reinforcedConcreteBonusPercent)),new PlayableProfileField("provingGround.orbitalSeconds","Полигон · balance-proving-ground-v1","Перезарядка умений эскалации","Личная перезарядка всех реализованных умений только на полигоне; без общего интервала и ускорения MAX.","с",.1,60,.1,p=>p.provingGroundOrbitalSeconds,nameof(PlayableProfileData.provingGroundOrbitalSeconds)),new PlayableProfileField("provingGround.actionSeconds","Полигон · balance-proving-ground-v1","Длительность действий","Время строительства, производства, исследований и улучшений только на полигоне. Выпуск юнитов сохраняет обычные физические ограничения.","с",.1,60,.1,p=>p.provingGroundActionSeconds,nameof(PlayableProfileData.provingGroundActionSeconds)),new PlayableProfileField("provingGround.attackRearLaneOffset","Полигон · balance-proving-ground-v1","Боковой отступ цели атаки за штабом","Цель остаётся позади вражеского штаба; боковой отступ открывает прямой подход между штабом и форпостом. Ноль требует обхода штаба обычной навигацией.","м",0,25,1,p=>p.provingGroundAttackRearLaneOffset,nameof(PlayableProfileData.provingGroundAttackRearLaneOffset)),new PlayableProfileField("provingGround.dividerWidth","Полигон · balance-proving-ground-v1","Ширина средней линии","Ширина визуальной границы половин полигона; не создаёт препятствий.","м",.05,1,.05,p=>p.provingGroundDividerWidth,nameof(PlayableProfileData.provingGroundDividerWidth))}).ToArray();
     }
 
     public static class PlayableMap

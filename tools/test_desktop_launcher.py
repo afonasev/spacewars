@@ -16,6 +16,7 @@ class LauncherPackaging(unittest.TestCase):
             source=package.ROOT/'tools/native-release/launcher/LauncherView.ps1'
             self.assertEqual((root/'LauncherView.ps1').read_bytes(),source.read_bytes())
             self.assertTrue(source.read_bytes().startswith(b'\xef\xbb\xbf'))
+            self.assertEqual((root/'LauncherLogo.png').read_bytes(),(package.ROOT/'unity/Assets/Spacewars/Content/Brand/Icon.png').read_bytes())
             run.assert_not_called()
     def test_mac_compiles_universal_view_and_seals_complete_bundle(self):
         with tempfile.TemporaryDirectory() as temp,patch.object(package,'run') as run:
@@ -28,4 +29,5 @@ class LauncherPackaging(unittest.TestCase):
             import plistlib
             info=plistlib.loads((root/'LauncherView.app/Contents/Info.plist').read_bytes())
             self.assertEqual(info['LSMinimumSystemVersion'],'11.0')
+            self.assertEqual((root/'LauncherView.app/Contents/Resources/LauncherLogo.png').read_bytes(),(package.ROOT/'unity/Assets/Spacewars/Content/Brand/Icon.png').read_bytes())
             self.assertEqual(commands[1],['codesign','--force','--sign','-',root/'LauncherView.app'])

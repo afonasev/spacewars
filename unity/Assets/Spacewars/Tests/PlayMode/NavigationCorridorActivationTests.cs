@@ -26,6 +26,19 @@ namespace Spacewars.Tests.PlayMode
         private static JToken Canonical(JToken value)=>ContractCodec.Parse(ContractCodec.Write(value));
         private static void Retain(string name,byte[] bytes){var output=Environment.GetEnvironmentVariable("SPACEWARS_ACTIVATION_OUTPUT");if(!string.IsNullOrWhiteSpace(output)){Directory.CreateDirectory(output);File.WriteAllBytes(Path.Combine(output,name),bytes);}}
         private static JObject Package()=>JObject.Parse(Resources.Load<TextAsset>("NativeLabCatalog").text);
+        [Test] public void PromotedTestBalanceValuesAreActiveAndExported()
+        {
+            var expected=new System.Collections.Generic.Dictionary<string,double>{{"explorerProductionDurationSec",12},{"explorerRange",6.5},{"hawkCreditCost",200},{"hawkPreparationSeconds",2},{"hawkRange",9},{"hawkReloadSeconds",2.5},{"headquartersHealth",500},{"orbitalScanWaveSeconds",1},{"outpostHealth",350},{"shkvalBaseRange",12},{"shkvalCreditCost",250},{"shkvalGuidanceCost",300},{"tankRange",8},{"turretDamage",3},{"turretHealth",200},{"turretRange",10},{"turretBurstSize",6},{"turretBurstShotIntervalMs",90},{"turretBurstPauseMs",1100},{"turretSpreadDeg",5},{"turretProjectileSpeed",32},{"gaussDamage",50},{"gaussRange",11.5}};
+            var store=new NativeBalanceStore(Baseline(),Path.Combine(directory,"promoted.json"),false);store.Select(NativeBalanceStore.NewMatchProfileId,NativeBalanceStore.NewMatchProfileVersion);GuardNew(store);
+            Assert.AreEqual(4,store.SelectedVersion);var data=store.Active.CopyData();
+            foreach(var pair in expected){var field=typeof(PlayableProfileData).GetField(pair.Key);Assert.NotNull(field,pair.Key);Assert.AreEqual(pair.Value,Convert.ToDouble(field.GetValue(data)),1e-7,pair.Key);}
+            var source=Path.GetFullPath(Path.Combine(Application.dataPath,"../..",NativeBalanceStore.ProjectRelativePath));var authoring=new NativeBalanceStore(Baseline(),source,true);var exported=authoring.ExportPackage();
+            foreach(string id in new[]{NativeBalanceStore.DefaultId,NativeBalanceStore.NewMatchProfileId}){
+                var profile=exported["profiles"].Single(p=>(string)p["id"]==id);Assert.True(profile["release"].Any(r=>(int)r==4));var row=profile["versions"].Single(v=>(int)v["revision"]==4);
+                foreach(var pair in expected)Assert.AreEqual(pair.Value,(double)row["data"][pair.Key],1e-7,id+"/"+pair.Key);
+                Assert.AreEqual(10,(double)profile["versions"].Single(v=>(int)v["revision"]==3)["data"]["tankRange"],"Historical balance remains immutable.");
+            }
+        }
         [SetUp] public void Setup(){directory=Path.Combine(Path.GetTempPath(),"spacewars-corridor-activation-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);}
         [TearDown] public void Teardown(){if(Directory.Exists(directory))Directory.Delete(directory,true);NativeGameplayAudioProfile.Reload();}
         private static void GuardNew(NativeBalanceStore store){Assert.AreEqual(NativeBalanceStore.NewMatchProfileId,store.SelectedId);Assert.AreEqual(NativeBalanceStore.NewMatchProfileVersion,store.SelectedVersion);Assert.AreEqual(PlayableProfile.RequiredProfileId,store.Active.ProfileId);StringAssert.Contains("["+NativeBalanceStore.NewMatchProfileId+"] @"+NativeBalanceStore.NewMatchProfileVersion,store.ActiveIdentity);Assert.AreEqual(15,store.Active.Navigation.GroupCorridorMaximumExcessPercent);Assert.False(store.CanEdit);Assert.AreEqual(500,store.Active.HeadquartersCreditCost);Assert.AreEqual(300,store.Active.OutpostCreditCost);Assert.AreEqual(250,store.Active.MineCreditCost);Assert.AreEqual(5,store.Active.RelayIncomePerPeriod);Assert.AreEqual(5,store.Active.IncomePeriodSeconds);}

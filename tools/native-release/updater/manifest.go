@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"time"
 )
 
 var publicKey string // pinned at build time, never supplied by the update server
@@ -30,15 +31,16 @@ type File struct {
 	Chunks []Chunk `json:"chunks"`
 }
 type Manifest struct {
-	Schema    int        `json:"schema"`
-	Sequence  int64      `json:"sequence"`
-	Version   string     `json:"version"`
-	Commit    string     `json:"commit"`
-	ID        string     `json:"id"`
-	Platform  string     `json:"platform"`
-	Entry     string     `json:"entry"`
-	Files     []File     `json:"files"`
-	Transport *Transport `json:"transport,omitempty"`
+	Schema      int        `json:"schema"`
+	Sequence    int64      `json:"sequence"`
+	Version     string     `json:"version"`
+	ReleaseDate string     `json:"release_date,omitempty"`
+	Commit      string     `json:"commit"`
+	ID          string     `json:"id"`
+	Platform    string     `json:"platform"`
+	Entry       string     `json:"entry"`
+	Files       []File     `json:"files"`
+	Transport   *Transport `json:"transport,omitempty"`
 }
 type Envelope struct {
 	Payload   string `json:"payload"`
@@ -126,6 +128,11 @@ func verifyEnvelope(raw []byte, platform string) (Manifest, error) {
 	}
 	if _, e := versionParts(m.Version); e != nil {
 		return m, e
+	}
+	if m.ReleaseDate != "" {
+		if _, e := time.Parse("2006-01-02", m.ReleaseDate); e != nil {
+			return m, errors.New("invalid release date")
+		}
 	}
 	if e := validateTransport(m); e != nil {
 		return m, e

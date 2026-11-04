@@ -10,7 +10,7 @@ namespace Spacewars.Runtime
     // WorldWire/PlayableWorldRecords. There are no serialized engine objects/jobs.
     public sealed class PlayableWorldState : IDisposable
     {
-        public const int CurrentVersion=31;
+        public const int CurrentVersion=32;
         public int Version=CurrentVersion,Seed;
         public long Generation,Tick;
         public string SourceIdentity;
@@ -143,7 +143,7 @@ namespace Spacewars.Runtime
                 foreach(var row in rallyWork){var work=row.Value;WorldWire.Write(w,work.Intent);w.Write(work.Kind);w.Write(work.Candidate);w.Write(work.Geometry!=null);if(work.Geometry!=null&& !ReferenceEquals(work.Geometry,Geometry))throw new InvalidOperationException("Rally geometry is outside current boundary.");w.Write(work.RequestSequence);}
                 Array(w,rallyReceipts.ToArray(),x=>WorldWire.Write(w,x));
                 foreach(var layout in new[]{units.CaptureLayout(),buildings.CaptureLayout(),centerDamage.CaptureLayout(),rallyWork.CaptureLayout()})Array(w,layout,i=>w.Write(i));
-                WriteMatchHistory(w);WriteSpatialCompletionExtension(w);WriteTacticalQueueExtension(w);
+                WriteMatchHistory(w);WriteSpatialCompletionExtension(w);WriteTacticalQueueExtension(w);WriteWreckScheduling(w);
                 w.Write(0x494E4331);Array(w,incomeEvents.ToArray(),e=>{w.Write(e.Tick);w.Write(e.BuildingId);w.Write((int)e.Owner);w.Write((int)e.Kind);Number(w,e.Position.X);Number(w,e.Position.Z);Number(w,e.Amount);});
             WriteCampaignState(w);WriteBuildingDestructions(w);WriteTeamSignals(w);WriteWrecks(w);WriteShkvalLaunches(w);WriteDefaultCombat(w);WriteOrbital(w);WriteShkvalDamage(w);WriteShkvalBlastTerms(w);WriteMines(w);WriteLingeringVision(w);WriteAirMotionSources(w);
             },nav.CaptureBudget);
@@ -220,7 +220,7 @@ namespace Spacewars.Runtime
                     d.rallyWork.Add(intent.Building,new RallyWork{Intent=intent,Kind=kind,Candidate=exit,Geometry=hasGeometry?geometry:null,RequestSequence=bound?.Request??0});
                 }
                 d.rallyReceipts.AddRange(Array(r,()=>ReadPlayableCommandReceipt(r)));
-                d.units.RestoreLayout(Array(r,()=>r.ReadInt32()));d.buildings.RestoreLayout(Array(r,()=>r.ReadInt32()));d.centerDamage.RestoreLayout(Array(r,()=>r.ReadInt32()));d.rallyWork.RestoreLayout(Array(r,()=>r.ReadInt32()));d.ReadMatchHistory(r);d.ReadSpatialCompletionExtension(r);d.ReadTacticalQueueExtension(r,legacyQueue);
+                d.units.RestoreLayout(Array(r,()=>r.ReadInt32()));d.buildings.RestoreLayout(Array(r,()=>r.ReadInt32()));d.centerDamage.RestoreLayout(Array(r,()=>r.ReadInt32()));d.rallyWork.RestoreLayout(Array(r,()=>r.ReadInt32()));d.ReadMatchHistory(r);d.ReadSpatialCompletionExtension(r);d.ReadTacticalQueueExtension(r,legacyQueue);d.ReadWreckScheduling(r);
                 if(r.BaseStream.Position<r.BaseStream.Length)
                 {
                     if(r.ReadInt32()!=0x494E4331)throw new ArgumentException("Invalid income presentation extension.");
