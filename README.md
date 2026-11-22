@@ -5,11 +5,11 @@
 
 | Windows | macOS |
 | --- | --- |
-| **[Download EXE](https://github.com/afonasev/spacewars/releases/download/v0.6.19/Spacewars-0.6.19-Windows-x64.exe)** | **[Download DMG](https://github.com/afonasev/spacewars/releases/download/v0.6.19/Spacewars-0.6.19-macOS-Universal.dmg)** |
+| **[Download EXE](https://github.com/afonasev/spacewars/releases/download/v0.6.20/Spacewars-0.6.20-Windows-x64.exe)** | **[Download DMG](https://github.com/afonasev/spacewars/releases/download/v0.6.20/Spacewars-0.6.20-macOS-Universal.dmg)** |
 
 [Только установщики / Installer releases](https://github.com/afonasev/spacewars/releases?q=tag%3Av0%20prerelease%3Afalse)
 
-Installer version: **0.6.19**.
+Installer version: **0.6.20**.
 <!-- desktop-downloads:end -->
 
 Native Unity RTS prototype. [Download Windows / macOS](https://github.com/afonasev/spacewars/releases) · [Website](https://spacewars.afonasev.tech/)
